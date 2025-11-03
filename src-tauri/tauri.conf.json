@@ -22,6 +22,6 @@
   },
   "bundle": {
     "active": true,
-    "icon": ["icons/icon.png", "icons/icon.ico", "icons/icon.icns"]
+    "icon": ["icons/SmolPC.png", "icons/SmolPC.ico", "icons/SmolPC.icns"]
   }
 }
