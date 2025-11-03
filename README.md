@@ -51,6 +51,7 @@ An offline AI-powered coding assistant for secondary school students (ages 11-18
 ### Prerequisites
 
 Before you begin, you need:
+
 - **Node.js** v18 or higher
 - **Rust** (latest stable)
 - **Ollama** with coding models installed
@@ -131,6 +132,7 @@ npm run tauri dev
 4. **Restart your computer** after installation
 
 **Verify:**
+
 ```powershell
 node --version
 npm --version
@@ -145,6 +147,7 @@ npm --version
 5. **Close and reopen PowerShell**
 
 **Verify:**
+
 ```powershell
 rustc --version
 cargo --version
@@ -157,6 +160,7 @@ cargo --version
 3. Ollama starts automatically in system tray (bottom-right)
 
 **Download AI models:**
+
 ```powershell
 # Download models (takes 10-20 minutes)
 ollama pull qwen2.5-coder:7b      # 4.7GB - Recommended
@@ -193,6 +197,7 @@ npm run tauri dev
 ### 1. Ask Questions
 
 Type any coding question in the question field:
+
 - "How do I create a function in Python?"
 - "Show me a for loop in JavaScript"
 - "Explain what variables are"
@@ -202,6 +207,7 @@ Click **🚀 Generate Code** and wait 10-30 seconds.
 ### 2. Use Quick Examples
 
 Click any example button to auto-fill common questions:
+
 - **Calculator** - Build a basic calculator
 - **Website** - Create HTML structure
 - **Loops** - Learn loop syntax
@@ -230,6 +236,7 @@ Click **Generate** - the AI will explain what's wrong and how to fix it!
 ### 5. Switch Models
 
 Use the dropdown (top-right) to switch between:
+
 - **Qwen Coder** (Recommended) - More detailed explanations
 - **DeepSeek** (Faster) - Quicker responses
 
@@ -238,19 +245,23 @@ Use the dropdown (top-right) to switch between:
 ## 🏗️ Building an Executable
 
 ### Development Mode
+
 ```bash
 npm run tauri dev
 ```
+
 - Hot-reload enabled for HTML/CSS/JS
 - Rust changes require restart
 - Press Ctrl+C to stop
 
 ### Production Build
+
 ```bash
 npm run tauri build
 ```
 
 **Output locations:**
+
 - **macOS:** `src-tauri/target/release/bundle/macos/SmolPC Code Helper.app`
 - **Windows:** `src-tauri/target/release/smolpc-codehelper.exe`
 
@@ -261,6 +272,7 @@ Executable size: ~5-10MB (Ollama must still be installed separately)
 ## 🧪 Example Queries to Try
 
 ### Beginner Level
+
 ```
 "What is a variable in Python?"
 "How do I print text in JavaScript?"
@@ -268,6 +280,7 @@ Executable size: ~5-10MB (Ollama must still be installed separately)
 ```
 
 ### Intermediate Level
+
 ```
 "Create a calculator with +, -, ×, ÷ in Python"
 "Build a simple HTML form with name and email"
@@ -275,6 +288,7 @@ Executable size: ~5-10MB (Ollama must still be installed separately)
 ```
 
 ### Advanced Level
+
 ```
 "Explain how recursion works with examples"
 "Create a class for a bank account in Python"
@@ -282,7 +296,9 @@ Executable size: ~5-10MB (Ollama must still be installed separately)
 ```
 
 ### Debugging
+
 Paste broken code and ask:
+
 ```
 "What's wrong with this code?"
 "Why am I getting an error?"
@@ -315,16 +331,17 @@ smolpc-codehelper/
 
 ## 🔧 Tech Stack
 
-| Component | Technology |
-|-----------|------------|
-| Frontend | Vanilla HTML/CSS/JavaScript |
-| Backend | Rust |
-| Desktop Framework | Tauri 2.0 |
-| AI Engine | Ollama |
-| Primary Model | Qwen 2.5 Coder (7B) |
-| Secondary Model | DeepSeek Coder (6.7B) |
+| Component         | Technology                  |
+| ----------------- | --------------------------- |
+| Frontend          | Vanilla HTML/CSS/JavaScript |
+| Backend           | Rust                        |
+| Desktop Framework | Tauri 2.0                   |
+| AI Engine         | Ollama                      |
+| Primary Model     | Qwen 2.5 Coder (7B)         |
+| Secondary Model   | DeepSeek Coder (6.7B)       |
 
 **Why these choices?**
+
 - **Tauri** - Creates tiny executables (~5MB vs Electron's 100MB+)
 - **Vanilla JS** - No framework bloat, easy for students to understand
 - **Ollama** - Best local LLM solution, works offline
@@ -337,18 +354,21 @@ smolpc-codehelper/
 ### "Ollama not running" error
 
 **macOS:**
+
 ```bash
 # Start Ollama in terminal
 ollama serve
 ```
 
 **Windows:**
+
 - Check system tray for Ollama icon
 - Or search "Ollama" in Start menu and launch it
 
 ### "Failed to connect to Ollama"
 
 Test if Ollama is responding:
+
 ```bash
 # macOS/Linux
 curl http://localhost:11434/api/tags
@@ -392,12 +412,14 @@ npm run tauri dev
 ### "Cannot access uninitialized variable" error
 
 This means Tauri API isn't loading. Check:
+
 - Make sure you're running `npm run tauri dev` (not opening HTML directly)
 - Check browser console (F12) for errors
 
 ### Models downloading slowly
 
 Models are 3-4GB each. On slow internet:
+
 - **Qwen 2.5 Coder:** 4.7GB (~10-30 minutes)
 - **DeepSeek Coder:** 3.8GB (~10-30 minutes)
 
@@ -406,6 +428,7 @@ Be patient! Download once, use forever offline.
 ### Windows: "Command not found"
 
 After installing Rust/Node.js:
+
 1. **Close PowerShell completely**
 2. **Open a NEW PowerShell window**
 3. Try commands again
@@ -415,27 +438,31 @@ After installing Rust/Node.js:
 ## 💡 Tips & Tricks
 
 ### Keyboard Shortcuts
+
 - **Ctrl+Enter** (Cmd+Enter on Mac) - Generate code from question field
 - **F12** - Open developer tools
 - **Ctrl+C** - Stop the dev server
 
 ### For Best Results
+
 1. **Be specific** - "Create a Python function that adds two numbers" is better than "make a function"
 2. **One task at a time** - Break complex requests into steps
 3. **Use examples** - "Show me like the calculator example but for multiplication"
 4. **Ask for explanations** - "Explain how this code works line by line"
 
 ### Model Comparison
-| Model | Speed | Detail | Best For |
-|-------|-------|--------|----------|
-| Qwen Coder | Slower | More detailed | Learning, explanations |
-| DeepSeek | Faster | Concise | Quick answers, debugging |
+
+| Model      | Speed  | Detail        | Best For                 |
+| ---------- | ------ | ------------- | ------------------------ |
+| Qwen Coder | Slower | More detailed | Learning, explanations   |
+| DeepSeek   | Faster | Concise       | Quick answers, debugging |
 
 ---
 
 ## 🎯 Use Cases
 
 ### For Students
+
 - ✅ Get help with coding homework
 - ✅ Learn new programming concepts
 - ✅ Debug their own code
@@ -443,6 +470,7 @@ After installing Rust/Node.js:
 - ✅ Explore different languages
 
 ### For Teachers
+
 - ✅ Demonstrate coding concepts in class
 - ✅ Provide 24/7 coding help
 - ✅ Works without internet (after setup)
@@ -450,6 +478,7 @@ After installing Rust/Node.js:
 - ✅ Free - no API costs
 
 ### For Schools
+
 - ✅ Budget-friendly (runs on older hardware)
 - ✅ Privacy-compliant (fully offline)
 - ✅ No ongoing costs
@@ -460,6 +489,7 @@ After installing Rust/Node.js:
 ## 🔐 Privacy & Safety
 
 **This app is 100% private:**
+
 - ✅ No data sent to the internet
 - ✅ No cloud APIs
 - ✅ No tracking or analytics
@@ -467,6 +497,7 @@ After installing Rust/Node.js:
 - ✅ No account required
 
 **Safe for students:**
+
 - ✅ No inappropriate content
 - ✅ Educational focus
 - ✅ Age-appropriate explanations
@@ -477,12 +508,14 @@ After installing Rust/Node.js:
 ## 🚦 System Requirements
 
 ### Minimum
+
 - **OS:** Windows 10/11 or macOS 10.15+
 - **RAM:** 8GB
 - **Storage:** 10GB free
 - **CPU:** Intel i3 or equivalent
 
 ### Recommended
+
 - **RAM:** 16GB
 - **Storage:** 20GB free (SSD preferred)
 - **CPU:** Intel i5 or better
@@ -506,6 +539,7 @@ After installing Rust/Node.js:
 Part of the SmolPC 2.0 educational project. Contributions welcome!
 
 ### How to Contribute
+
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
@@ -515,6 +549,7 @@ Part of the SmolPC 2.0 educational project. Contributions welcome!
 7. Open a Pull Request
 
 ### Ideas for Contributions
+
 - [ ] Add more example prompts
 - [ ] Support for more programming languages
 - [ ] Syntax highlighting in output
@@ -528,6 +563,7 @@ Part of the SmolPC 2.0 educational project. Contributions welcome!
 ## 📅 Roadmap
 
 ### ✅ Phase 1: MVP (COMPLETE)
+
 - [x] Basic UI
 - [x] Ollama integration
 - [x] Code generation
@@ -537,6 +573,7 @@ Part of the SmolPC 2.0 educational project. Contributions welcome!
 - [x] Model switching
 
 ### 🚧 Phase 2: Enhancements (Q1 2025)
+
 - [ ] Syntax highlighting
 - [ ] Dark mode
 - [ ] Question history
@@ -544,6 +581,7 @@ Part of the SmolPC 2.0 educational project. Contributions welcome!
 - [ ] Improved prompts
 
 ### 🔮 Phase 3: Advanced (Q2 2025)
+
 - [ ] Multi-file projects
 - [ ] Code execution sandbox
 - [ ] Step-by-step tutorials
@@ -560,17 +598,20 @@ Educational use as part of the SmolPC project.
 ## 🎓 About SmolPC
 
 SmolPC Code Helper is part of the **SmolPC 2.0 initiative** - a suite of educational tools designed for secondary schools that:
+
 - Run on budget hardware
 - Work offline
 - Respect student privacy
 - Support teachers and students
 
 **Other SmolPC Tools:**
+
 - LibreOffice automation
 - Educational utilities
 - Offline learning resources
 
 **Project Goals:**
+
 - Make quality education accessible
 - Reduce dependency on expensive hardware
 - Enable offline learning
@@ -583,6 +624,7 @@ SmolPC Code Helper is part of the **SmolPC 2.0 initiative** - a suite of educati
 **Built by the SmolPC Team**
 
 **Powered by:**
+
 - Anthropic (Claude for development assistance)
 - Ollama (Local LLM runtime)
 - Alibaba (Qwen models)
@@ -590,6 +632,7 @@ SmolPC Code Helper is part of the **SmolPC 2.0 initiative** - a suite of educati
 - Tauri Team (Desktop framework)
 
 **Special Thanks:**
+
 - Secondary school teachers who provided feedback
 - Students who tested the app
 - Open-source community
@@ -599,11 +642,13 @@ SmolPC Code Helper is part of the **SmolPC 2.0 initiative** - a suite of educati
 ## 📧 Support
 
 **For setup issues:**
+
 1. Check this README's troubleshooting section
 2. Search existing GitHub issues
 3. Open a new issue with details
 
 **For educational use questions:**
+
 - Contact your school's IT department
 - Refer to SmolPC documentation
 
