@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmolPC Code Helper</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎓 SmolPC Code Helper</h1>
+            <select id="modelSelect" class="model-selector">
+                <option value="qwen2.5-coder:7b">Qwen Coder (Recommended)</option>
+                <option value="deepseek-coder:6.7b">DeepSeek (Faster)</option>
+            </select>
+        </header>
+
+        <main>
+            <!-- Question Input -->
+            <section class="input-section">
+                <label for="question">Ask a coding question:</label>
+                <textarea 
+                    id="question" 
+                    placeholder="e.g., How do I create a function in Python?"
+                    rows="3"
+                ></textarea>
+            </section>
+
+            <!-- Code Input for Debugging -->
+            <section class="input-section">
+                <label for="codeInput">Or paste your code for debugging:</label>
+                <textarea 
+                    id="codeInput" 
+                    placeholder="Paste your code here..."
+                    rows="5"
+                ></textarea>
+            </section>
+
+            <!-- Example Prompts -->
+            <section class="examples">
+                <p>Quick Examples:</p>
+                <div class="example-buttons">
+                    <button onclick="useExample('Create a calculator in Python with +, -, ×, ÷')">Calculator</button>
+                    <button onclick="useExample('Build a simple HTML website with a header and paragraph')">Website</button>
+                    <button onclick="useExample('Explain how for loops work in Python with examples')">Loops</button>
+                    <button onclick="useExample('Show me how to read and write files in Python')">File I/O</button>
+                    <button onclick="useExample('Create a function that sorts a list of numbers')">Sorting</button>
+                    <button onclick="useExample('Explain variables and data types in JavaScript')">Variables</button>
+                </div>
+            </section>
+
+            <!-- Generate Button -->
+            <button id="generateBtn" onclick="generateCode()" class="generate-btn">
+                🚀 Generate Code
+            </button>
+
+            <!-- Loading Indicator -->
+            <div id="loading" class="loading hidden">
+                <div class="spinner"></div>
+                <p>Generating code...</p>
+            </div>
+
+            <!-- Output Section -->
+            <section class="output-section">
+                <label>Generated Code:</label>
+                <pre id="codeOutput" class="code-output">Your generated code will appear here...</pre>
+            </section>
+
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+                <button onclick="copyCode()" class="btn">📋 Copy</button>
+                <button onclick="saveCode()" class="btn">💾 Save</button>
+                <button onclick="clearAll()" class="btn btn-secondary">🗑️ Clear</button>
+            </div>
+
+            <!-- Status Bar -->
+            <div id="status" class="status">Ready</div>
+        </main>
+    </div>
+
+    <script src="main.js"></script>
+</body>
+</html>
