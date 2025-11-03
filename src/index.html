@@ -5,77 +5,132 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SmolPC Code Helper</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.0.0/marked.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🎓 SmolPC Code Helper</h1>
-            <select id="modelSelect" class="model-selector">
-                <option value="qwen2.5-coder:7b">Qwen Coder (Recommended)</option>
-                <option value="deepseek-coder:6.7b">DeepSeek (Faster)</option>
-            </select>
-        </header>
+    <!-- Main Container -->
+    <div class="app-container">
+        
+        <!-- Sidebar -->
+        <aside id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <h2>Chats</h2>
+                <button id="newChatBtn" class="new-chat-btn" title="New Chat">
+                    <span>+ New Chat</span>
+                </button>
+            </div>
+            
+            <div class="chat-list" id="chatList">
+                <!-- Chat history items will be inserted here -->
+            </div>
+        </aside>
 
-        <main>
-            <!-- Question Input -->
-            <section class="input-section">
-                <label for="question">Ask a coding question:</label>
-                <textarea 
-                    id="question" 
-                    placeholder="e.g., How do I create a function in Python?"
-                    rows="3"
-                ></textarea>
-            </section>
-
-            <!-- Code Input for Debugging -->
-            <section class="input-section">
-                <label for="codeInput">Or paste your code for debugging:</label>
-                <textarea 
-                    id="codeInput" 
-                    placeholder="Paste your code here..."
-                    rows="5"
-                ></textarea>
-            </section>
-
-            <!-- Example Prompts -->
-            <section class="examples">
-                <p>Quick Examples:</p>
-                <div class="example-buttons">
-                    <button onclick="useExample('Create a calculator in Python with +, -, ×, ÷')">Calculator</button>
-                    <button onclick="useExample('Build a simple HTML website with a header and paragraph')">Website</button>
-                    <button onclick="useExample('Explain how for loops work in Python with examples')">Loops</button>
-                    <button onclick="useExample('Show me how to read and write files in Python')">File I/O</button>
-                    <button onclick="useExample('Create a function that sorts a list of numbers')">Sorting</button>
-                    <button onclick="useExample('Explain variables and data types in JavaScript')">Variables</button>
+        <!-- Main Content -->
+        <main class="main-content">
+            
+            <!-- Header -->
+            <header class="header">
+                <button id="sidebarToggle" class="sidebar-toggle" title="Toggle Sidebar">
+                    ☰
+                </button>
+                
+                <h1>🎓 SmolPC Code Helper</h1>
+                
+                <div class="header-controls">
+                    <!-- Model Selector -->
+                    <select id="modelSelect" class="model-selector">
+                        <option value="qwen2.5-coder:7b">Qwen Coder</option>
+                        <option value="deepseek-coder:6.7b">DeepSeek</option>
+                    </select>
+                    
+                    <!-- Context Toggle -->
+                    <div class="context-toggle" id="contextToggle" title="Toggle conversation memory">
+                        <span class="toggle-label">Context:</span>
+                        <div class="toggle-switch active">
+                            <span class="toggle-option on">ON</span>
+                            <span class="toggle-option off">OFF</span>
+                        </div>
+                    </div>
+                    
+                    <!-- New Chat Button (Header) -->
+                    <button id="newChatBtnHeader" class="new-chat-btn-header" title="New Chat">
+                        + New
+                    </button>
                 </div>
-            </section>
+            </header>
 
-            <!-- Generate Button -->
-            <button id="generateBtn" onclick="generateCode()" class="generate-btn">
-                🚀 Generate Code
-            </button>
-
-            <!-- Loading Indicator -->
-            <div id="loading" class="loading hidden">
-                <div class="spinner"></div>
-                <p>Generating code...</p>
+            <!-- Chat Container -->
+            <div class="chat-container" id="chatContainer">
+                <!-- Welcome Message (shown when no messages) -->
+                <div id="welcomeMessage" class="welcome-message">
+                    <div class="welcome-content">
+                        <h2>👋 Welcome to SmolPC Code Helper!</h2>
+                        <p>Ask me anything about coding. I can help you:</p>
+                        <ul>
+                            <li>Generate code with explanations</li>
+                            <li>Debug your code</li>
+                            <li>Explain programming concepts</li>
+                            <li>Answer coding questions</li>
+                        </ul>
+                        <p class="welcome-tip">💡 <strong>Tip:</strong> Context is ON - I'll remember our conversation!</p>
+                    </div>
+                </div>
+                
+                <!-- Messages will be inserted here -->
+                <div id="messagesContainer" class="messages-container">
+                    <!-- Chat messages go here -->
+                </div>
+                
+                <!-- Loading Indicator -->
+                <div id="loadingIndicator" class="loading-indicator hidden">
+                    <div class="spinner"></div>
+                    <span>Thinking...</span>
+                </div>
             </div>
 
-            <!-- Output Section -->
-            <section class="output-section">
-                <label>Generated Code:</label>
-                <pre id="codeOutput" class="code-output">Your generated code will appear here...</pre>
-            </section>
+            <!-- Quick Examples -->
+            <div class="examples-section" id="examplesSection">
+                <div class="examples-container">
+                    <span class="examples-label">Quick Examples:</span>
+                    <div class="example-buttons">
+                        <button class="example-btn" data-example="Create a calculator in Python with +, -, ×, ÷">Calculator</button>
+                        <button class="example-btn" data-example="Build a simple HTML website with a header and paragraph">Website</button>
+                        <button class="example-btn" data-example="Explain how for loops work in Python with examples">Loops</button>
+                        <button class="example-btn" data-example="Show me how to read and write files in Python">File I/O</button>
+                        <button class="example-btn" data-example="Create a function that sorts a list of numbers">Sorting</button>
+                        <button class="example-btn" data-example="Explain variables and data types in JavaScript">Variables</button>
+                    </div>
+                </div>
+            </div>
 
-            <!-- Action Buttons -->
-            <div class="action-buttons">
-                <button onclick="copyCode()" class="btn">📋 Copy</button>
-                <button onclick="saveCode()" class="btn">💾 Save</button>
-                <button onclick="clearAll()" class="btn btn-secondary">🗑️ Clear</button>
+            <!-- Input Area -->
+            <div class="input-area">
+                <div class="context-indicator" id="contextIndicator">
+                    <span class="indicator-icon">💡</span>
+                    <span class="indicator-text">Context ON - I remember this conversation</span>
+                </div>
+                
+                <div class="input-container">
+                    <textarea 
+                        id="messageInput" 
+                        class="message-input"
+                        placeholder="Type your question or paste code here..."
+                        rows="1"
+                    ></textarea>
+                    <button id="sendBtn" class="send-btn" title="Send message">
+                        🚀 Send
+                    </button>
+                </div>
+                
+                <div class="input-hint">
+                    Press <kbd>Enter</kbd> to send, <kbd>Shift+Enter</kbd> for new line
+                </div>
             </div>
 
             <!-- Status Bar -->
-            <div id="status" class="status">Ready</div>
+            <div id="statusBar" class="status-bar">
+                <span id="statusText">Ready</span>
+            </div>
         </main>
     </div>
 
