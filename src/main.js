@@ -6,6 +6,9 @@ let chats = [];
 let activeChat = null;
 let contextEnabled = true;
 
+// Debounce timer for streaming renders
+let renderDebounceTimer = null;
+
 // ===== INITIALIZATION =====
 window.addEventListener("DOMContentLoaded", async () => {
   loadChatsFromStorage();
@@ -405,26 +408,65 @@ async function generateResponseStream(userMessage, context) {
   const unlistenFns = [];
   const finalText = { value: "" };
 
+  // Listen for chunks with periodic rendering for smooth streaming
+  let chunkCount = 0;
   const unlistenChunk = await event.listen("gen_chunk", (e) => {
     const chunk = e && e.payload && e.payload.chunk ? e.payload.chunk : "";
+    console.log("Received chunk:", chunk.length, "chars");
     if (!chunk) return;
+    
     finalText.value += chunk;
     activeChat.messages[assistantIndex].content = finalText.value;
     activeChat.lastUpdated = new Date().toISOString();
-    saveChatsToStorage();
-    renderMessages();
-    scrollToBottom();
+    chunkCount++;
+    console.log("Total text so far:", finalText.value.length, "chars");
+    
+    // Update only the streaming message content to avoid flashing
+    if (chunkCount % 3 === 0) {
+      console.log("Updating content (every 3 chunks)...");
+      
+      // Find the last message element and update just its content
+      const messagesContainer = document.getElementById("messagesContainer");
+      const lastMessage = messagesContainer.lastElementChild;
+      
+      if (lastMessage) {
+        const messageText = lastMessage.querySelector(".message-text");
+        if (messageText) {
+          messageText.innerHTML = formatMessageContent(finalText.value);
+        }
+      }
+      
+      scrollToBottom();
+    }
   });
   unlistenFns.push(unlistenChunk);
 
   const donePromise = new Promise((resolve, reject) => {
     event
-      .listen("gen_done", () => resolve(finalText.value))
+      .listen("gen_done", () => {
+        // Clear any pending debounced render and do final render
+        if (renderDebounceTimer) {
+          clearTimeout(renderDebounceTimer);
+          renderDebounceTimer = null;
+        }
+        saveChatsToStorage();
+        renderMessages();
+        scrollToBottom();
+        resolve(finalText.value);
+      })
       .then((fn) => unlistenFns.push(fn));
+    
     event
       .listen("gen_error", (e) => {
         const err =
           e && e.payload && e.payload.error ? e.payload.error : "Unknown error";
+        
+        // Clear any pending debounced render
+        if (renderDebounceTimer) {
+          clearTimeout(renderDebounceTimer);
+          renderDebounceTimer = null;
+        }
+        
         reject(new Error(err));
       })
       .then((fn) => unlistenFns.push(fn));
@@ -440,9 +482,16 @@ async function generateResponseStream(userMessage, context) {
   try {
     return await donePromise;
   } finally {
+    // Cleanup listeners
     try {
       unlistenFns.forEach((fn) => typeof fn === "function" && fn());
     } catch (_) {}
+    
+    // Clear any remaining debounce timer
+    if (renderDebounceTimer) {
+      clearTimeout(renderDebounceTimer);
+      renderDebounceTimer = null;
+    }
   }
 }
 
