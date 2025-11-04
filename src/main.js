@@ -302,11 +302,10 @@ async function sendMessage() {
     const context = contextEnabled ? getContextMessages() : [];
 
     // Prefer streaming for faster perceived latency; fallback when unavailable
-    const response = await generateResponseStream(content, context);
+    const { response, streamed } = await generateResponseStream(content, context);
 
     // If non-streaming fallback was used, append assistant message now
-    const lastMsg = activeChat.messages[activeChat.messages.length - 1];
-    if (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.content) {
+    if (!streamed) {
       addMessage("assistant", response);
     }
 
