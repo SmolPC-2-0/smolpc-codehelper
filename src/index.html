@@ -7,6 +7,18 @@
     <link rel="stylesheet" href="styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/marked@11.0.0/marked.min.js"></script>
   </head>
+  <script type="importmap">
+    {
+      "imports": {
+        "@tauri-apps/api/core": "./vendor/tauri/core.js",
+        "@tauri-apps/api/event": "./vendor/tauri/event.js",
+        "tslib": "./vendor/tauri/external/tslib/tslib.es6.js"
+      }
+    }
+  </script>
+
+  <!-- load your code as a module -->
+  <script type="module" src="./main.js"></script>
   <body>
     <!-- Main Container -->
     <div class="app-container">
@@ -178,7 +190,5 @@
         </div>
       </main>
     </div>
-
-    <script src="main.js"></script>
   </body>
 </html>
