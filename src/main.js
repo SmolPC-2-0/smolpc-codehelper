@@ -427,15 +427,15 @@ async function generateResponseStream(userMessage, context) {
         reject(new Error(err));
       })
       .then((fn) => unlistenFns.push(fn));
+
+    // Start backend streaming after listeners are attached
+    invoke("generate_code_stream", { prompt: fullPrompt, model: model }).catch(
+      (err) => {
+        console.error("Streaming invoke error:", err);
+        reject(err);
+      }
+    );
   });
-
-  // Start backend streaming after listeners are attached
-  invoke("generate_code_stream", { prompt: fullPrompt, model: model }).catch(
-    (err) => {
-      console.error("Streaming invoke error:", err);
-    }
-  );
-
   try {
     return await donePromise;
   } finally {
