@@ -9,11 +9,13 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "SmolPC Code Helper",
         "width": 900,
         "height": 800,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "devtools": true
       }
     ],
     "security": {

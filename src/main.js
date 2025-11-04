@@ -1,15 +1,22 @@
-// Tauri v2 API
-const { invoke } = window.__TAURI_INTERNALS__;
+// Tauri v2 API (access via injected globals)
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 // ===== STATE MANAGEMENT =====
 let chats = [];
 let activeChat = null;
 let contextEnabled = true;
+let streamListenerRegistered = false;
+let streamUnlisten = null;
+let streamingActive = false;
+let activeAssistantIndex = null;
+let activeAssistantDomId = null;
 
 // ===== INITIALIZATION =====
 window.addEventListener("DOMContentLoaded", async () => {
   loadChatsFromStorage();
   setupEventListeners();
+  await initStreamListener();
   checkOllamaStatus();
 
   // If no active chat, create one
@@ -66,6 +73,204 @@ function setupEventListeners() {
       document.getElementById("messageInput").focus();
     });
   });
+}
+
+// ===== STREAMING EVENTS =====
+async function initStreamListener() {
+  if (streamListenerRegistered) return;
+
+  try {
+    // use the v2 API you imported
+    streamUnlisten = await listen("llm_chunk", (event) => {
+      if (!event || !event.payload) return;
+      const { text = "", done = false } = event.payload;
+
+      // micrologs: super helpful when debugging the “spinner never stops”
+      console.debug("[llm_chunk]", { len: text.length, done });
+
+      if (text) {
+        appendToActiveAssistantMessage(text);
+      }
+      if (done) {
+        finalizeAssistantMessage(true);
+      }
+    });
+
+    streamListenerRegistered = true;
+    console.debug("[stream] listener registered");
+  } catch (error) {
+    console.error("[stream] Failed to initialize stream listener:", error);
+    streamListenerRegistered = false;
+  }
+}
+
+function setStreamingState(isStreaming) {
+  console.debug("[ui] setStreamingState", isStreaming);
+  streamingActive = isStreaming;
+  const input = document.getElementById("messageInput");
+  const sendBtn = document.getElementById("sendBtn");
+
+  if (input) {
+    input.disabled = isStreaming;
+  }
+  if (sendBtn) {
+    sendBtn.disabled = isStreaming;
+  }
+
+  showLoading(isStreaming);
+
+  if (!isStreaming && input) {
+    input.focus();
+  }
+}
+
+function startAssistantMessage() {
+  if (!activeChat) return;
+
+  // If we’re already streaming into a bubble, don’t create another
+  if (activeAssistantIndex !== null && activeAssistantDomId) return;
+  console.debug(
+    "[ui] startAssistantMessage -> index",
+    activeAssistantIndex,
+    "domId",
+    activeAssistantDomId
+  );
+
+  // 1) Update state
+  addMessage("assistant", ""); // pushes into activeChat.messages and persists
+  activeAssistantIndex = activeChat.messages.length - 1;
+
+  // 2) Create a stable DOM node for this assistant message (exactly once)
+  activeAssistantDomId = `msg-${activeChat.id}-${activeAssistantIndex}`;
+
+  const container = document.getElementById("messagesContainer");
+  const bubble = document.createElement("div");
+  bubble.className = "message assistant";
+  bubble.dataset.mid = activeAssistantDomId;
+  bubble.innerHTML = `
+    <div class="message-avatar">🤖</div>
+    <div class="message-content">
+      <div class="message-header">
+        <span class="message-role">AI Assistant</span>
+        <span class="message-time">${formatTime(
+          new Date().toISOString()
+        )}</span>
+      </div>
+      <div class="message-text"></div>
+      <div class="message-actions">
+        <button class="message-action-btn" onclick="copyMessage(${activeAssistantIndex})">📋 Copy</button>
+        <button class="message-action-btn" onclick="saveMessage(${activeAssistantIndex})">💾 Save</button>
+      </div>
+    </div>
+  `;
+  container.appendChild(bubble);
+  scrollToBottom();
+}
+
+function appendToActiveAssistantMessage(text) {
+  if (!activeChat) return;
+  if (activeAssistantIndex === null) {
+    // If we somehow get a chunk with no active bubble, create it once.
+    startAssistantMessage();
+  }
+  console.debug("[ui] append", {
+    chars: text.length,
+    index: activeAssistantIndex,
+  });
+
+  const message = activeChat.messages[activeAssistantIndex];
+  if (!message) return;
+
+  // Update state
+  message.content = (message.content || "") + text;
+  activeChat.lastUpdated = new Date().toISOString();
+
+  // Update only the DOM node for this live assistant message
+  const container = document.getElementById("messagesContainer");
+  let node = null;
+
+  if (activeAssistantDomId) {
+    node = container.querySelector(
+      `.message.assistant[data-mid="${activeAssistantDomId}"] .message-text`
+    );
+  }
+  if (activeAssistantIndex === null) {
+    startAssistantMessage();
+  }
+  // Fallback (shouldn’t happen): find last assistant’s .message-text
+  if (!node) {
+    const nodes = container.querySelectorAll(
+      ".message.assistant .message-text"
+    );
+    node = nodes[nodes.length - 1];
+  }
+
+  if (node) {
+    // Streaming-time: keep it fast — append plain text only
+    node.textContent += text;
+  }
+
+  // Keep scroll pinned
+  scrollToBottom();
+
+  // Persist (cheap enough; you can throttle later)
+  saveChatsToStorage();
+}
+
+function finalizeAssistantMessage(success = true) {
+  console.debug("[ui] finalizeAssistantMessage", {
+    success,
+    index: activeAssistantIndex,
+    domId: activeAssistantDomId,
+  });
+
+  // Parse & render markdown exactly once at the end
+  if (activeChat && activeAssistantIndex !== null) {
+    const msg = activeChat.messages[activeAssistantIndex] || { content: "" };
+    const cleaned = (msg.content || "").replace(/\n{3,}/g, "\n\n");
+
+    const container = document.getElementById("messagesContainer");
+    let node = null;
+    if (activeAssistantDomId) {
+      node = container.querySelector(
+        `.message.assistant[data-mid="${activeAssistantDomId}"] .message-text`
+      );
+    }
+    if (!node) {
+      const nodes = container.querySelectorAll(
+        ".message.assistant .message-text"
+      );
+      node = nodes[nodes.length - 1];
+    }
+
+    if (node) {
+      if (typeof marked !== "undefined") {
+        node.innerHTML = marked.parse(cleaned);
+      } else {
+        let formatted = escapeHtml(cleaned)
+          .replace(
+            /```(\w+)?\n([\s\S]*?)```/g,
+            (m, lang, code) => `<pre><code>${code.trim()}</code></pre>`
+          )
+          .replace(/`([^`]+)`/g, "<code>$1</code>")
+          .replace(/\n/g, "<br>");
+        node.innerHTML = formatted;
+      }
+    }
+
+    activeChat.lastUpdated = new Date().toISOString();
+    saveChatsToStorage();
+  }
+
+  // Optional: refresh sidebar timestamps AFTER streaming completes
+  renderChatList();
+
+  // Reset streaming state
+  activeAssistantIndex = null;
+  activeAssistantDomId = null;
+  setStreamingState(false);
+
+  if (success) showStatus("Response generated", "success");
 }
 
 // ===== SIDEBAR FUNCTIONS =====
@@ -197,6 +402,9 @@ function createNewChat() {
 
   chats.unshift(chat);
   activeChat = chat;
+  activeAssistantIndex = null;
+  streamingActive = false;
+  setStreamingState(false);
 
   saveChatsToStorage();
   renderChatList();
@@ -213,6 +421,9 @@ function loadChat(chatId) {
   if (!chat) return;
 
   activeChat = chat;
+  activeAssistantIndex = null;
+  streamingActive = false;
+  setStreamingState(false);
   saveChatsToStorage();
   renderChatList();
   renderMessages();
@@ -282,43 +493,36 @@ async function sendMessage() {
 
   if (!content) return;
 
-  // Add user message
   addMessage("user", content);
   input.value = "";
   autoResizeInput();
 
-  // Update chat title if it's still "New Chat"
   if (activeChat.title === "New Chat") {
     activeChat.title = generateChatTitle(content);
     renderChatList();
   }
 
-  // Show loading
-  showLoading(true);
-  document.getElementById("sendBtn").disabled = true;
+  const context = contextEnabled ? getContextMessages() : [];
+  const model = document.getElementById("modelSelect").value;
+  const fullPrompt = buildPromptFromContext(content, context);
 
+  setStreamingState(true);
   try {
-    // Get context messages if enabled
-    const context = contextEnabled ? getContextMessages() : [];
-
-    // Prefer streaming for faster perceived latency; fallback when unavailable
-    const response = await generateResponseStream(content, context);
-
-    // If non-streaming fallback was used, append assistant message now
-    const lastMsg = activeChat.messages[activeChat.messages.length - 1];
-    if (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.content) {
-      addMessage("assistant", response);
-    }
-
-    showStatus("Response generated", "success");
+    await initStreamListener();
+    await sendMessageStreaming(model, fullPrompt, null, null);
   } catch (error) {
-    showStatus(`Error: ${error}`, "error");
-    addMessage("assistant", `❌ Error: ${error}`);
-  } finally {
-    showLoading(false);
-    document.getElementById("sendBtn").disabled = false;
-    input.focus();
+    console.error("Failed to generate response:", error);
+    const message =
+      typeof error === "string" ? error : error?.message || String(error);
+    if (activeAssistantIndex === null) {
+      startAssistantMessage();
+    }
+    appendToActiveAssistantMessage(`Error: ${message}`);
+    finalizeAssistantMessage(false);
+    showStatus(`Error: ${message}`, "error");
   }
+
+  input.focus();
 }
 
 function addMessage(role, content) {
@@ -346,107 +550,70 @@ function getContextMessages() {
   }));
 }
 
-async function generateResponse(userMessage, context) {
-  const model = document.getElementById("modelSelect").value;
-
-  // Build the full prompt with context
-  let fullPrompt = "";
-
-  if (context.length > 0) {
-    fullPrompt = "Previous conversation:\n\n";
-    context.forEach((msg) => {
-      const role = msg.role === "user" ? "Student" : "Assistant";
-      fullPrompt += `${role}: ${msg.content}\n\n`;
-    });
-    fullPrompt += `Student: ${userMessage}`;
-  } else {
-    fullPrompt = userMessage;
+function buildPromptFromContext(userMessage, context) {
+  if (!context || context.length === 0) {
+    return userMessage;
   }
 
-  // Call Rust backend
-  return await invoke("generate_code", {
+  let fullPrompt = "Previous conversation:\n\n";
+  context.forEach((msg) => {
+    const role = msg.role === "user" ? "Student" : "Assistant";
+    fullPrompt += `${role}: ${msg.content}\n\n`;
+  });
+  fullPrompt += `Student: ${userMessage}`;
+  return fullPrompt;
+}
+
+async function generateResponse(userMessage, context) {
+  const model = document.getElementById("modelSelect").value;
+  const fullPrompt = buildPromptFromContext(userMessage, context);
+
+  return await invoke("generate_code_stream", {
     prompt: fullPrompt,
     model: model,
   });
 }
 
-// Streaming generation using Tauri window events. Falls back to non-streaming
-// when the event API is not available (maintains offline compatibility).
-async function generateResponseStream(userMessage, context) {
-  const model = document.getElementById("modelSelect").value;
+async function sendMessageStreaming(model, prompt, system, options) {
+  startAssistantMessage();
 
-  const hasTauriEvents = !!(
-    window.__TAURI__ &&
-    window.__TAURI__.event &&
-    typeof window.__TAURI__.event.listen === "function"
-  );
-  if (!hasTauriEvents) {
-    return await generateResponse(userMessage, context);
-  }
-
-  // Build the full prompt with context (same as non-streaming)
-  let fullPrompt = "";
-  if (context.length > 0) {
-    fullPrompt = "Previous conversation:\n\n";
-    context.forEach((msg) => {
-      const role = msg.role === "user" ? "Student" : "Assistant";
-      fullPrompt += `${role}: ${msg.content}\n\n`;
+  if (!streamListenerRegistered) {
+    console.warn(
+      "[stream] listener not registered; falling back to non-streaming"
+    );
+    const text = await invoke("generate_code", {
+      prompt,
+      model,
+      options: options ?? null,
     });
-    fullPrompt += `Student: ${userMessage}`;
-  } else {
-    fullPrompt = userMessage;
+    appendToActiveAssistantMessage(text);
+    finalizeAssistantMessage(true);
+    return;
   }
-
-  // Create an empty assistant message to fill with chunks
-  addMessage("assistant", "");
-  const assistantIndex = activeChat.messages.length - 1;
-
-  const { event } = window.__TAURI__;
-  const unlistenFns = [];
-  const finalText = { value: "" };
-
-  const unlistenChunk = await event.listen("gen_chunk", (e) => {
-    const chunk = e && e.payload && e.payload.chunk ? e.payload.chunk : "";
-    if (!chunk) return;
-    finalText.value += chunk;
-    activeChat.messages[assistantIndex].content = finalText.value;
-    activeChat.lastUpdated = new Date().toISOString();
-    saveChatsToStorage();
-    renderMessages();
-    scrollToBottom();
-  });
-  unlistenFns.push(unlistenChunk);
-
-  const donePromise = new Promise((resolve, reject) => {
-    event
-      .listen("gen_done", () => resolve(finalText.value))
-      .then((fn) => unlistenFns.push(fn));
-    event
-      .listen("gen_error", (e) => {
-        const err =
-          e && e.payload && e.payload.error ? e.payload.error : "Unknown error";
-        reject(new Error(err));
-      })
-      .then((fn) => unlistenFns.push(fn));
-  });
-
-  // Start backend streaming after listeners are attached
-  invoke("generate_code_stream", { prompt: fullPrompt, model: model }).catch(
-    (err) => {
-      console.error("Streaming invoke error:", err);
-    }
-  );
 
   try {
-    return await donePromise;
-  } finally {
-    try {
-      unlistenFns.forEach((fn) => typeof fn === "function" && fn());
-    } catch (_) {}
+    await invoke("generate_code_stream", {
+      req: {
+        model,
+        prompt,
+        system: system ?? null,
+        options: options ?? null,
+      },
+    });
+  } catch (error) {
+    console.error("Streaming invocation failed:", error);
+    const fallbackText = await invoke("generate_code", {
+      prompt,
+      model,
+      options: options ?? null,
+    });
+    appendToActiveAssistantMessage(fallbackText);
+    finalizeAssistantMessage(true);
   }
 }
 
 function renderMessages() {
+  if (streamingActive) return;
   const container = document.getElementById("messagesContainer");
   const welcomeMsg = document.getElementById("welcomeMessage");
 
