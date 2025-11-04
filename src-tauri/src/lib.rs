@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tauri::Emitter; // required for window.emit()
 
 /// Shared application state
 /// - Reuses a single reqwest client (connection pooling, keep-alive)
@@ -46,18 +45,16 @@ struct GenerationOptions {
 }
 
 impl GenerationOptions {
-    /// Defaults targeting educational code output with low overhead.
+    /// Defaults optimized for high-performance machines with balanced speed and quality.
     fn with_reasonable_defaults() -> Self {
         GenerationOptions {
-            temperature: Some(0.3),
-            top_p: Some(0.9),
-            top_k: Some(40),
-            repeat_penalty: Some(1.1),
-            // Leave num_ctx and num_thread to Ollama defaults (hardware-aware)
-            num_ctx: None,
-            // Cap output to avoid long, CPU-heavy generations
-            num_predict: Some(512),
-            num_thread: None,
+            temperature: Some(0.7),       // Balanced diversity
+            top_p: Some(0.9),            // Slightly reduced sampling range
+            top_k: Some(30),             // Smaller token pool for faster sampling
+            repeat_penalty: Some(1.1),   // Slight penalty to avoid repetition
+            num_thread: Some(4),         // Match to available cores (adjust as needed)
+            num_predict: Some(512),      // Shorter outputs for faster generation
+            num_ctx: None,               // Default context size
             stop: None,
         }
     }
@@ -87,10 +84,21 @@ async fn generate_code(
     model: String,
     options: Option<GenerationOptions>,
 ) -> Result<String, String> {
+    // Start tracking time
+    let start_time = std::time::Instant::now();
+
     // Student-friendly instructions
-    let system_prompt = "You are a friendly coding tutor helping secondary school students (ages 11-18). \
-Provide clear, well-commented code with explanations. Keep it simple and educational. \
-Always explain what the code does and why it works that way.";
+    let system_prompt = "You are a friendly, encouraging coding tutor for secondary school students aged 11–18. Your goals in every response are to: 
+
+1. Stay on topic — focus only on the exact question or task the student asked about.  
+2. Gauge complexity — tailor explanations to the learner’s likely age and prior knowledge.  
+3. Use clear, simple language for basic questions; provide richer but still accessible detail for advanced ones.  
+4. Explain clearly — break ideas into digestible steps, highlight key terms, and connect new ideas to things students may already know.  
+5. Add helpful context — explain why the code works, mention alternatives, and point out common mistakes to deepen understanding.  
+6. Always show well-commented code examples inside fenced code blocks with the correct language identifier, explaining what each part does and why.  
+7. Stay encouraging and patient — remind students that practice builds skill and invite curiosity in every response.  
+8. Always deliver explanations that are kind, informative, and age-appropriate for learners aged 11–18.
+";
 
     let full_prompt = format!("{}\n\nStudent question: {}", system_prompt, prompt);
 
@@ -150,105 +158,12 @@ Always explain what the code does and why it works that way.";
         .ok_or_else(|| "No response from model".to_string())?
         .to_string();
 
+    // Stop tracking time and log the duration
+    let duration = start_time.elapsed();
+    println!("DEBUG: Model generation took {:?}", duration);
+
     Ok(result)
 }
-
-/// Streaming generation over the chat API.
-/// Emits events to the originating window for incremental UI updates.
-/// - "gen_chunk": { chunk: String }
-/// - "gen_done": {}
-/// - "gen_error": { error: String }
-#[tauri::command]
-async fn generate_code_stream(
-    window: tauri::Window,
-    state: tauri::State<'_, AppState>,
-    prompt: String,
-    model: String,
-    options: Option<GenerationOptions>,
-) -> Result<(), String> {
-    // System prompt tailored for students (kept concise here).
-    let system_prompt = "You are a friendly, encouraging coding tutor for secondary school students aged 11–18. Your goals are to keep answers simple, well-structured, and educational.";
-
-    // Merge defaults with overrides
-    let mut opts = GenerationOptions::with_reasonable_defaults();
-    if let Some(overrides) = options {
-        if overrides.temperature.is_some() { opts.temperature = overrides.temperature; }
-        if overrides.top_p.is_some() { opts.top_p = overrides.top_p; }
-        if overrides.top_k.is_some() { opts.top_k = overrides.top_k; }
-        if overrides.repeat_penalty.is_some() { opts.repeat_penalty = overrides.repeat_penalty; }
-        if overrides.num_ctx.is_some() { opts.num_ctx = overrides.num_ctx; }
-        if overrides.num_predict.is_some() { opts.num_predict = overrides.num_predict; }
-        if overrides.num_thread.is_some() { opts.num_thread = overrides.num_thread; }
-        if overrides.stop.is_some() { opts.stop = overrides.stop; }
-    }
-
-    let url = format!("{}/api/chat", state.base_url);
-
-    let body = json!({
-        "model": model,
-        "stream": true,
-        "options": opts,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
-        ]
-    });
-
-    let resp = state
-        .client
-        .post(url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to connect to Ollama: {}", e))?;
-
-    // Stream response bytes; parse each JSON line
-    let mut stream = resp.bytes_stream();
-    use futures_util::StreamExt;
-
-    while let Some(item) = stream.next().await {
-        let bytes = match item {
-            Ok(b) => b,
-            Err(e) => {
-                let _ = window.emit("gen_error", json!({"error": e.to_string()}));
-                return Err(format!("Stream error: {}", e));
-            }
-        };
-
-        for line in bytes.split(|&c| c == b'\n') {
-            if line.is_empty() { continue; }
-            let parsed: Result<serde_json::Value, _> = serde_json::from_slice(line);
-            match parsed {
-                Ok(val) => {
-                    if val.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
-                        let _ = window.emit("gen_done", json!({}));
-                        return Ok(());
-                    }
-
-                    if let Some(chunk) = val
-                        .get("message")
-                        .and_then(|m| m.get("content"))
-                        .and_then(|c| c.as_str())
-                    {
-                        let _ = window.emit("gen_chunk", json!({"chunk": chunk}));
-                    }
-
-                    if let Some(chunk) = val.get("response").and_then(|c| c.as_str()) {
-                        let _ = window.emit("gen_chunk", json!({"chunk": chunk}));
-                    }
-                }
-                Err(_) => {
-                    // Ignore non-JSON lines to keep UX clean
-                }
-            }
-        }
-    }
-
-    // End of stream without explicit done
-    let _ = window.emit("gen_done", json!({}));
-    Ok(())
-}
-
 // Save code to file (native save dialog)
 #[tauri::command]
 async fn save_code(content: String) -> Result<(), String> {
@@ -287,7 +202,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             check_ollama,
             generate_code,
-            generate_code_stream,
             save_code
         ])
         .run(tauri::generate_context!())
