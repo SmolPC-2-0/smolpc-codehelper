@@ -233,7 +233,7 @@ async fn generate_code_stream(
                         let _ = window.emit("gen_chunk", json!({"chunk": chunk}));
                     }
 
-                    if let Some(chunk) = val.get("response").and_then(|c| c.as_str()) {
+                    else if let Some(chunk) = val.get("response").and_then(|c| c.as_str()) {
                         let _ = window.emit("gen_chunk", json!({"chunk": chunk}));
                     }
                 }
