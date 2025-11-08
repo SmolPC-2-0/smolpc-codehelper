@@ -7,6 +7,7 @@
     "frontendDist": "../src"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "SmolPC Code Helper",
@@ -22,6 +23,6 @@
   },
   "bundle": {
     "active": true,
-    "icon": ["icons/SmolPC.png", "icons/SmolPC.ico", "icons/SmolPC.icns"]
+    "icon": ["icons/icon.png", "icons/icon.ico", "icons/icon.icns"]
   }
 }
