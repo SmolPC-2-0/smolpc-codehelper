@@ -55,7 +55,7 @@ impl GenerationOptions {
             top_k: Some(30),             // Smaller token pool for faster sampling
             repeat_penalty: Some(1.1),   // Slight penalty to avoid repetition
             num_thread: Some(4),         // Match to available cores (adjust as needed)
-            num_predict: Some(512),      // Shorter outputs for faster generation
+            num_predict: None,      // Shorter outputs for faster generation
             num_ctx: None,               // Default context size
             stop: None,
         }
