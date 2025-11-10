@@ -221,7 +221,7 @@ function loadChat(chatId) {
   renderMessages();
 
   // Scroll to bottom
-  setTimeout(scrollToBottom, 100);
+  setTimeout(smartScrollToBottom, 100);
 }
 
 function deleteChat(chatId) {
@@ -336,7 +336,7 @@ function addMessage(role, content) {
 
   saveChatsToStorage();
   renderMessages();
-  scrollToBottom();
+  smartScrollToBottom();
 }
 
 function getContextMessages() {
@@ -378,6 +378,9 @@ async function generateResponse(userMessage, context) {
 async function generateResponseStream(userMessage, context) {
   const model = document.getElementById("modelSelect").value;
 
+  autoScrollEnabled = true;
+
+  smartScrollToBottom();
   const hasTauriEvents = !!(
     window.__TAURI__ &&
     window.__TAURI__.event &&
@@ -412,31 +415,31 @@ async function generateResponseStream(userMessage, context) {
   let chunkCount = 0;
   const unlistenChunk = await event.listen("gen_chunk", (e) => {
     const chunk = e && e.payload && e.payload.chunk ? e.payload.chunk : "";
-    console.log("Received chunk:", chunk.length, "chars");
+    // console.log("Received chunk:", chunk.length, "chars");
     if (!chunk) return;
-    
+
     finalText.value += chunk;
     activeChat.messages[assistantIndex].content = finalText.value;
     activeChat.lastUpdated = new Date().toISOString();
     chunkCount++;
-    console.log("Total text so far:", finalText.value.length, "chars");
-    
+    // console.log("Total text so far:", finalText.value.length, "chars");
+
     // Update only the streaming message content to avoid flashing
     if (chunkCount % 3 === 0) {
-      console.log("Updating content (every 3 chunks)...");
-      
+      // console.log("Updating content (every 3 chunks)...");
+
       // Find the last message element and update just its content
       const messagesContainer = document.getElementById("messagesContainer");
       const lastMessage = messagesContainer.lastElementChild;
-      
+
       if (lastMessage) {
         const messageText = lastMessage.querySelector(".message-text");
         if (messageText) {
           messageText.innerHTML = formatMessageContent(finalText.value);
         }
       }
-      
-      scrollToBottom();
+
+      smartScrollToBottom();
     }
   });
   unlistenFns.push(unlistenChunk);
@@ -451,22 +454,22 @@ async function generateResponseStream(userMessage, context) {
         }
         saveChatsToStorage();
         renderMessages();
-        scrollToBottom();
+        smartScrollToBottom();
         resolve(finalText.value);
       })
       .then((fn) => unlistenFns.push(fn));
-    
+
     event
       .listen("gen_error", (e) => {
         const err =
           e && e.payload && e.payload.error ? e.payload.error : "Unknown error";
-        
+
         // Clear any pending debounced render
         if (renderDebounceTimer) {
           clearTimeout(renderDebounceTimer);
           renderDebounceTimer = null;
         }
-        
+
         reject(new Error(err));
       })
       .then((fn) => unlistenFns.push(fn));
@@ -486,7 +489,7 @@ async function generateResponseStream(userMessage, context) {
     try {
       unlistenFns.forEach((fn) => typeof fn === "function" && fn());
     } catch (_) {}
-    
+
     // Clear any remaining debounce timer
     if (renderDebounceTimer) {
       clearTimeout(renderDebounceTimer);
@@ -551,7 +554,7 @@ function createMessageElement(message, index) {
 
 function formatMessageContent(content) {
   // Use marked.js to parse markdown
-  if (typeof marked !== "undefined") {
+  if (typeof marked !== "undefined" && typeof DOMPurify !== "undefined") {
     // Configure marked
     marked.setOptions({
       breaks: true, // Convert \n to <br>
@@ -560,14 +563,44 @@ function formatMessageContent(content) {
       mangle: false,
     });
 
-    // Clean up excessive blank lines before parsing
-    // Replace 3+ newlines with just 2 (one blank line max)
-    let cleaned = content.replace(/\n{3,}/g, "\n\n");
+    let cleaned = content
+      .replace(/\n{4,}/g, "\n\n\n") // Max 3 blank lines
+      .replace(/\n\n\n+/g, "\n\n"); // Collapse triple+ newlines
+    const parsed = marked.parse(cleaned);
 
-    return marked.parse(cleaned);
+    // Sanitize the HTML to prevent XSS
+    return DOMPurify.sanitize(parsed, {
+      ALLOWED_TAGS: [
+        "p",
+        "br",
+        "strong",
+        "em",
+        "code",
+        "pre",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "ul",
+        "ol",
+        "li",
+        "blockquote",
+        "a",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "hr",
+      ],
+      ALLOWED_ATTR: ["href", "class"],
+    });
   }
 
-  // Fallback if marked isn't loaded
+  // Fallback if marked/DOMPurify isn't loaded
   let formatted = escapeHtml(content);
   formatted = formatted.replace(
     /```(\w+)?\n([\s\S]*?)```/g,
@@ -633,7 +666,7 @@ function showLoading(show) {
   const loading = document.getElementById("loadingIndicator");
   if (show) {
     loading.classList.remove("hidden");
-    scrollToBottom();
+    smartScrollToBottom();
   } else {
     loading.classList.add("hidden");
   }
@@ -656,9 +689,26 @@ function showStatus(message, type = "") {
   }, 3000);
 }
 
-function scrollToBottom() {
+let autoScrollEnabled = true; // Track if we should auto-scroll
+
+function smartScrollToBottom() {
   const container = document.getElementById("chatContainer");
-  container.scrollTop = container.scrollHeight;
+
+  // Check if user has scrolled up manually (more than 150px from bottom)
+  const distanceFromBottom =
+    container.scrollHeight - container.scrollTop - container.clientHeight;
+
+  // Update auto-scroll flag based on user's position
+  if (distanceFromBottom > 150) {
+    autoScrollEnabled = false; // User scrolled up, disable auto-scroll
+  } else if (distanceFromBottom < 30) {
+    autoScrollEnabled = true; // User scrolled back to bottom, re-enable
+  }
+
+  // Only auto-scroll if enabled
+  if (autoScrollEnabled) {
+    container.scrollTop = container.scrollHeight;
+  }
 }
 
 function autoResizeInput() {
