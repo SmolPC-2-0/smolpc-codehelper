@@ -312,6 +312,7 @@ body {
   overflow-y: auto;
   padding: 24px;
   background: #fafafa;
+  overscroll-behavior: contain;
 }
 
 /* Welcome Message */
