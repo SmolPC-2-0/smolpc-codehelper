@@ -246,57 +246,80 @@ async fn generate_code_stream(
             format!("Failed to connect to Ollama: {}", e)
         })?;
 
-    // Process stream line by line
-    let mut stream = response.bytes_stream();
-    
-    while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(bytes) => {
-                // Parse JSON from this chunk
-                match serde_json::from_slice::<serde_json::Value>(&bytes) {
-                    Ok(json) => {
-                        // Extract the response text
-                        if let Some(text) = json.get("response").and_then(|v| v.as_str()) {
-                            println!("Chunk received: {} chars", text.len());
-                            // Emit chunk to frontend
-                            if !text.is_empty() {
-                                if let Err(e) = app.emit("gen_chunk", json!({"chunk": text})) {
-                                    eprintln!("Failed to emit chunk: {}", e);
-                                    let _ = app.emit("gen_error", json!({"error": "Failed to emit chunk"}));
-                                    return Err("Failed to emit chunk".to_string());
+// Process stream line by line
+let mut stream = response.bytes_stream();
+let mut buffer = String::new(); // Buffer for incomplete lines
+
+while let Some(chunk) = stream.next().await {
+    match chunk {
+        Ok(bytes) => {
+            // Convert bytes to string and add to buffer
+            match std::str::from_utf8(&bytes) {
+                Ok(text) => {
+                    buffer.push_str(text);
+                    
+                    // Process complete lines (separated by newlines)
+                    while let Some(newline_pos) = buffer.find('\n') {
+                        let line = buffer[..newline_pos].trim().to_string();
+                        buffer = buffer[newline_pos + 1..].to_string();
+                        
+                        // Skip empty lines
+                        if line.is_empty() {
+                            continue;
+                        }
+                        
+                        // Parse JSON from this complete line
+                        match serde_json::from_str::<serde_json::Value>(&line) {
+                            Ok(json) => {
+                                // Extract the response text
+                                if let Some(text) = json.get("response").and_then(|v| v.as_str()) {
+                                    println!("Chunk received: {} chars", text.len());
+                                    // Emit chunk to frontend
+                                    if !text.is_empty() {
+                                        if let Err(e) = app.emit("gen_chunk", json!({"chunk": text})) {
+                                            eprintln!("Failed to emit chunk: {}", e);
+                                            let _ = app.emit("gen_error", json!({"error": "Failed to emit chunk"}));
+                                            return Err("Failed to emit chunk".to_string());
+                                        }
+                                    }
+                                }
+
+                                // Check if generation is done
+                                if json.get("done").and_then(|v| v.as_bool()) == Some(true) {
+                                    // Stop tracking time and log
+                                    let duration = start_time.elapsed();
+                                    println!("DEBUG: Streaming generation took {:?}", duration);
+                                    
+                                    // Emit completion event
+                                    if let Err(e) = app.emit("gen_done", json!({})) {
+                                        eprintln!("Failed to emit done: {}", e);
+                                    }
+                                    return Ok(()); // Exit successfully
                                 }
                             }
-                        }
-
-                        // Check if generation is done
-                        if json.get("done").and_then(|v| v.as_bool()) == Some(true) {
-                            // Stop tracking time and log
-                            let duration = start_time.elapsed();
-                            println!("DEBUG: Streaming generation took {:?}", duration);
-                            
-                            // Emit completion event
-                            if let Err(e) = app.emit("gen_done", json!({})) {
-                                eprintln!("Failed to emit done: {}", e);
+                            Err(e) => {
+                                eprintln!("Failed to parse JSON line: {} - Line: {}", e, line);
+                                // Don't fail on single bad line, continue processing
+                                continue;
                             }
-                            break;
                         }
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to parse JSON chunk: {}", e);
-                        let _ = app.emit("gen_error", json!({"error": format!("Failed to parse response: {}", e)}));
-                        return Err(format!("Failed to parse response: {}", e));
                     }
                 }
-            }
-            Err(e) => {
-                eprintln!("Stream error: {}", e);
-                let _ = app.emit("gen_error", json!({"error": format!("Stream error: {}", e)}));
-                return Err(format!("Stream error: {}", e));
+                Err(e) => {
+                    eprintln!("Invalid UTF-8 in stream: {}", e);
+                    continue;
+                }
             }
         }
+        Err(e) => {
+            eprintln!("Stream error: {}", e);
+            let _ = app.emit("gen_error", json!({"error": format!("Stream error: {}", e)}));
+            return Err(format!("Stream error: {}", e));
+        }
     }
+}
 
-    Ok(())
+Ok(())
 }
 
 // Save code to file (native save dialog)
