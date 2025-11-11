@@ -122,26 +122,36 @@
 <style>
 	/* Custom prose styling for code blocks */
 	:global(.code-block) {
-		@apply my-4 overflow-hidden rounded-lg;
+		margin-top: 1rem;
+		margin-bottom: 1rem;
+		overflow: hidden;
+		border-radius: 0.5rem;
 	}
 
 	:global(.prose code) {
-		@apply rounded px-1 py-0.5;
+		border-radius: 0.25rem;
+		padding-left: 0.375rem;
+		padding-right: 0.375rem;
+		padding-top: 0.125rem;
+		padding-bottom: 0.125rem;
 	}
 
 	:global(.prose pre) {
-		@apply rounded-lg;
+		border-radius: 0.5rem;
 	}
 
 	:global(.prose p) {
-		@apply my-2;
+		margin-top: 0.5rem;
+		margin-bottom: 0.5rem;
 	}
 
 	:global(.prose ul) {
-		@apply my-2;
+		margin-top: 0.5rem;
+		margin-bottom: 0.5rem;
 	}
 
 	:global(.prose ol) {
-		@apply my-2;
+		margin-top: 0.5rem;
+		margin-bottom: 0.5rem;
 	}
 </style>
