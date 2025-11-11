@@ -1,5 +1,5 @@
 mod commands;
-use commands::default::{read, write};
+use commands::default::{read, save_code, write};
 use commands::ollama::{check_ollama, generate_stream, get_ollama_models};
 
 #[allow(clippy::missing_panics_doc)]
@@ -19,6 +19,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read,
             write,
+            save_code,
             check_ollama,
             get_ollama_models,
             generate_stream

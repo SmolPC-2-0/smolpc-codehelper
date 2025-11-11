@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 // Student-friendly system prompt for coding assistance
-const SYSTEM_PROMPT: &str = r#"You are a helpful coding assistant designed for secondary school students (ages 11-18).
+const SYSTEM_PROMPT: &str = r"You are a helpful coding assistant designed for secondary school students (ages 11-18).
 Your goal is to explain programming concepts clearly and provide well-commented code examples.
 
 Guidelines:
@@ -13,7 +13,7 @@ Guidelines:
 - Always include helpful comments in code
 - Be patient and supportive
 - Adapt explanations to the student's level
-- Encourage learning and experimentation"#;
+- Encourage learning and experimentation";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OllamaMessage {
