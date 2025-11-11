@@ -2,100 +2,115 @@
 	import { onMount } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+	import Sidebar from '$lib/components/Sidebar.svelte';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
 	import StatusIndicator from '$lib/components/StatusIndicator.svelte';
-	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
-	import type { Message, OllamaStatus } from '$lib/types/ollama';
+	import ModelSelector from '$lib/components/ModelSelector.svelte';
+	import ContextToggle from '$lib/components/ContextToggle.svelte';
+	import QuickExamples from '$lib/components/QuickExamples.svelte';
+	import { chatsStore } from '$lib/stores/chats.svelte';
+	import { settingsStore } from '$lib/stores/settings.svelte';
+	import { ollamaStore } from '$lib/stores/ollama.svelte';
+	import type { Message } from '$lib/types/chat';
+	import type { OllamaMessage } from '$lib/types/ollama';
+	import { Menu, X } from '@lucide/svelte';
+	import { Button } from '$lib/components/ui/button';
 
-	// State
-	let messages = $state<Message[]>([]);
-	let ollamaStatus = $state<OllamaStatus>({
-		connected: false,
-		checking: true
-	});
+	// UI State
+	let isSidebarOpen = $state(true);
 	let isGenerating = $state(false);
-	let currentModel = $state('qwen2.5-coder:7b');
+	let showQuickExamples = $state(true);
 	let messagesContainer: HTMLDivElement;
 
-	// Generate unique ID
-	function generateId(): string {
-		return Date.now().toString(36) + Math.random().toString(36).substr(2);
-	}
+	// Derived state
+	const currentChat = $derived(chatsStore.currentChat);
+	const messages = $derived(currentChat?.messages ?? []);
+	const hasNoChats = $derived(chatsStore.chats.length === 0);
 
 	// Scroll to bottom of messages
 	function scrollToBottom() {
 		if (messagesContainer) {
 			setTimeout(() => {
 				messagesContainer.scrollTop = messagesContainer.scrollHeight;
-			}, 0);
+			}, 50);
 		}
 	}
 
-	// Check Ollama status
-	async function checkOllama() {
-		ollamaStatus.checking = true;
-		try {
-			const connected = await invoke<boolean>('check_ollama');
-			ollamaStatus = {
-				connected,
-				checking: false,
-				error: connected ? undefined : 'Please start Ollama server'
-			};
-		} catch (error) {
-			ollamaStatus = {
-				connected: false,
-				checking: false,
-				error: 'Failed to check Ollama status'
-			};
+	// Build context from previous messages
+	function buildContext(): OllamaMessage[] {
+		if (!settingsStore.contextEnabled || !currentChat) {
+			return [];
 		}
+
+		return currentChat.messages.map((msg) => ({
+			role: msg.role === 'user' ? 'user' : 'assistant',
+			content: msg.content
+		}));
 	}
 
 	// Handle sending a message
 	async function handleSendMessage(content: string) {
-		if (!ollamaStatus.connected || isGenerating) return;
+		if (!ollamaStore.isConnected || isGenerating) return;
+
+		// Create new chat if none exists or if this is first message after switching
+		if (!currentChat) {
+			chatsStore.createChat(settingsStore.selectedModel);
+		}
+
+		if (!currentChat) return; // Safety check
+
+		// Hide quick examples after first message
+		showQuickExamples = false;
 
 		// Add user message
 		const userMessage: Message = {
-			id: generateId(),
+			id: crypto.randomUUID(),
 			role: 'user',
 			content,
 			timestamp: Date.now()
 		};
-		messages.push(userMessage);
-		messages = messages; // Trigger reactivity
+		chatsStore.addMessage(currentChat.id, userMessage);
 		scrollToBottom();
 
 		// Create placeholder for assistant response
 		const assistantMessage: Message = {
-			id: generateId(),
+			id: crypto.randomUUID(),
 			role: 'assistant',
 			content: '',
 			timestamp: Date.now(),
 			isStreaming: true
 		};
-		messages.push(assistantMessage);
-		messages = messages; // Trigger reactivity
+		chatsStore.addMessage(currentChat.id, assistantMessage);
 		scrollToBottom();
 
 		isGenerating = true;
 
 		try {
+			// Build context from previous messages
+			const context = buildContext();
+
 			// Start streaming generation
 			await invoke('generate_stream', {
 				prompt: content,
-				model: currentModel,
-				context: null // Phase 1: no context yet
+				model: settingsStore.selectedModel,
+				context: context.length > 0 ? context : null
 			});
 		} catch (error) {
 			console.error('Generation error:', error);
-			assistantMessage.content = `Error: ${error}`;
-			assistantMessage.isStreaming = false;
-			messages = messages;
+			chatsStore.updateMessage(currentChat.id, assistantMessage.id, {
+				content: `Error: ${error}`,
+				isStreaming: false
+			});
 		}
 	}
 
-	// Setup event listeners
+	// Handle example selection
+	function handleExampleSelect(prompt: string) {
+		handleSendMessage(prompt);
+	}
+
+	// Setup event listeners and initialization
 	onMount(() => {
 		let unlistenChunk: UnlistenFn;
 		let unlistenDone: UnlistenFn;
@@ -104,41 +119,55 @@
 		async function setupListeners() {
 			// Listen for streaming chunks
 			unlistenChunk = await listen<string>('ollama_chunk', (event) => {
+				if (!currentChat) return;
+
 				const lastMessage = messages[messages.length - 1];
 				if (lastMessage && lastMessage.role === 'assistant' && lastMessage.isStreaming) {
-					lastMessage.content += event.payload;
-					messages = messages; // Trigger reactivity
+					chatsStore.updateMessage(currentChat.id, lastMessage.id, {
+						content: lastMessage.content + event.payload
+					});
 					scrollToBottom();
 				}
 			});
 
 			// Listen for generation complete
 			unlistenDone = await listen('ollama_done', () => {
+				if (!currentChat) return;
+
 				const lastMessage = messages[messages.length - 1];
 				if (lastMessage && lastMessage.role === 'assistant') {
-					lastMessage.isStreaming = false;
-					messages = messages; // Trigger reactivity
+					chatsStore.updateMessage(currentChat.id, lastMessage.id, {
+						isStreaming: false
+					});
 				}
 				isGenerating = false;
 			});
 
 			// Listen for errors
 			unlistenError = await listen<string>('ollama_error', (event) => {
+				if (!currentChat) return;
+
 				const lastMessage = messages[messages.length - 1];
 				if (lastMessage && lastMessage.role === 'assistant') {
-					lastMessage.content = `Error: ${event.payload}`;
-					lastMessage.isStreaming = false;
-					messages = messages; // Trigger reactivity
+					chatsStore.updateMessage(currentChat.id, lastMessage.id, {
+						content: `Error: ${event.payload}`,
+						isStreaming: false
+					});
 				}
 				isGenerating = false;
 			});
 		}
 
 		// Initial Ollama check
-		checkOllama();
+		ollamaStore.checkConnection();
 
 		// Setup event listeners
 		setupListeners();
+
+		// Create initial chat if none exists
+		if (hasNoChats) {
+			chatsStore.createChat(settingsStore.selectedModel);
+		}
 
 		// Cleanup
 		return () => {
@@ -147,41 +176,101 @@
 			if (unlistenError) unlistenError();
 		};
 	});
+
+	// Watch messages to auto-scroll
+	$effect(() => {
+		if (messages.length > 0) {
+			scrollToBottom();
+		}
+	});
 </script>
 
-<main class="flex h-screen flex-col bg-background p-4">
-	<div class="mx-auto w-full max-w-4xl flex-1 flex flex-col gap-4">
-		<!-- Header -->
-		<Card>
-			<CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
-				<CardTitle class="text-2xl font-bold">SmolPC Code Helper</CardTitle>
-				<StatusIndicator status={ollamaStatus} />
-			</CardHeader>
-		</Card>
+<div class="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
+	<!-- Sidebar -->
+	{#if isSidebarOpen}
+		<Sidebar isOpen={isSidebarOpen} onClose={() => (isSidebarOpen = false)} />
+	{/if}
 
-		<!-- Messages -->
-		<Card class="flex-1 flex flex-col overflow-hidden">
-			<CardContent class="flex-1 overflow-y-auto p-4" bind:this={messagesContainer}>
+	<!-- Main Content -->
+	<div class="flex flex-1 flex-col overflow-hidden">
+		<!-- Header -->
+		<header
+			class="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900"
+		>
+			<div class="flex items-center gap-3">
+				{#if !isSidebarOpen}
+					<Button variant="ghost" size="icon" onclick={() => (isSidebarOpen = true)}>
+						<Menu class="h-5 w-5" />
+					</Button>
+				{/if}
+				<h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+					{currentChat?.title ?? 'New Chat'}
+				</h1>
+			</div>
+
+			<div class="flex items-center gap-3">
+				<StatusIndicator status={ollamaStore.status} />
+			</div>
+		</header>
+
+		<!-- Controls Bar -->
+		<div
+			class="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900"
+		>
+			<ModelSelector />
+			<ContextToggle />
+		</div>
+
+		<!-- Messages Area -->
+		<div class="flex-1 overflow-y-auto p-4" bind:this={messagesContainer}>
+			<div class="mx-auto max-w-4xl">
 				{#if messages.length === 0}
-					<div class="flex h-full items-center justify-center text-center text-muted-foreground">
-						<div>
-							<h3 class="mb-2 text-lg font-semibold">Welcome to SmolPC Code Helper!</h3>
-							<p>Ask any coding question to get started.</p>
+					<div class="flex min-h-[60vh] flex-col items-center justify-center text-center">
+						<div class="mb-8">
+							<h2 class="mb-2 text-2xl font-bold text-gray-900 dark:text-white">
+								Welcome to SmolPC Code Helper!
+							</h2>
+							<p class="text-gray-600 dark:text-gray-400">
+								Your offline AI coding assistant for learning and problem-solving
+							</p>
 						</div>
+
+						{#if showQuickExamples}
+							<div class="w-full max-w-3xl">
+								<QuickExamples
+									onSelectExample={handleExampleSelect}
+									onClose={() => (showQuickExamples = false)}
+								/>
+							</div>
+						{:else}
+							<Button onclick={() => (showQuickExamples = true)} variant="outline">
+								Show Quick Examples
+							</Button>
+						{/if}
 					</div>
 				{:else}
-					{#each messages as message (message.id)}
-						<ChatMessage {message} />
-					{/each}
+					<div class="space-y-4">
+						{#each messages as message (message.id)}
+							<ChatMessage {message} />
+						{/each}
+					</div>
 				{/if}
-			</CardContent>
-		</Card>
+			</div>
+		</div>
 
-		<!-- Input -->
-		<Card>
-			<CardContent class="p-4">
-				<ChatInput onSend={handleSendMessage} disabled={!ollamaStatus.connected || isGenerating} />
-			</CardContent>
-		</Card>
+		<!-- Input Area -->
+		<div
+			class="border-t border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-900"
+		>
+			<div class="mx-auto max-w-4xl">
+				<ChatInput
+					onSend={handleSendMessage}
+					disabled={!ollamaStore.isConnected || isGenerating}
+					placeholder={isGenerating
+						? 'Generating response...'
+						: 'Ask a coding question (Shift+Enter for new line)...'}
+				/>
+			</div>
+		</div>
 	</div>
-</main>
+</div>
