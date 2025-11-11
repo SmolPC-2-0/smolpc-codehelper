@@ -49,11 +49,7 @@
 </script>
 
 <div
-	class="flex gap-3 rounded-lg p-4 transition-colors"
-	class:bg-blue-50={message.role === 'user'}
-	class:dark:bg-blue-950/20={message.role === 'user'}
-	class:bg-gray-50={message.role === 'assistant'}
-	class:dark:bg-gray-900/50={message.role === 'assistant'}
+	class="flex gap-3 rounded-lg p-4 transition-colors {message.role === 'user' ? 'bg-blue-50 dark:bg-blue-950/20' : 'bg-gray-50 dark:bg-gray-900/50'}"
 >
 	<!-- Avatar -->
 	<div class="flex-shrink-0">

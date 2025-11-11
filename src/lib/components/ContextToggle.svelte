@@ -9,14 +9,7 @@
 
 <button
 	onclick={handleToggle}
-	class="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors"
-	class:border-green-600={settingsStore.contextEnabled}
-	class:bg-green-50={settingsStore.contextEnabled}
-	class:dark:bg-green-950/20={settingsStore.contextEnabled}
-	class:border-gray-300={!settingsStore.contextEnabled}
-	class:bg-gray-50={!settingsStore.contextEnabled}
-	class:dark:border-gray-700={!settingsStore.contextEnabled}
-	class:dark:bg-gray-900={!settingsStore.contextEnabled}
+	class="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors {settingsStore.contextEnabled ? 'border-green-600 bg-green-50 dark:bg-green-950/20' : 'border-gray-300 bg-gray-50 dark:border-gray-700 dark:bg-gray-900'}"
 	title={settingsStore.contextEnabled
 		? 'Context enabled - AI remembers conversation'
 		: 'Context disabled - Each message is independent'}
