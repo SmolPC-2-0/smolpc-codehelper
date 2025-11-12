@@ -3,7 +3,6 @@
 	import { renderMarkdown, copyToClipboard, extractCode } from '$lib/utils/markdown';
 	import { invoke } from '@tauri-apps/api/core';
 	import { User, Bot, Copy, Check, Download } from '@lucide/svelte';
-	import { onMount } from 'svelte';
 
 	interface Props {
 		message: Message;
@@ -11,41 +10,30 @@
 
 	let { message }: Props = $props();
 
-	let messageElement: HTMLDivElement;
-	let copiedCode: string | null = $state(null);
+	let copied = $state(false);
 
 	const renderedContent = $derived(renderMarkdown(message.content));
 	const codeBlocks = $derived(extractCode(message.content));
 
-	async function handleCopyCode(code: string) {
-		const success = await copyToClipboard(code);
+	// Combine all code blocks into one string
+	const allCode = $derived(codeBlocks.join('\n\n'));
+
+	async function handleCopyAllCode() {
+		const success = await copyToClipboard(allCode);
 		if (success) {
-			copiedCode = code;
-			setTimeout(() => (copiedCode = null), 2000);
+			copied = true;
+			setTimeout(() => (copied = false), 2000);
 		}
 	}
 
-	async function handleSaveCode(code: string) {
+	async function handleSaveAllCode() {
 		try {
-			await invoke('save_code', { code });
+			await invoke('save_code', { code: allCode });
 		} catch (error) {
 			console.error('Failed to save code:', error);
 			alert('Failed to save file. Please try again.');
 		}
 	}
-
-	onMount(() => {
-		// Add click handlers to dynamically created copy buttons
-		if (messageElement) {
-			const copyButtons = messageElement.querySelectorAll('.copy-code-btn');
-			copyButtons.forEach((btn) => {
-				btn.addEventListener('click', (e) => {
-					const code = (e.target as HTMLElement).getAttribute('data-code');
-					if (code) handleCopyCode(code);
-				});
-			});
-		}
-	});
 </script>
 
 <div
@@ -72,10 +60,7 @@
 			{message.role === 'user' ? 'You' : 'AI Assistant'}
 		</div>
 
-		<div
-			bind:this={messageElement}
-			class="prose prose-sm dark:prose-invert max-w-none break-words text-gray-800 dark:text-gray-200"
-		>
+		<div class="prose prose-sm dark:prose-invert max-w-none break-words text-gray-800 dark:text-gray-200">
 			{@html renderedContent}
 		</div>
 
@@ -86,34 +71,32 @@
 			</div>
 		{/if}
 
-		<!-- Code Actions -->
+		<!-- Unified Code Actions -->
 		{#if message.role === 'assistant' && codeBlocks.length > 0 && !message.isStreaming}
-			<div class="mt-3 flex flex-wrap gap-2">
-				{#each codeBlocks as code, index}
-					<div class="flex gap-1">
-						<button
-							onclick={() => handleCopyCode(code)}
-							class="flex items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700"
-							title="Copy code block {index + 1}"
-						>
-							{#if copiedCode === code}
-								<Check class="h-3 w-3 text-green-600" />
-								<span>Copied!</span>
-							{:else}
-								<Copy class="h-3 w-3" />
-								<span>Copy Code {codeBlocks.length > 1 ? index + 1 : ''}</span>
-							{/if}
-						</button>
-						<button
-							onclick={() => handleSaveCode(code)}
-							class="flex items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700"
-							title="Save code block {index + 1} to file"
-						>
-							<Download class="h-3 w-3" />
-							<span>Save</span>
-						</button>
-					</div>
-				{/each}
+			<div class="mt-3 flex gap-2">
+				<button
+					type="button"
+					onclick={handleCopyAllCode}
+					class="flex items-center gap-1 rounded border border-gray-300 bg-white px-3 py-1.5 text-xs hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700"
+					title="Copy all code from this message"
+				>
+					{#if copied}
+						<Check class="h-3 w-3 text-green-600" />
+						<span class="text-green-600">Copied!</span>
+					{:else}
+						<Copy class="h-3 w-3" />
+						<span>Copy All Code</span>
+					{/if}
+				</button>
+				<button
+					type="button"
+					onclick={handleSaveAllCode}
+					class="flex items-center gap-1 rounded border border-gray-300 bg-white px-3 py-1.5 text-xs hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700"
+					title="Save all code from this message to file"
+				>
+					<Download class="h-3 w-3" />
+					<span>Save All Code</span>
+				</button>
 			</div>
 		{/if}
 	</div>

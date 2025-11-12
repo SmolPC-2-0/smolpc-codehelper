@@ -22,15 +22,33 @@
 	let isGenerating = $state(false);
 	let showQuickExamples = $state(true);
 	let messagesContainer: HTMLDivElement;
+	let userHasScrolledUp = $state(false);
+	let cancelRequested = $state(false);
 
 	// Derived state
 	const currentChat = $derived(chatsStore.currentChat);
 	const messages = $derived(currentChat?.messages ?? []);
 	const hasNoChats = $derived(chatsStore.chats.length === 0);
 
-	// Scroll to bottom of messages
-	function scrollToBottom() {
+	// Check if user is at bottom of scroll
+	function isAtBottom(): boolean {
+		if (!messagesContainer) return true;
+		const threshold = 100; // pixels from bottom
+		const distanceFromBottom =
+			messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight;
+		return distanceFromBottom < threshold;
+	}
+
+	// Handle scroll events to detect manual scrolling
+	function handleScroll() {
 		if (messagesContainer) {
+			userHasScrolledUp = !isAtBottom();
+		}
+	}
+
+	// Scroll to bottom of messages (only if user hasn't scrolled up)
+	function scrollToBottom() {
+		if (messagesContainer && !userHasScrolledUp) {
 			setTimeout(() => {
 				messagesContainer.scrollTop = messagesContainer.scrollHeight;
 			}, 50);
@@ -85,6 +103,7 @@
 		scrollToBottom();
 
 		isGenerating = true;
+		cancelRequested = false; // Reset cancel flag
 
 		try {
 			// Build context from previous messages
@@ -110,6 +129,22 @@
 		handleSendMessage(prompt);
 	}
 
+	// Handle cancel generation
+	function handleCancelGeneration() {
+		cancelRequested = true;
+		isGenerating = false;
+
+		// Mark the last message as no longer streaming
+		if (currentChat) {
+			const lastMessage = messages[messages.length - 1];
+			if (lastMessage && lastMessage.role === 'assistant' && lastMessage.isStreaming) {
+				chatsStore.updateMessage(currentChat.id, lastMessage.id, {
+					isStreaming: false
+				});
+			}
+		}
+	}
+
 	// Setup event listeners and initialization
 	onMount(() => {
 		let unlistenChunk: UnlistenFn;
@@ -119,7 +154,7 @@
 		async function setupListeners() {
 			// Listen for streaming chunks
 			unlistenChunk = await listen<string>('ollama_chunk', (event) => {
-				if (!currentChat) return;
+				if (!currentChat || cancelRequested) return;
 
 				const lastMessage = messages[messages.length - 1];
 				if (lastMessage && lastMessage.role === 'assistant' && lastMessage.isStreaming) {
@@ -222,7 +257,7 @@
 		</div>
 
 		<!-- Messages Area -->
-		<div class="flex-1 overflow-y-auto p-4" bind:this={messagesContainer}>
+		<div class="flex-1 overflow-y-auto p-4" bind:this={messagesContainer} onscroll={handleScroll}>
 			<div class="mx-auto max-w-4xl">
 				{#if messages.length === 0}
 					<div class="flex min-h-[60vh] flex-col items-center justify-center text-center">
@@ -263,6 +298,19 @@
 			class="border-t border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-900"
 		>
 			<div class="mx-auto max-w-4xl">
+				{#if isGenerating}
+					<div class="mb-3 flex items-center justify-center">
+						<Button
+							type="button"
+							variant="outline"
+							onclick={handleCancelGeneration}
+							class="border-red-300 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/20"
+						>
+							<X class="mr-2 h-4 w-4" />
+							Cancel Generation
+						</Button>
+					</div>
+				{/if}
 				<ChatInput
 					onSend={handleSendMessage}
 					disabled={!ollamaStore.isConnected || isGenerating}

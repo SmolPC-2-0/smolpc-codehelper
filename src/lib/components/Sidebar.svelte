@@ -26,6 +26,7 @@
 	}
 
 	function handleDeleteChat(chatId: string, event: MouseEvent) {
+		event.preventDefault();
 		event.stopPropagation();
 		if (confirm('Delete this chat?')) {
 			chatsStore.deleteChat(chatId);
@@ -63,12 +64,14 @@
 						class="group relative mb-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-gray-100 dark:hover:bg-gray-900 {chatsStore.currentChatId === chat.id ? 'bg-gray-100 dark:bg-gray-900' : ''}"
 					>
 						<button
+							type="button"
 							onclick={() => handleSelectChat(chat.id)}
 							class="flex-1 truncate text-left text-gray-700 dark:text-gray-300"
 						>
 							{chat.title}
 						</button>
 						<button
+							type="button"
 							onclick={(e) => handleDeleteChat(chat.id, e)}
 							class="ml-2 rounded p-1 opacity-0 transition-opacity hover:bg-red-100 dark:hover:bg-red-900 group-hover:opacity-100"
 							aria-label="Delete chat"

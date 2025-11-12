@@ -40,73 +40,10 @@ function detectLanguage(code: string): string {
 }
 
 /**
- * Simple syntax highlighting for common languages
+ * Format code for display (no syntax highlighting to avoid escaping issues)
  */
-function highlightCode(code: string, lang: string): string {
-	const escaped = escapeHtml(code);
-
-	// Basic keyword highlighting
-	const keywords: Record<string, string[]> = {
-		python: ['def', 'class', 'import', 'from', 'return', 'if', 'else', 'elif', 'for', 'while'],
-		javascript: [
-			'function',
-			'const',
-			'let',
-			'var',
-			'return',
-			'if',
-			'else',
-			'for',
-			'while',
-			'class'
-		],
-		java: [
-			'public',
-			'private',
-			'class',
-			'void',
-			'return',
-			'if',
-			'else',
-			'for',
-			'while',
-			'new'
-		],
-		cpp: ['int', 'void', 'return', 'if', 'else', 'for', 'while', 'class', 'namespace']
-	};
-
-	let highlighted = escaped;
-
-	// Highlight keywords
-	if (keywords[lang]) {
-		for (const keyword of keywords[lang]) {
-			const regex = new RegExp(`\\b(${keyword})\\b`, 'g');
-			highlighted = highlighted.replace(
-				regex,
-				'<span class="text-blue-600 dark:text-blue-400 font-semibold">$1</span>'
-			);
-		}
-	}
-
-	// Highlight strings
-	highlighted = highlighted.replace(
-		/(".*?"|'.*?')/g,
-		'<span class="text-green-600 dark:text-green-400">$1</span>'
-	);
-
-	// Highlight numbers
-	highlighted = highlighted.replace(
-		/\b(\d+)\b/g,
-		'<span class="text-purple-600 dark:text-purple-400">$1</span>'
-	);
-
-	// Highlight comments
-	highlighted = highlighted.replace(
-		/(#.*$|\/\/.*$)/gm,
-		'<span class="text-gray-500 dark:text-gray-400 italic">$1</span>'
-	);
-
-	return highlighted;
+function formatCode(code: string): string {
+	return escapeHtml(code);
 }
 
 /**
@@ -118,13 +55,12 @@ export function renderMarkdown(text: string): string {
 	// Code blocks (```lang\ncode\n```)
 	html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
 		const language = lang || detectLanguage(code);
-		const highlighted = highlightCode(code.trim(), language);
+		const formatted = formatCode(code.trim());
 		return `<div class="code-block my-4 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
 			<div class="flex items-center justify-between px-4 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 rounded-t-lg">
 				<span class="text-xs font-mono text-gray-600 dark:text-gray-400 uppercase">${language}</span>
-				<button class="copy-code-btn text-xs px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400" data-code="${escapeHtml(code.trim())}">Copy</button>
 			</div>
-			<pre class="p-4 overflow-x-auto"><code class="text-sm font-mono">${highlighted}</code></pre>
+			<pre class="p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-800 dark:text-gray-200">${formatted}</code></pre>
 		</div>`;
 	});
 
