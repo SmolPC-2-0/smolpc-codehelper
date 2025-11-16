@@ -25,6 +25,7 @@
 	let userHasScrolledUp = $state(false);
 	let cancelRequested = $state(false);
 	let currentStreamingChatId = $state<string | null>(null);
+	let currentStreamingMessageId = $state<string | null>(null);
 	let userInteractedWithScroll = $state(false);
 	let touchStartY = $state(0);
 
@@ -141,6 +142,7 @@
 		isGenerating = true;
 		cancelRequested = false; // Reset cancel flag
 		currentStreamingChatId = currentChat.id; // Track which chat is streaming
+		currentStreamingMessageId = assistantMessage.id; // Track which message is streaming
 
 		try {
 			// Build context from previous messages
@@ -160,6 +162,7 @@
 			});
 			isGenerating = false;
 			currentStreamingChatId = null;
+			currentStreamingMessageId = null;
 		}
 	}
 
@@ -180,17 +183,16 @@
 		}
 
 		isGenerating = false;
-		currentStreamingChatId = null;
 
-		// Mark the last message as no longer streaming
-		if (currentChat) {
-			const lastMessage = messages[messages.length - 1];
-			if (lastMessage && lastMessage.role === 'assistant' && lastMessage.isStreaming) {
-				chatsStore.updateMessage(currentChat.id, lastMessage.id, {
-					isStreaming: false
-				});
-			}
+		// Mark the streaming message as no longer streaming
+		if (currentStreamingChatId && currentStreamingMessageId) {
+			chatsStore.updateMessage(currentStreamingChatId, currentStreamingMessageId, {
+				isStreaming: false
+			});
 		}
+
+		currentStreamingChatId = null;
+		currentStreamingMessageId = null;
 	}
 
 	// Setup event listeners and initialization
@@ -203,53 +205,65 @@
 		async function setupListeners() {
 			// Listen for streaming chunks
 			unlistenChunk = await listen<string>('ollama_chunk', (event) => {
-				// Only process chunks if we're streaming for the current chat
-				if (!currentChat || !currentStreamingChatId || currentChat.id !== currentStreamingChatId || cancelRequested) {
+				// Only process chunks if we're streaming
+				if (!currentStreamingChatId || !currentStreamingMessageId || cancelRequested) {
 					return;
 				}
 
-				const lastMessage = messages[messages.length - 1];
-				if (lastMessage && lastMessage.role === 'assistant' && lastMessage.isStreaming) {
-					chatsStore.updateMessage(currentChat.id, lastMessage.id, {
-						content: lastMessage.content + event.payload
-					});
+				// Find the streaming chat and message
+				const streamingChat = chatsStore.chats.find((c) => c.id === currentStreamingChatId);
+				if (!streamingChat) return;
+
+				const streamingMessage = streamingChat.messages.find((m) => m.id === currentStreamingMessageId);
+				if (!streamingMessage || streamingMessage.role !== 'assistant' || !streamingMessage.isStreaming) {
+					return;
+				}
+
+				// Update the message content
+				chatsStore.updateMessage(currentStreamingChatId, currentStreamingMessageId, {
+					content: streamingMessage.content + event.payload
+				});
+
+				// Only scroll if this is the currently displayed chat
+				if (currentChat?.id === currentStreamingChatId) {
 					scrollToBottom();
 				}
 			});
 
 			// Listen for generation complete
 			unlistenDone = await listen('ollama_done', () => {
-				if (!currentChat || !currentStreamingChatId) return;
+				if (!currentStreamingChatId || !currentStreamingMessageId) return;
 
-				const lastMessage = messages[messages.length - 1];
-				if (lastMessage && lastMessage.role === 'assistant') {
-					chatsStore.updateMessage(currentChat.id, lastMessage.id, {
-						isStreaming: false
-					});
-				}
+				// Mark the streaming message as complete
+				chatsStore.updateMessage(currentStreamingChatId, currentStreamingMessageId, {
+					isStreaming: false
+				});
+
 				isGenerating = false;
 				currentStreamingChatId = null;
+				currentStreamingMessageId = null;
 			});
 
 			// Listen for cancellation
 			unlistenCancelled = await listen('ollama_cancelled', () => {
 				isGenerating = false;
 				currentStreamingChatId = null;
+				currentStreamingMessageId = null;
 			});
 
 			// Listen for errors
 			unlistenError = await listen<string>('ollama_error', (event) => {
-				if (!currentChat) return;
+				if (!currentStreamingChatId || !currentStreamingMessageId) return;
 
-				const lastMessage = messages[messages.length - 1];
-				if (lastMessage && lastMessage.role === 'assistant') {
-					chatsStore.updateMessage(currentChat.id, lastMessage.id, {
-						content: `Error: ${event.payload}`,
-						isStreaming: false
-					});
-				}
+				// Update the streaming message with error
+				chatsStore.updateMessage(currentStreamingChatId, currentStreamingMessageId, {
+					content: `Error: ${event.payload}`,
+					isStreaming: false
+				});
+
 				isGenerating = false;
 				currentStreamingChatId = null;
+				currentStreamingMessageId = null;
 			});
 		}
 
@@ -274,14 +288,10 @@
 		};
 	});
 
-	// Watch for chat changes and cancel any active stream
+	// Watch for chat changes
 	$effect(() => {
-		const chatId = currentChat?.id;
-
-		// If we're generating for a different chat, cancel it
-		if (currentStreamingChatId && chatId !== currentStreamingChatId) {
-			handleCancelGeneration();
-		}
+		// Track current chat ID to trigger effect
+		currentChat?.id;
 
 		// Reset scroll state when switching chats
 		userHasScrolledUp = false;
