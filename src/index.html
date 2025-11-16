@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SmolPC Code Helper</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.0.0/marked.min.js"></script>
+  </head>
+  <body>
+    <!-- Main Container -->
+    <div class="app-container">
+      <!-- Sidebar -->
+      <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+          <h2>Chats</h2>
+          <button id="newChatBtn" class="new-chat-btn" title="New Chat">
+            <span>+ New Chat</span>
+          </button>
+        </div>
+
+        <div class="chat-list" id="chatList">
+          <!-- Chat history items will be inserted here -->
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <main class="main-content">
+        <!-- Header -->
+        <header class="header">
+          <button
+            id="sidebarToggle"
+            class="sidebar-toggle"
+            title="Toggle Sidebar"
+          >
+            ☰
+          </button>
+
+          <h1>🎓 SmolPC Code Helper</h1>
+
+          <div class="header-controls">
+            <!-- Model Selector -->
+            <select id="modelSelect" class="model-selector">
+              <option value="qwen2.5-coder:7b">Qwen Coder</option>
+              <option value="deepseek-coder:6.7b">DeepSeek</option>
+            </select>
+
+            <!-- Context Toggle -->
+            <div
+              class="context-toggle"
+              id="contextToggle"
+              title="Toggle conversation memory"
+            >
+              <span class="toggle-label">Context:</span>
+              <div class="toggle-switch active">
+                <span class="toggle-option on">ON</span>
+                <span class="toggle-option off">OFF</span>
+              </div>
+            </div>
+
+            <!-- New Chat Button (Header) -->
+            <button
+              id="newChatBtnHeader"
+              class="new-chat-btn-header"
+              title="New Chat"
+            >
+              + New
+            </button>
+          </div>
+        </header>
+
+        <!-- Chat Container -->
+        <div class="chat-container" id="chatContainer">
+          <!-- Welcome Message (shown when no messages) -->
+          <div id="welcomeMessage" class="welcome-message">
+            <div class="welcome-content">
+              <h2>👋 Welcome to SmolPC Code Helper!</h2>
+              <p>Ask me anything about coding. I can help you:</p>
+              <ul>
+                <li>Generate code with explanations</li>
+                <li>Debug your code</li>
+                <li>Explain programming concepts</li>
+                <li>Answer coding questions</li>
+              </ul>
+              <p class="welcome-tip">
+                💡 <strong>Tip:</strong> Context is ON - I'll remember our
+                conversation!
+              </p>
+            </div>
+          </div>
+
+          <!-- Messages will be inserted here -->
+          <div id="messagesContainer" class="messages-container">
+            <!-- Chat messages go here -->
+          </div>
+
+          <!-- Loading Indicator -->
+          <div id="loadingIndicator" class="loading-indicator hidden">
+            <div class="spinner"></div>
+            <span>Thinking...</span>
+          </div>
+        </div>
+
+        <!-- Quick Examples -->
+        <div class="examples-section" id="examplesSection">
+          <div class="examples-container">
+            <span class="examples-label">Quick Examples:</span>
+            <div class="example-buttons">
+              <button
+                class="example-btn"
+                data-example="Create a calculator in Python with +, -, ×, ÷"
+              >
+                Calculator
+              </button>
+              <button
+                class="example-btn"
+                data-example="Build a simple HTML website with a header and paragraph"
+              >
+                Website
+              </button>
+              <button
+                class="example-btn"
+                data-example="Explain how for loops work in Python with examples"
+              >
+                Loops
+              </button>
+              <button
+                class="example-btn"
+                data-example="Show me how to read and write files in Python"
+              >
+                File I/O
+              </button>
+              <button
+                class="example-btn"
+                data-example="Create a function that sorts a list of numbers"
+              >
+                Sorting
+              </button>
+              <button
+                class="example-btn"
+                data-example="Explain variables and data types in JavaScript"
+              >
+                Variables
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="input-area">
+          <div class="context-indicator" id="contextIndicator">
+            <span class="indicator-icon">💡</span>
+            <span class="indicator-text"
+              >Context ON - I remember this conversation</span
+            >
+          </div>
+
+          <div class="input-container">
+            <textarea
+              id="messageInput"
+              class="message-input"
+              placeholder="Type your question or paste code here..."
+              rows="1"
+            ></textarea>
+            <button id="sendBtn" class="send-btn" title="Send message">
+              🚀 Send
+            </button>
+          </div>
+
+          <div class="input-hint">
+            Press <kbd>Enter</kbd> to send, <kbd>Shift+Enter</kbd> for new line
+          </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div id="statusBar" class="status-bar">
+          <span id="statusText">Ready</span>
+        </div>
+      </main>
+    </div>
+
+    <script src="main.js"></script>
+  </body>
+</html>
