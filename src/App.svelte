@@ -26,6 +26,7 @@
 	let cancelRequested = $state(false);
 	let currentStreamingChatId = $state<string | null>(null);
 	let isProgrammaticScroll = $state(false);
+	let userInteractedWithScroll = $state(false);
 
 	// Derived state
 	const currentChat = $derived(chatsStore.currentChat);
@@ -41,31 +42,30 @@
 		return distanceFromBottom <= threshold;
 	}
 
-	// Handle scroll events to detect manual scrolling
+	// Detect when user initiates scrolling (instant detection)
+	function handleUserScrollIntent() {
+		// User is actively trying to scroll - break autoscroll instantly
+		userInteractedWithScroll = true;
+		userHasScrolledUp = true;
+	}
+
+	// Handle scroll events to re-enable autoscroll when at bottom
 	function handleScroll() {
-		// Ignore programmatic scrolls
-		if (isProgrammaticScroll) return;
-
-		if (messagesContainer) {
+		// Only check if we should re-enable autoscroll
+		if (userInteractedWithScroll && messagesContainer) {
 			const atBottom = isAtBottom();
-
-			// If user is at the bottom, enable auto-scroll
-			// If user scrolled up, disable auto-scroll
-			userHasScrolledUp = !atBottom;
+			if (atBottom) {
+				// User scrolled back to bottom - resume autoscroll
+				userHasScrolledUp = false;
+				userInteractedWithScroll = false;
+			}
 		}
 	}
 
 	// Scroll to bottom of messages (only if user hasn't scrolled up)
 	function scrollToBottom() {
 		if (messagesContainer && !userHasScrolledUp) {
-			isProgrammaticScroll = true;
-			setTimeout(() => {
-				messagesContainer.scrollTop = messagesContainer.scrollHeight;
-				// Reset the flag after a short delay to allow the scroll event to fire
-				setTimeout(() => {
-					isProgrammaticScroll = false;
-				}, 100);
-			}, 50);
+			messagesContainer.scrollTop = messagesContainer.scrollHeight;
 		}
 	}
 
@@ -97,6 +97,7 @@
 
 		// Reset scroll state for new message
 		userHasScrolledUp = false;
+		userInteractedWithScroll = false;
 
 		// Add user message
 		const userMessage: Message = {
@@ -265,6 +266,7 @@
 
 		// Reset scroll state when switching chats
 		userHasScrolledUp = false;
+		userInteractedWithScroll = false;
 	});
 
 	// Watch messages to auto-scroll
@@ -312,7 +314,13 @@
 		</div>
 
 		<!-- Messages Area -->
-		<div class="flex-1 overflow-y-auto p-4" bind:this={messagesContainer} onscroll={handleScroll}>
+		<div
+			class="flex-1 overflow-y-auto p-4"
+			bind:this={messagesContainer}
+			onscroll={handleScroll}
+			onwheel={handleUserScrollIntent}
+			ontouchstart={handleUserScrollIntent}
+		>
 			<div class="mx-auto max-w-4xl">
 				{#if messages.length === 0}
 					<div class="flex min-h-[60vh] flex-col items-center justify-center text-center">
