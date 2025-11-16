@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::broadcast;
+use std::env;
 
 // Student-friendly system prompt for coding assistance
 const SYSTEM_PROMPT: &str = r#"You are a helpful coding assistant designed for secondary school students (ages 11-18).
@@ -16,6 +17,45 @@ Guidelines:
 - Be patient and supportive
 - Adapt explanations to the student's level
 - Encourage learning and experimentation"#;
+
+/// Shared HTTP client for connection pooling
+pub struct HttpClient {
+    client: reqwest::Client,
+}
+
+impl Default for HttpClient {
+    fn default() -> Self {
+        Self {
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+impl HttpClient {
+    pub fn get(&self) -> &reqwest::Client {
+        &self.client
+    }
+}
+
+/// Configuration for Ollama server URL
+pub struct OllamaConfig {
+    base_url: String,
+}
+
+impl Default for OllamaConfig {
+    fn default() -> Self {
+        // Read from environment variable or use default
+        let base_url = env::var("OLLAMA_URL")
+            .unwrap_or_else(|_| "http://localhost:11434".to_string());
+        Self { base_url }
+    }
+}
+
+impl OllamaConfig {
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OllamaMessage {
@@ -82,10 +122,13 @@ impl StreamCancellation {
 
 /// Check if Ollama server is running and available
 #[tauri::command]
-pub async fn check_ollama() -> Result<bool, Error> {
-    let client = reqwest::Client::new();
-    let response = client
-        .get("http://localhost:11434/api/tags")
+pub async fn check_ollama(
+    client: State<'_, HttpClient>,
+    config: State<'_, OllamaConfig>,
+) -> Result<bool, Error> {
+    let url = format!("{}/api/tags", config.base_url());
+    let response = client.get()
+        .get(&url)
         .send()
         .await;
 
@@ -97,10 +140,13 @@ pub async fn check_ollama() -> Result<bool, Error> {
 
 /// Get list of available Ollama models
 #[tauri::command]
-pub async fn get_ollama_models() -> Result<Vec<String>, Error> {
-    let client = reqwest::Client::new();
-    let response = client
-        .get("http://localhost:11434/api/tags")
+pub async fn get_ollama_models(
+    client: State<'_, HttpClient>,
+    config: State<'_, OllamaConfig>,
+) -> Result<Vec<String>, Error> {
+    let url = format!("{}/api/tags", config.base_url());
+    let response = client.get()
+        .get(&url)
         .send()
         .await
         .map_err(|e| Error::Other(format!("Failed to connect to Ollama: {}", e)))?;
@@ -127,12 +173,12 @@ pub async fn generate_stream(
     prompt: String,
     model: String,
     context: Option<Vec<OllamaMessage>>,
+    client: State<'_, HttpClient>,
+    config: State<'_, OllamaConfig>,
     cancellation: State<'_, StreamCancellation>,
 ) -> Result<(), Error> {
     // Create a new cancellation receiver for this stream
     let mut cancel_rx = cancellation.create_channel();
-
-    let client = reqwest::Client::new();
 
     // Build messages array with system prompt, context, and current prompt
     let mut messages = vec![OllamaMessage {
@@ -157,8 +203,9 @@ pub async fn generate_stream(
         stream: true,
     };
 
-    let response = client
-        .post("http://localhost:11434/api/chat")
+    let url = format!("{}/api/chat", config.base_url());
+    let response = client.get()
+        .post(&url)
         .json(&request)
         .send()
         .await

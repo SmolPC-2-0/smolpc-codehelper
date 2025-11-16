@@ -1,6 +1,6 @@
 mod commands;
 use commands::default::{read, save_code, write};
-use commands::ollama::{cancel_generation, check_ollama, generate_stream, get_ollama_models, StreamCancellation};
+use commands::ollama::{cancel_generation, check_ollama, generate_stream, get_ollama_models, StreamCancellation, HttpClient, OllamaConfig};
 
 #[allow(clippy::missing_panics_doc)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -17,6 +17,8 @@ pub fn run() {
             Ok(())
         })
         .manage(StreamCancellation::default())
+        .manage(HttpClient::default())
+        .manage(OllamaConfig::default())
         .invoke_handler(tauri::generate_handler![
             read,
             write,

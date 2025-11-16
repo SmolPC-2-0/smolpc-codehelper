@@ -47,7 +47,7 @@ export const chatsStore = {
 			updatedAt: Date.now(),
 			model
 		};
-		chats.push(newChat);
+		chats = [...chats, newChat];
 		currentChatId = newChat.id;
 		this.persist();
 		return newChat;
@@ -63,7 +63,7 @@ export const chatsStore = {
 	addMessage(chatId: string, message: Message) {
 		const chat = chats.find((c) => c.id === chatId);
 		if (chat) {
-			chat.messages.push(message);
+			chat.messages = [...chat.messages, message];
 			chat.updatedAt = Date.now();
 
 			// Auto-generate title from first user message
@@ -90,7 +90,7 @@ export const chatsStore = {
 	deleteChat(id: string) {
 		const index = chats.findIndex((chat) => chat.id === id);
 		if (index !== -1) {
-			chats.splice(index, 1);
+			chats = chats.filter((chat) => chat.id !== id);
 			if (currentChatId === id) {
 				currentChatId = chats.length > 0 ? chats[0].id : null;
 				saveToStorage(CURRENT_CHAT_KEY, currentChatId);

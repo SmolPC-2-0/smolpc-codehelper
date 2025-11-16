@@ -256,16 +256,17 @@
 		// Initial Ollama check
 		ollamaStore.checkConnection();
 
-		// Setup event listeners
-		setupListeners();
+		// Setup event listeners and track cleanup
+		const cleanupPromise = setupListeners();
 
 		// Create initial chat if none exists
 		if (hasNoChats) {
 			chatsStore.createChat(settingsStore.selectedModel);
 		}
 
-		// Cleanup
-		return () => {
+		// Cleanup - wait for setup to complete before cleaning up
+		return async () => {
+			await cleanupPromise;
 			if (unlistenChunk) unlistenChunk();
 			if (unlistenDone) unlistenDone();
 			if (unlistenError) unlistenError();
