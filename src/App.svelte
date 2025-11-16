@@ -25,8 +25,8 @@
 	let userHasScrolledUp = $state(false);
 	let cancelRequested = $state(false);
 	let currentStreamingChatId = $state<string | null>(null);
-	let isProgrammaticScroll = $state(false);
 	let userInteractedWithScroll = $state(false);
+	let touchStartY = $state(0);
 
 	// Derived state
 	const currentChat = $derived(chatsStore.currentChat);
@@ -53,7 +53,6 @@
 	}
 
 	// Handle touch scrolling
-	let touchStartY = 0;
 	function handleTouchStart(event: TouchEvent) {
 		touchStartY = event.touches[0].clientY;
 	}
