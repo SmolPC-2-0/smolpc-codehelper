@@ -24,6 +24,8 @@
 	let messagesContainer: HTMLDivElement;
 	let userHasScrolledUp = $state(false);
 	let cancelRequested = $state(false);
+	let currentStreamingChatId = $state<string | null>(null);
+	let isProgrammaticScroll = $state(false);
 
 	// Derived state
 	const currentChat = $derived(chatsStore.currentChat);
@@ -33,24 +35,36 @@
 	// Check if user is at bottom of scroll
 	function isAtBottom(): boolean {
 		if (!messagesContainer) return true;
-		const threshold = 100; // pixels from bottom
+		const threshold = 5; // Very small threshold - basically at the bottom
 		const distanceFromBottom =
 			messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight;
-		return distanceFromBottom < threshold;
+		return distanceFromBottom <= threshold;
 	}
 
 	// Handle scroll events to detect manual scrolling
 	function handleScroll() {
+		// Ignore programmatic scrolls
+		if (isProgrammaticScroll) return;
+
 		if (messagesContainer) {
-			userHasScrolledUp = !isAtBottom();
+			const atBottom = isAtBottom();
+
+			// If user is at the bottom, enable auto-scroll
+			// If user scrolled up, disable auto-scroll
+			userHasScrolledUp = !atBottom;
 		}
 	}
 
 	// Scroll to bottom of messages (only if user hasn't scrolled up)
 	function scrollToBottom() {
 		if (messagesContainer && !userHasScrolledUp) {
+			isProgrammaticScroll = true;
 			setTimeout(() => {
 				messagesContainer.scrollTop = messagesContainer.scrollHeight;
+				// Reset the flag after a short delay to allow the scroll event to fire
+				setTimeout(() => {
+					isProgrammaticScroll = false;
+				}, 100);
 			}, 50);
 		}
 	}
@@ -81,6 +95,9 @@
 		// Hide quick examples after first message
 		showQuickExamples = false;
 
+		// Reset scroll state for new message
+		userHasScrolledUp = false;
+
 		// Add user message
 		const userMessage: Message = {
 			id: crypto.randomUUID(),
@@ -104,6 +121,7 @@
 
 		isGenerating = true;
 		cancelRequested = false; // Reset cancel flag
+		currentStreamingChatId = currentChat.id; // Track which chat is streaming
 
 		try {
 			// Build context from previous messages
@@ -121,6 +139,8 @@
 				content: `Error: ${error}`,
 				isStreaming: false
 			});
+			isGenerating = false;
+			currentStreamingChatId = null;
 		}
 	}
 
@@ -130,9 +150,18 @@
 	}
 
 	// Handle cancel generation
-	function handleCancelGeneration() {
+	async function handleCancelGeneration() {
 		cancelRequested = true;
+
+		// Cancel the backend stream
+		try {
+			await invoke('cancel_generation');
+		} catch (error) {
+			console.error('Failed to cancel generation:', error);
+		}
+
 		isGenerating = false;
+		currentStreamingChatId = null;
 
 		// Mark the last message as no longer streaming
 		if (currentChat) {
@@ -150,11 +179,15 @@
 		let unlistenChunk: UnlistenFn;
 		let unlistenDone: UnlistenFn;
 		let unlistenError: UnlistenFn;
+		let unlistenCancelled: UnlistenFn;
 
 		async function setupListeners() {
 			// Listen for streaming chunks
 			unlistenChunk = await listen<string>('ollama_chunk', (event) => {
-				if (!currentChat || cancelRequested) return;
+				// Only process chunks if we're streaming for the current chat
+				if (!currentChat || !currentStreamingChatId || currentChat.id !== currentStreamingChatId || cancelRequested) {
+					return;
+				}
 
 				const lastMessage = messages[messages.length - 1];
 				if (lastMessage && lastMessage.role === 'assistant' && lastMessage.isStreaming) {
@@ -167,7 +200,7 @@
 
 			// Listen for generation complete
 			unlistenDone = await listen('ollama_done', () => {
-				if (!currentChat) return;
+				if (!currentChat || !currentStreamingChatId) return;
 
 				const lastMessage = messages[messages.length - 1];
 				if (lastMessage && lastMessage.role === 'assistant') {
@@ -176,6 +209,13 @@
 					});
 				}
 				isGenerating = false;
+				currentStreamingChatId = null;
+			});
+
+			// Listen for cancellation
+			unlistenCancelled = await listen('ollama_cancelled', () => {
+				isGenerating = false;
+				currentStreamingChatId = null;
 			});
 
 			// Listen for errors
@@ -190,6 +230,7 @@
 					});
 				}
 				isGenerating = false;
+				currentStreamingChatId = null;
 			});
 		}
 
@@ -209,7 +250,21 @@
 			if (unlistenChunk) unlistenChunk();
 			if (unlistenDone) unlistenDone();
 			if (unlistenError) unlistenError();
+			if (unlistenCancelled) unlistenCancelled();
 		};
+	});
+
+	// Watch for chat changes and cancel any active stream
+	$effect(() => {
+		const chatId = currentChat?.id;
+
+		// If we're generating for a different chat, cancel it
+		if (currentStreamingChatId && chatId !== currentStreamingChatId) {
+			handleCancelGeneration();
+		}
+
+		// Reset scroll state when switching chats
+		userHasScrolledUp = false;
 	});
 
 	// Watch messages to auto-scroll

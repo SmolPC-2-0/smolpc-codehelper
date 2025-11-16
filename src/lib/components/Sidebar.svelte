@@ -25,12 +25,14 @@
 		}
 	}
 
-	function handleDeleteChat(chatId: string, event: MouseEvent) {
-		event.preventDefault();
-		event.stopPropagation();
-		if (confirm('Delete this chat?')) {
-			chatsStore.deleteChat(chatId);
-		}
+	function handleDeleteChat(chatId: string) {
+		return (event: MouseEvent) => {
+			event.preventDefault();
+			event.stopPropagation();
+			if (confirm('Delete this chat?')) {
+				chatsStore.deleteChat(chatId);
+			}
+		};
 	}
 </script>
 
@@ -72,7 +74,7 @@
 						</button>
 						<button
 							type="button"
-							onclick={(e) => handleDeleteChat(chat.id, e)}
+							onclick={handleDeleteChat(chat.id)}
 							class="ml-2 rounded p-1 opacity-0 transition-opacity hover:bg-red-100 dark:hover:bg-red-900 group-hover:opacity-100"
 							aria-label="Delete chat"
 						>

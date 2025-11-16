@@ -1,6 +1,6 @@
 mod commands;
 use commands::default::{read, save_code, write};
-use commands::ollama::{check_ollama, generate_stream, get_ollama_models};
+use commands::ollama::{cancel_generation, check_ollama, generate_stream, get_ollama_models, StreamCancellation};
 
 #[allow(clippy::missing_panics_doc)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -16,13 +16,15 @@ pub fn run() {
             }
             Ok(())
         })
+        .manage(StreamCancellation::default())
         .invoke_handler(tauri::generate_handler![
             read,
             write,
             save_code,
             check_ollama,
             get_ollama_models,
-            generate_stream
+            generate_stream,
+            cancel_generation
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
