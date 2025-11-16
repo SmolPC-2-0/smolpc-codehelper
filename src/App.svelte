@@ -42,20 +42,39 @@
 		return distanceFromBottom <= threshold;
 	}
 
-	// Detect when user initiates scrolling (instant detection)
-	function handleUserScrollIntent() {
-		// User is actively trying to scroll - break autoscroll instantly
-		userInteractedWithScroll = true;
-		userHasScrolledUp = true;
+	// Detect when user scrolls UP (instant detection)
+	function handleUserScrollIntent(event: WheelEvent) {
+		// Only break autoscroll if user is scrolling UP (deltaY < 0)
+		// Scrolling down should not break autoscroll
+		if (event.deltaY < 0) {
+			userInteractedWithScroll = true;
+			userHasScrolledUp = true;
+		}
+	}
+
+	// Handle touch scrolling
+	let touchStartY = 0;
+	function handleTouchStart(event: TouchEvent) {
+		touchStartY = event.touches[0].clientY;
+	}
+
+	function handleTouchMove(event: TouchEvent) {
+		const touchY = event.touches[0].clientY;
+		const deltaY = touchStartY - touchY;
+		// If scrolling up (deltaY < 0), break autoscroll
+		if (deltaY < 0) {
+			userInteractedWithScroll = true;
+			userHasScrolledUp = true;
+		}
 	}
 
 	// Handle scroll events to re-enable autoscroll when at bottom
 	function handleScroll() {
-		// Only check if we should re-enable autoscroll
-		if (userInteractedWithScroll && messagesContainer) {
+		// Check if user scrolled to bottom
+		if (messagesContainer) {
 			const atBottom = isAtBottom();
 			if (atBottom) {
-				// User scrolled back to bottom - resume autoscroll
+				// User is at bottom - resume autoscroll
 				userHasScrolledUp = false;
 				userInteractedWithScroll = false;
 			}
@@ -319,7 +338,8 @@
 			bind:this={messagesContainer}
 			onscroll={handleScroll}
 			onwheel={handleUserScrollIntent}
-			ontouchstart={handleUserScrollIntent}
+			ontouchstart={handleTouchStart}
+			ontouchmove={handleTouchMove}
 		>
 			<div class="mx-auto max-w-4xl">
 				{#if messages.length === 0}
