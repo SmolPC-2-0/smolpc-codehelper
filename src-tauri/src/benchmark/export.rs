@@ -73,55 +73,6 @@ pub fn export_to_csv(results: &BenchmarkResults, prefix: &str) -> Result<PathBuf
         .map_err(|e| format!("Failed to write metric row: {}", e))?;
     }
 
-    // Write empty row separator
-    wtr.write_record(&[""; 13])
-        .map_err(|e| format!("Failed to write separator: {}", e))?;
-
-    // Write summary section header
-    wtr.write_record(&["SUMMARY"])
-        .map_err(|e| format!("Failed to write summary header: {}", e))?;
-
-    wtr.write_record(&[
-        "category",
-        "avg_first_token_ms",
-        "avg_tokens_per_sec",
-        "avg_total_time_ms",
-        "avg_memory_mb",
-        "avg_cpu_percent",
-        "test_count",
-    ])
-    .map_err(|e| format!("Failed to write summary column headers: {}", e))?;
-
-    // Write summary data
-    for summary in &results.summary {
-        wtr.write_record(&[
-            &summary.category,
-            &format!("{:.2}", summary.avg_first_token_ms),
-            &format!("{:.2}", summary.avg_tokens_per_sec),
-            &format!("{:.2}", summary.avg_total_time_ms),
-            &format!("{:.2}", summary.avg_memory_mb),
-            &format!("{:.2}", summary.avg_cpu_percent),
-            &summary.test_count.to_string(),
-        ])
-        .map_err(|e| format!("Failed to write summary row: {}", e))?;
-    }
-
-    // Write metadata
-    wtr.write_record(&[""; 13])
-        .map_err(|e| format!("Failed to write separator: {}", e))?;
-
-    wtr.write_record(&["METADATA"])
-        .map_err(|e| format!("Failed to write metadata header: {}", e))?;
-
-    wtr.write_record(&["Total Duration (seconds)", &format!("{:.2}", results.total_duration_seconds)])
-        .map_err(|e| format!("Failed to write total duration: {}", e))?;
-
-    wtr.write_record(&["Benchmark Timestamp", &results.timestamp])
-        .map_err(|e| format!("Failed to write timestamp: {}", e))?;
-
-    wtr.write_record(&["Total Tests", &results.metrics.len().to_string()])
-        .map_err(|e| format!("Failed to write total tests: {}", e))?;
-
     // Flush the writer
     wtr.flush()
         .map_err(|e| format!("Failed to flush CSV writer: {}", e))?;
