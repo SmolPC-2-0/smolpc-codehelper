@@ -68,7 +68,7 @@ Guidelines:
     let start_time = Instant::now();
 
     // Track CPU usage (refresh CPU info first)
-    sys.refresh_cpu();
+    sys.refresh_cpu_all();
     let cpu_before = sys.global_cpu_usage();
 
     // Make request
@@ -94,7 +94,7 @@ Guidelines:
 
     // Refresh system info to get updated metrics
     sys.refresh_all();
-    sys.refresh_cpu();
+    sys.refresh_cpu_all();
     let memory_after_mb = (sys.used_memory() as f64) / 1024.0 / 1024.0;
     let cpu_after = sys.global_cpu_usage();
 

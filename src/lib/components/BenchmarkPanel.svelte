@@ -15,28 +15,37 @@
 	let benchmarksDir = $state<string>('');
 	let selectedIterations = $state<number>(1); // Default to 1 for faster testing
 
-	onMount(async () => {
-		// Get benchmarks directory
-		try {
-			benchmarksDir = await invoke<string>('get_benchmarks_directory');
-		} catch (error) {
-			console.error('Failed to get benchmarks directory:', error);
+	onMount(() => {
+		let unlistenProgress: (() => void) | undefined;
+		let unlistenComplete: (() => void) | undefined;
+
+		// Setup async listeners
+		async function setupListeners() {
+			// Get benchmarks directory
+			try {
+				benchmarksDir = await invoke<string>('get_benchmarks_directory');
+			} catch (error) {
+				console.error('Failed to get benchmarks directory:', error);
+			}
+
+			// Listen for progress updates
+			unlistenProgress = await listen<BenchmarkProgress>('benchmark_progress', (event) => {
+				benchmarkStore.updateProgress(event.payload);
+			});
+
+			// Listen for completion
+			unlistenComplete = await listen<string>('benchmark_complete', (event) => {
+				benchmarkStore.complete(event.payload);
+			});
 		}
 
-		// Listen for progress updates
-		const unlistenProgress = await listen<BenchmarkProgress>('benchmark_progress', (event) => {
-			benchmarkStore.updateProgress(event.payload);
-		});
+		// Start async setup
+		setupListeners();
 
-		// Listen for completion
-		const unlistenComplete = await listen<string>('benchmark_complete', (event) => {
-			benchmarkStore.complete(event.payload);
-		});
-
-		// Cleanup listeners on unmount
+		// Return synchronous cleanup function
 		return () => {
-			unlistenProgress();
-			unlistenComplete();
+			if (unlistenProgress) unlistenProgress();
+			if (unlistenComplete) unlistenComplete();
 		};
 	});
 
