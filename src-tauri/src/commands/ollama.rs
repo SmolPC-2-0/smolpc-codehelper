@@ -47,11 +47,37 @@ impl Default for OllamaConfig {
         // Read from environment variable or use default
         let base_url = env::var("OLLAMA_URL")
             .unwrap_or_else(|_| "http://localhost:11434".to_string());
-        Self { base_url }
+
+        // Validate URL is localhost only for security
+        let validated_url = Self::validate_url(&base_url);
+
+        Self { base_url: validated_url }
     }
 }
 
 impl OllamaConfig {
+    /// Validates that the URL is localhost only (prevents data exfiltration)
+    fn validate_url(url: &str) -> String {
+        // Allow localhost, 127.0.0.1, and ::1 (IPv6 localhost)
+        let is_safe = url.starts_with("http://localhost")
+            || url.starts_with("https://localhost")
+            || url.starts_with("http://127.0.0.1")
+            || url.starts_with("https://127.0.0.1")
+            || url.starts_with("http://[::1]")
+            || url.starts_with("https://[::1]");
+
+        if is_safe {
+            url.to_string()
+        } else {
+            // Log warning and fall back to safe default
+            eprintln!(
+                "WARNING: OLLAMA_URL '{}' is not localhost. Using default http://localhost:11434 for security.",
+                url
+            );
+            "http://localhost:11434".to_string()
+        }
+    }
+
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
