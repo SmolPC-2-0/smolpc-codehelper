@@ -3,9 +3,10 @@ use super::test_suite::{get_test_suite, get_total_test_count, PromptCategory};
 use crate::commands::ollama::{OllamaConfig, OllamaMessage, OllamaRequest, OllamaResponse};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 use sysinfo::System;
+use tokio::sync::Mutex;
 
 /// Progress update event for the frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,7 +81,7 @@ Guidelines:
 
     tokio::spawn(async move {
         let mut sys_sampler = System::new_all();
-        while *sampling_active_clone.lock().unwrap() {
+        while *sampling_active_clone.lock().await {
             sys_sampler.refresh_all();
             sys_sampler.refresh_cpu_all();
 
@@ -88,15 +89,15 @@ Guidelines:
             let current_cpu = sys_sampler.global_cpu_usage();
 
             // Update peak memory
-            let mut peak = peak_memory_clone.lock().unwrap();
+            let mut peak = peak_memory_clone.lock().await;
             if current_memory > *peak {
                 *peak = current_memory;
             }
             drop(peak);
 
             // Store samples
-            cpu_samples_clone.lock().unwrap().push(current_cpu as f64);
-            memory_samples_clone.lock().unwrap().push(current_memory);
+            cpu_samples_clone.lock().await.push(current_cpu as f64);
+            memory_samples_clone.lock().await.push(current_memory);
 
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
@@ -150,7 +151,7 @@ Guidelines:
             }
             Err(e) => {
                 // Stop sampling on error
-                *sampling_active.lock().unwrap() = false;
+                *sampling_active.lock().await = false;
                 return Err(format!("Stream error: {}", e));
             }
         }
@@ -160,7 +161,7 @@ Guidelines:
     let total_time = start_time.elapsed().as_millis() as f64;
 
     // Stop resource sampling
-    *sampling_active.lock().unwrap() = false;
+    *sampling_active.lock().await = false;
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await; // Wait for last sample
 
     // Refresh final system state
@@ -168,10 +169,10 @@ Guidelines:
     let memory_after_mb = (sys.used_memory() as f64) / 1024.0 / 1024.0;
 
     // Get peak memory from sampling
-    let peak_memory_mb = *peak_memory.lock().unwrap();
+    let peak_memory_mb = *peak_memory.lock().await;
 
     // Calculate average CPU from samples
-    let cpu_samples_vec = cpu_samples.lock().unwrap();
+    let cpu_samples_vec = cpu_samples.lock().await;
     let avg_cpu = if !cpu_samples_vec.is_empty() {
         cpu_samples_vec.iter().sum::<f64>() / cpu_samples_vec.len() as f64
     } else {
@@ -180,7 +181,7 @@ Guidelines:
     drop(cpu_samples_vec);
 
     // Calculate average memory during inference
-    let memory_samples_vec = memory_samples.lock().unwrap();
+    let memory_samples_vec = memory_samples.lock().await;
     let avg_memory_during = if !memory_samples_vec.is_empty() {
         memory_samples_vec.iter().sum::<f64>() / memory_samples_vec.len() as f64
     } else {
