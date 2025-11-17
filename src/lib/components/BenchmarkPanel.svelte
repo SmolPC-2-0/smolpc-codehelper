@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
-	import { open } from '@tauri-apps/plugin-shell';
 	import { onMount } from 'svelte';
 	import { benchmarkStore } from '$lib/stores/benchmark.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
@@ -14,6 +13,7 @@
 	let { visible = $bindable() }: Props = $props();
 
 	let benchmarksDir = $state<string>('');
+	let selectedIterations = $state<number>(1); // Default to 1 for faster testing
 
 	onMount(async () => {
 		// Get benchmarks directory
@@ -46,7 +46,7 @@
 
 			await invoke('run_benchmark', {
 				model: settingsStore.selectedModel,
-				iterations: 3
+				iterations: selectedIterations
 			});
 
 			// Success is handled by the event listener
@@ -63,15 +63,13 @@
 	}
 
 	async function openBenchmarksFolder() {
-		if (benchmarksDir) {
-			try {
-				// Open the folder in the system's file manager
-				await open(benchmarksDir);
-			} catch (error) {
-				console.error('Failed to open folder:', error);
-				// Fallback: copy to clipboard or show path
-				alert(`Benchmarks folder: ${benchmarksDir}\n\nCouldn't open folder automatically.`);
-			}
+		try {
+			// Use custom Tauri command for cross-platform folder opening
+			await invoke('open_benchmarks_folder');
+		} catch (error) {
+			console.error('Failed to open folder:', error);
+			// Fallback: show path
+			alert(`Benchmarks folder: ${benchmarksDir}\n\nCouldn't open folder automatically.`);
 		}
 	}
 
@@ -160,6 +158,49 @@
 				<p class="font-medium">{settingsStore.selectedModel}</p>
 			</div>
 
+			<!-- Iterations Selector -->
+			<div class="space-y-2">
+				<label class="text-xs text-muted-foreground">Iterations (12 prompts each)</label>
+				<div class="flex gap-2">
+					<button
+						onclick={() => (selectedIterations = 1)}
+						class={`flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+							selectedIterations === 1
+								? 'border-primary bg-primary text-primary-foreground'
+								: 'hover:bg-muted'
+						}`}
+						disabled={benchmarkStore.isRunning}
+					>
+						1 (Quick)
+					</button>
+					<button
+						onclick={() => (selectedIterations = 2)}
+						class={`flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+							selectedIterations === 2
+								? 'border-primary bg-primary text-primary-foreground'
+								: 'hover:bg-muted'
+						}`}
+						disabled={benchmarkStore.isRunning}
+					>
+						2
+					</button>
+					<button
+						onclick={() => (selectedIterations = 3)}
+						class={`flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+							selectedIterations === 3
+								? 'border-primary bg-primary text-primary-foreground'
+								: 'hover:bg-muted'
+						}`}
+						disabled={benchmarkStore.isRunning}
+					>
+						3 (Full)
+					</button>
+				</div>
+				<p class="text-xs text-muted-foreground">
+					Total tests: {selectedIterations * 12} (~{Math.ceil(selectedIterations * 2)} min)
+				</p>
+			</div>
+
 			<!-- Actions -->
 			<div class="flex gap-2">
 				<button
@@ -192,8 +233,8 @@
 
 			<!-- Help Text -->
 			<p class="text-xs text-muted-foreground">
-				Runs 36 tests (12 prompts × 3 iterations) to measure performance. Results exported
-				to CSV for analysis.
+				Tests: {selectedIterations * 12} total (12 prompts × {selectedIterations} iteration{selectedIterations > 1 ? 's' : ''}).
+				Results exported to CSV for analysis.
 			</p>
 		</div>
 	</div>

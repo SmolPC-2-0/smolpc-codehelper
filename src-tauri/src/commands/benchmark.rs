@@ -46,3 +46,36 @@ pub fn get_benchmarks_directory() -> Result<String, Error> {
     let dir = crate::benchmark::get_benchmarks_dir().map_err(|e| Error::Other(e))?;
     Ok(dir.to_string_lossy().to_string())
 }
+
+/// Open the benchmarks folder in the system file manager
+#[tauri::command]
+pub fn open_benchmarks_folder() -> Result<(), Error> {
+    let dir = crate::benchmark::get_benchmarks_dir().map_err(|e| Error::Other(e))?;
+
+    // Use platform-specific commands to open the folder
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| Error::Other(format!("Failed to open folder: {}", e)))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| Error::Other(format!("Failed to open folder: {}", e)))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| Error::Other(format!("Failed to open folder: {}", e)))?;
+    }
+
+    Ok(())
+}

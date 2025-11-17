@@ -1,6 +1,6 @@
 mod benchmark;
 mod commands;
-use commands::benchmark::{get_benchmarks_directory, run_benchmark};
+use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_benchmark};
 use commands::default::{read, save_code, write};
 use commands::ollama::{cancel_generation, check_ollama, generate_stream, get_ollama_models, StreamCancellation, HttpClient, OllamaConfig};
 
@@ -8,7 +8,6 @@ use commands::ollama::{cancel_generation, check_ollama, generate_stream, get_oll
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -31,7 +30,8 @@ pub fn run() {
             generate_stream,
             cancel_generation,
             run_benchmark,
-            get_benchmarks_directory
+            get_benchmarks_directory,
+            open_benchmarks_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
