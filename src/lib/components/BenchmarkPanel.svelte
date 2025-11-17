@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
+	import { open } from '@tauri-apps/plugin-shell';
 	import { onMount } from 'svelte';
 	import { benchmarkStore } from '$lib/stores/benchmark.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
@@ -51,15 +52,26 @@
 			// Success is handled by the event listener
 		} catch (error) {
 			console.error('Benchmark failed:', error);
-			benchmarkStore.setError(error as string);
+			// Properly extract error message from error object
+			const errorMessage = error instanceof Error
+				? error.message
+				: typeof error === 'string'
+					? error
+					: JSON.stringify(error);
+			benchmarkStore.setError(errorMessage);
 		}
 	}
 
-	function openBenchmarksFolder() {
-		// Use Tauri's shell plugin to open the folder
-		// For now, just show the path
+	async function openBenchmarksFolder() {
 		if (benchmarksDir) {
-			alert(`Benchmarks folder: ${benchmarksDir}`);
+			try {
+				// Open the folder in the system's file manager
+				await open(benchmarksDir);
+			} catch (error) {
+				console.error('Failed to open folder:', error);
+				// Fallback: copy to clipboard or show path
+				alert(`Benchmarks folder: ${benchmarksDir}\n\nCouldn't open folder automatically.`);
+			}
 		}
 	}
 
