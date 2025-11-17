@@ -1,6 +1,6 @@
 use super::errors::Error;
 use crate::benchmark::{
-    create_readme, export_to_csv, run_benchmark_suite, BenchmarkProgress, BenchmarkResults,
+    create_readme, export_to_csv, run_benchmark_suite, BenchmarkResults,
 };
 use crate::commands::ollama::{HttpClient, OllamaConfig};
 use tauri::{AppHandle, Emitter, State};

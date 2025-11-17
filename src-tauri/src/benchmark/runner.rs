@@ -1,9 +1,9 @@
 use super::metrics::{BenchmarkMetrics, BenchmarkResults, calculate_summary, get_timestamp};
 use super::test_suite::{get_test_suite, get_total_test_count, PromptCategory};
-use crate::commands::ollama::{HttpClient, OllamaConfig, OllamaMessage, OllamaRequest, OllamaResponse};
+use crate::commands::ollama::{OllamaConfig, OllamaMessage, OllamaRequest, OllamaResponse};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
-use sysinfo::{System, SystemExt, CpuExt};
+use sysinfo::System;
 
 /// Progress update event for the frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,8 +67,9 @@ Guidelines:
     // Start timing
     let start_time = Instant::now();
 
-    // Track CPU usage
-    let cpu_before = sys.global_cpu_info().cpu_usage();
+    // Track CPU usage (refresh CPU info first)
+    sys.refresh_cpu();
+    let cpu_before = sys.global_cpu_usage();
 
     // Make request
     let url = format!("{}/api/chat", config.base_url());
@@ -93,8 +94,9 @@ Guidelines:
 
     // Refresh system info to get updated metrics
     sys.refresh_all();
+    sys.refresh_cpu();
     let memory_after_mb = (sys.used_memory() as f64) / 1024.0 / 1024.0;
-    let cpu_after = sys.global_cpu_info().cpu_usage();
+    let cpu_after = sys.global_cpu_usage();
 
     // Extract response content and estimate token count
     let response_content = ollama_response

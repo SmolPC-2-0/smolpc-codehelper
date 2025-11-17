@@ -1,7 +1,7 @@
-use super::metrics::{BenchmarkMetrics, BenchmarkResults, BenchmarkSummary};
+use super::metrics::BenchmarkResults;
 use csv::Writer;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Get the benchmarks directory path (creates if doesn't exist)
 pub fn get_benchmarks_dir() -> Result<PathBuf, String> {
