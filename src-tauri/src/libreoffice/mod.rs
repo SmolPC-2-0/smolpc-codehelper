@@ -13,13 +13,16 @@
 ///
 /// - `types`: JSON-RPC and MCP protocol types
 /// - `process_manager`: Python process lifecycle management
-/// - `mcp_client`: Core MCP client with JSON-RPC communication (coming soon)
+/// - `mcp_client`: Core MCP client with JSON-RPC communication
 /// - `commands`: Tauri command handlers (coming soon)
 
+pub mod mcp_client;
 pub mod process_manager;
 pub mod types;
 
 // Re-export commonly used types
+#[allow(unused_imports)]
+pub use mcp_client::MCPClient;
 #[allow(unused_imports)]
 pub use process_manager::ProcessManager;
 #[allow(unused_imports)]
