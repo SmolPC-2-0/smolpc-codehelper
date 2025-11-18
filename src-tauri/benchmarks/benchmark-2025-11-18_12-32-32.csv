@@ -1,0 +1,37 @@
+timestamp,iteration,category,model,first_token_ms,total_time_ms,tokens_per_sec,avg_token_ms,memory_before_mb,memory_peak_mb,cpu_percent,response_tokens,prompt
+2025-11-18T12:16:58.306117+00:00,1,short,qwen2.5-coder:7b,504.13,12247.30,27.54,36.32,1965.67,1977.55,4.04,279,What is a variable in Python?
+2025-11-18T12:17:15.822736+00:00,1,short,qwen2.5-coder:7b,147.04,16974.36,27.38,36.53,1977.55,1982.81,4.30,397,How do I print in JavaScript?
+2025-11-18T12:17:27.384477+00:00,1,short,qwen2.5-coder:7b,151.24,10994.89,27.80,35.97,1982.81,1985.73,4.27,259,Explain a for loop briefly
+2025-11-18T12:17:53.476536+00:00,1,medium,qwen2.5-coder:7b,154.87,25504.80,27.20,36.76,1985.70,1985.70,4.22,597,Write a bubble sort function in Python with comments
+2025-11-18T12:18:26.820407+00:00,1,medium,qwen2.5-coder:7b,151.02,32750.46,27.16,36.82,1963.06,1976.56,4.15,770,Create a simple calculator program in JavaScript
+2025-11-18T12:19:01.880684+00:00,1,medium,qwen2.5-coder:7b,155.87,34505.77,26.78,37.34,1977.52,1977.52,4.28,796,Explain classes and objects in Python with an example
+2025-11-18T12:19:50.620855+00:00,1,long,qwen2.5-coder:7b,158.29,48158.56,27.00,37.04,1955.92,1967.53,4.19,1125,Explain object-oriented programming concepts with detailed examples in Python
+2025-11-18T12:20:22.080690+00:00,1,long,qwen2.5-coder:7b,156.11,30874.08,27.29,36.65,1967.53,1976.69,4.25,725,Write a complete web scraper in Python with error handling and documentation
+2025-11-18T12:21:03.958929+00:00,1,long,qwen2.5-coder:7b,161.08,41307.15,27.04,36.98,1976.69,1981.52,4.37,960,Create a detailed guide for beginners on how to use Git and GitHub
+2025-11-18T12:21:17.841924+00:00,1,follow-up,qwen2.5-coder:7b,1101.33,13328.18,27.27,36.67,1981.45,1996.30,3.95,286,Can you explain that more simply?
+2025-11-18T12:21:29.854754+00:00,1,follow-up,qwen2.5-coder:7b,148.97,11469.40,27.21,36.75,1996.30,1998.39,4.28,264,Can you add more comments to the code?
+2025-11-18T12:21:55.524847+00:00,1,follow-up,qwen2.5-coder:7b,150.59,25080.08,26.46,37.79,1997.95,2001.39,4.31,568,What are some common mistakes beginners make with this?
+2025-11-18T12:22:17.826092+00:00,2,short,qwen2.5-coder:7b,53.06,21755.42,26.82,37.29,1959.88,1980.28,4.42,501,What is a variable in Python?
+2025-11-18T12:22:39.599938+00:00,2,short,qwen2.5-coder:7b,177.66,21232.81,26.54,37.68,1974.25,1974.25,4.41,482,How do I print in JavaScript?
+2025-11-18T12:22:58.649312+00:00,2,short,qwen2.5-coder:7b,156.34,18479.79,26.38,37.91,1968.77,1971.64,4.36,416,Explain a for loop briefly
+2025-11-18T12:23:28.261369+00:00,2,medium,qwen2.5-coder:7b,151.57,29029.04,26.48,37.77,1950.81,1964.38,4.29,662,Write a bubble sort function in Python with comments
+2025-11-18T12:24:02.002925+00:00,2,medium,qwen2.5-coder:7b,164.27,33190.63,26.50,37.74,1961.08,1966.05,4.23,760,Create a simple calculator program in JavaScript
+2025-11-18T12:24:30.892181+00:00,2,medium,qwen2.5-coder:7b,159.40,28350.47,26.81,37.30,1966.02,1974.03,4.31,654,Explain classes and objects in Python with an example
+2025-11-18T12:25:19.135681+00:00,2,long,qwen2.5-coder:7b,152.95,47653.46,26.49,37.76,1968.42,1971.92,4.26,1091,Explain object-oriented programming concepts with detailed examples in Python
+2025-11-18T12:25:57.988793+00:00,2,long,qwen2.5-coder:7b,148.59,38279.57,27.07,36.95,1954.05,1973.22,4.36,892,Write a complete web scraper in Python with error handling and documentation
+2025-11-18T12:26:31.819314+00:00,2,long,qwen2.5-coder:7b,156.31,33258.14,27.22,36.73,1967.66,1977.19,4.44,776,Create a detailed guide for beginners on how to use Git and GitHub
+2025-11-18T12:26:51.915964+00:00,2,follow-up,qwen2.5-coder:7b,2145.23,19537.35,26.73,37.41,1964.47,1996.73,4.04,398,Can you explain that more simply?
+2025-11-18T12:27:12.962042+00:00,2,follow-up,qwen2.5-coder:7b,158.58,20471.95,26.21,38.15,1996.39,1997.30,4.43,457,Can you add more comments to the code?
+2025-11-18T12:27:42.379091+00:00,2,follow-up,qwen2.5-coder:7b,141.83,28860.52,25.70,38.91,1984.06,1984.06,4.37,636,What are some common mistakes beginners make with this?
+2025-11-18T12:27:55.819971+00:00,3,short,qwen2.5-coder:7b,42.62,12855.85,26.63,37.55,1952.42,1967.31,4.64,291,What is a variable in Python?
+2025-11-18T12:28:19.032987+00:00,3,short,qwen2.5-coder:7b,147.15,22644.60,26.98,37.06,1967.19,1973.22,4.43,522,How do I print in JavaScript?
+2025-11-18T12:28:31.887401+00:00,3,short,qwen2.5-coder:7b,142.14,12292.38,26.36,37.93,1973.23,1975.44,4.37,276,Explain a for loop briefly
+2025-11-18T12:29:02.974095+00:00,3,medium,qwen2.5-coder:7b,131.87,30489.21,26.76,37.37,1972.58,1976.67,4.38,703,Write a bubble sort function in Python with comments
+2025-11-18T12:29:32.769167+00:00,3,medium,qwen2.5-coder:7b,148.03,29194.01,26.50,37.73,1976.67,1979.12,4.30,669,Create a simple calculator program in JavaScript
+2025-11-18T12:30:03.025147+00:00,3,medium,qwen2.5-coder:7b,132.46,29652.94,26.43,37.84,1953.62,1969.69,4.38,673,Explain classes and objects in Python with an example
+2025-11-18T12:30:33.529425+00:00,3,long,qwen2.5-coder:7b,160.47,29935.31,26.19,38.19,1967.42,1972.66,4.39,674,Explain object-oriented programming concepts with detailed examples in Python
+2025-11-18T12:31:03.627815+00:00,3,long,qwen2.5-coder:7b,132.96,29512.32,25.79,38.78,1972.66,1976.56,4.22,658,Write a complete web scraper in Python with error handling and documentation
+2025-11-18T12:31:40.096967+00:00,3,long,qwen2.5-coder:7b,151.51,35857.60,24.94,40.10,1971.31,1977.83,4.27,772,Create a detailed guide for beginners on how to use Git and GitHub
+2025-11-18T12:31:52.312745+00:00,3,follow-up,qwen2.5-coder:7b,1102.27,11632.26,27.17,36.80,1969.06,1982.62,3.90,246,Can you explain that more simply?
+2025-11-18T12:32:03.238585+00:00,3,follow-up,qwen2.5-coder:7b,149.19,10303.50,27.05,36.96,1979.16,1982.45,4.21,236,Can you add more comments to the code?
+2025-11-18T12:32:32.296172+00:00,3,follow-up,qwen2.5-coder:7b,133.10,28492.72,26.85,37.25,1982.45,1983.97,4.24,659,What are some common mistakes beginners make with this?

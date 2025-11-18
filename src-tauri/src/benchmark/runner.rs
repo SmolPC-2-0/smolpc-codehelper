@@ -114,7 +114,7 @@ async fn warmup_and_find_ollama_process(
         .processes()
         .iter()
         .find(|(_, process)| {
-            let name = process.name().to_lowercase();
+            let name = process.name().to_string_lossy().to_ascii_lowercase();
             name.contains("ollama")
         })
         .map(|(pid, _)| *pid)
