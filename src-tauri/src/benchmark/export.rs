@@ -248,6 +248,10 @@ mod tests {
             response_tokens: 200,
             timestamp: "2025-01-01T00:00:00Z".to_string(),
             iteration: 2,
+            cpu_model: "Test CPU".to_string(),
+            gpu_name: "Test GPU".to_string(),
+            avx2_supported: true,
+            npu_detected: false,
         };
 
         let csv_row = CsvMetricRow::from(&metric);

@@ -24,13 +24,12 @@ pub fn run() {
             }
 
             // Detect hardware on startup (async)
-            let cache = app.state::<HardwareCache>();
-            let cache_clone = cache.inner().clone();
+            let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 match hardware::detect_all().await {
                     Ok(info) => {
                         log::info!("Hardware detected on startup: CPU={}, GPUs={}", info.cpu.brand, info.gpus.len());
-                        cache_clone.set(info).await;
+                        app_handle.state::<HardwareCache>().set(info).await;
                     }
                     Err(e) => {
                         log::error!("Failed to detect hardware on startup: {}", e);
