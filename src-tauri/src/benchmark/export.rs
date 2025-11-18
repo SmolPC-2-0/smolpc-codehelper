@@ -1,7 +1,47 @@
-use super::metrics::BenchmarkResults;
+use super::metrics::{BenchmarkMetrics, BenchmarkResults};
 use csv::Writer;
+use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
+
+/// CSV-specific format for benchmark metrics with proper column names and ordering
+/// This ensures automatic column ordering via serde and prevents manual column mismatches
+#[derive(Debug, Serialize)]
+struct CsvMetricRow {
+    timestamp: String,
+    iteration: usize,
+    category: String,
+    model: String,
+    first_token_ms: String,
+    total_time_ms: String,
+    tokens_per_sec: String,
+    avg_token_ms: String,
+    memory_before_mb: String,
+    memory_peak_mb: String,
+    cpu_percent: String,
+    response_tokens: usize,
+    prompt: String,
+}
+
+impl From<&BenchmarkMetrics> for CsvMetricRow {
+    fn from(metric: &BenchmarkMetrics) -> Self {
+        Self {
+            timestamp: metric.timestamp.clone(),
+            iteration: metric.iteration,
+            category: metric.prompt_type.clone(),
+            model: metric.model_name.clone(),
+            first_token_ms: format!("{:.2}", metric.first_token_latency_ms),
+            total_time_ms: format!("{:.2}", metric.total_response_time_ms),
+            tokens_per_sec: format!("{:.2}", metric.tokens_per_second),
+            avg_token_ms: format!("{:.2}", metric.avg_token_latency_ms),
+            memory_before_mb: format!("{:.2}", metric.memory_before_mb),
+            memory_peak_mb: format!("{:.2}", metric.peak_memory_mb),
+            cpu_percent: format!("{:.2}", metric.cpu_usage_percent),
+            response_tokens: metric.response_tokens,
+            prompt: metric.prompt.clone(),
+        }
+    }
+}
 
 /// Get the benchmarks directory path (creates if doesn't exist)
 pub fn get_benchmarks_dir() -> Result<PathBuf, String> {
@@ -25,7 +65,7 @@ pub fn generate_filename(prefix: &str) -> String {
     format!("{}-{}.csv", prefix, timestamp)
 }
 
-/// Export benchmark results to CSV
+/// Export benchmark results to CSV using serde for automatic column management
 pub fn export_to_csv(results: &BenchmarkResults, prefix: &str) -> Result<PathBuf, String> {
     let benchmarks_dir = get_benchmarks_dir()?;
     let filename = generate_filename(prefix);
@@ -35,42 +75,11 @@ pub fn export_to_csv(results: &BenchmarkResults, prefix: &str) -> Result<PathBuf
     let mut wtr = Writer::from_path(&filepath)
         .map_err(|e| format!("Failed to create CSV file: {}", e))?;
 
-    // Write header
-    wtr.write_record(&[
-        "timestamp",
-        "iteration",
-        "category",
-        "model",
-        "first_token_ms",
-        "total_time_ms",
-        "tokens_per_sec",
-        "avg_token_ms",
-        "memory_before_mb",
-        "memory_peak_mb",
-        "cpu_percent",
-        "response_tokens",
-        "prompt",
-    ])
-    .map_err(|e| format!("Failed to write CSV header: {}", e))?;
-
-    // Write metrics data
+    // Write all metrics using serde serialization (automatic headers and column ordering)
     for metric in &results.metrics {
-        wtr.write_record(&[
-            &metric.timestamp,
-            &metric.iteration.to_string(),
-            &metric.prompt_type,
-            &metric.model_name,
-            &format!("{:.2}", metric.first_token_latency_ms),
-            &format!("{:.2}", metric.total_response_time_ms),
-            &format!("{:.2}", metric.tokens_per_second),
-            &format!("{:.2}", metric.avg_token_latency_ms),
-            &format!("{:.2}", metric.memory_before_mb),
-            &format!("{:.2}", metric.peak_memory_mb),
-            &format!("{:.2}", metric.cpu_usage_percent),
-            &metric.response_tokens.to_string(),
-            &metric.prompt,
-        ])
-        .map_err(|e| format!("Failed to write metric row: {}", e))?;
+        let csv_row = CsvMetricRow::from(metric);
+        wtr.serialize(csv_row)
+            .map_err(|e| format!("Failed to serialize metric row: {}", e))?;
     }
 
     // Flush the writer

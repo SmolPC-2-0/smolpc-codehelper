@@ -210,6 +210,13 @@
 				</p>
 			</div>
 
+			<!-- Accuracy Tip -->
+			<div class="rounded-md border border-yellow-500/20 bg-yellow-500/10 p-3">
+				<p class="text-xs text-yellow-600 dark:text-yellow-400">
+					<strong>Tip:</strong> Close background apps for accurate CPU/memory measurements (system-wide monitoring).
+				</p>
+			</div>
+
 			<!-- Actions -->
 			<div class="flex gap-2">
 				<button

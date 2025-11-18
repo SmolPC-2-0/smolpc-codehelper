@@ -18,6 +18,7 @@ pub struct BenchmarkProgress {
 }
 
 /// Run a single benchmark test and collect metrics with accurate streaming measurements
+/// Returns (BenchmarkMetrics, response_content) for follow-up context
 async fn run_single_test(
     prompt: String,
     category: PromptCategory,
@@ -26,7 +27,7 @@ async fn run_single_test(
     context: Option<Vec<OllamaMessage>>,
     client: &reqwest::Client,
     config: &OllamaConfig,
-) -> Result<BenchmarkMetrics, String> {
+) -> Result<(BenchmarkMetrics, String), String> {
     let mut sys = System::new_all();
     sys.refresh_all();
 
@@ -106,7 +107,7 @@ Guidelines:
     // Start timing and make streaming request
     let start_time = Instant::now();
     let mut first_token_time: Option<f64> = None;
-    let mut token_count = 0usize;
+    let mut actual_token_count: Option<usize> = None;
     let mut response_content = String::new();
 
     let url = format!("{}/api/chat", config.base_url());
@@ -115,7 +116,7 @@ Guidelines:
         .json(&request)
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(|e| format!("Failed to send request to Ollama: {}", e))?;
 
     let mut stream = response.bytes_stream();
 
@@ -135,14 +136,12 @@ Guidelines:
 
                                     // Accumulate content
                                     response_content.push_str(&message.content);
-
-                                    // Count tokens (approximate based on chunks received)
-                                    // A better approach would be to use actual tokenizer, but this is reasonable
-                                    token_count += 1;
                                 }
                             }
 
                             if ollama_response.done {
+                                // Capture actual token count from Ollama metadata
+                                actual_token_count = ollama_response.eval_count;
                                 break;
                             }
                         }
@@ -152,7 +151,7 @@ Guidelines:
             Err(e) => {
                 // Stop sampling on error
                 *sampling_active.lock().await = false;
-                return Err(format!("Stream error: {}", e));
+                return Err(format!("Stream error while reading from Ollama: {}", e));
             }
         }
     }
@@ -189,13 +188,12 @@ Guidelines:
     };
     drop(memory_samples_vec);
 
-    // Use actual token count from streaming, or estimate if needed
-    let response_tokens = if token_count > 0 {
-        token_count
-    } else {
-        // Fallback: estimate based on character count
-        response_content.len() / 4
-    };
+    // Use actual token count from Ollama metadata (most accurate)
+    // Fallback to character-based estimation only if metadata unavailable
+    let response_tokens = actual_token_count.unwrap_or_else(|| {
+        // Estimate: ~4 characters per token on average
+        (response_content.len() / 4).max(1)
+    });
 
     // Calculate metrics
     let first_token_latency_ms = first_token_time.unwrap_or(total_time);
@@ -212,23 +210,26 @@ Guidelines:
         0.0
     };
 
-    Ok(BenchmarkMetrics {
-        first_token_latency_ms,
-        total_response_time_ms: total_time,
-        tokens_per_second,
-        avg_token_latency_ms: avg_token_latency,
-        memory_before_mb,
-        memory_during_mb: avg_memory_during,
-        memory_after_mb,
-        peak_memory_mb,
-        cpu_usage_percent: avg_cpu,
-        model_name: model,
-        prompt_type: category.as_str().to_string(),
-        prompt,
-        response_tokens,
-        timestamp: get_timestamp(),
-        iteration,
-    })
+    Ok((
+        BenchmarkMetrics {
+            first_token_latency_ms,
+            total_response_time_ms: total_time,
+            tokens_per_second,
+            avg_token_latency_ms: avg_token_latency,
+            memory_before_mb,
+            memory_during_mb: avg_memory_during,
+            memory_after_mb,
+            peak_memory_mb,
+            cpu_usage_percent: avg_cpu,
+            model_name: model,
+            prompt_type: category.as_str().to_string(),
+            prompt,
+            response_tokens,
+            timestamp: get_timestamp(),
+            iteration,
+        },
+        response_content,
+    ))
 }
 
 /// Run the complete benchmark suite
@@ -281,7 +282,7 @@ pub async fn run_benchmark_suite(
             });
 
             // Run the test
-            let metrics = run_single_test(
+            let (metrics, response_content) = run_single_test(
                 test.prompt.clone(),
                 test.category,
                 model.clone(),
@@ -292,10 +293,9 @@ pub async fn run_benchmark_suite(
             )
             .await?;
 
-            // Store response for potential follow-up context
-            // (In a real scenario, we'd extract this from the actual response)
+            // Store actual response content for follow-up context
             if test.category == PromptCategory::Short && test.id == "short_1" {
-                last_response = Some("A variable is a container that stores data...".to_string());
+                last_response = Some(response_content);
             }
 
             all_metrics.push(metrics);
