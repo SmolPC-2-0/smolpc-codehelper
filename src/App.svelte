@@ -3,6 +3,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 	import Home from '$lib/components/Home.svelte';
+	import LibreOffice from '$lib/components/LibreOffice.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
@@ -454,4 +455,7 @@
 		<!-- Hidden Benchmark Panel (Ctrl+Shift+B / Cmd+Shift+B to toggle) -->
 		<BenchmarkPanel bind:visible={showBenchmarkPanel} />
 	</div>
+{:else if currentRoute === 'libreoffice'}
+	<!-- LibreOffice Placeholder -->
+	<LibreOffice onNavigate={handleNavigate} />
 {/if}

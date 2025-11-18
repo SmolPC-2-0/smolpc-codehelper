@@ -19,13 +19,13 @@
 
 		<div class="flex flex-col gap-4">
 			<Button onclick={() => onNavigate('codehelper')} size="lg">
-				Open CodeHelper
+				💻 CodeHelper
 			</Button>
-			<Button onclick={() => onNavigate('libreoffice')} size="lg" variant="outline" disabled>
-				LibreOffice AI (Coming Soon)
+			<Button onclick={() => onNavigate('libreoffice')} size="lg" variant="outline">
+				📄 LibreOffice AI
 			</Button>
 			<Button onclick={() => onNavigate('blender')} size="lg" variant="outline" disabled>
-				Blender AI (Coming Soon)
+				🎨 Blender AI (Coming Soon)
 			</Button>
 		</div>
 	</div>
