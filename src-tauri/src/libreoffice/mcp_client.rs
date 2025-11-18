@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex};
 use tokio::time::{timeout, Duration};
 
 /// MCP Client for communicating with Python MCP server
@@ -260,31 +260,42 @@ impl MCPClient {
     }
 
     /// Read a single JSON-RPC response (internal helper)
+    ///
+    /// This will skip non-JSON lines (like log messages) until it finds a valid JSON-RPC response
     async fn read_response_internal(
         process: &Arc<Mutex<ProcessManager>>,
     ) -> Result<JsonRpcResponse, LibreOfficeError> {
-        let mut line = String::new();
         let mut process = process.lock().await;
 
-        process
-            .stdout
-            .read_line(&mut line)
-            .await
-            .map_err(|e| {
-                LibreOfficeError::ProcessCrashed(format!("Failed to read from stdout: {}", e))
-            })?;
+        // Try to read lines until we get a valid JSON-RPC response
+        loop {
+            let mut line = String::new();
 
-        if line.is_empty() {
-            return Err(LibreOfficeError::ProcessCrashed(
-                "Process stdout closed".to_string(),
-            ));
+            let bytes_read = process
+                .stdout
+                .read_line(&mut line)
+                .await
+                .map_err(|e| {
+                    LibreOfficeError::ProcessCrashed(format!("Failed to read from stdout: {}", e))
+                })?;
+
+            if bytes_read == 0 {
+                return Err(LibreOfficeError::ProcessCrashed(
+                    "Process stdout closed".to_string(),
+                ));
+            }
+
+            // Try to parse as JSON-RPC response
+            match serde_json::from_str::<JsonRpcResponse>(&line) {
+                Ok(response) => return Ok(response),
+                Err(_) => {
+                    // Not a JSON-RPC response, might be a log message
+                    // Log it and continue to next line
+                    log::debug!("Skipping non-JSON line from MCP server: {}", line.trim());
+                    continue;
+                }
+            }
         }
-
-        let response = serde_json::from_str::<JsonRpcResponse>(&line).map_err(|e| {
-            LibreOfficeError::InvalidResponse(format!("Failed to parse JSON-RPC response: {}", e))
-        })?;
-
-        Ok(response)
     }
 
     /// Background task to read responses from stdout
