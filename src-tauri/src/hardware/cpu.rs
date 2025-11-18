@@ -67,11 +67,15 @@ fn detect_x86(
 
     // Feature detection using runtime detection
     let features = CpuFeatures {
+        // x86 features
         sse42: is_x86_feature_detected!("sse4.2"),
         avx: is_x86_feature_detected!("avx"),
         avx2: is_x86_feature_detected!("avx2"),
         avx512f: is_x86_feature_detected!("avx512f"),
         fma: is_x86_feature_detected!("fma"),
+        // ARM features (not available on x86)
+        neon: false,
+        sve: false,
     };
 
     // Cache information from CPUID
@@ -80,6 +84,7 @@ fn detect_x86(
     Ok(CpuInfo {
         vendor,
         brand,
+        architecture: std::env::consts::ARCH.to_string(),
         cores_physical,
         cores_logical,
         frequency_mhz,
@@ -173,14 +178,17 @@ fn detect_arm64(
     #[cfg(not(target_feature = "sve"))]
     let sve = std::arch::is_aarch64_feature_detected!("sve");
 
-    // Map ARM features to CpuFeatures structure
-    // For ARM: NEON ≈ SSE/AVX, SVE ≈ AVX-512
+    // ARM has different features than x86
     let features = CpuFeatures {
-        sse42: neon,  // NEON is roughly equivalent to SSE
-        avx: neon,    // NEON provides SIMD like AVX
-        avx2: neon,   // Modern ARM has NEON by default
-        avx512f: sve, // SVE is ARM's scalable vector extension
-        fma: neon,    // NEON supports FMA operations
+        // x86 features (not available on ARM)
+        sse42: false,
+        avx: false,
+        avx2: false,
+        avx512f: false,
+        fma: false,
+        // ARM features
+        neon,
+        sve,
     };
 
     // Cache detection not available via standard APIs on ARM
@@ -190,6 +198,7 @@ fn detect_arm64(
     Ok(CpuInfo {
         vendor,
         brand,
+        architecture: std::env::consts::ARCH.to_string(),
         cores_physical,
         cores_logical,
         frequency_mhz,
@@ -222,16 +231,21 @@ fn detect_generic(
 
     // No feature detection on unknown architectures
     let features = CpuFeatures {
+        // x86 features
         sse42: false,
         avx: false,
         avx2: false,
         avx512f: false,
         fma: false,
+        // ARM features
+        neon: false,
+        sve: false,
     };
 
     Ok(CpuInfo {
         vendor,
         brand,
+        architecture: std::env::consts::ARCH.to_string(),
         cores_physical,
         cores_logical,
         frequency_mhz,

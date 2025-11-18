@@ -112,6 +112,10 @@
 							<span class="col-span-2">{hardwareStore.info.cpu.vendor}</span>
 						</div>
 						<div class="grid grid-cols-3 gap-2">
+							<span class="text-muted-foreground">Architecture:</span>
+							<span class="col-span-2">{hardwareStore.info.cpu.architecture}</span>
+						</div>
+						<div class="grid grid-cols-3 gap-2">
 							<span class="text-muted-foreground">Cores:</span>
 							<span class="col-span-2"
 								>{hardwareStore.info.cpu.cores_physical} physical / {hardwareStore.info
@@ -133,9 +137,22 @@
 							</span>
 						</div>
 						<div class="mt-3 pt-3 border-t border-border">
-							<div class="mb-1 text-muted-foreground text-xs">Instruction Sets:</div>
+							<div class="mb-1 text-muted-foreground text-xs">
+								{hardwareStore.info.cpu.architecture.includes('aarch64') ? 'SIMD Extensions:' : 'Instruction Sets:'}
+							</div>
 							<div class="flex flex-wrap gap-1.5">
-								{#each Object.entries(hardwareStore.info.cpu.features) as [feature, supported]}
+								{#each Object.entries(hardwareStore.info.cpu.features).filter(([feature, supported]) => {
+									// Filter features based on architecture
+									const isArm = hardwareStore.info.cpu.architecture.includes('aarch64') || hardwareStore.info.cpu.architecture.includes('arm');
+									const armFeatures = ['neon', 'sve'];
+									const x86Features = ['sse42', 'avx', 'avx2', 'avx512f', 'fma'];
+
+									if (isArm) {
+										return armFeatures.includes(feature);
+									} else {
+										return x86Features.includes(feature);
+									}
+								}) as [feature, supported]}
 									<span
 										class={`px-2 py-0.5 text-xs rounded-md ${
 											supported

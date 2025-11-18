@@ -8,6 +8,7 @@ export interface HardwareInfo {
 export interface CpuInfo {
 	vendor: string;
 	brand: string;
+	architecture: string;
 	cores_physical: number;
 	cores_logical: number;
 	frequency_mhz?: number;
@@ -18,11 +19,15 @@ export interface CpuInfo {
 }
 
 export interface CpuFeatures {
+	// x86/x86_64 features
 	sse42: boolean;
 	avx: boolean;
 	avx2: boolean;
 	avx512f: boolean;
 	fma: boolean;
+	// ARM features
+	neon: boolean;
+	sve: boolean;
 }
 
 export interface GpuInfo {

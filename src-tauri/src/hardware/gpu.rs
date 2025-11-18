@@ -15,7 +15,13 @@ pub async fn detect() -> Result<Vec<GpuInfo>, String> {
     for adapter in instance.enumerate_adapters(Backends::PRIMARY) {
         let info = adapter.get_info();
 
-        let vendor = GpuVendor::from_pci_id(info.vendor);
+        // Try to get vendor from PCI ID, fallback to name inference
+        // (Apple Silicon reports vendor ID as 0)
+        let vendor = if info.vendor == 0 {
+            GpuVendor::from_name(&info.name)
+        } else {
+            GpuVendor::from_pci_id(info.vendor)
+        };
 
         gpus.push(GpuInfo {
             name: info.name.clone(),

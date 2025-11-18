@@ -18,6 +18,30 @@ pub fn detect(cpu: &CpuInfo) -> Result<Option<NpuInfo>, String> {
 fn detect_cpu_model_heuristic(cpu: &CpuInfo) -> Result<Option<NpuInfo>, String> {
     let brand_lower = cpu.brand.to_lowercase();
 
+    // Apple Silicon Neural Engine (M1/M2/M3/M4 series)
+    // All Apple Silicon chips have a Neural Engine
+    if brand_lower.contains("apple m1")
+        || brand_lower.contains("apple m2")
+        || brand_lower.contains("apple m3")
+        || brand_lower.contains("apple m4")
+    {
+        // Determine Neural Engine core count based on chip
+        let cores = if brand_lower.contains("max") || brand_lower.contains("ultra") {
+            "32-core" // M3 Max/Ultra
+        } else if brand_lower.contains("pro") {
+            "16-core" // M3 Pro
+        } else {
+            "16-core" // Base M1/M2/M3 (varies by generation)
+        };
+
+        return Ok(Some(NpuInfo {
+            detected: true,
+            confidence: NpuConfidence::High,
+            details: format!("Apple Neural Engine detected ({} Neural Engine)", cores),
+            method: "Apple Silicon detection".to_string(),
+        }));
+    }
+
     // Intel Core Ultra (Intel AI Boost NPU)
     if brand_lower.contains("core ultra") {
         return Ok(Some(NpuInfo {

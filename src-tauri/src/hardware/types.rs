@@ -14,6 +14,7 @@ pub struct HardwareInfo {
 pub struct CpuInfo {
     pub vendor: String,
     pub brand: String,
+    pub architecture: String,  // "x86_64", "aarch64", etc.
     pub cores_physical: usize,
     pub cores_logical: usize,
     pub frequency_mhz: Option<u64>,
@@ -26,11 +27,15 @@ pub struct CpuInfo {
 /// CPU feature flags (SIMD instruction sets)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CpuFeatures {
+    // x86/x86_64 features
     pub sse42: bool,
     pub avx: bool,
     pub avx2: bool,
     pub avx512f: bool,
     pub fma: bool,
+    // ARM features
+    pub neon: bool,
+    pub sve: bool,
 }
 
 /// GPU information
@@ -66,6 +71,24 @@ impl GpuVendor {
             0x106B => GpuVendor::Apple,
             0x5143 | 0x4D4F | 0x17CB => GpuVendor::Qualcomm, // Qualcomm IDs
             _ => GpuVendor::Unknown,
+        }
+    }
+
+    /// Infer vendor from GPU name when PCI ID is unavailable (e.g., Apple Silicon)
+    pub fn from_name(name: &str) -> Self {
+        let name_lower = name.to_lowercase();
+        if name_lower.contains("apple") || name_lower.contains(" m1") || name_lower.contains(" m2") || name_lower.contains(" m3") || name_lower.contains(" m4") {
+            GpuVendor::Apple
+        } else if name_lower.contains("nvidia") || name_lower.contains("geforce") || name_lower.contains("quadro") || name_lower.contains("tesla") {
+            GpuVendor::Nvidia
+        } else if name_lower.contains("amd") || name_lower.contains("radeon") {
+            GpuVendor::Amd
+        } else if name_lower.contains("intel") || name_lower.contains("uhd") || name_lower.contains("iris") {
+            GpuVendor::Intel
+        } else if name_lower.contains("qualcomm") || name_lower.contains("adreno") {
+            GpuVendor::Qualcomm
+        } else {
+            GpuVendor::Unknown
         }
     }
 }

@@ -384,6 +384,7 @@ pub async fn run_benchmark_suite(
             cpu: hardware::types::CpuInfo {
                 vendor: "Unknown".to_string(),
                 brand: "Unknown CPU".to_string(),
+                architecture: "Unknown".to_string(),
                 cores_physical: 0,
                 cores_logical: 0,
                 frequency_mhz: None,
@@ -393,6 +394,8 @@ pub async fn run_benchmark_suite(
                     avx2: false,
                     avx512f: false,
                     fma: false,
+                    neon: false,
+                    sve: false,
                 },
                 cache_l1_kb: None,
                 cache_l2_kb: None,
