@@ -9,6 +9,7 @@
 	import ModelSelector from '$lib/components/ModelSelector.svelte';
 	import ContextToggle from '$lib/components/ContextToggle.svelte';
 	import QuickExamples from '$lib/components/QuickExamples.svelte';
+	import BenchmarkPanel from '$lib/components/BenchmarkPanel.svelte';
 	import { chatsStore } from '$lib/stores/chats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { ollamaStore } from '$lib/stores/ollama.svelte';
@@ -28,6 +29,7 @@
 	let currentStreamingMessageId = $state<string | null>(null);
 	let userInteractedWithScroll = $state(false);
 	let touchStartY = $state(0);
+	let showBenchmarkPanel = $state(false);
 
 	// Derived state
 	const currentChat = $derived(chatsStore.currentChat);
@@ -195,6 +197,18 @@
 		currentStreamingMessageId = null;
 	}
 
+	// Handle keyboard shortcuts
+	function handleKeyDown(event: KeyboardEvent) {
+		// Ctrl+Shift+B (Windows/Linux) or Cmd+Shift+B (Mac) to toggle benchmark panel
+		const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+		const modifierKey = isMac ? event.metaKey : event.ctrlKey;
+
+		if (modifierKey && event.shiftKey && event.key.toLowerCase() === 'b') {
+			event.preventDefault();
+			showBenchmarkPanel = !showBenchmarkPanel;
+		}
+	}
+
 	// Setup event listeners and initialization
 	onMount(() => {
 		let unlistenChunk: UnlistenFn;
@@ -278,6 +292,9 @@
 			chatsStore.createChat(settingsStore.selectedModel);
 		}
 
+		// Add keyboard event listener
+		window.addEventListener('keydown', handleKeyDown);
+
 		// Cleanup - wait for setup to complete before cleaning up
 		return async () => {
 			await cleanupPromise;
@@ -285,6 +302,7 @@
 			if (unlistenDone) unlistenDone();
 			if (unlistenError) unlistenError();
 			if (unlistenCancelled) unlistenCancelled();
+			window.removeEventListener('keydown', handleKeyDown);
 		};
 	});
 
@@ -414,4 +432,7 @@
 			</div>
 		</div>
 	</div>
+
+	<!-- Hidden Benchmark Panel (Ctrl+Shift+B / Cmd+Shift+B to toggle) -->
+	<BenchmarkPanel bind:visible={showBenchmarkPanel} />
 </div>

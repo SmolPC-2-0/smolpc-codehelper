@@ -1,4 +1,6 @@
+mod benchmark;
 mod commands;
+use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_benchmark};
 use commands::default::{read, save_code, write};
 use commands::ollama::{cancel_generation, check_ollama, generate_stream, get_ollama_models, StreamCancellation, HttpClient, OllamaConfig};
 
@@ -26,7 +28,10 @@ pub fn run() {
             check_ollama,
             get_ollama_models,
             generate_stream,
-            cancel_generation
+            cancel_generation,
+            run_benchmark,
+            get_benchmarks_directory,
+            open_benchmarks_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
