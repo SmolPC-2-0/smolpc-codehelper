@@ -1,7 +1,7 @@
 use crate::libreoffice::types::LibreOfficeError;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::BufReader;
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 
 /// Manages the Python MCP server process lifecycle
@@ -92,7 +92,7 @@ impl ProcessManager {
 
     /// Wait for the process to exit and get its status
     pub async fn wait(&mut self) -> Result<std::process::ExitStatus, LibreOfficeError> {
-        self.child.await.map_err(|e| {
+        self.child.wait().await.map_err(|e| {
             LibreOfficeError::ProcessCrashed(format!("Error waiting for process: {}", e))
         })
     }
