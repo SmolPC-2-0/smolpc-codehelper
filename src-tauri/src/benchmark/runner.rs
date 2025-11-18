@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use sysinfo::System;
 use tokio::sync::Mutex;
+use tokio::time::Instant;
 
 // Benchmark configuration constants
 /// Interval (in milliseconds) for sampling CPU and memory during inference
@@ -96,7 +97,7 @@ Guidelines:
         // Find Ollama process by name for MANDATORY process-specific monitoring
         let ollama_pid = sys_sampler.processes().iter()
             .find(|(_, process)| {
-                let name = process.name().to_lowercase();
+                let name = process.name().to_string_lossy().to_lowercase();
                 name.contains("ollama")
             })
             .map(|(pid, _)| *pid);
