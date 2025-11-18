@@ -12,13 +12,15 @@
 /// ## Modules
 ///
 /// - `types`: JSON-RPC and MCP protocol types
-/// - `process_manager`: Python process lifecycle management (coming soon)
+/// - `process_manager`: Python process lifecycle management
 /// - `mcp_client`: Core MCP client with JSON-RPC communication (coming soon)
 /// - `commands`: Tauri command handlers (coming soon)
 
+pub mod process_manager;
 pub mod types;
 
 // Re-export commonly used types
+pub use process_manager::ProcessManager;
 pub use types::{
     Content, InitializeParams, InitializeResult, JsonRpcError, JsonRpcNotification,
     JsonRpcRequest, JsonRpcResponse, LibreOfficeError, Tool, ToolCallParams, ToolCallResult,
