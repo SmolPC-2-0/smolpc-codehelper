@@ -16,18 +16,18 @@ impl ProcessManager {
     /// Spawn the Python MCP server process
     ///
     /// This will:
-    /// 1. Find the Python executable
+    /// 1. Find the Python executable (prefer venv)
     /// 2. Find the MCP server script
     /// 3. Spawn the process with stdio pipes
     /// 4. Return handles for stdin/stdout/stderr
     pub async fn spawn() -> Result<Self, LibreOfficeError> {
-        // Find Python executable
-        let python_exe = find_python_executable()?;
-        log::info!("Found Python executable: {:?}", python_exe);
-
-        // Find MCP server script
+        // Find MCP server script first (needed to find venv)
         let server_script = find_server_script()?;
         log::info!("Found MCP server script: {:?}", server_script);
+
+        // Find Python executable (prefer venv if it exists)
+        let python_exe = find_python_executable(&server_script)?;
+        log::info!("Found Python executable: {:?}", python_exe);
 
         // Spawn the process
         let mut child = Command::new(&python_exe)
@@ -105,7 +105,27 @@ impl Drop for ProcessManager {
 }
 
 /// Find the Python executable on the system
-fn find_python_executable() -> Result<PathBuf, LibreOfficeError> {
+///
+/// Prefers the virtual environment Python if it exists in the MCP server directory
+fn find_python_executable(server_script: &Path) -> Result<PathBuf, LibreOfficeError> {
+    // First, try to find venv Python in the same directory as the server script
+    if let Some(server_dir) = server_script.parent() {
+        #[cfg(target_os = "macos")]
+        let venv_python = server_dir.join("venv/bin/python3");
+
+        #[cfg(target_os = "windows")]
+        let venv_python = server_dir.join("venv\\Scripts\\python.exe");
+
+        #[cfg(target_os = "linux")]
+        let venv_python = server_dir.join("venv/bin/python3");
+
+        if venv_python.exists() {
+            log::info!("Found virtual environment Python: {:?}", venv_python);
+            return Ok(venv_python);
+        }
+    }
+
+    // Fall back to system Python
     #[cfg(target_os = "macos")]
     {
         // macOS: Try common Python paths
@@ -261,7 +281,9 @@ mod tests {
     #[test]
     fn test_find_python_executable() {
         // This test will pass if Python is installed
-        let result = find_python_executable();
+        // Use a dummy path for testing
+        let dummy_script = Path::new("/tmp/dummy_script.py");
+        let result = find_python_executable(dummy_script);
         match result {
             Ok(path) => {
                 println!("Found Python at: {:?}", path);
@@ -294,7 +316,8 @@ mod tests {
     #[tokio::test]
     async fn test_spawn_python_hello_world() {
         // Test spawning a simple Python process
-        let python_exe = match find_python_executable() {
+        let dummy_script = Path::new("/tmp/dummy_script.py");
+        let python_exe = match find_python_executable(dummy_script) {
             Ok(exe) => exe,
             Err(_) => {
                 println!("Skipping test: Python not found");
@@ -319,7 +342,8 @@ mod tests {
     #[tokio::test]
     async fn test_process_manager_lifecycle() {
         // Test the full lifecycle (if Python and script are available)
-        let python_exe = match find_python_executable() {
+        let dummy_script = Path::new("/tmp/dummy_script.py");
+        let python_exe = match find_python_executable(dummy_script) {
             Ok(exe) => exe,
             Err(_) => {
                 println!("Skipping test: Python not found");
