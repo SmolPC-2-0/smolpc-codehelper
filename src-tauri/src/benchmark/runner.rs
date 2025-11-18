@@ -1,23 +1,18 @@
 use super::metrics::{BenchmarkMetrics, BenchmarkResults, calculate_summary, get_timestamp};
 use super::test_suite::{get_test_suite, get_total_test_count, PromptCategory};
 use crate::commands::ollama::{OllamaConfig, OllamaMessage, OllamaRequest, OllamaResponse};
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::time::Instant;
 use sysinfo::System;
 use tokio::sync::Mutex;
 
 // Benchmark configuration constants
 /// Interval (in milliseconds) for sampling CPU and memory during inference
-const RESOURCE_SAMPLING_INTERVAL_MS: u64 = 100;
+/// 50ms provides rigorous monitoring for production-quality data
+const RESOURCE_SAMPLING_INTERVAL_MS: u64 = 50;
 
 /// Delay (in milliseconds) between tests to allow system stabilization
 const TEST_STABILIZATION_DELAY_MS: u64 = 500;
-
-/// Estimated average characters per token for fallback token counting
-/// Used only when Ollama metadata is unavailable
-const CHARS_PER_TOKEN_ESTIMATE: usize = 4;
 
 /// Progress update event for the frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,7 +71,7 @@ Guidelines:
     let request = OllamaRequest {
         model: model.clone(),
         messages,
-        stream: true, // Use streaming for accurate token timing
+        stream: false, // Non-streaming for accurate Ollama-native timing data
     };
 
     // Shared state for periodic sampling
@@ -98,7 +93,7 @@ Guidelines:
         let mut sys_sampler = System::new_all();
         sys_sampler.refresh_all();
 
-        // Find Ollama process by name for process-specific monitoring
+        // Find Ollama process by name for MANDATORY process-specific monitoring
         let ollama_pid = sys_sampler.processes().iter()
             .find(|(_, process)| {
                 let name = process.name().to_lowercase();
@@ -106,52 +101,48 @@ Guidelines:
             })
             .map(|(pid, _)| *pid);
 
+        // Store PID for validation (None means we couldn't find Ollama process)
+        let mut found_ollama = ollama_pid.is_some();
+
         while *sampling_active_clone.lock().await {
             sys_sampler.refresh_all();
             sys_sampler.refresh_cpu_all();
 
-            let (current_memory, current_cpu) = if let Some(pid) = ollama_pid {
-                // Process-specific monitoring (preferred)
+            if let Some(pid) = ollama_pid {
+                // Process-specific monitoring (REQUIRED)
                 if let Some(process) = sys_sampler.process(pid) {
                     let memory = (process.memory() as f64) / 1024.0 / 1024.0;
                     let cpu = process.cpu_usage() as f64;
-                    (memory, cpu)
+
+                    // Update peak memory
+                    let mut peak = peak_memory_clone.lock().await;
+                    if memory > *peak {
+                        *peak = memory;
+                    }
+                    drop(peak);
+
+                    // Store samples
+                    cpu_samples_clone.lock().await.push(cpu);
+                    memory_samples_clone.lock().await.push(memory);
                 } else {
-                    // Fallback to system-wide if process disappeared
-                    let memory = (sys_sampler.used_memory() as f64) / 1024.0 / 1024.0;
-                    let cpu = sys_sampler.global_cpu_usage() as f64;
-                    (memory, cpu)
+                    // Process disappeared during monitoring - this is a problem
+                    found_ollama = false;
+                    break;
                 }
             } else {
-                // Fallback to system-wide if Ollama process not found
-                let memory = (sys_sampler.used_memory() as f64) / 1024.0 / 1024.0;
-                let cpu = sys_sampler.global_cpu_usage() as f64;
-                (memory, cpu)
-            };
-
-            // Update peak memory
-            let mut peak = peak_memory_clone.lock().await;
-            if current_memory > *peak {
-                *peak = current_memory;
+                // No Ollama process found - cannot continue
+                found_ollama = false;
+                break;
             }
-            drop(peak);
-
-            // Store samples
-            cpu_samples_clone.lock().await.push(current_cpu);
-            memory_samples_clone.lock().await.push(current_memory);
 
             tokio::time::sleep(tokio::time::Duration::from_millis(RESOURCE_SAMPLING_INTERVAL_MS)).await;
         }
-        // Signal completion when loop exits
+
+        // Signal completion and return whether monitoring was successful
         let _ = sampling_done_tx.send(());
     });
 
-    // Start timing and make streaming request
-    let start_time = Instant::now();
-    let mut first_token_time: Option<f64> = None;
-    let mut actual_token_count: Option<usize> = None;
-    let mut response_content = String::new();
-
+    // Make non-streaming request to get accurate Ollama timing metadata
     let url = format!("{}/api/chat", config.base_url());
     let response = client
         .post(&url)
@@ -160,52 +151,72 @@ Guidelines:
         .await
         .map_err(|e| format!("Failed to send request to Ollama: {}", e))?;
 
-    let mut stream = response.bytes_stream();
-
-    // Process streaming response
-    while let Some(chunk_result) = stream.next().await {
-        match chunk_result {
-            Ok(bytes) => {
-                if let Ok(text) = String::from_utf8(bytes.to_vec()) {
-                    for line in text.lines() {
-                        if let Ok(ollama_response) = serde_json::from_str::<OllamaResponse>(line) {
-                            if let Some(message) = ollama_response.message {
-                                if !message.content.is_empty() {
-                                    // Capture first token timing
-                                    if first_token_time.is_none() {
-                                        first_token_time = Some(start_time.elapsed().as_millis() as f64);
-                                    }
-
-                                    // Accumulate content
-                                    response_content.push_str(&message.content);
-                                }
-                            }
-
-                            if ollama_response.done {
-                                // Capture actual token count from Ollama metadata
-                                actual_token_count = ollama_response.eval_count;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                // Stop sampling on error and wait for cleanup
-                *sampling_active.lock().await = false;
-                let _ = sampling_done_rx.await;
-                return Err(format!("Stream error while reading from Ollama: {}", e));
-            }
-        }
-    }
-
-    // End timing
-    let total_time = start_time.elapsed().as_millis() as f64;
+    // Parse the response JSON
+    let ollama_response: OllamaResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Ollama response: {}", e))?;
 
     // Stop resource sampling and wait for completion
     *sampling_active.lock().await = false;
     let _ = sampling_done_rx.await; // Wait for sampling task to actually finish
 
+    // Validate that we successfully monitored the Ollama process
+    let cpu_samples_vec = cpu_samples.lock().await.clone();
+    let memory_samples_vec = memory_samples.lock().await.clone();
+
+    if cpu_samples_vec.is_empty() || memory_samples_vec.is_empty() {
+        return Err("Failed to monitor Ollama process - process not found or disappeared during benchmark".to_string());
+    }
+
+    // Extract response content
+    let response_content = ollama_response.message
+        .as_ref()
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
+
+    // === CRITICAL VALIDATION: Require all Ollama timing metadata ===
+    // These fields are required for production-quality data
+    let eval_count = ollama_response.eval_count
+        .ok_or_else(|| "Ollama did not provide eval_count (token count) - cannot proceed with benchmark".to_string())?;
+
+    let eval_duration_ns = ollama_response.eval_duration
+        .ok_or_else(|| "Ollama did not provide eval_duration - cannot proceed with benchmark".to_string())?;
+
+    let prompt_eval_duration_ns = ollama_response.prompt_eval_duration
+        .unwrap_or(0); // Prompt eval can be 0 if model is already loaded
+
+    let total_duration_ns = ollama_response.total_duration
+        .ok_or_else(|| "Ollama did not provide total_duration - cannot proceed with benchmark".to_string())?;
+
+    // Convert nanoseconds to milliseconds for all timing metrics
+    let eval_duration_ms = (eval_duration_ns as f64) / 1_000_000.0;
+    let prompt_eval_duration_ms = (prompt_eval_duration_ns as f64) / 1_000_000.0;
+    let total_duration_ms = (total_duration_ns as f64) / 1_000_000.0;
+
+    // === Calculate metrics using Ollama's NATIVE data (not our stopwatch) ===
+
+    // First token latency = Time to process prompt (before first token generation)
+    let first_token_latency_ms = prompt_eval_duration_ms;
+
+    // Total response time = Full request duration from Ollama's perspective
+    let total_response_time_ms = total_duration_ms;
+
+    // Tokens per second = Using Ollama's actual generation time
+    let tokens_per_second = if eval_duration_ms > 0.0 {
+        (eval_count as f64) / (eval_duration_ms / 1000.0)
+    } else {
+        -1.0 // Invalid data marker
+    };
+
+    // Average time per token = Using Ollama's generation time
+    let avg_token_latency = if eval_count > 0 {
+        eval_duration_ms / eval_count as f64
+    } else {
+        -1.0 // Invalid data marker
+    };
+
+    // === Resource metrics from our process-specific sampling ===
     // Refresh final system state
     sys.refresh_all();
     let memory_after_mb = (sys.used_memory() as f64) / 1024.0 / 1024.0;
@@ -214,49 +225,15 @@ Guidelines:
     let peak_memory_mb = *peak_memory.lock().await;
 
     // Calculate average CPU from samples
-    let cpu_samples_vec = cpu_samples.lock().await;
-    let avg_cpu = if !cpu_samples_vec.is_empty() {
-        cpu_samples_vec.iter().sum::<f64>() / cpu_samples_vec.len() as f64
-    } else {
-        0.0
-    };
-    drop(cpu_samples_vec);
+    let avg_cpu = cpu_samples_vec.iter().sum::<f64>() / cpu_samples_vec.len() as f64;
 
     // Calculate average memory during inference
-    let memory_samples_vec = memory_samples.lock().await;
-    let avg_memory_during = if !memory_samples_vec.is_empty() {
-        memory_samples_vec.iter().sum::<f64>() / memory_samples_vec.len() as f64
-    } else {
-        memory_after_mb
-    };
-    drop(memory_samples_vec);
-
-    // Use actual token count from Ollama metadata (most accurate)
-    // Fallback to character-based estimation only if metadata unavailable
-    let response_tokens = actual_token_count.unwrap_or_else(|| {
-        // Estimate using configured chars-per-token ratio
-        (response_content.len() / CHARS_PER_TOKEN_ESTIMATE).max(1)
-    });
-
-    // Calculate metrics
-    let first_token_latency_ms = first_token_time.unwrap_or(total_time);
-
-    let tokens_per_second = if total_time > 0.0 {
-        (response_tokens as f64) / (total_time / 1000.0)
-    } else {
-        0.0
-    };
-
-    let avg_token_latency = if response_tokens > 0 {
-        total_time / response_tokens as f64
-    } else {
-        0.0
-    };
+    let avg_memory_during = memory_samples_vec.iter().sum::<f64>() / memory_samples_vec.len() as f64;
 
     Ok((
         BenchmarkMetrics {
             first_token_latency_ms,
-            total_response_time_ms: total_time,
+            total_response_time_ms,
             tokens_per_second,
             avg_token_latency_ms: avg_token_latency,
             memory_before_mb,
@@ -267,7 +244,7 @@ Guidelines:
             model_name: model,
             prompt_type: category.as_str().to_string(),
             prompt,
-            response_tokens,
+            response_tokens: eval_count,
             timestamp: get_timestamp(),
             iteration,
         },
