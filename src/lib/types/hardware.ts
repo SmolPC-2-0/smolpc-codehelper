@@ -2,6 +2,8 @@ export interface HardwareInfo {
 	cpu: CpuInfo;
 	gpus: GpuInfo[];
 	npu?: NpuInfo;
+	memory: MemoryInfo;
+	storage: StorageInfo;
 	detected_at: string;
 }
 
@@ -38,6 +40,7 @@ export interface GpuInfo {
 	vram_mb?: number;
 	temperature_c?: number;
 	utilization_percent?: number;
+	cuda_compute_capability?: string;
 }
 
 export interface NpuInfo {
@@ -45,4 +48,16 @@ export interface NpuInfo {
 	confidence: 'High' | 'Medium' | 'Low';
 	details: string;
 	method: string;
+}
+
+export interface MemoryInfo {
+	total_gb: number;
+	available_gb: number;
+}
+
+export interface StorageInfo {
+	total_gb: number;
+	available_gb: number;
+	is_ssd: boolean;
+	device_name: string;
 }

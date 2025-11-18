@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { hardwareStore } from '$lib/stores/hardware.svelte';
-	import { Cpu, Gpu, Zap, RefreshCw, X } from '@lucide/svelte';
+	import { Cpu, Gpu, Zap, RefreshCw, X, MemoryStick, HardDrive } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 
 	interface Props {
@@ -168,6 +168,50 @@
 					</div>
 				</div>
 
+				<!-- Memory Information -->
+				<div class="rounded-lg border border-border p-4">
+					<div class="mb-3 flex items-center gap-2">
+						<MemoryStick class="h-4 w-4 text-primary" />
+						<h4 class="font-semibold">Memory</h4>
+					</div>
+					<div class="space-y-2 text-sm">
+						<div class="grid grid-cols-3 gap-2">
+							<span class="text-muted-foreground">Total:</span>
+							<span class="col-span-2 font-medium">{hardwareStore.info.memory.total_gb.toFixed(1)} GB</span>
+						</div>
+						<div class="grid grid-cols-3 gap-2">
+							<span class="text-muted-foreground">Available:</span>
+							<span class="col-span-2">{hardwareStore.info.memory.available_gb.toFixed(1)} GB</span>
+						</div>
+					</div>
+				</div>
+
+				<!-- Storage Information -->
+				<div class="rounded-lg border border-border p-4">
+					<div class="mb-3 flex items-center gap-2">
+						<HardDrive class="h-4 w-4 text-primary" />
+						<h4 class="font-semibold">Primary Storage</h4>
+					</div>
+					<div class="space-y-2 text-sm">
+						<div class="grid grid-cols-3 gap-2">
+							<span class="text-muted-foreground">Device:</span>
+							<span class="col-span-2 font-medium">{hardwareStore.info.storage.device_name}</span>
+						</div>
+						<div class="grid grid-cols-3 gap-2">
+							<span class="text-muted-foreground">Type:</span>
+							<span class="col-span-2">{hardwareStore.info.storage.is_ssd ? 'SSD' : 'HDD'}</span>
+						</div>
+						<div class="grid grid-cols-3 gap-2">
+							<span class="text-muted-foreground">Capacity:</span>
+							<span class="col-span-2">{hardwareStore.info.storage.total_gb.toFixed(0)} GB</span>
+						</div>
+						<div class="grid grid-cols-3 gap-2">
+							<span class="text-muted-foreground">Available:</span>
+							<span class="col-span-2">{hardwareStore.info.storage.available_gb.toFixed(0)} GB</span>
+						</div>
+					</div>
+				</div>
+
 				<!-- GPU Information -->
 				<div class="rounded-lg border border-border p-4">
 					<div class="mb-3 flex items-center gap-2">
@@ -205,6 +249,12 @@
 										<div class="grid grid-cols-3 gap-2">
 											<span class="text-muted-foreground">VRAM:</span>
 											<span class="col-span-2">{gpu.vram_mb} MB</span>
+										</div>
+									{/if}
+									{#if gpu.cuda_compute_capability}
+										<div class="grid grid-cols-3 gap-2">
+											<span class="text-muted-foreground">CUDA:</span>
+											<span class="col-span-2">{gpu.cuda_compute_capability}</span>
 										</div>
 									{/if}
 								</div>

@@ -403,6 +403,16 @@ pub async fn run_benchmark_suite(
             },
             gpus: vec![],
             npu: None,
+            memory: hardware::types::MemoryInfo {
+                total_gb: 0.0,
+                available_gb: 0.0,
+            },
+            storage: hardware::types::StorageInfo {
+                total_gb: 0.0,
+                available_gb: 0.0,
+                is_ssd: false,
+                device_name: "Unknown".to_string(),
+            },
             detected_at: chrono::Utc::now().to_rfc3339(),
         }
     });

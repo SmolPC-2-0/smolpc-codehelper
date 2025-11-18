@@ -6,6 +6,8 @@ pub struct HardwareInfo {
     pub cpu: CpuInfo,
     pub gpus: Vec<GpuInfo>,
     pub npu: Option<NpuInfo>,
+    pub memory: MemoryInfo,
+    pub storage: StorageInfo,
     pub detected_at: String,
 }
 
@@ -48,6 +50,7 @@ pub struct GpuInfo {
     pub vram_mb: Option<u64>,
     pub temperature_c: Option<u32>,
     pub utilization_percent: Option<u32>,
+    pub cuda_compute_capability: Option<String>,
 }
 
 /// GPU vendor enumeration
@@ -108,4 +111,20 @@ pub enum NpuConfidence {
     High,   // DirectML/DXCore confirmed
     Medium, // CPU model match
     Low,    // Generic heuristic
+}
+
+/// System memory information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryInfo {
+    pub total_gb: f64,
+    pub available_gb: f64,
+}
+
+/// Primary storage device information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageInfo {
+    pub total_gb: f64,
+    pub available_gb: f64,
+    pub is_ssd: bool,
+    pub device_name: String,
 }
