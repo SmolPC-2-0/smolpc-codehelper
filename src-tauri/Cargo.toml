@@ -33,13 +33,5 @@ sysinfo = "0.32"
 csv = "1.3"
 chrono = "0.4"
 
-# Hardware detection dependencies
-wgpu = "23"
-
-# x86/x86_64-specific CPU detection
-[target.'cfg(any(target_arch = "x86", target_arch = "x86_64"))'.dependencies]
-raw-cpuid = "11"
-
-# Windows-specific NPU detection
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.57", features = ["Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi"] }
+# Hardware detection
+hardware-query = "0.2.1"
