@@ -18,6 +18,7 @@
 	onMount(() => {
 		let unlistenProgress: (() => void) | undefined;
 		let unlistenComplete: (() => void) | undefined;
+		let cancelled = false;
 
 		// Setup async listeners
 		async function setupListeners() {
@@ -28,10 +29,19 @@
 				console.error('Failed to get benchmarks directory:', error);
 			}
 
+			// Check if component was unmounted during async operation
+			if (cancelled) return;
+
 			// Listen for progress updates
 			unlistenProgress = await listen<BenchmarkProgress>('benchmark_progress', (event) => {
 				benchmarkStore.updateProgress(event.payload);
 			});
+
+			// Check again after each async operation
+			if (cancelled) {
+				unlistenProgress?.();
+				return;
+			}
 
 			// Listen for completion
 			unlistenComplete = await listen<string>('benchmark_complete', (event) => {
@@ -39,13 +49,25 @@
 			});
 		}
 
+		// Handle ESC key to close panel
+		function handleKeydown(event: KeyboardEvent) {
+			if (event.key === 'Escape' && visible) {
+				closePanel();
+			}
+		}
+
 		// Start async setup
 		setupListeners();
 
+		// Add keyboard listener
+		window.addEventListener('keydown', handleKeydown);
+
 		// Return synchronous cleanup function
 		return () => {
-			if (unlistenProgress) unlistenProgress();
-			if (unlistenComplete) unlistenComplete();
+			cancelled = true;
+			unlistenProgress?.();
+			unlistenComplete?.();
+			window.removeEventListener('keydown', handleKeydown);
 		};
 	});
 

@@ -76,13 +76,22 @@ pub fn export_to_csv(results: &BenchmarkResults, prefix: &str) -> Result<PathBuf
         .map_err(|e| format!("Failed to create CSV file: {}", e))?;
 
     // Write all metrics using serde serialization (automatic headers and column ordering)
-    for metric in &results.metrics {
+    // Flush periodically for crash safety
+    const FLUSH_INTERVAL: usize = 10;
+
+    for (index, metric) in results.metrics.iter().enumerate() {
         let csv_row = CsvMetricRow::from(metric);
         wtr.serialize(csv_row)
             .map_err(|e| format!("Failed to serialize metric row: {}", e))?;
+
+        // Periodic flush every 10 rows to prevent data loss on crash
+        if (index + 1) % FLUSH_INTERVAL == 0 {
+            wtr.flush()
+                .map_err(|e| format!("Failed to flush CSV writer during periodic flush: {}", e))?;
+        }
     }
 
-    // Flush the writer
+    // Final flush to ensure all data is written
     wtr.flush()
         .map_err(|e| format!("Failed to flush CSV writer: {}", e))?;
 
@@ -166,4 +175,182 @@ Import CSV files into Excel, Google Sheets, or data analysis tools for visualiza
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::benchmark::metrics::{BenchmarkMetrics, BenchmarkSummary};
+
+    fn create_test_metric() -> BenchmarkMetrics {
+        BenchmarkMetrics {
+            first_token_latency_ms: 100.0,
+            total_response_time_ms: 1000.0,
+            tokens_per_second: 10.0,
+            avg_token_latency_ms: 100.0,
+            memory_before_mb: 1000.0,
+            memory_during_mb: 1100.0,
+            memory_after_mb: 1000.0,
+            peak_memory_mb: 1200.0,
+            cpu_usage_percent: 50.0,
+            model_name: "test-model".to_string(),
+            prompt_type: "short".to_string(),
+            prompt: "test prompt".to_string(),
+            response_tokens: 100,
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+            iteration: 1,
+        }
+    }
+
+    #[test]
+    fn test_csv_metric_row_conversion() {
+        let metric = create_test_metric();
+        let csv_row = CsvMetricRow::from(&metric);
+
+        assert_eq!(csv_row.timestamp, "2025-01-01T00:00:00Z");
+        assert_eq!(csv_row.iteration, 1);
+        assert_eq!(csv_row.category, "short");
+        assert_eq!(csv_row.model, "test-model");
+        assert_eq!(csv_row.first_token_ms, "100.00");
+        assert_eq!(csv_row.total_time_ms, "1000.00");
+        assert_eq!(csv_row.tokens_per_sec, "10.00");
+        assert_eq!(csv_row.response_tokens, 100);
+        assert_eq!(csv_row.prompt, "test prompt");
+    }
+
+    #[test]
+    fn test_csv_metric_row_formatting() {
+        let metric = BenchmarkMetrics {
+            first_token_latency_ms: 123.456,
+            total_response_time_ms: 1234.567,
+            tokens_per_second: 12.345,
+            avg_token_latency_ms: 98.765,
+            memory_before_mb: 1000.123,
+            memory_during_mb: 1100.456,
+            memory_after_mb: 1000.789,
+            peak_memory_mb: 1200.987,
+            cpu_usage_percent: 55.555,
+            model_name: "test".to_string(),
+            prompt_type: "medium".to_string(),
+            prompt: "prompt".to_string(),
+            response_tokens: 200,
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+            iteration: 2,
+        };
+
+        let csv_row = CsvMetricRow::from(&metric);
+
+        // Verify 2 decimal place formatting
+        assert_eq!(csv_row.first_token_ms, "123.46");
+        assert_eq!(csv_row.total_time_ms, "1234.57");
+        assert_eq!(csv_row.tokens_per_sec, "12.35");
+        assert_eq!(csv_row.memory_peak_mb, "1200.99");
+        assert_eq!(csv_row.cpu_percent, "55.56");
+    }
+
+    #[test]
+    fn test_generate_filename() {
+        let filename = generate_filename("test-prefix");
+
+        assert!(filename.starts_with("test-prefix-"));
+        assert!(filename.ends_with(".csv"));
+        assert!(filename.contains("-"));
+
+        // Should contain timestamp components (year-month-day_hour-minute-second)
+        let parts: Vec<&str> = filename.split('-').collect();
+        assert!(parts.len() >= 6, "Filename should contain date/time components");
+    }
+
+    #[test]
+    fn test_export_to_csv_creates_file() {
+        let metric = create_test_metric();
+        let results = BenchmarkResults {
+            metrics: vec![metric],
+            summary: vec![],
+            total_duration_seconds: 10.0,
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+        };
+
+        let result = export_to_csv(&results, "test");
+
+        assert!(result.is_ok(), "CSV export should succeed");
+
+        let filepath = result.unwrap();
+        assert!(filepath.exists(), "CSV file should be created");
+        assert_eq!(filepath.extension().unwrap(), "csv");
+
+        // Cleanup
+        let _ = std::fs::remove_file(&filepath);
+    }
+
+    #[test]
+    fn test_export_to_csv_content_validation() {
+        let metric = create_test_metric();
+        let results = BenchmarkResults {
+            metrics: vec![metric],
+            summary: vec![],
+            total_duration_seconds: 10.0,
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+        };
+
+        let filepath = export_to_csv(&results, "test").unwrap();
+
+        // Read the CSV file and verify content
+        let content = std::fs::read_to_string(&filepath).unwrap();
+
+        // Check for header row
+        assert!(content.contains("timestamp,iteration,category,model"));
+        assert!(content.contains("first_token_ms,total_time_ms,tokens_per_sec"));
+
+        // Check for data row
+        assert!(content.contains("2025-01-01T00:00:00Z"));
+        assert!(content.contains("test-model"));
+        assert!(content.contains("short"));
+        assert!(content.contains("test prompt"));
+
+        // Cleanup
+        let _ = std::fs::remove_file(&filepath);
+    }
+
+    #[test]
+    fn test_export_to_csv_multiple_rows() {
+        let results = BenchmarkResults {
+            metrics: vec![
+                create_test_metric(),
+                BenchmarkMetrics {
+                    prompt_type: "medium".to_string(),
+                    iteration: 2,
+                    ..create_test_metric()
+                },
+            ],
+            summary: vec![],
+            total_duration_seconds: 20.0,
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+        };
+
+        let filepath = export_to_csv(&results, "test").unwrap();
+        let content = std::fs::read_to_string(&filepath).unwrap();
+
+        // Should have header + 2 data rows
+        let line_count = content.lines().count();
+        assert_eq!(line_count, 3, "Should have header + 2 data rows");
+
+        // Should contain both categories
+        assert!(content.contains("short"));
+        assert!(content.contains("medium"));
+
+        // Cleanup
+        let _ = std::fs::remove_file(&filepath);
+    }
+
+    #[test]
+    fn test_get_benchmarks_dir_creates_directory() {
+        let result = get_benchmarks_dir();
+        assert!(result.is_ok(), "Should create benchmarks directory");
+
+        let path = result.unwrap();
+        assert!(path.exists(), "Benchmarks directory should exist");
+        assert!(path.is_dir(), "Path should be a directory");
+        assert_eq!(path.file_name().unwrap(), "benchmarks");
+    }
 }

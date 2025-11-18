@@ -8,6 +8,17 @@ use std::time::Instant;
 use sysinfo::System;
 use tokio::sync::Mutex;
 
+// Benchmark configuration constants
+/// Interval (in milliseconds) for sampling CPU and memory during inference
+const RESOURCE_SAMPLING_INTERVAL_MS: u64 = 100;
+
+/// Delay (in milliseconds) between tests to allow system stabilization
+const TEST_STABILIZATION_DELAY_MS: u64 = 500;
+
+/// Estimated average characters per token for fallback token counting
+/// Used only when Ollama metadata is unavailable
+const CHARS_PER_TOKEN_ESTIMATE: usize = 4;
+
 /// Progress update event for the frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkProgress {
@@ -74,6 +85,9 @@ Guidelines:
     let memory_samples = Arc::new(Mutex::new(Vec::new()));
     let sampling_active = Arc::new(Mutex::new(true));
 
+    // Channel for signaling sampling task completion
+    let (sampling_done_tx, sampling_done_rx) = tokio::sync::oneshot::channel();
+
     // Spawn background task for periodic resource sampling
     let peak_memory_clone = Arc::clone(&peak_memory);
     let cpu_samples_clone = Arc::clone(&cpu_samples);
@@ -100,8 +114,10 @@ Guidelines:
             cpu_samples_clone.lock().await.push(current_cpu as f64);
             memory_samples_clone.lock().await.push(current_memory);
 
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(RESOURCE_SAMPLING_INTERVAL_MS)).await;
         }
+        // Signal completion when loop exits
+        let _ = sampling_done_tx.send(());
     });
 
     // Start timing and make streaming request
@@ -149,8 +165,9 @@ Guidelines:
                 }
             }
             Err(e) => {
-                // Stop sampling on error
+                // Stop sampling on error and wait for cleanup
                 *sampling_active.lock().await = false;
+                let _ = sampling_done_rx.await;
                 return Err(format!("Stream error while reading from Ollama: {}", e));
             }
         }
@@ -159,9 +176,9 @@ Guidelines:
     // End timing
     let total_time = start_time.elapsed().as_millis() as f64;
 
-    // Stop resource sampling
+    // Stop resource sampling and wait for completion
     *sampling_active.lock().await = false;
-    tokio::time::sleep(tokio::time::Duration::from_millis(150)).await; // Wait for last sample
+    let _ = sampling_done_rx.await; // Wait for sampling task to actually finish
 
     // Refresh final system state
     sys.refresh_all();
@@ -191,8 +208,8 @@ Guidelines:
     // Use actual token count from Ollama metadata (most accurate)
     // Fallback to character-based estimation only if metadata unavailable
     let response_tokens = actual_token_count.unwrap_or_else(|| {
-        // Estimate: ~4 characters per token on average
-        (response_content.len() / 4).max(1)
+        // Estimate using configured chars-per-token ratio
+        (response_content.len() / CHARS_PER_TOKEN_ESTIMATE).max(1)
     });
 
     // Calculate metrics
@@ -301,7 +318,7 @@ pub async fn run_benchmark_suite(
             all_metrics.push(metrics);
 
             // Small delay between tests to let system stabilize
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(TEST_STABILIZATION_DELAY_MS)).await;
         }
     }
 
