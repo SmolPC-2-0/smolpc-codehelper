@@ -5,6 +5,16 @@ import os
 import traceback
 import socket
 
+# Add script directory to Python path for LibreOffice macro execution
+try:
+    script_dir = os.path.dirname(__file__)
+except NameError:
+    # Running as LibreOffice macro - __file__ not available
+    script_dir = os.path.expanduser("~/Library/Application Support/LibreOffice/4/user/Scripts/python")
+
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
+
 from helper_utils import (
     managed_document,
     normalize_path,
