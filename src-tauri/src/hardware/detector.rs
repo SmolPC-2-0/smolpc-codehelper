@@ -34,9 +34,9 @@ fn convert_cpu_info(hw_info: &hardware_query::HardwareInfo) -> CpuInfo {
         vendor: cpu.vendor().to_string(),
         brand: cpu.model_name().to_string(),
         architecture: std::env::consts::ARCH.to_string(),
-        cores_physical: cpu.physical_cores(),
-        cores_logical: cpu.logical_cores(),
-        frequency_mhz: cpu.max_frequency_mhz(),
+        cores_physical: cpu.physical_cores() as usize,
+        cores_logical: cpu.logical_cores() as usize,
+        frequency_mhz: Some(cpu.max_frequency() as u64),
         features: CpuFeatures {
             sse42: cpu.has_feature("sse4.2") || cpu.has_feature("sse42"),
             avx: cpu.has_feature("avx"),
@@ -46,9 +46,9 @@ fn convert_cpu_info(hw_info: &hardware_query::HardwareInfo) -> CpuInfo {
             neon: cpu.has_feature("neon"),
             sve: cpu.has_feature("sve"),
         },
-        cache_l1_kb: cpu.l1_cache_kb(),
-        cache_l2_kb: cpu.l2_cache_kb(),
-        cache_l3_kb: cpu.l3_cache_kb(),
+        cache_l1_kb: Some(cpu.l1_cache_kb() as usize),
+        cache_l2_kb: Some(cpu.l2_cache_kb() as usize),
+        cache_l3_kb: Some(cpu.l3_cache_kb() as usize),
     }
 }
 
@@ -58,7 +58,8 @@ fn convert_gpu_info(hw_info: &hardware_query::HardwareInfo) -> Vec<GpuInfo> {
         .gpus()
         .iter()
         .map(|gpu| {
-            let vendor = match gpu.vendor().to_lowercase().as_str() {
+            let vendor_str = gpu.vendor().to_string().to_lowercase();
+            let vendor = match vendor_str.as_str() {
                 v if v.contains("nvidia") => GpuVendor::Nvidia,
                 v if v.contains("amd") || v.contains("ati") => GpuVendor::Amd,
                 v if v.contains("intel") => GpuVendor::Intel,
@@ -67,14 +68,31 @@ fn convert_gpu_info(hw_info: &hardware_query::HardwareInfo) -> Vec<GpuInfo> {
                 _ => GpuVendor::Unknown,
             };
 
+            // Determine backend based on supported APIs
+            let backend = if gpu.supports_metal() {
+                "Metal"
+            } else if gpu.supports_directml() {
+                "DirectX 12"
+            } else if gpu.supports_vulkan() {
+                "Vulkan"
+            } else if gpu.supports_cuda() {
+                "CUDA"
+            } else if gpu.supports_opencl() {
+                "OpenCL"
+            } else {
+                "Unknown"
+            };
+
+            let device_type = gpu.gpu_type().to_string();
+
             GpuInfo {
                 name: gpu.model_name().to_string(),
                 vendor,
-                backend: gpu.api().unwrap_or("Unknown").to_string(),
-                device_type: gpu.device_type().to_string(),
-                vram_mb: gpu.memory_mb(),
-                temperature_c: gpu.temperature_c(),
-                utilization_percent: gpu.utilization_percent(),
+                backend: backend.to_string(),
+                device_type,
+                vram_mb: Some(gpu.memory_mb()),
+                temperature_c: gpu.temperature().map(|t| t as u32),
+                utilization_percent: gpu.usage_percent().map(|u| u as u32),
             }
         })
         .collect()
@@ -88,10 +106,16 @@ fn convert_npu_info(hw_info: &hardware_query::HardwareInfo) -> Option<NpuInfo> {
 
     let npu = &hw_info.npus()[0]; // Use first NPU
 
+    let details = if let Some(tops) = npu.tops_performance() {
+        format!("{} {} - {:.1} TOPS", npu.vendor(), npu.model_name(), tops)
+    } else {
+        format!("{} {}", npu.vendor(), npu.model_name())
+    };
+
     Some(NpuInfo {
         detected: true,
         confidence: NpuConfidence::High, // hardware-query provides actual detection
-        details: format!("{} - {}", npu.vendor(), npu.model_name()),
+        details,
         method: "hardware-query offline detection".to_string(),
     })
 }
