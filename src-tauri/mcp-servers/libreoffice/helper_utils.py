@@ -12,7 +12,14 @@ def _setup_module_logging():
     """Internal function to set up logging for this module."""
     try:
         # Get the directory of this file
-        module_dir = os.path.dirname(__file__)
+        try:
+            module_dir = os.path.dirname(__file__)
+        except NameError:
+            # Running as LibreOffice macro - __file__ not available
+            import uno
+            ctx = uno.getComponentContext()
+            module_dir = os.path.expanduser("~/Library/Application Support/LibreOffice/4/user/Scripts/python")
+
         log_path = os.path.join(module_dir, "helper.log")
 
         # Clear existing handlers
