@@ -4,6 +4,8 @@
 
 SmolPC Code Helper is an offline AI-powered coding assistant designed specifically for secondary school students (ages 11-18). Built with Svelte 5, Tauri 2, and Rust, it provides a modern, professional desktop application for learning programming with AI assistance that runs completely offline after initial setup.
 
+**Current Version**: 2.1.0 (Production-Grade Benchmark System)
+
 ## Technology Stack
 
 ### Frontend
@@ -19,13 +21,15 @@ SmolPC Code Helper is an offline AI-powered coding assistant designed specifical
 - **Language**: Rust
 - **HTTP Client**: reqwest (with streaming support)
 - **Async Runtime**: tokio
+- **System Monitoring**: sysinfo (process-specific resource tracking)
 - **File Dialogs**: rfd
 
 ### AI Integration
-- **Runtime**: Ollama (local, offline)
+- **Current Runtime**: Ollama (local, offline, HTTP API)
 - **Primary Model**: Qwen 2.5 Coder (7B)
 - **Secondary Model**: DeepSeek Coder (6.7B)
 - **API**: HTTP streaming to localhost:11434
+- **Future**: In-process llama.cpp integration (next optimization phase)
 
 ## Architecture
 
@@ -65,21 +69,43 @@ smolpc-codehelper/
 │   ├── src/
 │   │   ├── lib.rs                      # Main application setup
 │   │   ├── main.rs                     # Entry point
-│   │   └── commands/                   # Tauri command handlers
+│   │   ├── commands.rs                 # Command module aggregator
+│   │   ├── commands/                   # Tauri command handlers
+│   │   │   ├── mod.rs                  # Module exports
+│   │   │   ├── errors.rs               # Error handling
+│   │   │   ├── ollama.rs               # Ollama integration
+│   │   │   ├── default.rs              # File I/O operations
+│   │   │   └── benchmark.rs            # Benchmark Tauri commands
+│   │   └── benchmark/                  # Benchmark System (v2.1.0)
 │   │       ├── mod.rs                  # Module exports
-│   │       ├── errors.rs               # Error handling
-│   │       ├── ollama.rs               # Ollama integration
-│   │       └── default.rs              # File I/O operations
+│   │       ├── runner.rs               # Production-grade data collection
+│   │       ├── metrics.rs              # Benchmark data structures
+│   │       ├── test_suite.rs           # Standardized test prompts
+│   │       └── export.rs               # CSV export functionality
+│   ├── benchmarks/                     # Benchmark Results Storage
+│   │   ├── README.md                   # Methodology documentation
+│   │   └── *.csv                       # Benchmark data files
 │   ├── Cargo.toml                      # Rust dependencies
 │   ├── tauri.conf.json                 # Tauri configuration
 │   └── capabilities/                   # Security permissions
+│       └── default.json                # Permission definitions
+│
+├── .github/
+│   └── workflows/                      # GitHub Actions
+│       ├── claude-code-review.yml      # Automated PR review
+│       ├── claude.yml                  # Claude agent workflow
+│       ├── release.yml                 # Release automation
+│       └── test-build.yml              # Build verification
 │
 ├── package.json                         # Node dependencies
 ├── vite.config.ts                       # Vite configuration
 ├── svelte.config.js                     # Svelte preprocessor config
 ├── tailwind.config.js                   # Tailwind configuration
 ├── tsconfig.json                        # TypeScript configuration
-└── README.md                            # User documentation
+├── CHANGES.md                           # Version changelog
+├── PR_SUMMARY.md                        # Latest PR documentation
+├── README.md                            # User documentation
+└── claude.md                            # This file - workspace context
 ```
 
 ## Core Features
@@ -117,6 +143,119 @@ smolpc-codehelper/
 - **Local AI Models**: Ollama runs on localhost
 - **Bundled Dependencies**: All frontend libs bundled (no CDN)
 - **Local Storage**: Persistent data in browser localStorage
+
+### 6. Production-Grade Benchmarking (v2.1.0)
+- **Accuracy-First Design**: Suitable for academic research reports
+- **Process-Specific Monitoring**: Track Ollama inference process resources
+- **Native Metrics**: Token counts and timing from Ollama metadata (no estimation)
+- **Statistical Rigor**: Median calculations for outlier resistance
+- **CSV Export**: Import into Excel, Google Sheets, or analysis tools
+- **Standardized Test Suite**: Consistent prompts across short/medium/long/follow-up categories
+
+## Benchmark System (v2.1.0)
+
+### Purpose
+Measure AI model performance with production-grade accuracy for:
+- Academic research and reports
+- Performance regression detection
+- Model comparison across optimization phases
+- Resource utilization analysis
+
+### Architecture
+
+#### Core Modules
+
+**`benchmark/runner.rs`**: Production-grade data collection engine
+- Model warmup to eliminate first-call latency
+- Process-specific resource monitoring (CPU, memory)
+- 50ms sampling intervals for rigorous measurements
+- CPU baseline establishment (200ms required by sysinfo crate)
+- Non-streaming API calls for complete Ollama metadata access
+- Median calculations for statistical robustness
+
+**`benchmark/metrics.rs`**: Data structures and calculations
+- BenchmarkMetrics: Individual test results
+- BenchmarkResults: Full suite aggregation
+- Summary statistics: Per-category averages
+- Timestamp generation for test identification
+
+**`benchmark/test_suite.rs`**: Standardized test prompts
+- 12 tests across 4 categories: short/medium/long/follow-up
+- Student-focused programming prompts
+- Consistent workload for reliable comparisons
+- Context-aware follow-up tests
+
+**`benchmark/export.rs`**: CSV export functionality
+- Three-section format: data, summary, metadata
+- Excel/Google Sheets compatible
+- Versioned output files (prefix + timestamp)
+
+**`commands/benchmark.rs`**: Tauri command interface
+- `run_benchmark_suite()`: Frontend trigger
+- Progress events for UI updates
+- Error propagation to frontend
+
+### Measurement Methodology
+
+#### Token Metrics
+- **Source**: Ollama native metadata (`eval_count`)
+- **Accuracy**: No estimation or approximation
+- **Failure Mode**: Tests fail if metadata unavailable
+
+#### Timing Metrics
+- **Source**: Ollama nanosecond-precision timing
+- `first_token_ms`: From `prompt_eval_duration`
+- `total_time_ms`: From `total_duration`
+- `tokens_per_sec`: Calculated from `eval_count` / `eval_duration`
+- `avg_token_ms`: Calculated from `eval_duration` / `eval_count`
+
+#### Resource Monitoring
+- **Warmup Phase**: Load model, identify Ollama PID, eliminate cold start
+- **Process-Specific**: Monitor Ollama inference process only
+- **CPU Baseline**: 200ms delay between refresh cycles (sysinfo requirement)
+- **Sampling**: 50ms intervals during inference
+- **Memory Metrics**: Process-specific before/during(median)/peak/after
+- **Statistical Method**: Median for memory_during (outlier-resistant)
+
+### Known Limitations
+
+#### CPU Measurement Undercounting
+CPU shows ~4-16% instead of expected 50-100% due to HTTP API architecture:
+- **Ollama process**: ~16% CPU, ~85% GPU (GPU-accelerated inference)
+- **Code helper process**: ~40% CPU (HTTP client overhead, JSON parsing, async runtime)
+- **What we measure**: Ollama process only
+
+**Current Status**: Consistent measurements suitable for relative comparisons
+**Resolution**: Planned in-process llama.cpp integration will eliminate HTTP overhead
+
+#### GPU Metrics Not Captured
+Currently no GPU utilization tracking. For GPU-accelerated inference, low CPU usage is expected and legitimate.
+
+### CSV Output Format
+
+```csv
+# DATA SECTION
+timestamp,iteration,category,model,first_token_ms,total_time_ms,tokens_per_sec,avg_token_ms,memory_before_mb,memory_peak_mb,cpu_percent,response_tokens,prompt
+...
+
+# SUMMARY SECTION
+SUMMARY,avg_first_token_ms,avg_tokens_per_sec,avg_total_time_ms,avg_memory_mb,avg_cpu_percent,test_count
+...
+
+# METADATA SECTION
+Total Duration,<seconds>
+Benchmark Timestamp,<ISO8601>
+Total Tests,<count>
+```
+
+### Usage
+
+```bash
+# Run from Tauri frontend (future UI integration)
+# Or trigger via command handlers
+
+# Output: src-tauri/benchmarks/baseline-<timestamp>.csv
+```
 
 ## State Management (Svelte 5 Runes)
 
@@ -202,42 +341,13 @@ Optimized for secondary school students with:
 - Filters: Python, JavaScript, TypeScript, Rust, HTML, CSS, Text
 - Saves code to selected file
 
-## Markdown Rendering
+### Benchmark Operations (`benchmark.rs`)
 
-### Custom Implementation
-Due to environment constraints, a lightweight custom markdown parser is included:
-
-**Supported Features:**
-- Code blocks with language detection
-- Inline code
-- Headers (H1, H2, H3)
-- Bold/Italic
-- Links
-- Unordered/Ordered lists
-- Basic syntax highlighting (keywords, strings, numbers, comments)
-
-**Upgrading to Production:**
-When able to install packages:
-```bash
-npm install marked highlight.js
-```
-
-Then replace `/src/lib/utils/markdown.ts` with:
-```typescript
-import { marked } from 'marked';
-import hljs from 'highlight.js';
-
-export function renderMarkdown(text: string): string {
-  return marked(text, {
-    highlight: (code, lang) => {
-      if (lang && hljs.getLanguage(lang)) {
-        return hljs.highlight(code, { language: lang }).value;
-      }
-      return code;
-    }
-  });
-}
-```
+**`run_benchmark_suite(model, iterations) -> BenchmarkResults`**
+- Executes full benchmark suite
+- Emits progress events for UI updates
+- Returns structured results
+- Automatically exports to CSV
 
 ## Development
 
@@ -275,6 +385,19 @@ npm run lint
 
 # Formatting
 npm run format
+
+# Rust checks
+cd src-tauri
+cargo check
+cargo clippy
+cargo fmt
+```
+
+### Running Benchmarks
+```bash
+# Currently integrated into Tauri commands
+# Future: UI panel for benchmark execution
+# Manual: Trigger via frontend or command handlers
 ```
 
 ## Key Design Decisions
@@ -284,20 +407,20 @@ npm run format
 - **Implementation**: Custom store objects with runes for backward compatibility
 - **Benefits**: Better TypeScript support, less boilerplate
 
-### 2. Streaming Only
-- **Rationale**: Better UX with real-time feedback
-- **Removed**: Non-streaming `generate_code` command
-- **Benefits**: Faster perceived response time
+### 2. Streaming for UI, Non-Streaming for Benchmarks
+- **UI**: Streaming for real-time feedback and better UX
+- **Benchmarks**: Non-streaming for complete Ollama metadata access
+- **Trade-off**: Accuracy over real-time updates in benchmark context
 
 ### 3. LocalStorage Persistence
 - **Rationale**: Simple, reliable, no backend required
 - **Auto-save**: Every state change triggers persist
 - **Benefits**: Instant load times, no database needed
 
-### 4. Component Modularity
-- **Rationale**: Reusability and maintainability
-- **Pattern**: Small, focused components with clear props
-- **Benefits**: Easy testing, scalable architecture
+### 4. Process-Specific Monitoring
+- **Rationale**: Accurate measurements isolated from system noise
+- **Implementation**: Warmup phase identifies Ollama PID
+- **Benefits**: Reliable data regardless of background applications
 
 ### 5. TypeScript Throughout
 - **Rationale**: Type safety and better DX
@@ -313,9 +436,10 @@ npm run format
 - **Event Cleanup**: Proper listener disposal
 
 ### Backend
-- **Streaming**: Reduces memory footprint
+- **Streaming**: Reduces memory footprint for UI
 - **Connection Pooling**: Reuse HTTP connections
 - **Async/Await**: Non-blocking I/O operations
+- **Resource Sampling**: Efficient 50ms intervals with minimal overhead
 
 ## Security Considerations
 
@@ -327,15 +451,37 @@ npm run format
 ### File System
 - **User Consent**: File dialogs for all file operations
 - **No Auto-saves**: User explicitly chooses save locations
+- **Benchmark Data**: Isolated to benchmarks/ directory
 
 ### Tauri Permissions
 - **Minimal Scope**: Only required capabilities enabled
 - **File Access**: Limited to user-selected files
 - **Network**: Only localhost Ollama connection
 
-## Future Enhancements
+## Current Development Phase: Optimization
 
-### Planned Features
+### Completed (v2.1.0)
+- ✅ Production-grade benchmark system
+- ✅ Accurate process-specific monitoring
+- ✅ Statistical rigor (median, CPU baseline)
+- ✅ Comprehensive documentation
+
+### Next Phase: llama.cpp Integration
+**Goal**: Eliminate HTTP API overhead, improve performance
+
+**Benefits**:
+- Remove 40% CPU overhead from HTTP client
+- Simplify resource monitoring (single process)
+- Faster inference (no network layer)
+- Better resource measurements (capture total CPU)
+- Enable GPU metrics
+
+**Implementation**:
+- Replace Ollama HTTP calls with llama.cpp bindings
+- Update benchmark system for in-process monitoring
+- Maintain API compatibility for frontend
+
+### Future Enhancements
 1. **Export/Import**: Backup and restore chat history
 2. **Search**: Find messages across all chats
 3. **Code Execution**: Run code snippets safely
@@ -343,13 +489,8 @@ npm run format
 5. **Settings Panel**: Advanced configuration UI
 6. **Themes**: Light/dark mode with custom colors
 7. **Keyboard Shortcuts**: Power user efficiency
-8. **Chat Renaming**: Custom chat titles
-
-### Scalability Improvements
-1. **Database**: SQLite for large chat histories
-2. **Virtual Scrolling**: Handle thousands of messages
-3. **Web Workers**: Offload markdown rendering
-4. **Lazy Loading**: Load chats on demand
+8. **Benchmark UI**: Frontend panel for benchmark execution
+9. **GPU Metrics**: Track GPU utilization during inference
 
 ## Troubleshooting
 
@@ -368,6 +509,12 @@ npm run format
 - Reduce context window if using low-end hardware
 - Consider smaller models (1.5B variants)
 
+### Benchmark Issues
+- Ensure Ollama process is running before benchmarks
+- Check sufficient disk space in benchmarks/ directory
+- Review benchmark README.md for methodology details
+- CPU measurements ~4-16% are expected (HTTP architecture limitation)
+
 ## Contributing
 
 ### Code Style
@@ -375,11 +522,33 @@ npm run format
 - Follow TypeScript best practices
 - Write descriptive commit messages
 - Add comments for complex logic
+- Document production-grade code with rustdoc
 
 ### Testing
 - Test on multiple resolutions
 - Verify offline functionality
 - Check localStorage limits
+- Run benchmarks before/after optimizations
+
+### Benchmark Data
+- Commit benchmark CSVs with meaningful prefixes (baseline, phase1, phase2, etc.)
+- Document optimization changes in CHANGES.md
+- Compare before/after results in PR descriptions
+
+## Documentation
+
+### Key Files
+- **`README.md`**: User-facing documentation
+- **`claude.md`**: This file - full workspace context for AI assistants
+- **`CHANGES.md`**: Version changelog with detailed changes
+- **`PR_SUMMARY.md`**: Latest PR documentation
+- **`src-tauri/benchmarks/README.md`**: Benchmark methodology
+
+### Keeping Updated
+- Update CHANGES.md for each version
+- Create PR_SUMMARY.md for significant changes
+- Update this file when architecture changes
+- Document known limitations and trade-offs
 
 ## License
 
@@ -389,6 +558,7 @@ MIT License - See LICENSE file for details
 
 - **UI Framework**: Svelte Team
 - **Desktop Framework**: Tauri Team
-- **AI Runtime**: Ollama Team
+- **AI Runtime**: Ollama Team (current), llama.cpp (planned)
 - **Components**: shadcn-svelte
 - **Icons**: Lucide Icons
+- **System Monitoring**: sysinfo crate
