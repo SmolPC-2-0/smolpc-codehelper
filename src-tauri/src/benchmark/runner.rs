@@ -96,12 +96,38 @@ Guidelines:
 
     tokio::spawn(async move {
         let mut sys_sampler = System::new_all();
+        sys_sampler.refresh_all();
+
+        // Find Ollama process by name for process-specific monitoring
+        let ollama_pid = sys_sampler.processes().iter()
+            .find(|(_, process)| {
+                let name = process.name().to_lowercase();
+                name.contains("ollama")
+            })
+            .map(|(pid, _)| *pid);
+
         while *sampling_active_clone.lock().await {
             sys_sampler.refresh_all();
             sys_sampler.refresh_cpu_all();
 
-            let current_memory = (sys_sampler.used_memory() as f64) / 1024.0 / 1024.0;
-            let current_cpu = sys_sampler.global_cpu_usage();
+            let (current_memory, current_cpu) = if let Some(pid) = ollama_pid {
+                // Process-specific monitoring (preferred)
+                if let Some(process) = sys_sampler.process(pid) {
+                    let memory = (process.memory() as f64) / 1024.0 / 1024.0;
+                    let cpu = process.cpu_usage() as f64;
+                    (memory, cpu)
+                } else {
+                    // Fallback to system-wide if process disappeared
+                    let memory = (sys_sampler.used_memory() as f64) / 1024.0 / 1024.0;
+                    let cpu = sys_sampler.global_cpu_usage() as f64;
+                    (memory, cpu)
+                }
+            } else {
+                // Fallback to system-wide if Ollama process not found
+                let memory = (sys_sampler.used_memory() as f64) / 1024.0 / 1024.0;
+                let cpu = sys_sampler.global_cpu_usage() as f64;
+                (memory, cpu)
+            };
 
             // Update peak memory
             let mut peak = peak_memory_clone.lock().await;
@@ -111,7 +137,7 @@ Guidelines:
             drop(peak);
 
             // Store samples
-            cpu_samples_clone.lock().await.push(current_cpu as f64);
+            cpu_samples_clone.lock().await.push(current_cpu);
             memory_samples_clone.lock().await.push(current_memory);
 
             tokio::time::sleep(tokio::time::Duration::from_millis(RESOURCE_SAMPLING_INTERVAL_MS)).await;
