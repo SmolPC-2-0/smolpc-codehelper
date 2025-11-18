@@ -3,6 +3,7 @@ use super::test_suite::{get_test_suite, get_total_test_count, PromptCategory};
 use crate::commands::ollama::{OllamaConfig, OllamaMessage, OllamaRequest, OllamaResponse};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Instant;
 use sysinfo::System;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
@@ -15,6 +16,9 @@ const RESOURCE_SAMPLING_INTERVAL_MS: u64 = 50;
 /// Delay (in milliseconds) between tests to allow system stabilization
 const TEST_STABILIZATION_DELAY_MS: u64 = 500;
 
+/// Delay (in milliseconds) for CPU baseline establishment
+const CPU_BASELINE_DELAY_MS: u64 = 200;
+
 /// Progress update event for the frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkProgress {
@@ -22,6 +26,58 @@ pub struct BenchmarkProgress {
     pub total: usize,
     pub current_test: String,
     pub iteration: usize,
+}
+
+/// Warmup function to load model and identify Ollama process
+/// This eliminates first-call latency and establishes process monitoring
+async fn warmup_and_find_ollama_process(
+    model: &str,
+    client: &reqwest::Client,
+    config: &OllamaConfig,
+) -> Result<sysinfo::Pid, String> {
+    // Make a minimal request to load the model
+    let warmup_messages = vec![OllamaMessage {
+        role: "user".to_string(),
+        content: "Hi".to_string(),
+    }];
+
+    let request = OllamaRequest {
+        model: model.to_string(),
+        messages: warmup_messages,
+        stream: false,
+    };
+
+    let url = format!("{}/api/chat", config.base_url());
+    let _response = client
+        .post(&url)
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| format!("Warmup request failed: {}", e))?;
+
+    // Give Ollama a moment to fully initialize the model
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Find the Ollama process
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    let ollama_pid = sys
+        .processes()
+        .iter()
+        .find(|(_, process)| {
+            let name = process.name().to_lowercase();
+            name.contains("ollama")
+        })
+        .map(|(pid, _)| *pid)
+        .ok_or_else(|| {
+            "CRITICAL ERROR: Could not find Ollama process. \
+             Benchmark requires process-specific monitoring. \
+             Ensure Ollama is running before starting benchmark."
+                .to_string()
+        })?;
+
+    Ok(ollama_pid)
 }
 
 /// Run a single benchmark test and collect metrics with accurate streaming measurements
@@ -34,12 +90,16 @@ async fn run_single_test(
     context: Option<Vec<OllamaMessage>>,
     client: &reqwest::Client,
     config: &OllamaConfig,
+    ollama_pid: sysinfo::Pid,
 ) -> Result<(BenchmarkMetrics, String), String> {
     let mut sys = System::new_all();
     sys.refresh_all();
 
-    // Capture initial memory state
-    let memory_before_mb = (sys.used_memory() as f64) / 1024.0 / 1024.0;
+    // Capture initial process-specific memory state
+    let memory_before_mb = sys
+        .process(ollama_pid)
+        .map(|p| (p.memory() as f64) / 1024.0 / 1024.0)
+        .ok_or_else(|| "Ollama process disappeared before test started".to_string())?;
 
     // Build messages array
     let system_prompt = r#"You are a helpful coding assistant designed for secondary school students (ages 11-18).
@@ -94,52 +154,41 @@ Guidelines:
         let mut sys_sampler = System::new_all();
         sys_sampler.refresh_all();
 
-        // Find Ollama process by name for MANDATORY process-specific monitoring
-        let ollama_pid = sys_sampler.processes().iter()
-            .find(|(_, process)| {
-                let name = process.name().to_string_lossy().to_lowercase();
-                name.contains("ollama")
-            })
-            .map(|(pid, _)| *pid);
+        // Establish CPU baseline - requires initial refresh + delay + second refresh
+        sys_sampler.refresh_cpu_all();
+        tokio::time::sleep(tokio::time::Duration::from_millis(CPU_BASELINE_DELAY_MS)).await;
+        sys_sampler.refresh_cpu_all();
 
-        // Store PID for validation (None means we couldn't find Ollama process)
-        let mut found_ollama = ollama_pid.is_some();
-
+        // Use the pre-identified Ollama PID (passed in as parameter)
+        // No need to search - we already found it during warmup
         while *sampling_active_clone.lock().await {
             sys_sampler.refresh_all();
             sys_sampler.refresh_cpu_all();
 
-            if let Some(pid) = ollama_pid {
-                // Process-specific monitoring (REQUIRED)
-                if let Some(process) = sys_sampler.process(pid) {
-                    let memory = (process.memory() as f64) / 1024.0 / 1024.0;
-                    let cpu = process.cpu_usage() as f64;
+            // Process-specific monitoring (REQUIRED)
+            if let Some(process) = sys_sampler.process(ollama_pid) {
+                let memory = (process.memory() as f64) / 1024.0 / 1024.0;
+                let cpu = process.cpu_usage() as f64;
 
-                    // Update peak memory
-                    let mut peak = peak_memory_clone.lock().await;
-                    if memory > *peak {
-                        *peak = memory;
-                    }
-                    drop(peak);
-
-                    // Store samples
-                    cpu_samples_clone.lock().await.push(cpu);
-                    memory_samples_clone.lock().await.push(memory);
-                } else {
-                    // Process disappeared during monitoring - this is a problem
-                    found_ollama = false;
-                    break;
+                // Update peak memory
+                let mut peak = peak_memory_clone.lock().await;
+                if memory > *peak {
+                    *peak = memory;
                 }
+                drop(peak);
+
+                // Store samples
+                cpu_samples_clone.lock().await.push(cpu);
+                memory_samples_clone.lock().await.push(memory);
             } else {
-                // No Ollama process found - cannot continue
-                found_ollama = false;
+                // Process disappeared during monitoring - this is a critical error
                 break;
             }
 
             tokio::time::sleep(tokio::time::Duration::from_millis(RESOURCE_SAMPLING_INTERVAL_MS)).await;
         }
 
-        // Signal completion and return whether monitoring was successful
+        // Signal completion
         let _ = sampling_done_tx.send(());
     });
 
@@ -218,9 +267,12 @@ Guidelines:
     };
 
     // === Resource metrics from our process-specific sampling ===
-    // Refresh final system state
+    // Refresh final system state and get process-specific memory
     sys.refresh_all();
-    let memory_after_mb = (sys.used_memory() as f64) / 1024.0 / 1024.0;
+    let memory_after_mb = sys
+        .process(ollama_pid)
+        .map(|p| (p.memory() as f64) / 1024.0 / 1024.0)
+        .ok_or_else(|| "Ollama process disappeared after test completed".to_string())?;
 
     // Get peak memory from sampling
     let peak_memory_mb = *peak_memory.lock().await;
@@ -228,8 +280,15 @@ Guidelines:
     // Calculate average CPU from samples
     let avg_cpu = cpu_samples_vec.iter().sum::<f64>() / cpu_samples_vec.len() as f64;
 
-    // Calculate average memory during inference
-    let avg_memory_during = memory_samples_vec.iter().sum::<f64>() / memory_samples_vec.len() as f64;
+    // Calculate MEDIAN memory during inference (more robust to outliers than average)
+    let mut sorted_memory = memory_samples_vec.clone();
+    sorted_memory.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let median_memory_during = if sorted_memory.len() % 2 == 0 {
+        let mid = sorted_memory.len() / 2;
+        (sorted_memory[mid - 1] + sorted_memory[mid]) / 2.0
+    } else {
+        sorted_memory[sorted_memory.len() / 2]
+    };
 
     Ok((
         BenchmarkMetrics {
@@ -238,7 +297,7 @@ Guidelines:
             tokens_per_second,
             avg_token_latency_ms: avg_token_latency,
             memory_before_mb,
-            memory_during_mb: avg_memory_during,
+            memory_during_mb: median_memory_during,
             memory_after_mb,
             peak_memory_mb,
             cpu_usage_percent: avg_cpu,
@@ -261,6 +320,9 @@ pub async fn run_benchmark_suite(
     config: &OllamaConfig,
     progress_callback: impl Fn(BenchmarkProgress),
 ) -> Result<BenchmarkResults, String> {
+    // Warmup: Load model and identify Ollama process (eliminates first-call latency)
+    let ollama_pid = warmup_and_find_ollama_process(&model, client, config).await?;
+
     let suite_start = Instant::now();
     let test_suite = get_test_suite();
     let total_tests = get_total_test_count(iterations);
@@ -311,6 +373,7 @@ pub async fn run_benchmark_suite(
                 context,
                 client,
                 config,
+                ollama_pid,
             )
             .await?;
 
