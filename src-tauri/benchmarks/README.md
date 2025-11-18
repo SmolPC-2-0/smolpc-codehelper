@@ -41,6 +41,24 @@ Aggregated statistics by category:
 - **Benchmark Timestamp**: When benchmark was run
 - **Total Tests**: Number of individual tests
 
+## Measurement Methodology
+
+### Token Counting
+Token counts use Ollama's actual token metadata (`eval_count`) for maximum accuracy. If metadata is unavailable, estimation fallback uses ~4 characters per token.
+
+### Resource Monitoring
+**Process-Specific Monitoring:** CPU and memory measurements track the Ollama server process specifically, not system-wide resources. This provides accurate measurements even with other applications running.
+
+- Automatically detects the Ollama process by name at benchmark start
+- Samples CPU and memory usage every 100ms during inference
+- Tracks peak memory and average CPU for the Ollama process only
+- Fallback to system-wide monitoring if Ollama process cannot be identified
+
+**Benefits:**
+- Accurate measurements regardless of background apps
+- No need to close other applications before benchmarking
+- Isolates Ollama performance from system noise
+
 ## Usage
 
 Import CSV files into Excel, Google Sheets, or data analysis tools for visualization and comparison across optimization phases.
