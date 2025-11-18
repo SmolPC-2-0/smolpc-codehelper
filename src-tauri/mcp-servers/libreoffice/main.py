@@ -53,6 +53,11 @@ def get_office_path():
             r"C:\Program Files (x86)\Collabora Office\program\soffice.exe",
             r"C:\Program Files\LibreOffice\program\soffice.exe",  # Fallback to LibreOffice
         ]
+    elif system == "darwin":  # macOS
+        possible_paths = [
+            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+            "/Applications/Collabora Office.app/Contents/MacOS/soffice",
+        ]
     elif system == "linux":
         # Linux paths - Collabora Office is typically installed in these locations
         possible_paths = [
@@ -89,7 +94,16 @@ def get_python_path():
             if os.path.exists(path):
                 return path
         return sys.executable  # Fallback to system Python
-    else:
+    elif system == "darwin":  # macOS
+        possible_paths = [
+            "/Applications/LibreOffice.app/Contents/Resources/python",
+            "/Applications/Collabora Office.app/Contents/Resources/python",
+        ]
+        for path in possible_paths:
+            if os.path.exists(path):
+                return path
+        return sys.executable  # Fallback to system Python
+    else:  # Linux
         return sys.executable  # Use the current Python interpreter on Linux
 
 
@@ -106,10 +120,17 @@ def start_office(port=2002):
     if not is_port_in_use(port):
         print("Starting Collabora Office with socket...", file=sys.stderr)
         soffice_path = get_office_path()
+
+        # Create a cross-platform temp directory path
+        import tempfile
+        temp_dir = tempfile.gettempdir()
+        user_profile = os.path.join(temp_dir, "LibreOfficeHeadlessProfile")
+        user_installation = f"file://{user_profile}"
+
         office_process = subprocess.Popen(
             [
                 soffice_path,
-                "-env:UserInstallation=file:///C:/Temp/LibreOfficeHeadlessProfile",
+                f"-env:UserInstallation={user_installation}",
                 "--headless",
                 f"--accept=socket,host=localhost,port={port};urp;",
                 "--norestore",
