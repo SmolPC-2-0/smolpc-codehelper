@@ -24,8 +24,8 @@
 			<Button onclick={() => onNavigate('libreoffice')} size="lg" variant="outline">
 				📄 LibreOffice AI
 			</Button>
-			<Button onclick={() => onNavigate('blender')} size="lg" variant="outline" disabled>
-				🎨 Blender AI (Coming Soon)
+			<Button onclick={() => onNavigate('blender')} size="lg" variant="outline">
+				🎨 Blender AI
 			</Button>
 		</div>
 	</div>

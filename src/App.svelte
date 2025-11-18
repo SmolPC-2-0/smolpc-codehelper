@@ -4,6 +4,7 @@
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 	import Home from '$lib/components/Home.svelte';
 	import LibreOffice from '$lib/components/LibreOffice.svelte';
+	import Blender from '$lib/components/Blender.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
@@ -458,4 +459,7 @@
 {:else if currentRoute === 'libreoffice'}
 	<!-- LibreOffice Placeholder -->
 	<LibreOffice onNavigate={handleNavigate} />
+{:else if currentRoute === 'blender'}
+	<!-- Blender Placeholder -->
+	<Blender onNavigate={handleNavigate} />
 {/if}
