@@ -1,12 +1,51 @@
 use crate::hardware::types::{CpuFeatures, CpuInfo};
-use raw_cpuid::CpuId;
 use sysinfo::System;
 
-/// Detect CPU information
+/// Detect CPU information (cross-platform)
 pub fn detect() -> Result<CpuInfo, String> {
-    let cpuid = CpuId::new();
     let mut sys = System::new_all();
     sys.refresh_all();
+
+    // Core counts (works on all platforms via sysinfo)
+    let cores_logical = sys.cpus().len();
+    let cores_physical = sys.physical_core_count().unwrap_or(cores_logical);
+
+    // CPU frequency (from first CPU)
+    let frequency_mhz = sys.cpus().first().map(|cpu| cpu.frequency());
+
+    // Platform-specific detection
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        detect_x86(sys, cores_physical, cores_logical, frequency_mhz)
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        detect_arm64(sys, cores_physical, cores_logical, frequency_mhz)
+    }
+
+    #[cfg(not(any(
+        target_arch = "x86",
+        target_arch = "x86_64",
+        target_arch = "aarch64"
+    )))]
+    {
+        detect_generic(sys, cores_physical, cores_logical, frequency_mhz)
+    }
+}
+
+/// x86/x86_64 CPU detection using CPUID
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn detect_x86(
+    sys: System,
+    cores_physical: usize,
+    cores_logical: usize,
+    frequency_mhz: Option<u64>,
+) -> Result<CpuInfo, String> {
+    use raw_cpuid::CpuId;
+
+    // Create CpuId instance using the native CPUID reader
+    let cpuid = CpuId::new();
 
     // Vendor information
     let vendor = cpuid
@@ -18,14 +57,13 @@ pub fn detect() -> Result<CpuInfo, String> {
     let brand = cpuid
         .get_processor_brand_string()
         .map(|b| b.as_str().trim().to_string())
-        .unwrap_or_else(|| "Unknown CPU".to_string());
-
-    // Core counts
-    let cores_logical = sys.cpus().len();
-    let cores_physical = sys.physical_core_count().unwrap_or(cores_logical);
-
-    // CPU frequency (from first CPU)
-    let frequency_mhz = sys.cpus().first().map(|cpu| cpu.frequency());
+        .unwrap_or_else(|| {
+            // Fallback to sysinfo brand
+            sys.cpus()
+                .first()
+                .map(|cpu| cpu.brand().to_string())
+                .unwrap_or_else(|| "Unknown CPU".to_string())
+        });
 
     // Feature detection using runtime detection
     let features = CpuFeatures {
@@ -37,7 +75,7 @@ pub fn detect() -> Result<CpuInfo, String> {
     };
 
     // Cache information from CPUID
-    let (cache_l1_kb, cache_l2_kb, cache_l3_kb) = detect_cache_info(&cpuid);
+    let (cache_l1_kb, cache_l2_kb, cache_l3_kb) = detect_cache_info_x86(&cpuid);
 
     Ok(CpuInfo {
         vendor,
@@ -52,8 +90,9 @@ pub fn detect() -> Result<CpuInfo, String> {
     })
 }
 
-/// Detect cache hierarchy information
-fn detect_cache_info(cpuid: &CpuId) -> (Option<usize>, Option<usize>, Option<usize>) {
+/// x86 cache detection via CPUID
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn detect_cache_info_x86(cpuid: &raw_cpuid::CpuId) -> (Option<usize>, Option<usize>, Option<usize>) {
     let mut l1_data = None;
     let mut l2 = None;
     let mut l3 = None;
@@ -94,4 +133,111 @@ fn detect_cache_info(cpuid: &CpuId) -> (Option<usize>, Option<usize>, Option<usi
     }
 
     (l1_data, l2, l3)
+}
+
+/// ARM64/AArch64 CPU detection
+#[cfg(target_arch = "aarch64")]
+fn detect_arm64(
+    sys: System,
+    cores_physical: usize,
+    cores_logical: usize,
+    frequency_mhz: Option<u64>,
+) -> Result<CpuInfo, String> {
+    // Vendor detection from CPU brand
+    let brand = sys
+        .cpus()
+        .first()
+        .map(|cpu| cpu.brand().to_string())
+        .unwrap_or_else(|| "Unknown CPU".to_string());
+
+    let vendor = if brand.contains("Apple") {
+        "Apple"
+    } else if brand.contains("Qualcomm") || brand.contains("Snapdragon") {
+        "Qualcomm"
+    } else if brand.contains("ARM") {
+        "ARM"
+    } else {
+        "Unknown"
+    }
+    .to_string();
+
+    // ARM feature detection using runtime detection
+    #[cfg(target_feature = "neon")]
+    let neon = true;
+    #[cfg(not(target_feature = "neon"))]
+    let neon = std::arch::is_aarch64_feature_detected!("neon");
+
+    // SVE detection (Scalable Vector Extension - ARM's equivalent to AVX-512)
+    #[cfg(target_feature = "sve")]
+    let sve = true;
+    #[cfg(not(target_feature = "sve"))]
+    let sve = std::arch::is_aarch64_feature_detected!("sve");
+
+    // Map ARM features to CpuFeatures structure
+    // For ARM: NEON ≈ SSE/AVX, SVE ≈ AVX-512
+    let features = CpuFeatures {
+        sse42: neon,  // NEON is roughly equivalent to SSE
+        avx: neon,    // NEON provides SIMD like AVX
+        avx2: neon,   // Modern ARM has NEON by default
+        avx512f: sve, // SVE is ARM's scalable vector extension
+        fma: neon,    // NEON supports FMA operations
+    };
+
+    // Cache detection not available via standard APIs on ARM
+    // Could potentially read from /sys/devices/system/cpu on Linux
+    let (cache_l1_kb, cache_l2_kb, cache_l3_kb) = (None, None, None);
+
+    Ok(CpuInfo {
+        vendor,
+        brand,
+        cores_physical,
+        cores_logical,
+        frequency_mhz,
+        features,
+        cache_l1_kb,
+        cache_l2_kb,
+        cache_l3_kb,
+    })
+}
+
+/// Generic fallback for other architectures
+#[cfg(not(any(
+    target_arch = "x86",
+    target_arch = "x86_64",
+    target_arch = "aarch64"
+)))]
+fn detect_generic(
+    sys: System,
+    cores_physical: usize,
+    cores_logical: usize,
+    frequency_mhz: Option<u64>,
+) -> Result<CpuInfo, String> {
+    let brand = sys
+        .cpus()
+        .first()
+        .map(|cpu| cpu.brand().to_string())
+        .unwrap_or_else(|| "Unknown CPU".to_string());
+
+    let vendor = "Unknown".to_string();
+
+    // No feature detection on unknown architectures
+    let features = CpuFeatures {
+        sse42: false,
+        avx: false,
+        avx2: false,
+        avx512f: false,
+        fma: false,
+    };
+
+    Ok(CpuInfo {
+        vendor,
+        brand,
+        cores_physical,
+        cores_logical,
+        frequency_mhz,
+        features,
+        cache_l1_kb: None,
+        cache_l2_kb: None,
+        cache_l3_kb: None,
+    })
 }

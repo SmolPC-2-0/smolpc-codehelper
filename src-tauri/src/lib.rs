@@ -8,6 +8,7 @@ use commands::ollama::{
     cancel_generation, check_ollama, generate_stream, get_ollama_models, HttpClient,
     OllamaConfig, StreamCancellation,
 };
+use tauri::Manager;
 
 #[allow(clippy::missing_panics_doc)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
