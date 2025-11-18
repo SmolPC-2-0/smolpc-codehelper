@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+	import Home from '$lib/components/Home.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
@@ -17,6 +18,10 @@
 	import type { OllamaMessage } from '$lib/types/ollama';
 	import { Menu, X } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
+
+	// Routing State
+	type Route = 'home' | 'codehelper' | 'libreoffice' | 'blender';
+	let currentRoute = $state<Route>('home');
 
 	// UI State
 	let isSidebarOpen = $state(true);
@@ -197,6 +202,11 @@
 		currentStreamingMessageId = null;
 	}
 
+	// Handle navigation between routes
+	function handleNavigate(route: Route) {
+		currentRoute = route;
+	}
+
 	// Handle keyboard shortcuts
 	function handleKeyDown(event: KeyboardEvent) {
 		// Ctrl+Shift+B (Windows/Linux) or Cmd+Shift+B (Mac) to toggle benchmark panel
@@ -324,19 +334,27 @@
 	});
 </script>
 
-<div class="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
-	<!-- Sidebar -->
-	{#if isSidebarOpen}
-		<Sidebar isOpen={isSidebarOpen} onClose={() => (isSidebarOpen = false)} />
-	{/if}
+{#if currentRoute === 'home'}
+	<!-- Home Page -->
+	<Home onNavigate={handleNavigate} />
+{:else if currentRoute === 'codehelper'}
+	<!-- CodeHelper Interface -->
+	<div class="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
+		<!-- Sidebar -->
+		{#if isSidebarOpen}
+			<Sidebar isOpen={isSidebarOpen} onClose={() => (isSidebarOpen = false)} />
+		{/if}
 
-	<!-- Main Content -->
-	<div class="flex flex-1 flex-col overflow-hidden">
+		<!-- Main Content -->
+		<div class="flex flex-1 flex-col overflow-hidden">
 		<!-- Header -->
 		<header
 			class="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900"
 		>
 			<div class="flex items-center gap-3">
+				<Button variant="ghost" onclick={() => handleNavigate('home')}>
+					← Home
+				</Button>
 				{#if !isSidebarOpen}
 					<Button variant="ghost" size="icon" onclick={() => (isSidebarOpen = true)}>
 						<Menu class="h-5 w-5" />
@@ -433,6 +451,7 @@
 		</div>
 	</div>
 
-	<!-- Hidden Benchmark Panel (Ctrl+Shift+B / Cmd+Shift+B to toggle) -->
-	<BenchmarkPanel bind:visible={showBenchmarkPanel} />
-</div>
+		<!-- Hidden Benchmark Panel (Ctrl+Shift+B / Cmd+Shift+B to toggle) -->
+		<BenchmarkPanel bind:visible={showBenchmarkPanel} />
+	</div>
+{/if}
