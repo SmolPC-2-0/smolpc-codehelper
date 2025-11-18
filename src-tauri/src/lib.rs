@@ -1,5 +1,7 @@
 mod benchmark;
 mod commands;
+mod libreoffice;
+
 use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_benchmark};
 use commands::default::{read, save_code, write};
 use commands::ollama::{cancel_generation, check_ollama, generate_stream, get_ollama_models, StreamCancellation, HttpClient, OllamaConfig};
