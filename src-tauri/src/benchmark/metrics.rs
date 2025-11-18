@@ -51,6 +51,19 @@ pub struct BenchmarkMetrics {
 
     /// Test iteration number
     pub iteration: usize,
+
+    // Hardware information
+    /// CPU model/brand
+    pub cpu_model: String,
+
+    /// Primary GPU name
+    pub gpu_name: String,
+
+    /// Whether AVX2 is supported
+    pub avx2_supported: bool,
+
+    /// Whether NPU is detected
+    pub npu_detected: bool,
 }
 
 /// Summary statistics across multiple benchmark runs
@@ -144,6 +157,10 @@ mod tests {
             response_tokens: 100,
             timestamp: "2025-01-01T00:00:00Z".to_string(),
             iteration: 1,
+            cpu_model: "Test CPU".to_string(),
+            gpu_name: "Test GPU".to_string(),
+            avx2_supported: true,
+            npu_detected: false,
         }
     }
 

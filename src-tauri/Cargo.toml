@@ -32,3 +32,11 @@ rfd = "0.15.4"
 sysinfo = "0.32"
 csv = "1.3"
 chrono = "0.4"
+
+# Hardware detection dependencies
+raw-cpuid = "11"
+wgpu = "23"
+
+# Windows-specific NPU detection
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = ["Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi"] }

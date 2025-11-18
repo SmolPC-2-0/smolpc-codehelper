@@ -1,0 +1,43 @@
+export interface HardwareInfo {
+	cpu: CpuInfo;
+	gpus: GpuInfo[];
+	npu?: NpuInfo;
+	detected_at: string;
+}
+
+export interface CpuInfo {
+	vendor: string;
+	brand: string;
+	cores_physical: number;
+	cores_logical: number;
+	frequency_mhz?: number;
+	features: CpuFeatures;
+	cache_l1_kb?: number;
+	cache_l2_kb?: number;
+	cache_l3_kb?: number;
+}
+
+export interface CpuFeatures {
+	sse42: boolean;
+	avx: boolean;
+	avx2: boolean;
+	avx512f: boolean;
+	fma: boolean;
+}
+
+export interface GpuInfo {
+	name: string;
+	vendor: 'Nvidia' | 'Amd' | 'Intel' | 'Apple' | 'Qualcomm' | 'Unknown';
+	backend: string;
+	device_type: string;
+	vram_mb?: number;
+	temperature_c?: number;
+	utilization_percent?: number;
+}
+
+export interface NpuInfo {
+	detected: boolean;
+	confidence: 'High' | 'Medium' | 'Low';
+	details: string;
+	method: string;
+}

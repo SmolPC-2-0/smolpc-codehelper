@@ -20,6 +20,10 @@ struct CsvMetricRow {
     memory_peak_mb: String,
     cpu_percent: String,
     response_tokens: usize,
+    cpu_model: String,
+    gpu_name: String,
+    avx2_supported: bool,
+    npu_detected: bool,
     prompt: String,
 }
 
@@ -38,6 +42,10 @@ impl From<&BenchmarkMetrics> for CsvMetricRow {
             memory_peak_mb: format!("{:.2}", metric.peak_memory_mb),
             cpu_percent: format!("{:.2}", metric.cpu_usage_percent),
             response_tokens: metric.response_tokens,
+            cpu_model: metric.cpu_model.clone(),
+            gpu_name: metric.gpu_name.clone(),
+            avx2_supported: metric.avx2_supported,
+            npu_detected: metric.npu_detected,
             prompt: metric.prompt.clone(),
         }
     }
@@ -199,6 +207,10 @@ mod tests {
             response_tokens: 100,
             timestamp: "2025-01-01T00:00:00Z".to_string(),
             iteration: 1,
+            cpu_model: "Test CPU".to_string(),
+            gpu_name: "Test GPU".to_string(),
+            avx2_supported: true,
+            npu_detected: false,
         }
     }
 
