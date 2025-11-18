@@ -44,20 +44,47 @@ Aggregated statistics by category:
 ## Measurement Methodology
 
 ### Token Counting
-Token counts use Ollama's actual token metadata (`eval_count`) for maximum accuracy. If metadata is unavailable, estimation fallback uses ~4 characters per token.
+Token counts use Ollama's **native token metadata** (`eval_count`) for maximum accuracy. No estimation or approximation is used. Tests fail immediately if Ollama does not provide accurate token counts.
+
+### Timing Metrics
+All timing measurements use **Ollama's native nanosecond-precision timing data**:
+- `first_token_ms`: From `prompt_eval_duration` (time to process prompt before generation)
+- `total_time_ms`: From `total_duration` (full request duration)
+- `tokens_per_sec`: Calculated from `eval_count` / `eval_duration`
+- `avg_token_ms`: Calculated from `eval_duration` / `eval_count`
+
+**Non-streaming mode** is used to ensure Ollama provides complete metadata. This sacrifices real-time streaming for production-grade measurement accuracy.
 
 ### Resource Monitoring
-**Process-Specific Monitoring:** CPU and memory measurements track the Ollama server process specifically, not system-wide resources. This provides accurate measurements even with other applications running.
 
-- Automatically detects the Ollama process by name at benchmark start
-- Samples CPU and memory usage every 100ms during inference
-- Tracks peak memory and average CPU for the Ollama process only
-- Fallback to system-wide monitoring if Ollama process cannot be identified
+**Model Warmup:** Before any benchmarks run, a warmup request loads the model and identifies the Ollama process. This eliminates first-call latency from benchmark results and establishes reliable process monitoring.
+
+**Process-Specific Monitoring:** CPU and memory measurements track the Ollama inference process specifically, not system-wide resources. All measurements are process-specific with **no fallback to system-wide monitoring** (tests fail if Ollama process cannot be found).
+
+**Sampling methodology:**
+- Pre-identifies Ollama process during warmup (fails immediately if not found)
+- Establishes CPU baseline with 200ms delay (required by sysinfo crate)
+- Samples CPU and memory every 50ms during inference (rigorous monitoring)
+- Captures memory from Ollama process at: before, during (median), after, and peak
+- Tracks peak memory by comparing all samples (not initialized to system memory)
+
+**Memory metrics:**
+- `memory_before_mb`: Process-specific memory before inference request
+- `memory_peak_mb`: Maximum process memory observed during all samples
+- `memory_during_mb`: **Median** of all memory samples (outlier-resistant)
+- `memory_after_mb`: Process-specific memory after inference completes
+
+**Known Limitations:**
+- CPU measurements show lower values (~4-16%) than total system load due to HTTP API architecture
+- The benchmark client (code helper) runs in a separate process, adding HTTP overhead
+- GPU-accelerated inference legitimately shows low CPU usage (GPU does heavy lifting)
+- This will be resolved in future versions using in-process llama.cpp integration
 
 **Benefits:**
-- Accurate measurements regardless of background apps
-- No need to close other applications before benchmarking
-- Isolates Ollama performance from system noise
+- Production-grade accuracy suitable for academic research reports
+- Measurements isolated from background system noise
+- Consistent methodology across all tests
+- Clear failure modes (no silent degradation to inaccurate measurements)
 
 ## Usage
 
