@@ -21,11 +21,9 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 try {
-	const app = mount(App, {
+	mount(App, {
 		target: document.getElementById('app')!
 	});
-
-	export default app;
 } catch (error) {
 	console.error('Failed to mount app:', error);
 	document.body.innerHTML = `
