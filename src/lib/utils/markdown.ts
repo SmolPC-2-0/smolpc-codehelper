@@ -91,8 +91,8 @@ export function renderMarkdown(text: string): string {
 		'<a href="$2" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">$1</a>'
 	);
 
-	// Unordered lists
-	html = html.replace(/^\* (.+)$/gim, '<li class="ml-6 list-disc">$1</li>');
+	// Unordered lists (support both * and - markers)
+	html = html.replace(/^[\*\-] (.+)$/gim, '<li class="ml-6 list-disc">$1</li>');
 	html = html.replace(/(<li class="ml-6 list-disc">.*<\/li>)/s, '<ul class="my-2 pl-2">$1</ul>');
 
 	// Ordered lists
