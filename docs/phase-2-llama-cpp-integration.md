@@ -13,6 +13,7 @@
 Phase 2 replaces Ollama with in-process llama.cpp integration, enabling hardware-optimized compilation, better performance, and intelligent model management based on detected hardware capabilities.
 
 **Key Goals:**
+
 1. Build llama.cpp with hardware-specific optimizations (CUDA, Metal, AVX2/512, NEON)
 2. Implement intelligent model selection based on available RAM/VRAM
 3. Enable GPU layer offloading for hybrid CPU+GPU inference
@@ -20,6 +21,7 @@ Phase 2 replaces Ollama with in-process llama.cpp integration, enabling hardware
 5. Achieve 20-50% performance improvement over Ollama
 
 **Current System Capabilities (from v2.2.0):**
+
 - CPU: Intel Core Ultra 9 285H (16 cores, AVX2 supported)
 - GPU: NVIDIA GeForce RTX 4050 Laptop (6GB VRAM, CUDA 8.9)
 - NPU: Intel AI Boost (detected but not utilized)
@@ -46,6 +48,7 @@ Phase 2 replaces Ollama with in-process llama.cpp integration, enabling hardware
 ### Dependencies
 
 **Rust Crates:**
+
 ```toml
 # Core llama.cpp binding
 llama-cpp-rs = "0.4"  # Or llama-cpp-2 (check latest)
@@ -67,6 +70,7 @@ cmake = "0.1"
 ```
 
 **System Requirements:**
+
 - **CMake** 3.14+ (for building llama.cpp)
 - **C++ Compiler:**
   - Windows: MSVC 2019+ or MinGW-w64
@@ -79,6 +83,7 @@ cmake = "0.1"
 ### Build Configurations
 
 **Windows (NVIDIA GPU):**
+
 ```cmake
 -DLLAMA_CUDA=ON
 -DCMAKE_CUDA_ARCHITECTURES=89  # RTX 4050 (Ada Lovelace)
@@ -87,6 +92,7 @@ cmake = "0.1"
 ```
 
 **macOS (Apple Silicon):**
+
 ```cmake
 -DLLAMA_METAL=ON
 -DLLAMA_ACCELERATE=ON
@@ -94,6 +100,7 @@ cmake = "0.1"
 ```
 
 **Linux (NVIDIA GPU):**
+
 ```cmake
 -DLLAMA_CUDA=ON
 -DCMAKE_CUDA_ARCHITECTURES=89
@@ -114,6 +121,7 @@ Frontend (Svelte) → Tauri IPC → Ollama HTTP API (localhost:11434)
 ```
 
 **Issues:**
+
 - HTTP overhead (~40% CPU for client)
 - No control over compilation flags
 - Can't optimize for specific hardware
@@ -135,6 +143,7 @@ Frontend (Svelte) → Tauri IPC → llama.cpp (in-process)
 ```
 
 **Benefits:**
+
 - No HTTP overhead (direct memory access)
 - Hardware-optimized binary
 - Configurable layer offloading
@@ -152,6 +161,7 @@ Frontend (Svelte) → Tauri IPC → llama.cpp (in-process)
 **File:** `src-tauri/src/llama/builder.rs`
 
 **Responsibilities:**
+
 - Download llama.cpp from GitHub
 - Detect system capabilities (CMake, compilers, CUDA)
 - Generate CMake configuration based on hardware
@@ -159,6 +169,7 @@ Frontend (Svelte) → Tauri IPC → llama.cpp (in-process)
 - Validate build artifacts
 
 **Key Functions:**
+
 ```rust
 pub async fn check_build_dependencies() -> Result<BuildCapabilities, String>
 pub async fn download_llama_cpp(version: &str) -> Result<PathBuf, String>
@@ -168,6 +179,7 @@ pub async fn verify_build(binary_path: &PathBuf) -> Result<bool, String>
 ```
 
 **CMake Flag Generation Logic:**
+
 ```rust
 fn generate_cmake_flags(hardware: &HardwareInfo) -> Vec<String> {
     let mut flags = vec!["-DBUILD_SHARED_LIBS=OFF".to_string()];
@@ -210,6 +222,7 @@ fn generate_cmake_flags(hardware: &HardwareInfo) -> Vec<String> {
 ```
 
 **Build Process:**
+
 ```rust
 pub async fn build_llama_cpp(flags: Vec<String>) -> Result<PathBuf, String> {
     // 1. Create build directory
@@ -241,6 +254,7 @@ pub async fn build_llama_cpp(flags: Vec<String>) -> Result<PathBuf, String> {
 **File:** `src/lib/components/BuildPanel.svelte`
 
 **Features:**
+
 - Show build progress (downloading, configuring, compiling)
 - Display CMake flags being used
 - Show compiler output (collapsible)
@@ -251,16 +265,18 @@ pub async fn build_llama_cpp(flags: Vec<String>) -> Result<PathBuf, String> {
 
 ```typescript
 export const llamaBuildStore = {
-    status: $state<'idle' | 'downloading' | 'configuring' | 'building' | 'complete' | 'error'>('idle'),
-    progress: $state(0),
-    currentStep: $state(''),
-    error: $state<string | null>(null),
-    buildPath: $state<string | null>(null),
+	status: $state<'idle' | 'downloading' | 'configuring' | 'building' | 'complete' | 'error'>(
+		'idle'
+	),
+	progress: $state(0),
+	currentStep: $state(''),
+	error: $state<string | null>(null),
+	buildPath: $state<string | null>(null),
 
-    async startBuild() {
-        this.status = 'downloading';
-        // ... trigger Tauri command
-    }
+	async startBuild() {
+		this.status = 'downloading';
+		// ... trigger Tauri command
+	}
 };
 ```
 
@@ -275,6 +291,7 @@ export const llamaBuildStore = {
 **Purpose:** Track available models, their requirements, and compatibility.
 
 **Data Structure:**
+
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
@@ -314,6 +331,7 @@ impl ModelRegistry {
 ```
 
 **Default Models:**
+
 ```rust
 pub fn default_models() -> Vec<ModelInfo> {
     vec![
@@ -374,6 +392,7 @@ pub fn default_models() -> Vec<ModelInfo> {
 **File:** `src-tauri/src/models/downloader.rs`
 
 **Features:**
+
 - Resume interrupted downloads
 - Progress tracking
 - SHA256 verification
@@ -381,6 +400,7 @@ pub fn default_models() -> Vec<ModelInfo> {
 - Bandwidth throttling (optional)
 
 **Key Functions:**
+
 ```rust
 pub struct DownloadManager {
     client: reqwest::Client,
@@ -445,28 +465,28 @@ impl DownloadManager {
 
 ```svelte
 <script lang="ts">
-    import { modelStore } from '$lib/stores/models.svelte';
+	import { modelStore } from '$lib/stores/models.svelte';
 
-    let downloading = $state(false);
-    let progress = $state(0);
+	let downloading = $state(false);
+	let progress = $state(0);
 
-    async function downloadModel(modelName: string) {
-        downloading = true;
-        try {
-            await modelStore.download(modelName, (downloaded, total) => {
-                progress = (downloaded / total) * 100;
-            });
-        } finally {
-            downloading = false;
-        }
-    }
+	async function downloadModel(modelName: string) {
+		downloading = true;
+		try {
+			await modelStore.download(modelName, (downloaded, total) => {
+				progress = (downloaded / total) * 100;
+			});
+		} finally {
+			downloading = false;
+		}
+	}
 </script>
 
 <div class="model-downloader">
-    {#if downloading}
-        <progress value={progress} max="100"></progress>
-        <p>{progress.toFixed(1)}% downloaded</p>
-    {/if}
+	{#if downloading}
+		<progress value={progress} max="100"></progress>
+		<p>{progress.toFixed(1)}% downloaded</p>
+	{/if}
 </div>
 ```
 
@@ -481,6 +501,7 @@ impl DownloadManager {
 **Purpose:** Safe Rust wrapper around llama.cpp C++ API.
 
 **Structure:**
+
 ```rust
 use llama_cpp_rs::*;
 
@@ -688,6 +709,7 @@ pub async fn unload_model(state: State<'_, LlamaState>) -> Result<(), String> {
 **File:** `src/lib/components/ModelSelector.svelte` (Update existing)
 
 **New Features:**
+
 - Show recommended model based on hardware
 - Display model requirements vs. available resources
 - Visual indicators (✓ compatible, ⚠️ tight, ✗ incompatible)
@@ -698,6 +720,7 @@ pub async fn unload_model(state: State<'_, LlamaState>) -> Result<(), String> {
 **File:** `src/lib/components/SettingsPanel.svelte` (New)
 
 **Sections:**
+
 - **Model Settings:** Currently loaded model, unload/reload
 - **Performance:** Thread count, GPU layers (with explanations)
 - **Advanced:** Context size, batch size, temperature, seed
@@ -706,6 +729,7 @@ pub async fn unload_model(state: State<'_, LlamaState>) -> Result<(), String> {
 #### 4.3 Migration from Ollama
 
 **Strategy:**
+
 - Keep Ollama integration as fallback (Phase 2.5)
 - Add feature flag: `use_llama_cpp` in settings
 - Gradual migration: users can toggle between Ollama and llama.cpp
@@ -715,13 +739,13 @@ pub async fn unload_model(state: State<'_, LlamaState>) -> Result<(), String> {
 
 ```typescript
 export const settingsStore = {
-    useLlamaCpp: $state(false), // New setting
+	useLlamaCpp: $state(false), // New setting
 
-    async toggleBackend() {
-        this.useLlamaCpp = !this.useLlamaCpp;
-        // Reload model with new backend
-        await this.reloadModel();
-    }
+	async toggleBackend() {
+		this.useLlamaCpp = !this.useLlamaCpp;
+		// Reload model with new backend
+		await this.reloadModel();
+	}
 };
 ```
 
@@ -772,6 +796,7 @@ src/lib/
 ### Unit Tests
 
 **Rust Tests:**
+
 ```rust
 #[cfg(test)]
 mod tests {
@@ -803,11 +828,13 @@ mod tests {
 ### Integration Tests
 
 1. **Build System:**
+
    - Test CMake detection
    - Test compiler detection
    - Test successful build on each platform
 
 2. **Model Download:**
+
    - Test download progress tracking
    - Test resume functionality
    - Test SHA256 verification
@@ -823,15 +850,16 @@ mod tests {
 
 **Comparison Matrix:**
 
-| Metric | Ollama (Baseline) | llama.cpp (Target) | Improvement |
-|--------|-------------------|-------------------|-------------|
-| Tokens/sec | 43 | 52-65 | +20-50% |
-| First token (ms) | 39 | 25-35 | ~35% faster |
-| CPU usage | 1% | 5-10% | Higher (expected) |
-| Memory usage | 76 MB | 100-200 MB | Higher (in-process) |
-| VRAM usage | ~4.5 GB | 4-5 GB | Similar |
+| Metric           | Ollama (Baseline) | llama.cpp (Target) | Improvement         |
+| ---------------- | ----------------- | ------------------ | ------------------- |
+| Tokens/sec       | 43                | 52-65              | +20-50%             |
+| First token (ms) | 39                | 25-35              | ~35% faster         |
+| CPU usage        | 1%                | 5-10%              | Higher (expected)   |
+| Memory usage     | 76 MB             | 100-200 MB         | Higher (in-process) |
+| VRAM usage       | ~4.5 GB           | 4-5 GB             | Similar             |
 
 **Benchmark Script:**
+
 ```bash
 # Run with Ollama (baseline)
 npm run benchmark -- --backend ollama --iterations 5
@@ -850,12 +878,14 @@ npm run benchmark-compare
 ### Your System (RTX 4050 + Ultra 9 285H)
 
 **Current Performance (Ollama):**
+
 - Tokens/sec: 43
 - First token: 39ms
 - CPU: 1%
 - VRAM: ~4.5GB
 
 **Target Performance (llama.cpp):**
+
 - Tokens/sec: **52-60** (20-40% improvement)
 - First token: **25-30ms** (35% improvement)
 - CPU: **5-8%** (acceptable increase)
@@ -869,6 +899,7 @@ npm run benchmark-compare
 4. **AVX2 instructions:** Already used by Ollama, no gain
 
 **Expected Configuration:**
+
 ```
 n_threads: 14 (16 physical cores - 2 for system)
 n_gpu_layers: 50-55 (out of 60 total for 7B model)
@@ -885,6 +916,7 @@ batch_size: 512
 **Risk:** llama.cpp build fails on some systems.
 
 **Mitigation:**
+
 - Pre-build binaries for common configurations (Windows + NVIDIA, macOS + Metal)
 - Fallback to Ollama if build fails
 - Comprehensive error messages with troubleshooting steps
@@ -895,6 +927,7 @@ batch_size: 512
 **Risk:** llama.cpp performs worse than Ollama in some configurations.
 
 **Mitigation:**
+
 - Keep Ollama backend as fallback
 - Add A/B testing mode for users
 - Benchmark extensively before v2.3.0 release
@@ -905,6 +938,7 @@ batch_size: 512
 **Risk:** Downloaded models not compatible with llama.cpp version.
 
 **Mitigation:**
+
 - Pin llama.cpp version
 - Maintain model registry with tested models
 - SHA256 verification
@@ -915,6 +949,7 @@ batch_size: 512
 **Risk:** Users run out of storage with multiple models.
 
 **Mitigation:**
+
 - Pre-download checks
 - Show storage usage in UI
 - Easy model deletion
@@ -925,6 +960,7 @@ batch_size: 512
 **Risk:** CUDA/Metal initialization fails.
 
 **Mitigation:**
+
 - Detect CUDA version before building
 - Graceful fallback to CPU-only
 - Clear error messages with driver update instructions
@@ -971,42 +1007,49 @@ batch_size: 512
 ## Implementation Timeline
 
 ### Week 1-2: Build System
+
 - Set up llama.cpp download and build
 - CMake flag generation from hardware
 - Build verification
 - Build status UI
 
 ### Week 3-4: Model Management
+
 - Model registry implementation
 - Download manager with progress
 - SHA256 verification
 - Model storage management
 
 ### Week 5-6: Runtime Integration
+
 - llama.cpp wrapper
 - Configuration optimizer
 - Tauri commands
 - GPU layer offloading
 
 ### Week 7: Frontend Integration
+
 - Model selection UI updates
 - Settings panel
 - Migration from Ollama
 - Error handling UI
 
 ### Week 8: Testing & Optimization
+
 - Unit tests
 - Integration tests
 - Performance benchmarks
 - Bug fixes
 
 ### Week 9: Documentation
+
 - User migration guide
 - Developer documentation
 - API documentation
 - Troubleshooting guide
 
 ### Week 10: Release Preparation
+
 - Final testing
 - Release notes
 - Version bump to 2.3.0
@@ -1019,18 +1062,21 @@ batch_size: 512
 ### Cross-Platform Compatibility
 
 **Windows:**
+
 - Test on Windows 10 and 11
 - Test with MSVC and MinGW compilers
 - Ensure CUDA paths are correctly detected
 - Handle long path names (>260 chars)
 
 **macOS:**
+
 - Test on Intel and Apple Silicon
 - Verify Metal framework linking
 - Check Xcode Command Line Tools version
 - Test on macOS 12+
 
 **Linux:**
+
 - Test on Ubuntu 22.04+, Fedora, Arch
 - Verify GCC/Clang versions
 - Check CUDA Toolkit installation
@@ -1039,6 +1085,7 @@ batch_size: 512
 ### User Experience
 
 **First-Time Setup:**
+
 1. Detect system capabilities
 2. Recommend optimal model
 3. Offer one-click setup (build + download)
@@ -1046,6 +1093,7 @@ batch_size: 512
 5. Provide time estimates
 
 **Ongoing Use:**
+
 - Model loads quickly on startup
 - Clear indication of which backend is active
 - Easy switching between models
@@ -1055,6 +1103,7 @@ batch_size: 512
 ### Migration Path
 
 **For Existing Users:**
+
 1. Update to v2.3.0
 2. See "Try llama.cpp" banner in UI
 3. Click to see benefits (performance comparison)
@@ -1063,6 +1112,7 @@ batch_size: 512
 6. Choose preferred backend permanently
 
 **Rollback Plan:**
+
 - Keep Ollama integration until v3.0
 - Allow switching back if issues occur
 - Export/import chat history between backends
