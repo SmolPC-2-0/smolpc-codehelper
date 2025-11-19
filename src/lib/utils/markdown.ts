@@ -103,10 +103,27 @@ export function renderMarkdown(text: string): string {
 	html = html.replace(/\n\n/g, '</p><p class="my-2">');
 	html = '<p class="my-2">' + html + '</p>';
 
+	// Fix invalid HTML: remove paragraph tags around block-level elements
+	// Headings
+	html = html.replace(/<p class="my-2">(<h[123])/g, '$1');
+	html = html.replace(/(<\/h[123]>)<\/p>/g, '$1');
+	// Lists
+	html = html.replace(/<p class="my-2">(<ul)/g, '$1');
+	html = html.replace(/(<\/ul>)<\/p>/g, '$1');
+	html = html.replace(/<p class="my-2">(<ol)/g, '$1');
+	html = html.replace(/(<\/ol>)<\/p>/g, '$1');
+	// Code blocks
+	html = html.replace(/<p class="my-2">(___CODEBLOCK\d+___)/g, '$1');
+	html = html.replace(/(___CODEBLOCK\d+___)<\/p>/g, '$1');
+
 	// Final step: Restore code blocks from placeholders
 	codeBlocks.forEach((block, i) => {
 		html = html.replace(`___CODEBLOCK${i}___`, block);
 	});
+
+	// Clean up any remaining paragraph tags around code blocks
+	html = html.replace(/<p class="my-2">(<div class="code-block)/g, '$1');
+	html = html.replace(/(<\/div>)<\/p>/g, '$1');
 
 	return html;
 }
