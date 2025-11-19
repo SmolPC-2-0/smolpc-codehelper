@@ -38,6 +38,10 @@ export const hardwareStore = {
 			const cached = await invoke<HardwareInfo | null>('get_cached_hardware');
 			if (cached) {
 				hardware = cached;
+			} else {
+				// If no cached data, trigger detection automatically
+				// This handles the case where the frontend loads before backend detection completes
+				await this.detect();
 			}
 		} catch (e) {
 			console.error('Failed to get cached hardware:', e);

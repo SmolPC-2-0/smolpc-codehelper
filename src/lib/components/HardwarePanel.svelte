@@ -269,17 +269,17 @@
 						<div class="mb-3 flex items-center gap-2">
 							<Zap class="h-4 w-4 text-primary" />
 							<h4 class="font-semibold">NPU</h4>
-							<span
-								class={`ml-auto px-2 py-0.5 text-xs rounded-md ${
-									hardwareStore.info.npu.confidence === 'High'
-										? 'bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400'
-										: hardwareStore.info.npu.confidence === 'Medium'
+							{#if hardwareStore.info.npu.confidence !== 'High'}
+								<span
+									class={`ml-auto px-2 py-0.5 text-xs rounded-md ${
+										hardwareStore.info.npu.confidence === 'Medium'
 											? 'bg-yellow-100 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-400'
 											: 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-								}`}
-							>
-								{hardwareStore.info.npu.confidence} Confidence
-							</span>
+									}`}
+								>
+									{hardwareStore.info.npu.confidence} Confidence
+								</span>
+							{/if}
 						</div>
 						<div class="space-y-2 text-sm">
 							<div class="grid grid-cols-3 gap-2">
