@@ -50,21 +50,25 @@ function formatCode(code: string): string {
  * Render markdown to HTML
  */
 export function renderMarkdown(text: string): string {
-	let html = text;
-
-	// Code blocks (```lang\ncode\n```)
-	html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+	// Step 1: Extract and process code blocks first (with placeholders)
+	const codeBlocks: string[] = [];
+	let html = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
 		const language = lang || detectLanguage(code);
 		const formatted = formatCode(code.trim());
-		return `<div class="code-block my-4 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+		const placeholder = `___CODEBLOCK${codeBlocks.length}___`;
+		codeBlocks.push(`<div class="code-block my-4 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
 			<div class="flex items-center justify-between px-4 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 rounded-t-lg">
 				<span class="text-xs font-mono text-gray-600 dark:text-gray-400 uppercase">${language}</span>
 			</div>
 			<pre class="p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-800 dark:text-gray-200">${formatted}</code></pre>
-		</div>`;
+		</div>`);
+		return placeholder;
 	});
 
-	// Inline code
+	// Step 2: Escape HTML in the remaining text (protects against XSS and preserves angle brackets)
+	html = escapeHtml(html);
+
+	// Step 3: Process inline code (backticks survived HTML escaping, content is already escaped)
 	html = html.replace(
 		/`([^`]+)`/g,
 		'<code class="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-sm font-mono text-red-600 dark:text-red-400">$1</code>'
@@ -98,6 +102,11 @@ export function renderMarkdown(text: string): string {
 	// Line breaks (double newlines become paragraphs)
 	html = html.replace(/\n\n/g, '</p><p class="my-2">');
 	html = '<p class="my-2">' + html + '</p>';
+
+	// Final step: Restore code blocks from placeholders
+	codeBlocks.forEach((block, i) => {
+		html = html.replace(`___CODEBLOCK${i}___`, block);
+	});
 
 	return html;
 }
