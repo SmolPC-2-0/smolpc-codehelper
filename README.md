@@ -3,6 +3,7 @@
 An offline AI-powered coding assistant for secondary school students (ages 11-18). Built with Tauri + Svelte 5 and powered by local Ollama models - works 100% offline after initial setup.
 
 ![Status](https://img.shields.io/badge/Status-Active-brightgreen)
+![Version](https://img.shields.io/badge/Version-2.1.0-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 ![License](https://img.shields.io/badge/License-MIT-orange)
 
@@ -10,6 +11,7 @@ An offline AI-powered coding assistant for secondary school students (ages 11-18
 
 ## ✨ Features
 
+### Core Functionality
 - 🤖 **100% Offline AI** - Uses local Ollama models (no cloud, no API keys)
 - 💬 **Chat Interface** - Natural conversation-style coding help
 - 📚 **Student-Friendly** - Clear explanations with well-commented code examples
@@ -17,9 +19,14 @@ An offline AI-powered coding assistant for secondary school students (ages 11-18
 - ⚡ **Streaming Responses** - See AI responses as they're generated
 - 🎯 **Context-Aware** - Optional conversation history for follow-up questions
 - 🌐 **Background Generation** - Switch chats while responses are generating
-- 🎨 **Modern UI** - Clean, responsive interface with dark mode support
 - 🔄 **Multiple Models** - Switch between different coding models
 - 💾 **Auto-Save** - Chats persist across sessions
+
+### Advanced Features (v2.1.0)
+- 📊 **Production-Grade Benchmarking** - Measure AI model performance with academic research-quality accuracy
+- 🔬 **Process-Specific Monitoring** - Track CPU and memory usage of AI inference with 50ms precision
+- 📈 **Performance Analytics** - Export detailed CSV reports for optimization analysis
+- 🎯 **Statistical Rigor** - Median calculations, outlier resistance, nanosecond-precision timing
 
 ---
 
@@ -386,15 +393,27 @@ smolpc-codehelper/
 │   ├── src/
 │   │   ├── commands/
 │   │   │   ├── ollama.rs       # Ollama API integration
+│   │   │   ├── benchmark.rs    # Benchmark Tauri commands
 │   │   │   └── errors.rs       # Error handling
+│   │   ├── benchmark/           # Benchmark System (v2.1.0)
+│   │   │   ├── mod.rs          # Module exports
+│   │   │   ├── runner.rs       # Production-grade data collection
+│   │   │   ├── metrics.rs      # Benchmark data structures
+│   │   │   ├── test_suite.rs   # Standardized test prompts
+│   │   │   └── export.rs       # CSV export functionality
 │   │   ├── lib.rs              # Main Rust library
 │   │   └── main.rs             # Entry point
+│   ├── benchmarks/              # Benchmark Results Storage
+│   │   ├── README.md           # Methodology documentation
+│   │   └── *.csv               # Benchmark data files
 │   ├── Cargo.toml              # Rust dependencies
 │   └── tauri.conf.json         # App configuration
 │
 ├── package.json                # Node.js dependencies
 ├── vite.config.ts              # Vite configuration
 ├── tsconfig.json               # TypeScript configuration
+├── FEATURES.md                 # Feature documentation
+├── CHANGES.md                  # Version changelog
 └── README.md                   # This file
 ```
 
@@ -678,7 +697,27 @@ If responses aren't helpful:
 
 ## 🔄 Recent Updates
 
-### Version 2.0 (Current)
+### Version 2.1.0 (Current - November 2025)
+
+**Production-Grade Benchmarking System:**
+- ✅ Process-specific resource monitoring (CPU, memory) with 50ms sampling precision
+- ✅ Native Ollama metadata for token counts and timing (nanosecond precision)
+- ✅ Statistical rigor: median calculations, outlier resistance, CPU baseline establishment
+- ✅ Model warmup system to eliminate first-call latency from measurements
+- ✅ Comprehensive CSV export for performance analysis
+- ✅ Suitable for academic research reports
+
+**Critical Bug Fixes:**
+- ✅ Fixed memory peak detection (was mixing system-wide and process-specific measurements)
+- ✅ Fixed CPU monitoring baseline (was showing 0% usage)
+- ✅ Improved statistical accuracy with median instead of average
+
+**Documentation:**
+- ✅ Comprehensive benchmark methodology documentation
+- ✅ Updated project structure with benchmark modules
+- ✅ Added CHANGES.md with detailed version history
+
+### Version 2.0 (December 2024)
 
 **Major Features:**
 - ✅ Migrated to Svelte 5 with runes for better reactivity
@@ -686,20 +725,6 @@ If responses aren't helpful:
 - ✅ HTTP client pooling for better resource management
 - ✅ Configurable Ollama URL via environment variable
 - ✅ Security: URL validation to prevent data exfiltration
-- ✅ Fixed memory leaks in event listener cleanup
-- ✅ Improved array reactivity for Svelte 5
-
-**UI/UX Improvements:**
-- ✅ Better scroll behavior with autoscroll resume
-- ✅ Fixed chat deletion and cancel button issues
-- ✅ Improved state management
-- ✅ Cleaned up unused variables
-
-**Technical:**
-- ✅ Upgraded to Tailwind 4.x
-- ✅ Replaced @apply with regular CSS
-- ✅ Fixed Svelte compilation errors
-- ✅ Updated dependencies
 
 ---
 
@@ -930,11 +955,11 @@ It helps others discover the project and motivates continued development.
 ## 📈 Stats
 
 - **Project Start:** December 2024
-- **Current Version:** 2.0
-- **Lines of Code:** ~5,000
+- **Current Version:** 2.1.0
+- **Lines of Code:** ~6,500+
 - **Contributors:** SmolPC Team
 - **License:** MIT
-- **Stars:** [Your count here]
+- **Platform Support:** Windows, macOS, Linux
 
 ---
 
