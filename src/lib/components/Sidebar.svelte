@@ -2,7 +2,7 @@
 	import { chatsStore } from '$lib/stores/chats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { groupChatsByTime } from '$lib/utils/date';
-	import { MessageSquarePlus, Trash2, Settings } from '@lucide/svelte';
+	import { MessageSquarePlus, Trash2 } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 
 	interface Props {
@@ -113,14 +113,6 @@
 				<p>Click "New Chat" to start</p>
 			</div>
 		{/if}
-	</div>
-
-	<!-- Footer with Settings -->
-	<div class="border-t border-gray-200 p-4 dark:border-gray-800">
-		<Button variant="outline" class="w-full">
-			<Settings class="mr-2 h-4 w-4" />
-			Settings
-		</Button>
 	</div>
 </aside>
 

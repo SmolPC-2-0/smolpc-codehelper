@@ -55,7 +55,7 @@
 	</div>
 
 	<!-- Content -->
-	<div class="flex-1 overflow-hidden">
+	<div class="flex-1 min-w-0">
 		<div class="mb-1 text-sm font-semibold text-gray-700 dark:text-gray-300">
 			{message.role === 'user' ? 'You' : 'AI Assistant'}
 		</div>
@@ -131,10 +131,16 @@
 	:global(.prose ul) {
 		margin-top: 0.5rem;
 		margin-bottom: 0.5rem;
+		padding-left: 0.5rem;
 	}
 
 	:global(.prose ol) {
 		margin-top: 0.5rem;
 		margin-bottom: 0.5rem;
+		padding-left: 0.5rem;
+	}
+
+	:global(.prose li) {
+		margin-left: 1.5rem;
 	}
 </style>
