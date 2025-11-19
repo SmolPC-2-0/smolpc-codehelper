@@ -14,6 +14,12 @@ export function saveToStorage<T>(key: string, data: T): void {
  */
 export function loadFromStorage<T>(key: string, defaultValue: T): T {
 	try {
+		// Check if localStorage is available (might not be in some contexts)
+		if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+			console.warn('localStorage not available, using default value');
+			return defaultValue;
+		}
+
 		const item = localStorage.getItem(key);
 		if (item === null) {
 			return defaultValue;

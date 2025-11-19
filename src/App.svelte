@@ -6,13 +6,16 @@
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
 	import StatusIndicator from '$lib/components/StatusIndicator.svelte';
+	import HardwareIndicator from '$lib/components/HardwareIndicator.svelte';
 	import ModelSelector from '$lib/components/ModelSelector.svelte';
 	import ContextToggle from '$lib/components/ContextToggle.svelte';
 	import QuickExamples from '$lib/components/QuickExamples.svelte';
 	import BenchmarkPanel from '$lib/components/BenchmarkPanel.svelte';
+	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
 	import { chatsStore } from '$lib/stores/chats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { ollamaStore } from '$lib/stores/ollama.svelte';
+	import { hardwareStore } from '$lib/stores/hardware.svelte';
 	import type { Message } from '$lib/types/chat';
 	import type { OllamaMessage } from '$lib/types/ollama';
 	import { Menu, X } from '@lucide/svelte';
@@ -30,6 +33,7 @@
 	let userInteractedWithScroll = $state(false);
 	let touchStartY = $state(0);
 	let showBenchmarkPanel = $state(false);
+	let showHardwarePanel = $state(false);
 
 	// Derived state
 	const currentChat = $derived(chatsStore.currentChat);
@@ -284,6 +288,9 @@
 		// Initial Ollama check
 		ollamaStore.checkConnection();
 
+		// Load cached hardware info
+		hardwareStore.getCached();
+
 		// Setup event listeners and track cleanup
 		const cleanupPromise = setupListeners();
 
@@ -348,6 +355,7 @@
 			</div>
 
 			<div class="flex items-center gap-3">
+				<HardwareIndicator onclick={() => (showHardwarePanel = !showHardwarePanel)} />
 				<StatusIndicator status={ollamaStore.status} />
 			</div>
 		</header>
@@ -435,4 +443,7 @@
 
 	<!-- Hidden Benchmark Panel (Ctrl+Shift+B / Cmd+Shift+B to toggle) -->
 	<BenchmarkPanel bind:visible={showBenchmarkPanel} />
+
+	<!-- Hardware Panel -->
+	<HardwarePanel bind:visible={showHardwarePanel} />
 </div>

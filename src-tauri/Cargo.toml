@@ -1,6 +1,6 @@
 [package]
 name = "smolpc-code-helper"
-version = "2.0.0"
+version = "2.2.0"
 description = "An AI-powered coding assistant for students, powered by local Ollama models"
 authors = ["SmolPC Team"]
 license = "MIT"
@@ -32,3 +32,6 @@ rfd = "0.15.4"
 sysinfo = "0.32"
 csv = "1.3"
 chrono = "0.4"
+
+# Hardware detection
+hardware-query = "0.2.1"

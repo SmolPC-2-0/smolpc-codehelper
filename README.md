@@ -20,6 +20,9 @@ An offline AI-powered coding assistant for secondary school students (ages 11-18
 - 🎨 **Modern UI** - Clean, responsive interface with dark mode support
 - 🔄 **Multiple Models** - Switch between different coding models
 - 💾 **Auto-Save** - Chats persist across sessions
+- 🔍 **Hardware Detection** - Automatic CPU, GPU, Memory, Storage, and NPU detection
+- 📊 **System Profiling** - Real-time hardware information for optimization decisions
+- ⚙️ **Intelligent Configuration** - Hardware-aware settings (coming soon)
 
 ---
 
@@ -374,24 +377,38 @@ smolpc-codehelper/
 │   │   │   ├── Sidebar.svelte  # Chat list sidebar
 │   │   │   ├── ChatMessage.svelte
 │   │   │   ├── ChatInput.svelte
+│   │   │   ├── HardwarePanel.svelte      # Hardware info display
+│   │   │   ├── HardwareIndicator.svelte  # Status bar indicator
 │   │   │   └── ...
 │   │   ├── stores/              # State management
-│   │   │   ├── chats.svelte.ts # Chat state (Svelte 5 runes)
+│   │   │   ├── chats.svelte.ts    # Chat state (Svelte 5 runes)
 │   │   │   ├── settings.svelte.ts
-│   │   │   └── ollama.svelte.ts
+│   │   │   ├── ollama.svelte.ts
+│   │   │   └── hardware.svelte.ts # Hardware detection state
 │   │   └── types/               # TypeScript types
+│   │       ├── hardware.ts      # Hardware type definitions
+│   │       └── ...
 │   └── main.ts                  # Entry point
 │
 ├── src-tauri/                   # Backend (Rust)
 │   ├── src/
 │   │   ├── commands/
 │   │   │   ├── ollama.rs       # Ollama API integration
+│   │   │   ├── hardware.rs     # Hardware detection commands
 │   │   │   └── errors.rs       # Error handling
+│   │   ├── hardware/           # Hardware detection module
+│   │   │   ├── types.rs        # Hardware type definitions
+│   │   │   ├── detector.rs     # Detection implementation
+│   │   │   └── mod.rs          # Module exports
+│   │   ├── benchmark/          # Benchmarking system
+│   │   │   └── runner.rs       # Benchmark execution
 │   │   ├── lib.rs              # Main Rust library
 │   │   └── main.rs             # Entry point
 │   ├── Cargo.toml              # Rust dependencies
 │   └── tauri.conf.json         # App configuration
 │
+├── docs/
+│   └── hardware-detection.md   # Hardware detection feature docs
 ├── package.json                # Node.js dependencies
 ├── vite.config.ts              # Vite configuration
 ├── tsconfig.json               # TypeScript configuration
@@ -409,11 +426,12 @@ smolpc-codehelper/
 | Styling           | Tailwind CSS 4          | Utility-first, fast development        |
 | UI Components     | shadcn-svelte           | Pre-built accessible components        |
 | Backend           | Rust                    | Performance, memory safety             |
-| Desktop Framework | Tauri 2.0               | Small executables (~8MB vs 100MB+)     |
+| Desktop Framework | Tauri 2.6.2             | Small executables (~8MB vs 100MB+)     |
 | Build Tool        | Vite 6                  | Fast HMR, optimized builds             |
 | AI Engine         | Ollama                  | Best local LLM solution                |
 | Primary Model     | Qwen 2.5 Coder (7B)     | Specialized for code, educational      |
 | Secondary Model   | DeepSeek Coder (6.7B)   | Fast inference, good code quality      |
+| Hardware Detection| hardware-query v0.2.1   | Cross-platform, offline detection      |
 | Storage           | localStorage            | Persistent chats across sessions       |
 
 ---
@@ -678,7 +696,33 @@ If responses aren't helpful:
 
 ## 🔄 Recent Updates
 
-### Version 2.0 (Current)
+### Version 2.2.0 (Current - January 2025)
+
+**Hardware Detection System:**
+- ✅ Comprehensive CPU detection (vendor, cores, frequency, cache, AVX2/AVX512/NEON/SVE)
+- ✅ GPU detection with CUDA compute capability for optimization
+- ✅ Memory and storage profiling for intelligent model selection
+- ✅ NPU detection (Apple Neural Engine, Intel AI Boost, AMD Ryzen AI, Qualcomm Hexagon)
+- ✅ Cross-platform support (Windows/macOS/Linux, x86/ARM)
+- ✅ Completely offline - no internet required
+- ✅ Auto-detection on startup with caching
+- ✅ Hardware panel UI with real-time information
+- ✅ Integrated hardware-query v0.2.1 for unified detection
+
+**Bug Fixes:**
+- ✅ Fixed startup detection race condition
+- ✅ Fixed NPU confidence badge display logic
+- ✅ Resolved hardware-query API usage issues
+
+### Version 2.1.0 (December 2024)
+
+**Benchmarking System:**
+- ✅ Production-grade llama.cpp benchmarking
+- ✅ Benchmark result caching and persistence
+- ✅ Multi-threaded performance testing
+- ✅ Hardware-aware configuration
+
+### Version 2.0 (December 2024)
 
 **Major Features:**
 - ✅ Migrated to Svelte 5 with runes for better reactivity
@@ -813,14 +857,27 @@ These will be addressed in future releases. See [Contributing](#contributing) fo
 - [x] Quick example prompts
 - [x] Background generation
 - [x] Svelte 5 migration
+- [x] Production-grade benchmarking system
+- [x] Hardware detection (CPU, GPU, Memory, Storage, NPU)
 
-### 🚧 Phase 2: Polish (Q1 2025)
+### 🚧 Phase 2: Intelligent Optimization (Q1 2025)
 
+**Current Focus:**
+- [ ] llama.cpp integration with hardware-optimized compilation
+- [ ] Automatic model selection based on available memory
+- [ ] GPU layer offloading configuration
+- [ ] CPU optimization flags (AVX2/AVX512/NEON)
+- [ ] Download manager with storage validation
+- [ ] Model recommendations based on hardware
+
+**UI/UX:**
 - [ ] Syntax highlighting in code blocks
 - [ ] Copy code button on code blocks
 - [ ] Export chat to markdown
 - [ ] Search functionality
 - [ ] Better error messages
+
+**Security & Stability:**
 - [ ] Input validation
 - [ ] Request timeouts
 - [ ] XSS protection
@@ -930,8 +987,8 @@ It helps others discover the project and motivates continued development.
 ## 📈 Stats
 
 - **Project Start:** December 2024
-- **Current Version:** 2.0
-- **Lines of Code:** ~5,000
+- **Current Version:** 2.2.0
+- **Lines of Code:** ~6,000+
 - **Contributors:** SmolPC Team
 - **License:** MIT
 - **Stars:** [Your count here]

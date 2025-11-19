@@ -1,0 +1,130 @@
+use serde::{Deserialize, Serialize};
+
+/// Complete hardware information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HardwareInfo {
+    pub cpu: CpuInfo,
+    pub gpus: Vec<GpuInfo>,
+    pub npu: Option<NpuInfo>,
+    pub memory: MemoryInfo,
+    pub storage: StorageInfo,
+    pub detected_at: String,
+}
+
+/// CPU information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CpuInfo {
+    pub vendor: String,
+    pub brand: String,
+    pub architecture: String,  // "x86_64", "aarch64", etc.
+    pub cores_physical: usize,
+    pub cores_logical: usize,
+    pub frequency_mhz: Option<u64>,
+    pub features: CpuFeatures,
+    pub cache_l1_kb: Option<usize>,
+    pub cache_l2_kb: Option<usize>,
+    pub cache_l3_kb: Option<usize>,
+}
+
+/// CPU feature flags (SIMD instruction sets)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CpuFeatures {
+    // x86/x86_64 features
+    pub sse42: bool,
+    pub avx: bool,
+    pub avx2: bool,
+    pub avx512f: bool,
+    pub fma: bool,
+    // ARM features
+    pub neon: bool,
+    pub sve: bool,
+}
+
+/// GPU information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GpuInfo {
+    pub name: String,
+    pub vendor: GpuVendor,
+    pub backend: String,
+    pub device_type: String,
+    pub vram_mb: Option<u64>,
+    pub temperature_c: Option<u32>,
+    pub utilization_percent: Option<u32>,
+    pub cuda_compute_capability: Option<String>,
+}
+
+/// GPU vendor enumeration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum GpuVendor {
+    Nvidia,
+    Amd,
+    Intel,
+    Apple,
+    Qualcomm,
+    Unknown,
+}
+
+impl GpuVendor {
+    /// Parse vendor from PCI vendor ID
+    pub fn from_pci_id(vendor_id: u32) -> Self {
+        match vendor_id {
+            0x10DE => GpuVendor::Nvidia,
+            0x1002 | 0x1022 => GpuVendor::Amd,
+            0x8086 => GpuVendor::Intel,
+            0x106B => GpuVendor::Apple,
+            0x5143 | 0x4D4F | 0x17CB => GpuVendor::Qualcomm, // Qualcomm IDs
+            _ => GpuVendor::Unknown,
+        }
+    }
+
+    /// Infer vendor from GPU name when PCI ID is unavailable (e.g., Apple Silicon)
+    pub fn from_name(name: &str) -> Self {
+        let name_lower = name.to_lowercase();
+        if name_lower.contains("apple") || name_lower.contains(" m1") || name_lower.contains(" m2") || name_lower.contains(" m3") || name_lower.contains(" m4") {
+            GpuVendor::Apple
+        } else if name_lower.contains("nvidia") || name_lower.contains("geforce") || name_lower.contains("quadro") || name_lower.contains("tesla") {
+            GpuVendor::Nvidia
+        } else if name_lower.contains("amd") || name_lower.contains("radeon") {
+            GpuVendor::Amd
+        } else if name_lower.contains("intel") || name_lower.contains("uhd") || name_lower.contains("iris") {
+            GpuVendor::Intel
+        } else if name_lower.contains("qualcomm") || name_lower.contains("adreno") {
+            GpuVendor::Qualcomm
+        } else {
+            GpuVendor::Unknown
+        }
+    }
+}
+
+/// NPU information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NpuInfo {
+    pub detected: bool,
+    pub confidence: NpuConfidence,
+    pub details: String,
+    pub method: String,
+}
+
+/// NPU detection confidence level
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NpuConfidence {
+    High,   // DirectML/DXCore confirmed
+    Medium, // CPU model match
+    Low,    // Generic heuristic
+}
+
+/// System memory information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryInfo {
+    pub total_gb: f64,
+    pub available_gb: f64,
+}
+
+/// Primary storage device information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageInfo {
+    pub total_gb: f64,
+    pub available_gb: f64,
+    pub is_ssd: bool,
+    pub device_name: String,
+}

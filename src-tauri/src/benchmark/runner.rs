@@ -50,6 +50,7 @@
 use super::metrics::{BenchmarkMetrics, BenchmarkResults, calculate_summary, get_timestamp};
 use super::test_suite::{get_test_suite, get_total_test_count, PromptCategory};
 use crate::commands::ollama::{OllamaConfig, OllamaMessage, OllamaRequest, OllamaResponse};
+use crate::hardware;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
@@ -139,6 +140,10 @@ async fn run_single_test(
     client: &reqwest::Client,
     config: &OllamaConfig,
     ollama_pid: sysinfo::Pid,
+    cpu_model: String,
+    gpu_name: String,
+    avx2_supported: bool,
+    npu_detected: bool,
 ) -> Result<(BenchmarkMetrics, String), String> {
     let mut sys = System::new_all();
     sys.refresh_all();
@@ -355,6 +360,10 @@ Guidelines:
             response_tokens: eval_count,
             timestamp: get_timestamp(),
             iteration,
+            cpu_model,
+            gpu_name,
+            avx2_supported,
+            npu_detected,
         },
         response_content,
     ))
@@ -368,6 +377,58 @@ pub async fn run_benchmark_suite(
     config: &OllamaConfig,
     progress_callback: impl Fn(BenchmarkProgress),
 ) -> Result<BenchmarkResults, String> {
+    // Detect hardware information for benchmark metadata
+    let hardware_info = hardware::detect_all().await.unwrap_or_else(|e| {
+        log::warn!("Failed to detect hardware: {}, using defaults", e);
+        hardware::types::HardwareInfo {
+            cpu: hardware::types::CpuInfo {
+                vendor: "Unknown".to_string(),
+                brand: "Unknown CPU".to_string(),
+                architecture: "Unknown".to_string(),
+                cores_physical: 0,
+                cores_logical: 0,
+                frequency_mhz: None,
+                features: hardware::types::CpuFeatures {
+                    sse42: false,
+                    avx: false,
+                    avx2: false,
+                    avx512f: false,
+                    fma: false,
+                    neon: false,
+                    sve: false,
+                },
+                cache_l1_kb: None,
+                cache_l2_kb: None,
+                cache_l3_kb: None,
+            },
+            gpus: vec![],
+            npu: None,
+            memory: hardware::types::MemoryInfo {
+                total_gb: 0.0,
+                available_gb: 0.0,
+            },
+            storage: hardware::types::StorageInfo {
+                total_gb: 0.0,
+                available_gb: 0.0,
+                is_ssd: false,
+                device_name: "Unknown".to_string(),
+            },
+            detected_at: chrono::Utc::now().to_rfc3339(),
+        }
+    });
+
+    // Extract hardware info for benchmark metadata
+    let cpu_model = hardware_info.cpu.brand.clone();
+    let gpu_name = hardware_info
+        .gpus
+        .iter()
+        .find(|g| g.device_type.to_lowercase().contains("discrete"))
+        .or_else(|| hardware_info.gpus.first())
+        .map(|g| g.name.clone())
+        .unwrap_or_else(|| "No GPU".to_string());
+    let avx2_supported = hardware_info.cpu.features.avx2;
+    let npu_detected = hardware_info.npu.as_ref().map(|n| n.detected).unwrap_or(false);
+
     // Warmup: Load model and identify Ollama process (eliminates first-call latency)
     let ollama_pid = warmup_and_find_ollama_process(&model, client, config).await?;
 
@@ -422,6 +483,10 @@ pub async fn run_benchmark_suite(
                 client,
                 config,
                 ollama_pid,
+                cpu_model.clone(),
+                gpu_name.clone(),
+                avx2_supported,
+                npu_detected,
             )
             .await?;
 

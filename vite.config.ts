@@ -6,6 +6,7 @@ import { defineConfig } from 'vite';
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
+	clearScreen: false,
 	plugins: [svelte({ compilerOptions: { runes: true } }), tailwindcss()],
 	resolve: {
 		alias: {
@@ -25,6 +26,10 @@ export default defineConfig({
 	build: {
 		target: process.env.TAURI_ENV_PLATFORM == 'windows' ? 'chrome105' : 'safari13',
 		minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
-		sourcemap: !!process.env.TAURI_ENV_DEBUG
+		sourcemap: !!process.env.TAURI_ENV_DEBUG,
+		// Emit module preload polyfill for better browser compatibility
+		modulePreload: {
+			polyfill: true
+		}
 	}
 });
