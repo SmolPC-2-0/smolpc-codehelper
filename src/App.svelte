@@ -414,7 +414,7 @@
 
 		<!-- Input Area -->
 		<div
-			class="border-t border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-900"
+			class="sticky bottom-0 z-10 border-t border-gray-200 bg-white px-4 py-4 shadow-lg dark:border-gray-800 dark:bg-gray-900"
 		>
 			<div class="mx-auto max-w-4xl">
 				{#if isGenerating}
