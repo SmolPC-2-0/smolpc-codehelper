@@ -47,6 +47,40 @@ function formatCode(code: string): string {
 }
 
 /**
+ * Modern Base64 encoding with proper Unicode support
+ * Replaces deprecated unescape/escape functions
+ */
+function encodeBase64(str: string): string {
+	// Convert string to UTF-8 bytes, then to base64
+	const bytes = new TextEncoder().encode(str);
+	const binString = Array.from(bytes, (byte) => String.fromCodePoint(byte)).join('');
+	return btoa(binString);
+}
+
+/**
+ * Generate HTML for a code block with copy button
+ * Extracted to avoid duplication (DRY principle)
+ */
+function generateCodeBlockHTML(language: string, formattedCode: string, encodedCode: string): string {
+	return `<div class="code-block my-4 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+		<div class="flex items-center justify-between px-4 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 rounded-t-lg">
+			<span class="text-xs font-mono text-gray-600 dark:text-gray-400 uppercase">${language}</span>
+			<button
+				data-code="${encodedCode}"
+				class="code-copy-btn p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 transition-colors"
+				title="Copy code"
+				aria-label="Copy code to clipboard"
+			>
+				<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+				</svg>
+			</button>
+		</div>
+		<pre class="p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-800 dark:text-gray-200">${formattedCode}</code></pre>
+	</div>`;
+}
+
+/**
  * Render markdown to HTML
  */
 export function renderMarkdown(text: string): string {
@@ -58,25 +92,9 @@ export function renderMarkdown(text: string): string {
 		const language = lang || detectLanguage(code);
 		const formatted = formatCode(code.trim());
 		const rawCode = code.trim();
-		// Encode code as base64 to avoid any escaping issues
-		const encodedCode = btoa(unescape(encodeURIComponent(rawCode)));
+		const encodedCode = encodeBase64(rawCode);
 		const placeholder = `___CODEBLOCK${codeBlocks.length}___`;
-		codeBlocks.push(`<div class="code-block my-4 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
-			<div class="flex items-center justify-between px-4 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 rounded-t-lg">
-				<span class="text-xs font-mono text-gray-600 dark:text-gray-400 uppercase">${language}</span>
-				<button
-					onclick="(function(btn){var code=decodeURIComponent(escape(atob(btn.dataset.code)));navigator.clipboard.writeText(code).then(function(){btn.innerHTML='<svg class=&quot;h-4 w-4&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; viewBox=&quot;0 0 24 24&quot;><path stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot; stroke-width=&quot;2&quot; d=&quot;M5 13l4 4L19 7&quot;></path></svg>';setTimeout(function(){btn.innerHTML='<svg class=&quot;h-4 w-4&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; viewBox=&quot;0 0 24 24&quot;><path stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot; stroke-width=&quot;2&quot; d=&quot;M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z&quot;></path></svg>'},2000)});})(this)"
-					data-code="${encodedCode}"
-					class="code-copy-btn p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 transition-colors"
-					title="Copy code"
-				>
-					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-					</svg>
-				</button>
-			</div>
-			<pre class="p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-800 dark:text-gray-200">${formatted}</code></pre>
-		</div>`);
+		codeBlocks.push(generateCodeBlockHTML(language, formatted, encodedCode));
 		return placeholder;
 	});
 
@@ -85,25 +103,9 @@ export function renderMarkdown(text: string): string {
 		const language = lang || detectLanguage(code);
 		const formatted = formatCode(code.trim());
 		const rawCode = code.trim();
-		// Encode code as base64 to avoid any escaping issues
-		const encodedCode = btoa(unescape(encodeURIComponent(rawCode)));
+		const encodedCode = encodeBase64(rawCode);
 		const placeholder = `___CODEBLOCK${codeBlocks.length}___`;
-		codeBlocks.push(`<div class="code-block my-4 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
-			<div class="flex items-center justify-between px-4 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 rounded-t-lg">
-				<span class="text-xs font-mono text-gray-600 dark:text-gray-400 uppercase">${language}</span>
-				<button
-					onclick="(function(btn){var code=decodeURIComponent(escape(atob(btn.dataset.code)));navigator.clipboard.writeText(code).then(function(){btn.innerHTML='<svg class=&quot;h-4 w-4&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; viewBox=&quot;0 0 24 24&quot;><path stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot; stroke-width=&quot;2&quot; d=&quot;M5 13l4 4L19 7&quot;></path></svg>';setTimeout(function(){btn.innerHTML='<svg class=&quot;h-4 w-4&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; viewBox=&quot;0 0 24 24&quot;><path stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot; stroke-width=&quot;2&quot; d=&quot;M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z&quot;></path></svg>'},2000)});})(this)"
-					data-code="${encodedCode}"
-					class="code-copy-btn p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 transition-colors"
-					title="Copy code"
-				>
-					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-					</svg>
-				</button>
-			</div>
-			<pre class="p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-800 dark:text-gray-200">${formatted}</code></pre>
-		</div>`);
+		codeBlocks.push(generateCodeBlockHTML(language, formatted, encodedCode));
 		return placeholder;
 	});
 
@@ -196,4 +198,55 @@ export function extractCode(markdown: string): string[] {
 	}
 
 	return codeBlocks;
+}
+
+/**
+ * Modern Base64 decoding with proper Unicode support
+ * Replaces deprecated unescape/escape functions
+ */
+function decodeBase64(base64: string): string {
+	const binString = atob(base64);
+	const bytes = Uint8Array.from(binString, (char) => char.codePointAt(0)!);
+	return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Setup event delegation for code copy buttons
+ * Call this from your component's onMount to avoid inline onclick handlers
+ * This is CSP-compliant and follows best practices
+ */
+export function setupCodeCopyHandlers(container: HTMLElement): () => void {
+	const handleClick = async (event: Event) => {
+		const target = event.target as HTMLElement;
+		const button = target.closest('.code-copy-btn') as HTMLButtonElement;
+
+		if (!button) return;
+
+		const encodedCode = button.dataset.code;
+		if (!encodedCode) return;
+
+		try {
+			const code = decodeBase64(encodedCode);
+			await navigator.clipboard.writeText(code);
+
+			// Show success feedback
+			const originalHTML = button.innerHTML;
+			button.innerHTML = `<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+			</svg>`;
+
+			setTimeout(() => {
+				button.innerHTML = originalHTML;
+			}, 2000);
+		} catch (error) {
+			console.error('Failed to copy code:', error);
+		}
+	};
+
+	container.addEventListener('click', handleClick);
+
+	// Return cleanup function
+	return () => {
+		container.removeEventListener('click', handleClick);
+	};
 }

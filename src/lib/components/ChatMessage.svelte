@@ -1,6 +1,7 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { Message } from '$lib/types/chat';
-	import { renderMarkdown, copyToClipboard, extractCode } from '$lib/utils/markdown';
+	import { renderMarkdown, copyToClipboard, extractCode, setupCodeCopyHandlers } from '$lib/utils/markdown';
 	import { invoke } from '@tauri-apps/api/core';
 	import { User, Bot, Copy, Check, Download } from '@lucide/svelte';
 
@@ -11,6 +12,7 @@
 	let { message }: Props = $props();
 
 	let copied = $state(false);
+	let contentContainer: HTMLDivElement;
 
 	const renderedContent = $derived(renderMarkdown(message.content));
 	const codeBlocks = $derived(extractCode(message.content));
@@ -34,6 +36,13 @@
 			alert('Failed to save file. Please try again.');
 		}
 	}
+
+	// Setup event delegation for copy buttons (CSP-compliant)
+	onMount(() => {
+		if (contentContainer) {
+			return setupCodeCopyHandlers(contentContainer);
+		}
+	});
 </script>
 
 <div
@@ -55,7 +64,7 @@
 	</div>
 
 	<!-- Content -->
-	<div class="flex-1 min-w-0">
+	<div class="flex-1 min-w-0" bind:this={contentContainer}>
 		<div class="mb-1 text-sm font-semibold text-gray-700 dark:text-gray-300">
 			{message.role === 'user' ? 'You' : 'AI Assistant'}
 		</div>
