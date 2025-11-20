@@ -134,7 +134,7 @@ export function renderMarkdown(text: string): string {
 	);
 
 	// Unordered lists (support both * and - markers)
-	html = html.replace(/^[\*\-] (.+)$/gim, '<li class="ml-6 list-disc">$1</li>');
+	html = html.replace(/^[*-] (.+)$/gim, '<li class="ml-6 list-disc">$1</li>');
 	html = html.replace(/(<li class="ml-6 list-disc">.*<\/li>)/s, '<ul class="my-2 pl-2">$1</ul>');
 
 	// Ordered lists
