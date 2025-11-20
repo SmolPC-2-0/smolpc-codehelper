@@ -61,7 +61,11 @@ function encodeBase64(str: string): string {
  * Generate HTML for a code block with copy button
  * Extracted to avoid duplication (DRY principle)
  */
-function generateCodeBlockHTML(language: string, formattedCode: string, encodedCode: string): string {
+function generateCodeBlockHTML(
+	language: string,
+	formattedCode: string,
+	encodedCode: string
+): string {
 	return `<div class="code-block my-4 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
 		<div class="flex items-center justify-between px-4 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 rounded-t-lg">
 			<span class="text-xs font-mono text-gray-600 dark:text-gray-400 uppercase">${language}</span>
@@ -136,7 +140,7 @@ export function renderMarkdown(text: string): string {
 	);
 
 	// Unordered lists (support both * and - markers)
-	html = html.replace(/^[\*\-] (.+)$/gim, '<li class="ml-6 list-disc">$1</li>');
+	html = html.replace(/^[*-] (.+)$/gim, '<li class="ml-6 list-disc">$1</li>');
 	html = html.replace(/(<li class="ml-6 list-disc">.*<\/li>)/s, '<ul class="my-2 pl-2">$1</ul>');
 
 	// Ordered lists
