@@ -1,0 +1,2 @@
+Tasks:
+ - Have a complexity dial that can tune how in depth something is explained depending on age / experience. Can have 3 separate stages, with init prompts stored in a json file that are used depending on state.

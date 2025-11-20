@@ -26,6 +26,7 @@
 	let isGenerating = $state(false);
 	let showQuickExamples = $state(true);
 	let messagesContainer: HTMLDivElement;
+	let inputAreaRef: HTMLDivElement;
 	let userHasScrolledUp = $state(false);
 	let cancelRequested = $state(false);
 	let currentStreamingChatId = $state<string | null>(null);
@@ -34,6 +35,7 @@
 	let touchStartY = $state(0);
 	let showBenchmarkPanel = $state(false);
 	let showHardwarePanel = $state(false);
+	let bottomOffset = $state(0);
 
 	// Derived state
 	const currentChat = $derived(chatsStore.currentChat);
@@ -213,12 +215,32 @@
 		}
 	}
 
+	// Calculate bottom offset to account for taskbar
+	function calculateBottomOffset() {
+		// Calculate the difference between visual viewport and window
+		// This accounts for system UI like taskbars
+		const visualViewportHeight = window.visualViewport?.height || window.innerHeight;
+		const windowHeight = window.innerHeight;
+		const offset = Math.max(0, windowHeight - visualViewportHeight);
+		bottomOffset = offset;
+	}
+
 	// Setup event listeners and initialization
 	onMount(() => {
 		let unlistenChunk: UnlistenFn;
 		let unlistenDone: UnlistenFn;
 		let unlistenError: UnlistenFn;
 		let unlistenCancelled: UnlistenFn;
+
+		// Calculate initial offset
+		calculateBottomOffset();
+
+		// Update offset on resize
+		const handleResize = () => calculateBottomOffset();
+		window.addEventListener('resize', handleResize);
+		if (window.visualViewport) {
+			window.visualViewport.addEventListener('resize', handleResize);
+		}
 
 		async function setupListeners() {
 			// Listen for streaming chunks
@@ -310,6 +332,10 @@
 			if (unlistenError) unlistenError();
 			if (unlistenCancelled) unlistenCancelled();
 			window.removeEventListener('keydown', handleKeyDown);
+			window.removeEventListener('resize', handleResize);
+			if (window.visualViewport) {
+				window.visualViewport.removeEventListener('resize', handleResize);
+			}
 		};
 	});
 
@@ -414,7 +440,9 @@
 
 		<!-- Input Area -->
 		<div
-			class="border-t border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-900"
+			bind:this={inputAreaRef}
+			class="sticky z-10 border-t border-gray-200 bg-white px-4 py-4 shadow-lg dark:border-gray-800 dark:bg-gray-900"
+			style="bottom: {bottomOffset}px"
 		>
 			<div class="mx-auto max-w-4xl">
 				{#if isGenerating}
