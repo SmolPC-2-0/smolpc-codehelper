@@ -47,8 +47,8 @@
 //! Currently no GPU utilization metrics collected. For GPU-accelerated inference,
 //! low CPU usage is expected and legitimate.
 
-use super::metrics::{BenchmarkMetrics, BenchmarkResults, calculate_summary, get_timestamp};
-use super::test_suite::{get_test_suite, get_total_test_count, PromptCategory};
+use super::metrics::{BenchmarkMetrics, BenchmarkResults, TimingSource, calculate_summary, get_timestamp};
+use super::test_suite::{get_test_suite, get_total_test_count, PromptCategory, SHORT_PROMPTS};
 use crate::commands::ollama::{OllamaConfig, OllamaMessage, OllamaRequest, OllamaResponse};
 use crate::hardware;
 use serde::{Deserialize, Serialize};
@@ -57,16 +57,85 @@ use std::time::Instant;
 use sysinfo::System;
 use tokio::sync::Mutex;
 
-// Benchmark configuration constants
-/// Interval (in milliseconds) for sampling CPU and memory during inference
-/// 50ms provides rigorous monitoring for production-quality data
+// =============================================================================
+// BENCHMARK CONFIGURATION CONSTANTS
+// =============================================================================
+
+/// Interval (in milliseconds) for sampling CPU and memory during inference.
+/// 50ms provides rigorous monitoring for production-quality data.
 const RESOURCE_SAMPLING_INTERVAL_MS: u64 = 50;
 
-/// Delay (in milliseconds) between tests to allow system stabilization
+/// Delay (in milliseconds) between tests to allow system stabilization.
 const TEST_STABILIZATION_DELAY_MS: u64 = 500;
 
-/// Delay (in milliseconds) for CPU baseline establishment
+/// Delay (in milliseconds) for CPU baseline establishment.
+/// Required by sysinfo crate: needs two refresh cycles with delay between them.
 const CPU_BASELINE_DELAY_MS: u64 = 200;
+
+/// Timeout (in seconds) for Ollama HTTP requests.
+/// 5 minutes allows for long responses on slower hardware.
+const REQUEST_TIMEOUT_SECS: u64 = 300;
+
+/// Delay (in milliseconds) after warmup to allow model initialization.
+const WARMUP_STABILIZATION_DELAY_MS: u64 = 500;
+
+/// Conversion factor from bytes to megabytes.
+const BYTES_PER_MB: f64 = 1024.0 * 1024.0;
+
+// =============================================================================
+// HELPER TYPES
+// =============================================================================
+
+/// Snapshot of hardware information for benchmark metadata.
+/// Encapsulates hardware detection with graceful fallback handling.
+#[derive(Debug, Clone)]
+struct HardwareSnapshot {
+    cpu_model: String,
+    gpu_name: String,
+    avx2_supported: bool,
+    npu_detected: bool,
+    detection_failed: bool,
+}
+
+impl HardwareSnapshot {
+    /// Create a hardware snapshot by detecting system hardware.
+    /// Falls back to defaults if detection fails, setting `detection_failed` flag.
+    async fn detect() -> Self {
+        match hardware::detect_all().await {
+            Ok(info) => {
+                let gpu_name = info
+                    .gpus
+                    .iter()
+                    .find(|g| g.device_type.to_lowercase().contains("discrete"))
+                    .or_else(|| info.gpus.first()).map_or_else(|| "No GPU".to_string(), |g| g.name.clone());
+
+                Self {
+                    cpu_model: info.cpu.brand.clone(),
+                    gpu_name,
+                    avx2_supported: info.cpu.features.avx2,
+                    npu_detected: info.npu.as_ref().is_some_and(|n| n.detected),
+                    detection_failed: false,
+                }
+            }
+            Err(e) => {
+                log::warn!("Hardware detection failed: {e}. Using defaults - benchmark metadata may be unreliable.");
+                Self::default()
+            }
+        }
+    }
+}
+
+impl Default for HardwareSnapshot {
+    fn default() -> Self {
+        Self {
+            cpu_model: "Unknown CPU".to_string(),
+            gpu_name: "Unknown GPU".to_string(),
+            avx2_supported: false,
+            npu_detected: false,
+            detection_failed: true,
+        }
+    }
+}
 
 /// Progress update event for the frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,17 +146,22 @@ pub struct BenchmarkProgress {
     pub iteration: usize,
 }
 
-/// Warmup function to load model and identify Ollama process
-/// This eliminates first-call latency and establishes process monitoring
+/// Warmup function to load model and identify Ollama process.
+/// This eliminates first-call latency and establishes process monitoring.
+/// Uses a realistic prompt from the test suite for proper GPU/cache warming.
 async fn warmup_and_find_ollama_process(
     model: &str,
     client: &reqwest::Client,
     config: &OllamaConfig,
 ) -> Result<sysinfo::Pid, String> {
-    // Make a minimal request to load the model
+    // Use a realistic prompt from the test suite for proper warming
+    // This ensures GPU memory and caches are properly initialized
+    let warmup_prompt = SHORT_PROMPTS.first()
+    .map_or_else(|| "What is a variable in Python?".to_string(), |s| (*s).to_string());
+
     let warmup_messages = vec![OllamaMessage {
         role: "user".to_string(),
-        content: "Hi".to_string(),
+        content: warmup_prompt,
     }];
 
     let request = OllamaRequest {
@@ -97,15 +171,31 @@ async fn warmup_and_find_ollama_process(
     };
 
     let url = format!("{}/api/chat", config.base_url());
-    let _response = client
+    let response = client
         .post(&url)
         .json(&request)
+        .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .send()
         .await
-        .map_err(|e| format!("Warmup request failed: {}", e))?;
+        .map_err(|e| {
+            if e.is_timeout() {
+                format!("Warmup request timed out after {REQUEST_TIMEOUT_SECS}s. The model may be too large for this system or Ollama is unresponsive.")
+            } else {
+                format!("Warmup request failed: {e}")
+            }
+        })?;
+
+    // Check for HTTP errors
+    if !response.status().is_success() {
+        return Err(format!(
+            "Warmup request failed with status {}: model '{}' may not be available",
+            response.status(),
+            model
+        ));
+    }
 
     // Give Ollama a moment to fully initialize the model
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(WARMUP_STABILIZATION_DELAY_MS)).await;
 
     // Find the Ollama process
     let mut sys = System::new_all();
@@ -120,17 +210,287 @@ async fn warmup_and_find_ollama_process(
         })
         .map(|(pid, _)| *pid)
         .ok_or_else(|| {
-            "CRITICAL ERROR: Could not find Ollama process. \
-             Benchmark requires process-specific monitoring. \
-             Ensure Ollama is running before starting benchmark."
+            "Could not find Ollama process. Benchmark requires process-specific monitoring. \
+             Ensure Ollama is running (try 'ollama serve' in terminal)."
                 .to_string()
         })?;
 
     Ok(ollama_pid)
 }
 
-/// Run a single benchmark test and collect metrics with accurate streaming measurements
-/// Returns (BenchmarkMetrics, response_content) for follow-up context
+// =============================================================================
+// RESOURCE SAMPLING
+// =============================================================================
+
+/// Results from resource sampling during inference.
+#[derive(Debug)]
+struct SamplingResults {
+    cpu_samples: Vec<f64>,
+    memory_samples: Vec<f64>,
+    peak_memory_mb: f64,
+}
+
+/// Shared state for the resource sampling task.
+struct SamplingState {
+    peak_memory: Arc<Mutex<f64>>,
+    cpu_samples: Arc<Mutex<Vec<f64>>>,
+    memory_samples: Arc<Mutex<Vec<f64>>>,
+    sampling_active: Arc<Mutex<bool>>,
+}
+
+impl SamplingState {
+    fn new(initial_memory: f64) -> Self {
+        Self {
+            peak_memory: Arc::new(Mutex::new(initial_memory)),
+            cpu_samples: Arc::new(Mutex::new(Vec::new())),
+            memory_samples: Arc::new(Mutex::new(Vec::new())),
+            sampling_active: Arc::new(Mutex::new(true)),
+        }
+    }
+}
+
+/// Spawn a background task that samples CPU and memory at regular intervals.
+/// Returns a oneshot receiver that signals when sampling is complete.
+fn spawn_resource_sampler(
+    ollama_pid: sysinfo::Pid,
+    state: &SamplingState,
+) -> tokio::sync::oneshot::Receiver<()> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+
+    let peak_memory = Arc::clone(&state.peak_memory);
+    let cpu_samples = Arc::clone(&state.cpu_samples);
+    let memory_samples = Arc::clone(&state.memory_samples);
+    let sampling_active = Arc::clone(&state.sampling_active);
+
+    tokio::spawn(async move {
+        let mut sys = System::new_all();
+        sys.refresh_all();
+
+        // Establish CPU baseline - sysinfo requires two refresh cycles with delay
+        sys.refresh_cpu_all();
+        tokio::time::sleep(tokio::time::Duration::from_millis(CPU_BASELINE_DELAY_MS)).await;
+        sys.refresh_cpu_all();
+
+        while *sampling_active.lock().await {
+            sys.refresh_all();
+            sys.refresh_cpu_all();
+
+            if let Some(process) = sys.process(ollama_pid) {
+                let memory = (process.memory() as f64) / BYTES_PER_MB;
+                let cpu = f64::from(process.cpu_usage());
+
+                // Update peak memory
+                {
+                    let mut peak = peak_memory.lock().await;
+                    if memory > *peak {
+                        *peak = memory;
+                    }
+                }
+
+                // Store samples
+                cpu_samples.lock().await.push(cpu);
+                memory_samples.lock().await.push(memory);
+            } else {
+                // Process disappeared - stop sampling
+                log::warn!("Ollama process (PID {ollama_pid}) disappeared during sampling");
+                break;
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(RESOURCE_SAMPLING_INTERVAL_MS)).await;
+        }
+
+        let _ = tx.send(());
+    });
+
+    rx
+}
+
+/// Collect and validate sampling results after inference completes.
+async fn collect_sampling_results(
+    state: &SamplingState,
+    sampling_done: tokio::sync::oneshot::Receiver<()>,
+    ollama_pid: sysinfo::Pid,
+) -> Result<SamplingResults, String> {
+    // Signal sampling to stop and wait for completion
+    *state.sampling_active.lock().await = false;
+    let _ = sampling_done.await;
+
+    let cpu_samples = state.cpu_samples.lock().await.clone();
+    let memory_samples = state.memory_samples.lock().await.clone();
+    let peak_memory_mb = *state.peak_memory.lock().await;
+
+    if cpu_samples.is_empty() || memory_samples.is_empty() {
+        return Err(format!(
+            "Resource sampling failed: no samples collected for Ollama process (PID {ollama_pid}). \
+             The process may have crashed or become unresponsive.",
+        ));
+    }
+
+    Ok(SamplingResults {
+        cpu_samples,
+        memory_samples,
+        peak_memory_mb,
+    })
+}
+
+// =============================================================================
+// TIMING METRICS CALCULATION
+// =============================================================================
+
+/// Timing metrics extracted from Ollama response or calculated from client measurements.
+struct TimingMetrics {
+    first_token_latency_ms: f64,
+    total_response_time_ms: f64,
+    tokens_per_second: f64,
+    avg_token_latency_ms: f64,
+    response_tokens: usize,
+    timing_source: TimingSource,
+}
+
+/// Calculate timing metrics from Ollama's native timing data.
+/// Falls back to client-side measurements if native data is unavailable.
+fn calculate_timing_metrics(
+    response: &OllamaResponse,
+    client_elapsed_ms: f64,
+) -> TimingMetrics {
+    // Try to use native Ollama timing data (preferred)
+    if let (Some(eval_count), Some(eval_duration_ns), Some(total_duration_ns)) = (
+        response.eval_count,
+        response.eval_duration,
+        response.total_duration,
+    ) {
+        let eval_duration_ms = (eval_duration_ns as f64) / 1_000_000.0;
+        let prompt_eval_duration_ms = response.prompt_eval_duration
+            .map_or_else(|| 0.0, |ns| (ns as f64) / 1_000_000.0);
+        let total_duration_ms = (total_duration_ns as f64) / 1_000_000.0;
+
+        let tokens_per_second = if eval_duration_ms > 0.0 {
+            (eval_count as f64) / (eval_duration_ms / 1000.0)
+        } else {
+            0.0
+        };
+
+        let avg_token_latency_ms = if eval_count > 0 {
+            eval_duration_ms / eval_count as f64
+        } else {
+            0.0
+        };
+
+        return TimingMetrics {
+            first_token_latency_ms: prompt_eval_duration_ms,
+            total_response_time_ms: total_duration_ms,
+            tokens_per_second,
+            avg_token_latency_ms,
+            response_tokens: eval_count,
+            timing_source: TimingSource::Native,
+        };
+    }
+
+    // Fallback to client-side measurements
+    log::warn!(
+        "Ollama did not provide native timing data. Using client-side measurements (less accurate)."
+    );
+
+    // Estimate token count from response content
+    let response_content = response.message
+        .as_ref()
+        .map_or("", |m| m.content.as_str());
+
+    // Rough estimation: ~4 characters per token for English text
+    let estimated_tokens = (response_content.len() / 4).max(1);
+
+    let tokens_per_second = if client_elapsed_ms > 0.0 {
+        (estimated_tokens as f64) / (client_elapsed_ms / 1000.0)
+    } else {
+        0.0
+    };
+
+    let avg_token_latency_ms = if estimated_tokens > 0 {
+        client_elapsed_ms / estimated_tokens as f64
+    } else {
+        0.0
+    };
+
+    TimingMetrics {
+        first_token_latency_ms: 0.0, // Cannot determine without native data
+        total_response_time_ms: client_elapsed_ms,
+        tokens_per_second,
+        avg_token_latency_ms,
+        response_tokens: estimated_tokens,
+        timing_source: TimingSource::Client,
+    }
+}
+
+// =============================================================================
+// REQUEST BUILDING
+// =============================================================================
+
+/// System prompt for the coding assistant.
+const SYSTEM_PROMPT: &str = r"You are a helpful coding assistant designed for secondary school students (ages 11-18).
+Your goal is to explain programming concepts clearly and provide well-commented code examples.
+
+Guidelines:
+- Use simple, encouraging language
+- Break down complex concepts into steps
+- Always include helpful comments in code
+- Be patient and supportive
+- Adapt explanations to the student's level
+- Encourage learning and experimentation";
+
+/// Build the messages array for an Ollama request.
+fn build_request_messages(prompt: &str, context: Option<Vec<OllamaMessage>>) -> Vec<OllamaMessage> {
+    let mut messages = vec![OllamaMessage {
+        role: "system".to_string(),
+        content: SYSTEM_PROMPT.to_string(),
+    }];
+
+    if let Some(ctx) = context {
+        messages.extend(ctx);
+    }
+
+    messages.push(OllamaMessage {
+        role: "user".to_string(),
+        content: prompt.to_string(),
+    });
+
+    messages
+}
+
+// =============================================================================
+// STATISTICAL HELPERS
+// =============================================================================
+
+/// Calculate the median of a slice of f64 values.
+fn calculate_median(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let len = sorted.len();
+    if len % 2 == 0 {
+        (sorted[len / 2 - 1] + sorted[len / 2]) / 2.0
+    } else {
+        sorted[len / 2]
+    }
+}
+
+/// Calculate the average of a slice of f64 values.
+fn calculate_average(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.iter().sum::<f64>() / values.len() as f64
+}
+
+// =============================================================================
+// SINGLE TEST EXECUTION
+// =============================================================================
+
+/// Run a single benchmark test and collect metrics.
+/// Returns (`BenchmarkMetrics`, `response_content`) for follow-up context.
 async fn run_single_test(
     prompt: String,
     category: PromptCategory,
@@ -140,137 +500,78 @@ async fn run_single_test(
     client: &reqwest::Client,
     config: &OllamaConfig,
     ollama_pid: sysinfo::Pid,
-    cpu_model: String,
-    gpu_name: String,
-    avx2_supported: bool,
-    npu_detected: bool,
+    hardware: &HardwareSnapshot,
 ) -> Result<(BenchmarkMetrics, String), String> {
+    // Capture initial memory state
     let mut sys = System::new_all();
     sys.refresh_all();
 
-    // Capture initial process-specific memory state
     let memory_before_mb = sys
         .process(ollama_pid)
-        .map(|p| (p.memory() as f64) / 1024.0 / 1024.0)
-        .ok_or_else(|| "Ollama process disappeared before test started".to_string())?;
+        .map(|p| (p.memory() as f64) / BYTES_PER_MB)
+        .ok_or_else(|| format!(
+            "Ollama process (PID {ollama_pid}) not found before test. Ensure Ollama is still running.",
+        ))?;
 
-    // Build messages array
-    let system_prompt = r#"You are a helpful coding assistant designed for secondary school students (ages 11-18).
-Your goal is to explain programming concepts clearly and provide well-commented code examples.
-
-Guidelines:
-- Use simple, encouraging language
-- Break down complex concepts into steps
-- Always include helpful comments in code
-- Be patient and supportive
-- Adapt explanations to the student's level
-- Encourage learning and experimentation"#;
-
-    let mut messages = vec![OllamaMessage {
-        role: "system".to_string(),
-        content: system_prompt.to_string(),
-    }];
-
-    // Add context if provided (for follow-up tests)
-    if let Some(ctx) = context {
-        messages.extend(ctx);
-    }
-
-    // Add current prompt
-    messages.push(OllamaMessage {
-        role: "user".to_string(),
-        content: prompt.clone(),
-    });
-
+    // Build request
+    let messages = build_request_messages(&prompt, context);
     let request = OllamaRequest {
         model: model.clone(),
         messages,
-        stream: false, // Non-streaming for accurate Ollama-native timing data
+        stream: false, // Non-streaming for accurate native timing data
     };
 
-    // Shared state for periodic sampling
-    let peak_memory = Arc::new(Mutex::new(memory_before_mb));
-    let cpu_samples = Arc::new(Mutex::new(Vec::new()));
-    let memory_samples = Arc::new(Mutex::new(Vec::new()));
-    let sampling_active = Arc::new(Mutex::new(true));
+    // Start resource sampling
+    let sampling_state = SamplingState::new(memory_before_mb);
+    let sampling_done = spawn_resource_sampler(ollama_pid, &sampling_state);
 
-    // Channel for signaling sampling task completion
-    let (sampling_done_tx, sampling_done_rx) = tokio::sync::oneshot::channel();
-
-    // Spawn background task for periodic resource sampling
-    let peak_memory_clone = Arc::clone(&peak_memory);
-    let cpu_samples_clone = Arc::clone(&cpu_samples);
-    let memory_samples_clone = Arc::clone(&memory_samples);
-    let sampling_active_clone = Arc::clone(&sampling_active);
-
-    tokio::spawn(async move {
-        let mut sys_sampler = System::new_all();
-        sys_sampler.refresh_all();
-
-        // Establish CPU baseline - requires initial refresh + delay + second refresh
-        sys_sampler.refresh_cpu_all();
-        tokio::time::sleep(tokio::time::Duration::from_millis(CPU_BASELINE_DELAY_MS)).await;
-        sys_sampler.refresh_cpu_all();
-
-        // Use the pre-identified Ollama PID (passed in as parameter)
-        // No need to search - we already found it during warmup
-        while *sampling_active_clone.lock().await {
-            sys_sampler.refresh_all();
-            sys_sampler.refresh_cpu_all();
-
-            // Process-specific monitoring (REQUIRED)
-            if let Some(process) = sys_sampler.process(ollama_pid) {
-                let memory = (process.memory() as f64) / 1024.0 / 1024.0;
-                let cpu = process.cpu_usage() as f64;
-
-                // Update peak memory
-                let mut peak = peak_memory_clone.lock().await;
-                if memory > *peak {
-                    *peak = memory;
-                }
-                drop(peak);
-
-                // Store samples
-                cpu_samples_clone.lock().await.push(cpu);
-                memory_samples_clone.lock().await.push(memory);
-            } else {
-                // Process disappeared during monitoring - this is a critical error
-                break;
-            }
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(RESOURCE_SAMPLING_INTERVAL_MS)).await;
-        }
-
-        // Signal completion
-        let _ = sampling_done_tx.send(());
-    });
-
-    // Make non-streaming request to get accurate Ollama timing metadata
+    // Make request with timeout
     let url = format!("{}/api/chat", config.base_url());
+    let request_start = Instant::now();
+
     let response = client
         .post(&url)
         .json(&request)
+        .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .send()
         .await
-        .map_err(|e| format!("Failed to send request to Ollama: {}", e))?;
+        .map_err(|e| {
+            if e.is_timeout() {
+                format!(
+                    "Request timed out after {}s for prompt '{}...'. \
+                     Consider using a smaller model or shorter prompts.",
+                    REQUEST_TIMEOUT_SECS,
+                    prompt.chars().take(50).collect::<String>()
+                )
+            } else if e.is_connect() {
+                "Failed to connect to Ollama. Ensure Ollama is running (try 'ollama serve').".to_string()
+            } else {
+                format!("HTTP request failed: {e}")
+            }
+        })?;
 
-    // Parse the response JSON
+    // Check HTTP status
+    if !response.status().is_success() {
+        return Err(format!(
+            "Ollama returned error status {}: {}",
+            response.status(),
+            response.status().canonical_reason().unwrap_or("Unknown error")
+        ));
+    }
+
+    // Parse response
     let ollama_response: OllamaResponse = response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse Ollama response: {}", e))?;
+        .map_err(|e| format!("Failed to parse Ollama response JSON: {e}"))?;
 
-    // Stop resource sampling and wait for completion
-    *sampling_active.lock().await = false;
-    let _ = sampling_done_rx.await; // Wait for sampling task to actually finish
+    let client_elapsed_ms = request_start.elapsed().as_secs_f64() * 1000.0;
 
-    // Validate that we successfully monitored the Ollama process
-    let cpu_samples_vec = cpu_samples.lock().await.clone();
-    let memory_samples_vec = memory_samples.lock().await.clone();
+    // Collect sampling results
+    let sampling_results = collect_sampling_results(&sampling_state, sampling_done, ollama_pid).await?;
 
-    if cpu_samples_vec.is_empty() || memory_samples_vec.is_empty() {
-        return Err("Failed to monitor Ollama process - process not found or disappeared during benchmark".to_string());
-    }
+    // Calculate timing metrics
+    let timing = calculate_timing_metrics(&ollama_response, client_elapsed_ms);
 
     // Extract response content
     let response_content = ollama_response.message
@@ -278,98 +579,69 @@ Guidelines:
         .map(|m| m.content.clone())
         .unwrap_or_default();
 
-    // === CRITICAL VALIDATION: Require all Ollama timing metadata ===
-    // These fields are required for production-quality data
-    let eval_count = ollama_response.eval_count
-        .ok_or_else(|| "Ollama did not provide eval_count (token count) - cannot proceed with benchmark".to_string())?;
-
-    let eval_duration_ns = ollama_response.eval_duration
-        .ok_or_else(|| "Ollama did not provide eval_duration - cannot proceed with benchmark".to_string())?;
-
-    let prompt_eval_duration_ns = ollama_response.prompt_eval_duration
-        .unwrap_or(0); // Prompt eval can be 0 if model is already loaded
-
-    let total_duration_ns = ollama_response.total_duration
-        .ok_or_else(|| "Ollama did not provide total_duration - cannot proceed with benchmark".to_string())?;
-
-    // Convert nanoseconds to milliseconds for all timing metrics
-    let eval_duration_ms = (eval_duration_ns as f64) / 1_000_000.0;
-    let prompt_eval_duration_ms = (prompt_eval_duration_ns as f64) / 1_000_000.0;
-    let total_duration_ms = (total_duration_ns as f64) / 1_000_000.0;
-
-    // === Calculate metrics using Ollama's NATIVE data (not our stopwatch) ===
-
-    // First token latency = Time to process prompt (before first token generation)
-    let first_token_latency_ms = prompt_eval_duration_ms;
-
-    // Total response time = Full request duration from Ollama's perspective
-    let total_response_time_ms = total_duration_ms;
-
-    // Tokens per second = Using Ollama's actual generation time
-    let tokens_per_second = if eval_duration_ms > 0.0 {
-        (eval_count as f64) / (eval_duration_ms / 1000.0)
-    } else {
-        -1.0 // Invalid data marker
-    };
-
-    // Average time per token = Using Ollama's generation time
-    let avg_token_latency = if eval_count > 0 {
-        eval_duration_ms / eval_count as f64
-    } else {
-        -1.0 // Invalid data marker
-    };
-
-    // === Resource metrics from our process-specific sampling ===
-    // Refresh final system state and get process-specific memory
+    // Get final memory state
     sys.refresh_all();
     let memory_after_mb = sys
         .process(ollama_pid)
-        .map(|p| (p.memory() as f64) / 1024.0 / 1024.0)
-        .ok_or_else(|| "Ollama process disappeared after test completed".to_string())?;
+        .map(|p| (p.memory() as f64) / BYTES_PER_MB)
+        .ok_or_else(|| format!(
+            "Ollama process (PID {ollama_pid}) disappeared after test completed.",    
+        ))?;
 
-    // Get peak memory from sampling
-    let peak_memory_mb = *peak_memory.lock().await;
-
-    // Calculate average CPU from samples
-    let avg_cpu = cpu_samples_vec.iter().sum::<f64>() / cpu_samples_vec.len() as f64;
-
-    // Calculate MEDIAN memory during inference (more robust to outliers than average)
-    let mut sorted_memory = memory_samples_vec.clone();
-    sorted_memory.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let median_memory_during = if sorted_memory.len() % 2 == 0 {
-        let mid = sorted_memory.len() / 2;
-        (sorted_memory[mid - 1] + sorted_memory[mid]) / 2.0
-    } else {
-        sorted_memory[sorted_memory.len() / 2]
-    };
+    // Calculate resource metrics
+    let avg_cpu = calculate_average(&sampling_results.cpu_samples);
+    let median_memory_during = calculate_median(&sampling_results.memory_samples);
 
     Ok((
         BenchmarkMetrics {
-            first_token_latency_ms,
-            total_response_time_ms,
-            tokens_per_second,
-            avg_token_latency_ms: avg_token_latency,
+            first_token_latency_ms: timing.first_token_latency_ms,
+            total_response_time_ms: timing.total_response_time_ms,
+            tokens_per_second: timing.tokens_per_second,
+            avg_token_latency_ms: timing.avg_token_latency_ms,
+            timing_source: timing.timing_source,
             memory_before_mb,
             memory_during_mb: median_memory_during,
             memory_after_mb,
-            peak_memory_mb,
+            peak_memory_mb: sampling_results.peak_memory_mb,
             cpu_usage_percent: avg_cpu,
             model_name: model,
             prompt_type: category.as_str().to_string(),
             prompt,
-            response_tokens: eval_count,
+            response_tokens: timing.response_tokens,
             timestamp: get_timestamp(),
             iteration,
-            cpu_model,
-            gpu_name,
-            avx2_supported,
-            npu_detected,
+            cpu_model: hardware.cpu_model.clone(),
+            gpu_name: hardware.gpu_name.clone(),
+            avx2_supported: hardware.avx2_supported,
+            npu_detected: hardware.npu_detected,
+            hardware_detection_failed: hardware.detection_failed,
         },
         response_content,
     ))
 }
 
-/// Run the complete benchmark suite
+// =============================================================================
+// BENCHMARK SUITE EXECUTION
+// =============================================================================
+
+/// Build follow-up context from a previous response.
+fn build_followup_context(previous_response: &str) -> Vec<OllamaMessage> {
+    let base_prompt = SHORT_PROMPTS.first()
+        .map_or_else(|| "What is a variable in Python?".to_string(), |s| s.to_string());
+
+    vec![
+        OllamaMessage {
+            role: "user".to_string(),
+            content: base_prompt,
+        },
+        OllamaMessage {
+            role: "assistant".to_string(),
+            content: previous_response.to_string(),
+        },
+    ]
+}
+
+/// Run the complete benchmark suite.
 pub async fn run_benchmark_suite(
     model: String,
     iterations: usize,
@@ -378,58 +650,16 @@ pub async fn run_benchmark_suite(
     progress_callback: impl Fn(BenchmarkProgress),
 ) -> Result<BenchmarkResults, String> {
     // Detect hardware information for benchmark metadata
-    let hardware_info = hardware::detect_all().await.unwrap_or_else(|e| {
-        log::warn!("Failed to detect hardware: {}, using defaults", e);
-        hardware::types::HardwareInfo {
-            cpu: hardware::types::CpuInfo {
-                vendor: "Unknown".to_string(),
-                brand: "Unknown CPU".to_string(),
-                architecture: "Unknown".to_string(),
-                cores_physical: 0,
-                cores_logical: 0,
-                frequency_mhz: None,
-                features: hardware::types::CpuFeatures {
-                    sse42: false,
-                    avx: false,
-                    avx2: false,
-                    avx512f: false,
-                    fma: false,
-                    neon: false,
-                    sve: false,
-                },
-                cache_l1_kb: None,
-                cache_l2_kb: None,
-                cache_l3_kb: None,
-            },
-            gpus: vec![],
-            npu: None,
-            memory: hardware::types::MemoryInfo {
-                total_gb: 0.0,
-                available_gb: 0.0,
-            },
-            storage: hardware::types::StorageInfo {
-                total_gb: 0.0,
-                available_gb: 0.0,
-                is_ssd: false,
-                device_name: "Unknown".to_string(),
-            },
-            detected_at: chrono::Utc::now().to_rfc3339(),
-        }
-    });
+    let hardware = HardwareSnapshot::detect().await;
 
-    // Extract hardware info for benchmark metadata
-    let cpu_model = hardware_info.cpu.brand.clone();
-    let gpu_name = hardware_info
-        .gpus
-        .iter()
-        .find(|g| g.device_type.to_lowercase().contains("discrete"))
-        .or_else(|| hardware_info.gpus.first())
-        .map(|g| g.name.clone())
-        .unwrap_or_else(|| "No GPU".to_string());
-    let avx2_supported = hardware_info.cpu.features.avx2;
-    let npu_detected = hardware_info.npu.as_ref().map(|n| n.detected).unwrap_or(false);
+    if hardware.detection_failed {
+        log::warn!(
+            "Hardware detection failed. Benchmark will continue with default metadata values. \
+             Results may be less useful for cross-system comparisons."
+        );
+    }
 
-    // Warmup: Load model and identify Ollama process (eliminates first-call latency)
+    // Warmup: Load model and identify Ollama process
     let ollama_pid = warmup_and_find_ollama_process(&model, client, config).await?;
 
     let suite_start = Instant::now();
@@ -447,20 +677,7 @@ pub async fn run_benchmark_suite(
 
             // Build context for follow-up prompts
             let context = if test.category == PromptCategory::FollowUp {
-                if let Some(ref prev_response) = last_response {
-                    Some(vec![
-                        OllamaMessage {
-                            role: "user".to_string(),
-                            content: "What is a variable in Python?".to_string(), // Use first short prompt as base
-                        },
-                        OllamaMessage {
-                            role: "assistant".to_string(),
-                            content: prev_response.clone(),
-                        },
-                    ])
-                } else {
-                    None
-                }
+                last_response.as_ref().map(|r| build_followup_context(r))
             } else {
                 None
             };
@@ -483,10 +700,7 @@ pub async fn run_benchmark_suite(
                 client,
                 config,
                 ollama_pid,
-                cpu_model.clone(),
-                gpu_name.clone(),
-                avx2_supported,
-                npu_detected,
+                &hardware,
             )
             .await?;
 
@@ -497,7 +711,7 @@ pub async fn run_benchmark_suite(
 
             all_metrics.push(metrics);
 
-            // Small delay between tests to let system stabilize
+            // Delay between tests to let system stabilize
             tokio::time::sleep(tokio::time::Duration::from_millis(TEST_STABILIZATION_DELAY_MS)).await;
         }
     }

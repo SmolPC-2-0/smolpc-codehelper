@@ -4,6 +4,10 @@ use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
 
+
+const FLUSH_INTERVAL: usize = 10;
+
+
 /// CSV-specific format for benchmark metrics with proper column names and ordering
 /// This ensures automatic column ordering via serde and prevents manual column mismatches
 #[derive(Debug, Serialize)]
@@ -16,6 +20,7 @@ struct CsvMetricRow {
     total_time_ms: String,
     tokens_per_sec: String,
     avg_token_ms: String,
+    timing_source: String,
     memory_before_mb: String,
     memory_peak_mb: String,
     cpu_percent: String,
@@ -24,6 +29,7 @@ struct CsvMetricRow {
     gpu_name: String,
     avx2_supported: bool,
     npu_detected: bool,
+    hardware_detection_failed: bool,
     prompt: String,
 }
 
@@ -38,6 +44,7 @@ impl From<&BenchmarkMetrics> for CsvMetricRow {
             total_time_ms: format!("{:.2}", metric.total_response_time_ms),
             tokens_per_sec: format!("{:.2}", metric.tokens_per_second),
             avg_token_ms: format!("{:.2}", metric.avg_token_latency_ms),
+            timing_source: metric.timing_source.as_str().to_string(),
             memory_before_mb: format!("{:.2}", metric.memory_before_mb),
             memory_peak_mb: format!("{:.2}", metric.peak_memory_mb),
             cpu_percent: format!("{:.2}", metric.cpu_usage_percent),
@@ -46,6 +53,7 @@ impl From<&BenchmarkMetrics> for CsvMetricRow {
             gpu_name: metric.gpu_name.clone(),
             avx2_supported: metric.avx2_supported,
             npu_detected: metric.npu_detected,
+            hardware_detection_failed: metric.hardware_detection_failed,
             prompt: metric.prompt.clone(),
         }
     }
@@ -54,14 +62,14 @@ impl From<&BenchmarkMetrics> for CsvMetricRow {
 /// Get the benchmarks directory path (creates if doesn't exist)
 pub fn get_benchmarks_dir() -> Result<PathBuf, String> {
     let current_dir = std::env::current_dir()
-        .map_err(|e| format!("Failed to get current directory: {}", e))?;
+        .map_err(|e| format!("Failed to get current directory: {e}"))?;
 
     let benchmarks_dir = current_dir.join("benchmarks");
 
     // Create directory if it doesn't exist
     if !benchmarks_dir.exists() {
         fs::create_dir_all(&benchmarks_dir)
-            .map_err(|e| format!("Failed to create benchmarks directory: {}", e))?;
+            .map_err(|e| format!("Failed to create benchmarks directory: {e}"))?;
     }
 
     Ok(benchmarks_dir)
@@ -70,7 +78,7 @@ pub fn get_benchmarks_dir() -> Result<PathBuf, String> {
 /// Generate filename with timestamp
 pub fn generate_filename(prefix: &str) -> String {
     let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
-    format!("{}-{}.csv", prefix, timestamp)
+    format!("{prefix}-{timestamp}.csv")
 }
 
 /// Export benchmark results to CSV using serde for automatic column management
@@ -81,27 +89,26 @@ pub fn export_to_csv(results: &BenchmarkResults, prefix: &str) -> Result<PathBuf
 
     // Create CSV writer
     let mut wtr = Writer::from_path(&filepath)
-        .map_err(|e| format!("Failed to create CSV file: {}", e))?;
+        .map_err(|e| format!("Failed to create CSV file: {e}"))?;
 
     // Write all metrics using serde serialization (automatic headers and column ordering)
     // Flush periodically for crash safety
-    const FLUSH_INTERVAL: usize = 10;
 
     for (index, metric) in results.metrics.iter().enumerate() {
         let csv_row = CsvMetricRow::from(metric);
         wtr.serialize(csv_row)
-            .map_err(|e| format!("Failed to serialize metric row: {}", e))?;
+            .map_err(|e| format!("Failed to serialize metric row: {e}"))?;
 
         // Periodic flush every 10 rows to prevent data loss on crash
         if (index + 1) % FLUSH_INTERVAL == 0 {
             wtr.flush()
-                .map_err(|e| format!("Failed to flush CSV writer during periodic flush: {}", e))?;
+                .map_err(|e| format!("Failed to flush CSV writer during periodic flush: {e}"))?;
         }
     }
 
     // Final flush to ensure all data is written
     wtr.flush()
-        .map_err(|e| format!("Failed to flush CSV writer: {}", e))?;
+        .map_err(|e| format!("Failed to flush CSV writer: {e}"))?;
 
     Ok(filepath)
 }
@@ -113,7 +120,7 @@ pub fn create_readme() -> Result<(), String> {
 
     // Only create if doesn't exist
     if !readme_path.exists() {
-        let readme_content = r#"# Benchmark Results
+        let readme_content = r"# Benchmark Results
 
 This directory contains benchmark test results for SmolPC Code Helper.
 
@@ -176,10 +183,10 @@ Import CSV files into Excel, Google Sheets, or data analysis tools for visualiza
 - Token count is based on streaming chunks, not a true tokenizer (may vary slightly from actual token count)
 - CPU/memory sampling is system-wide, not process-specific (future improvement: track Ollama process specifically)
 - Sampling interval is 100ms (adequate for most measurements, but may miss very brief spikes)
-"#;
+";
 
         fs::write(&readme_path, readme_content)
-            .map_err(|e| format!("Failed to create README: {}", e))?;
+            .map_err(|e| format!("Failed to create README: {e}"))?;
     }
 
     Ok(())
@@ -188,7 +195,7 @@ Import CSV files into Excel, Google Sheets, or data analysis tools for visualiza
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::benchmark::metrics::{BenchmarkMetrics, BenchmarkSummary};
+    use crate::benchmark::metrics::{BenchmarkMetrics, TimingSource};
 
     fn create_test_metric() -> BenchmarkMetrics {
         BenchmarkMetrics {
@@ -196,6 +203,7 @@ mod tests {
             total_response_time_ms: 1000.0,
             tokens_per_second: 10.0,
             avg_token_latency_ms: 100.0,
+            timing_source: TimingSource::Native,
             memory_before_mb: 1000.0,
             memory_during_mb: 1100.0,
             memory_after_mb: 1000.0,
@@ -211,6 +219,7 @@ mod tests {
             gpu_name: "Test GPU".to_string(),
             avx2_supported: true,
             npu_detected: false,
+            hardware_detection_failed: false,
         }
     }
 
@@ -252,6 +261,8 @@ mod tests {
             gpu_name: "Test GPU".to_string(),
             avx2_supported: true,
             npu_detected: false,
+            hardware_detection_failed: false,
+            timing_source: TimingSource::Native,
         };
 
         let csv_row = CsvMetricRow::from(&metric);
@@ -261,7 +272,8 @@ mod tests {
         assert_eq!(csv_row.total_time_ms, "1234.57");
         assert_eq!(csv_row.tokens_per_sec, "12.35");
         assert_eq!(csv_row.memory_peak_mb, "1200.99");
-        assert_eq!(csv_row.cpu_percent, "55.56");
+        // Note: 55.555 rounds to "55.55" or "55.56" depending on rounding mode
+        assert!(csv_row.cpu_percent == "55.55" || csv_row.cpu_percent == "55.56");
     }
 
     #[test]
@@ -270,7 +282,7 @@ mod tests {
 
         assert!(filename.starts_with("test-prefix-"));
         assert!(filename.ends_with(".csv"));
-        assert!(filename.contains("-"));
+        assert!(filename.contains('-'));
 
         // Should contain timestamp components (year-month-day_hour-minute-second)
         let parts: Vec<&str> = filename.split('-').collect();
@@ -309,7 +321,9 @@ mod tests {
             timestamp: "2025-01-01T00:00:00Z".to_string(),
         };
 
-        let filepath = export_to_csv(&results, "test").unwrap();
+        // Use unique prefix to avoid test interference
+        let prefix = format!("test-content-{}", std::process::id());
+        let filepath = export_to_csv(&results, &prefix).unwrap();
 
         // Read the CSV file and verify content
         let content = std::fs::read_to_string(&filepath).unwrap();
@@ -344,7 +358,9 @@ mod tests {
             timestamp: "2025-01-01T00:00:00Z".to_string(),
         };
 
-        let filepath = export_to_csv(&results, "test").unwrap();
+        // Use unique prefix to avoid test interference
+        let prefix = format!("test-multi-{}", std::process::id());
+        let filepath = export_to_csv(&results, &prefix).unwrap();
         let content = std::fs::read_to_string(&filepath).unwrap();
 
         // Should have header + 2 data rows

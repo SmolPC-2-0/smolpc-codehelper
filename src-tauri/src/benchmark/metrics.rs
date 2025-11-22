@@ -1,5 +1,23 @@
 use serde::{Deserialize, Serialize};
 
+/// Source of timing data for benchmark metrics
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TimingSource {
+    /// Timing data from Ollama's native nanosecond-precision metrics (preferred)
+    Native,
+    /// Timing data calculated from client-side measurements (fallback)
+    Client,
+}
+
+impl TimingSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TimingSource::Native => "native",
+            TimingSource::Client => "client",
+        }
+    }
+}
+
 /// Performance metrics for a single benchmark test
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkMetrics {
@@ -15,6 +33,9 @@ pub struct BenchmarkMetrics {
 
     /// Average time per token (ms)
     pub avg_token_latency_ms: f64,
+
+    /// Source of timing data ("native" = Ollama's metrics, "client" = client-side fallback)
+    pub timing_source: TimingSource,
 
     // Memory metrics (SECONDARY)
     /// RAM usage before inference started (MB)
@@ -64,6 +85,9 @@ pub struct BenchmarkMetrics {
 
     /// Whether NPU is detected
     pub npu_detected: bool,
+
+    /// Whether hardware detection failed (metadata may be unreliable)
+    pub hardware_detection_failed: bool,
 }
 
 /// Summary statistics across multiple benchmark runs
@@ -117,7 +141,7 @@ pub fn calculate_summary(metrics: &[BenchmarkMetrics]) -> Vec<BenchmarkSummary> 
         summaries.push(BenchmarkSummary {
             category: category.to_string(),
             avg_first_token_ms: avg_first_token,
-            avg_tokens_per_sec: avg_tokens_per_sec,
+            avg_tokens_per_sec,
             avg_total_time_ms: avg_total_time,
             avg_memory_mb: avg_memory,
             avg_cpu_percent: avg_cpu,
@@ -146,6 +170,7 @@ mod tests {
             total_response_time_ms: total_time,
             tokens_per_second: tokens_per_sec,
             avg_token_latency_ms: total_time / 100.0, // Simplified
+            timing_source: TimingSource::Native,
             memory_before_mb: 1000.0,
             memory_during_mb: 1100.0,
             memory_after_mb: 1000.0,
@@ -161,6 +186,7 @@ mod tests {
             gpu_name: "Test GPU".to_string(),
             avx2_supported: true,
             npu_detected: false,
+            hardware_detection_failed: false,
         }
     }
 

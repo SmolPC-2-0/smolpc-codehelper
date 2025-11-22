@@ -10,7 +10,7 @@ pub enum PromptCategory {
 }
 
 impl PromptCategory {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             PromptCategory::Short => "short",
             PromptCategory::Medium => "medium",
@@ -65,7 +65,7 @@ pub fn get_test_suite() -> Vec<TestPrompt> {
         suite.push(TestPrompt {
             id: format!("short_{}", idx + 1),
             category: PromptCategory::Short,
-            prompt: prompt.to_string(),
+            prompt: (*prompt).to_string(),
         });
     }
 
@@ -74,7 +74,7 @@ pub fn get_test_suite() -> Vec<TestPrompt> {
         suite.push(TestPrompt {
             id: format!("medium_{}", idx + 1),
             category: PromptCategory::Medium,
-            prompt: prompt.to_string(),
+            prompt: (*prompt).to_string(),
         });
     }
 
@@ -83,7 +83,7 @@ pub fn get_test_suite() -> Vec<TestPrompt> {
         suite.push(TestPrompt {
             id: format!("long_{}", idx + 1),
             category: PromptCategory::Long,
-            prompt: prompt.to_string(),
+            prompt: (*prompt).to_string(),
         });
     }
 
@@ -92,7 +92,7 @@ pub fn get_test_suite() -> Vec<TestPrompt> {
         suite.push(TestPrompt {
             id: format!("followup_{}", idx + 1),
             category: PromptCategory::FollowUp,
-            prompt: prompt.to_string(),
+            prompt: (*prompt).to_string(),
         });
     }
 
