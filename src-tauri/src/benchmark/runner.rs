@@ -146,9 +146,27 @@ pub struct BenchmarkProgress {
     pub iteration: usize,
 }
 
+/// Minimum memory threshold (in bytes) for the inference process.
+/// The process running the model will typically use 500MB+ (usually GBs).
+/// Server/CLI processes typically use <100MB.
+const INFERENCE_PROCESS_MIN_MEMORY_BYTES: u64 = 500 * 1024 * 1024; // 500MB
+
 /// Warmup function to load model and identify Ollama process.
 /// This eliminates first-call latency and establishes process monitoring.
 /// Uses a realistic prompt from the test suite for proper GPU/cache warming.
+///
+/// ## Process Identification Strategy
+///
+/// After warmup completes, the inference process is identified by:
+/// 1. **Memory (primary)**: The process holding the loaded model has dramatically higher
+///    memory usage (typically GBs) compared to server/CLI processes (~50-100MB)
+/// 2. **Memory threshold**: Must exceed 500MB to be considered an inference process
+/// 3. **Process name**: Must contain "ollama" (covers ollama, ollama.exe, ollama_llama_server)
+///
+/// This approach is more reliable than CPU-based detection because:
+/// - Memory remains high even when idle (model stays loaded)
+/// - CPU varies wildly based on timing of the sample
+/// - Memory difference is orders of magnitude (GBs vs MBs)
 async fn warmup_and_find_ollama_process(
     model: &str,
     client: &reqwest::Client,
@@ -157,7 +175,7 @@ async fn warmup_and_find_ollama_process(
     // Use a realistic prompt from the test suite for proper warming
     // This ensures GPU memory and caches are properly initialized
     let warmup_prompt = SHORT_PROMPTS.first()
-    .map_or_else(|| "What is a variable in Python?".to_string(), |s| (*s).to_string());
+        .map_or_else(|| "What is a variable in Python?".to_string(), |s| (*s).to_string());
 
     let warmup_messages = vec![OllamaMessage {
         role: "user".to_string(),
@@ -171,6 +189,8 @@ async fn warmup_and_find_ollama_process(
     };
 
     let url = format!("{}/api/chat", config.base_url());
+
+    // Execute warmup request - this loads the model into memory
     let response = client
         .post(&url)
         .json(&request)
@@ -194,30 +214,109 @@ async fn warmup_and_find_ollama_process(
         ));
     }
 
-    // Give Ollama a moment to fully initialize the model
-    tokio::time::sleep(tokio::time::Duration::from_millis(WARMUP_STABILIZATION_DELAY_MS)).await;
+    // Wait for response body to ensure model is fully loaded
+    let _ = response.bytes().await.map_err(|e| format!("Failed to read warmup response: {e}"))?;
 
-    // Find the Ollama process
-    let mut sys = System::new_all();
-    sys.refresh_all();
+    // Allow brief stabilization after warmup
+    tokio::time::sleep(std::time::Duration::from_millis(WARMUP_STABILIZATION_DELAY_MS)).await;
 
-    let ollama_pid = sys
-        .processes()
-        .iter()
-        .find(|(_, process)| {
-            let name = process.name().to_string_lossy().to_ascii_lowercase();
-            name.contains("ollama")
-        })
-        .map(|(pid, _)| *pid)
-        .ok_or_else(|| {
-            "Could not find Ollama process. Benchmark requires process-specific monitoring. \
-             Ensure Ollama is running (try 'ollama serve' in terminal)."
-                .to_string()
-        })?;
+    // Now identify the inference process by memory usage
+    // The model is loaded, so the inference process will have dramatically higher memory
+    let ollama_pid = find_ollama_inference_process()?;
 
     Ok(ollama_pid)
 }
 
+/// Find the Ollama inference process by memory usage.
+///
+/// This function identifies the correct process to monitor by:
+/// 1. Finding all processes with "ollama" in the name
+/// 2. Filtering to those exceeding the memory threshold (500MB)
+/// 3. Selecting the one with highest memory (the loaded model)
+///
+/// Returns an error if no suitable process is found.
+fn find_ollama_inference_process() -> Result<sysinfo::Pid, String> {
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    // Collect all Ollama-related processes with their memory usage
+    let mut candidates: Vec<(sysinfo::Pid, u64, String)> = sys
+        .processes()
+        .iter()
+        .filter_map(|(pid, proc)| {
+            let name = proc.name().to_string_lossy();
+            let name_lower = name.to_ascii_lowercase();
+
+            // Match ollama processes (covers ollama, ollama.exe, ollama_llama_server, etc.)
+            if name_lower.contains("ollama") {
+                Some((*pid, proc.memory(), name.to_string()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if candidates.is_empty() {
+        return Err(
+            "Could not find any Ollama process. Benchmark requires process-specific monitoring. \
+             Ensure Ollama is running (try 'ollama serve' in terminal)."
+                .to_string(),
+        );
+    }
+
+    // Log all found processes for debugging
+    log::debug!("Found {} Ollama process(es):", candidates.len());
+    for (pid, mem, name) in &candidates {
+        log::debug!("  PID {}: {} ({:.1} MB)", pid, name, *mem as f64 / BYTES_PER_MB);
+    }
+
+    // Sort by memory descending
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+
+    // The inference process should have significantly more memory than the threshold
+    let (pid, mem, name) = candidates.first().unwrap();
+
+    if *mem < INFERENCE_PROCESS_MIN_MEMORY_BYTES {
+        // No process exceeds threshold - model may not be loaded
+        let threshold_mb = INFERENCE_PROCESS_MIN_MEMORY_BYTES as f64 / BYTES_PER_MB;
+        let found_mb = *mem as f64 / BYTES_PER_MB;
+
+        return Err(format!(
+            "No Ollama inference process found with loaded model. \
+             Highest memory process '{name}' (PID {pid}) has only {found_mb:.1} MB, \
+             but inference process should have >{threshold_mb:.0} MB. \
+             The model may have failed to load or Ollama may have unloaded it."   
+        ));
+    }
+
+    log::info!(
+        "Selected Ollama inference process: '{}' (PID {}, {:.1} MB)",
+        name,
+        pid,
+        *mem as f64 / BYTES_PER_MB
+    );
+
+    // Validate selection if there are multiple processes
+    if candidates.len() > 1 {
+        let (_, second_mem, second_name) = &candidates[1];
+        let memory_ratio = *mem as f64 / (*second_mem).max(1) as f64;
+
+        if memory_ratio < 2.0 && *second_mem >= INFERENCE_PROCESS_MIN_MEMORY_BYTES {
+            // Two processes with similar high memory - unusual, log warning
+            log::warn!(
+                "Multiple Ollama processes with high memory detected. \
+                 Selected '{}' ({:.1} MB) over '{}' ({:.1} MB). \
+                 If benchmarks show unexpected results, ensure only one model is loaded.",
+                name,
+                *mem as f64 / BYTES_PER_MB,
+                second_name,
+                *second_mem as f64 / BYTES_PER_MB
+            );
+        }
+    }
+
+    Ok(*pid)
+}
 // =============================================================================
 // RESOURCE SAMPLING
 // =============================================================================
