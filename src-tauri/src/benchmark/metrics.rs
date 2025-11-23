@@ -51,7 +51,30 @@ pub struct BenchmarkMetrics {
     pub peak_memory_mb: f64,
 
     // CPU metrics (SECONDARY)
-    /// Average CPU utilization during inference (%)
+    // Note: Multiple CPU measurements enable accurate comparison when migrating from
+    // Ollama (HTTP-based) to llama.cpp (in-process). The HTTP architecture splits
+    // CPU usage across processes, so measuring only Ollama undercounts total cost.
+
+    /// Average CPU utilization of the Ollama/inference process during inference (%)
+    /// This measures only the inference engine's CPU usage.
+    pub cpu_ollama_percent: f64,
+
+    /// Average CPU utilization of this Tauri process during inference (%)
+    /// Captures HTTP overhead, JSON parsing, and async runtime costs.
+    /// Will be near-zero after llama.cpp migration (no HTTP overhead).
+    pub cpu_tauri_percent: f64,
+
+    /// Average system-wide CPU utilization during inference (%)
+    /// Provides context for overall system load and third-party processes.
+    pub cpu_system_percent: f64,
+
+    /// Combined CPU usage: ollama + tauri processes (%)
+    /// This is the true total CPU cost of inference in the current architecture.
+    /// Primary metric for comparing Ollama vs llama.cpp performance.
+    pub cpu_total_percent: f64,
+
+    /// Legacy field for backwards compatibility - same as cpu_ollama_percent
+    #[deprecated(note = "Use cpu_ollama_percent, cpu_tauri_percent, or cpu_total_percent instead")]
     pub cpu_usage_percent: f64,
 
     // Metadata
@@ -98,7 +121,21 @@ pub struct BenchmarkSummary {
     pub avg_tokens_per_sec: f64,
     pub avg_total_time_ms: f64,
     pub avg_memory_mb: f64,
+
+    // CPU summary metrics
+    /// Average Ollama/inference process CPU usage (%)
+    pub avg_cpu_ollama_percent: f64,
+    /// Average Tauri process CPU usage (%)
+    pub avg_cpu_tauri_percent: f64,
+    /// Average system-wide CPU usage (%)
+    pub avg_cpu_system_percent: f64,
+    /// Average combined CPU usage: ollama + tauri (%)
+    pub avg_cpu_total_percent: f64,
+
+    /// Legacy field - same as avg_cpu_ollama_percent
+    #[deprecated(note = "Use avg_cpu_ollama_percent or avg_cpu_total_percent instead")]
     pub avg_cpu_percent: f64,
+
     pub test_count: usize,
 }
 
@@ -117,6 +154,7 @@ pub fn get_timestamp() -> String {
 }
 
 /// Calculate summary statistics from a collection of metrics
+#[allow(deprecated)] // We need to set legacy fields
 pub fn calculate_summary(metrics: &[BenchmarkMetrics]) -> Vec<BenchmarkSummary> {
     let categories = ["short", "medium", "long", "follow-up"];
     let mut summaries = Vec::new();
@@ -136,7 +174,12 @@ pub fn calculate_summary(metrics: &[BenchmarkMetrics]) -> Vec<BenchmarkSummary> 
         let avg_tokens_per_sec = category_metrics.iter().map(|m| m.tokens_per_second).sum::<f64>() / count as f64;
         let avg_total_time = category_metrics.iter().map(|m| m.total_response_time_ms).sum::<f64>() / count as f64;
         let avg_memory = category_metrics.iter().map(|m| m.peak_memory_mb).sum::<f64>() / count as f64;
-        let avg_cpu = category_metrics.iter().map(|m| m.cpu_usage_percent).sum::<f64>() / count as f64;
+
+        // Calculate all CPU metrics
+        let avg_cpu_ollama = category_metrics.iter().map(|m| m.cpu_ollama_percent).sum::<f64>() / count as f64;
+        let avg_cpu_tauri = category_metrics.iter().map(|m| m.cpu_tauri_percent).sum::<f64>() / count as f64;
+        let avg_cpu_system = category_metrics.iter().map(|m| m.cpu_system_percent).sum::<f64>() / count as f64;
+        let avg_cpu_total = category_metrics.iter().map(|m| m.cpu_total_percent).sum::<f64>() / count as f64;
 
         summaries.push(BenchmarkSummary {
             category: category.to_string(),
@@ -144,7 +187,11 @@ pub fn calculate_summary(metrics: &[BenchmarkMetrics]) -> Vec<BenchmarkSummary> 
             avg_tokens_per_sec,
             avg_total_time_ms: avg_total_time,
             avg_memory_mb: avg_memory,
-            avg_cpu_percent: avg_cpu,
+            avg_cpu_ollama_percent: avg_cpu_ollama,
+            avg_cpu_tauri_percent: avg_cpu_tauri,
+            avg_cpu_system_percent: avg_cpu_system,
+            avg_cpu_total_percent: avg_cpu_total,
+            avg_cpu_percent: avg_cpu_ollama, // Legacy: same as ollama for backwards compat
             test_count: count,
         });
     }
@@ -157,6 +204,7 @@ mod tests {
     use super::*;
 
     /// Helper to create a test metric with minimal required fields
+    #[allow(deprecated)] // We need to set legacy fields
     fn create_test_metric(
         category: &str,
         first_token: f64,
@@ -175,7 +223,12 @@ mod tests {
             memory_during_mb: 1100.0,
             memory_after_mb: 1000.0,
             peak_memory_mb: peak_memory,
-            cpu_usage_percent: cpu,
+            // New CPU metrics - using cpu as ollama, simulating typical values
+            cpu_ollama_percent: cpu,
+            cpu_tauri_percent: cpu * 0.4, // Simulate ~40% of ollama's CPU for HTTP overhead
+            cpu_system_percent: cpu * 1.5, // Simulate system-wide being higher
+            cpu_total_percent: cpu + (cpu * 0.4), // ollama + tauri
+            cpu_usage_percent: cpu, // Legacy field
             model_name: "test-model".to_string(),
             prompt_type: category.to_string(),
             prompt: "test prompt".to_string(),

@@ -27,21 +27,29 @@
 //!
 //! ## Known Limitations
 //!
-//! ### CPU Measurement Undercounting
-//! CPU measurements show ~4-16% instead of expected 50-100% due to HTTP API architecture:
-//! - Ollama runs in separate process: ~16% CPU, ~85% GPU (GPU-accelerated inference)
-//! - Benchmark client (this process): ~40% CPU from HTTP overhead, JSON parsing, async runtime
-//! - We monitor Ollama process only, missing the HTTP client overhead
+//! ### Comprehensive CPU Measurement (v2.2.1+)
 //!
-//! This is an architectural limitation of the HTTP API approach. CPU measurements are:
-//! - ✅ Consistent across tests (useful for relative comparisons)
-//! - ✅ Accurate for the Ollama process itself
-//! - ❌ Don't capture total CPU cost (missing client-side HTTP overhead)
+//! To enable accurate comparison between Ollama (HTTP-based) and future llama.cpp
+//! (in-process) implementations, we now collect multiple CPU metrics:
 //!
-//! **Resolution**: Planned migration to in-process llama.cpp integration will:
-//! - Eliminate HTTP overhead (40% CPU)
-//! - Enable monitoring of single unified process
-//! - Provide accurate total CPU measurements
+//! - **`cpu_ollama_percent`**: Ollama inference process CPU usage
+//! - **`cpu_tauri_percent`**: This process (HTTP overhead, JSON parsing, async runtime)
+//! - **`cpu_system_percent`**: System-wide CPU load (context for overall system activity)
+//! - **`cpu_total_percent`**: Sum of ollama + tauri (true total cost of current architecture)
+//!
+//! **Why this matters for llama.cpp migration:**
+//! - Current Ollama architecture splits CPU across two processes
+//! - Ollama process: ~16% CPU (inference, mostly GPU-bound)
+//! - Tauri process: ~40% CPU (HTTP overhead, JSON serialization)
+//! - Total actual cost: ~56% CPU
+//!
+//! After llama.cpp migration (in-process):
+//! - Single process handles everything
+//! - HTTP overhead eliminated (cpu_tauri_percent → ~0%)
+//! - cpu_total_percent will drop significantly
+//!
+//! By measuring both processes now, benchmarks will accurately show the
+//! performance improvement when llama.cpp is integrated.
 //!
 //! ### GPU Metrics Not Captured
 //! Currently no GPU utilization metrics collected. For GPU-accelerated inference,
@@ -52,10 +60,10 @@ use super::test_suite::{get_test_suite, get_total_test_count, PromptCategory, SH
 use crate::commands::ollama::{OllamaConfig, OllamaMessage, OllamaRequest, OllamaResponse};
 use crate::hardware;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::time::Instant;
+use std::time::Duration;
 use sysinfo::System;
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 // =============================================================================
 // BENCHMARK CONFIGURATION CONSTANTS
@@ -63,21 +71,21 @@ use tokio::sync::Mutex;
 
 /// Interval (in milliseconds) for sampling CPU and memory during inference.
 /// 50ms provides rigorous monitoring for production-quality data.
-const RESOURCE_SAMPLING_INTERVAL_MS: u64 = 50;
+const RESOURCE_SAMPLING_INTERVAL_MS: Duration = Duration::from_millis(50);
 
 /// Delay (in milliseconds) between tests to allow system stabilization.
-const TEST_STABILIZATION_DELAY_MS: u64 = 500;
+const TEST_STABILIZATION_DELAY_MS: Duration = Duration::from_millis(500);
 
 /// Delay (in milliseconds) for CPU baseline establishment.
 /// Required by sysinfo crate: needs two refresh cycles with delay between them.
-const CPU_BASELINE_DELAY_MS: u64 = 200;
+const CPU_BASELINE_DELAY_MS: Duration = Duration::from_millis(200);
 
 /// Timeout (in seconds) for Ollama HTTP requests.
 /// 5 minutes allows for long responses on slower hardware.
-const REQUEST_TIMEOUT_SECS: u64 = 300;
+const REQUEST_TIMEOUT_SECS: Duration = Duration::from_secs(300);
 
 /// Delay (in milliseconds) after warmup to allow model initialization.
-const WARMUP_STABILIZATION_DELAY_MS: u64 = 500;
+const WARMUP_STABILIZATION_DELAY_MS: Duration = Duration::from_millis(500);
 
 /// Conversion factor from bytes to megabytes.
 const BYTES_PER_MB: f64 = 1024.0 * 1024.0;
@@ -103,18 +111,17 @@ impl HardwareSnapshot {
     async fn detect() -> Self {
         match hardware::detect_all().await {
             Ok(info) => {
-                let gpu_name = info
-                    .gpus
-                    .iter()
-                    .find(|g| g.device_type.to_lowercase().contains("discrete"))
-                    .or_else(|| info.gpus.first()).map_or_else(|| "No GPU".to_string(), |g| g.name.clone());
+                let gpu_name = info.gpus.iter()
+                    .find(|g| g.device_type.eq_ignore_ascii_case("discrete"))
+                    .or_else(|| info.gpus.first())
+                    .map_or_else(|| "No GPU".to_string(), |g| g.name.clone());
 
                 Self {
                     cpu_model: info.cpu.brand.clone(),
                     gpu_name,
                     avx2_supported: info.cpu.features.avx2,
                     npu_detected: info.npu.as_ref().is_some_and(|n| n.detected),
-                    detection_failed: false,
+                    detection_failed:    false,
                 }
             }
             Err(e) => {
@@ -194,12 +201,12 @@ async fn warmup_and_find_ollama_process(
     let response = client
         .post(&url)
         .json(&request)
-        .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .timeout(REQUEST_TIMEOUT_SECS)
         .send()
         .await
         .map_err(|e| {
             if e.is_timeout() {
-                format!("Warmup request timed out after {REQUEST_TIMEOUT_SECS}s. The model may be too large for this system or Ollama is unresponsive.")
+                format!("Warmup request timed out after {REQUEST_TIMEOUT_SECS:?}. The model may be too large for this system or Ollama is unresponsive.")
             } else {
                 format!("Warmup request failed: {e}")
             }
@@ -218,7 +225,7 @@ async fn warmup_and_find_ollama_process(
     let _ = response.bytes().await.map_err(|e| format!("Failed to read warmup response: {e}"))?;
 
     // Allow brief stabilization after warmup
-    tokio::time::sleep(std::time::Duration::from_millis(WARMUP_STABILIZATION_DELAY_MS)).await;
+    tokio::time::sleep(WARMUP_STABILIZATION_DELAY_MS).await;
 
     // Now identify the inference process by memory usage
     // The model is loaded, so the inference process will have dramatically higher memory
@@ -324,42 +331,137 @@ fn find_ollama_inference_process() -> Result<sysinfo::Pid, String> {
 /// Results from resource sampling during inference.
 #[derive(Debug)]
 struct SamplingResults {
-    cpu_samples: Vec<f64>,
+    /// CPU samples from the Ollama/inference process
+    cpu_ollama_samples: Vec<f64>,
+    /// CPU samples from the Tauri (this) process
+    cpu_tauri_samples: Vec<f64>,
+    /// System-wide CPU samples (all cores averaged)
+    cpu_system_samples: Vec<f64>,
+    /// Memory samples from the Ollama process
     memory_samples: Vec<f64>,
+    /// Peak memory observed during sampling
     peak_memory_mb: f64,
 }
 
+/// Internal data for resource sampling, protected by a single mutex.
+///
+/// We use `std::sync::Mutex` rather than `tokio::sync::Mutex` because:
+/// 1. Lock operations are trivial (nanoseconds) - just pushing to a Vec or updating a f64
+/// 2. Locks are NOT held across `.await` points
+/// 3. `std::sync::Mutex` has lower overhead than async mutexes
+///
+/// Per Tokio docs: "Contrary to popular belief, it is ok and often preferred to use
+/// the ordinary Mutex from the standard library in asynchronous code."
+/// See: https://tokio.rs/tokio/tutorial/shared-state
+#[derive(Debug)]
+struct SamplingData {
+    cpu_ollama_samples: Vec<f64>,
+    cpu_tauri_samples: Vec<f64>,
+    cpu_system_samples: Vec<f64>,
+    memory_samples: Vec<f64>,
+    peak_memory: f64,
+    sampling_active: bool,
+}
+
 /// Shared state for the resource sampling task.
+///
+/// Wraps all sampling data in a single `Arc<Mutex<>>` for thread-safe access
+/// between the sampling task and the main benchmark runner.
+#[derive(Clone)]
 struct SamplingState {
-    peak_memory: Arc<Mutex<f64>>,
-    cpu_samples: Arc<Mutex<Vec<f64>>>,
-    memory_samples: Arc<Mutex<Vec<f64>>>,
-    sampling_active: Arc<Mutex<bool>>,
+    inner: Arc<Mutex<SamplingData>>,
 }
 
 impl SamplingState {
+    /// Create a new sampling state with pre-allocated vectors.
+    ///
+    /// Pre-allocates capacity for ~100 samples (5 seconds at 50ms intervals),
+    /// which covers most inference runs without reallocation.
     fn new(initial_memory: f64) -> Self {
         Self {
-            peak_memory: Arc::new(Mutex::new(initial_memory)),
-            cpu_samples: Arc::new(Mutex::new(Vec::new())),
-            memory_samples: Arc::new(Mutex::new(Vec::new())),
-            sampling_active: Arc::new(Mutex::new(true)),
+            inner: Arc::new(Mutex::new(SamplingData {
+                cpu_ollama_samples: Vec::with_capacity(100),
+                cpu_tauri_samples: Vec::with_capacity(100),
+                cpu_system_samples: Vec::with_capacity(100),
+                memory_samples: Vec::with_capacity(100),
+                peak_memory: initial_memory,
+                sampling_active: true,
+            })),
         }
+    }
+
+    /// Record a single sample of CPU and memory metrics.
+    ///
+    /// This acquires the lock once and updates all fields atomically.
+    fn record_sample(&self, ollama_cpu: f64, tauri_cpu: f64, system_cpu: f64, memory: f64) {
+        let mut data = self.inner.lock().expect("SamplingState mutex poisoned");
+        data.cpu_ollama_samples.push(ollama_cpu);
+        data.cpu_tauri_samples.push(tauri_cpu);
+        data.cpu_system_samples.push(system_cpu);
+        data.memory_samples.push(memory);
+        if memory > data.peak_memory {
+            data.peak_memory = memory;
+        }
+    }
+
+    /// Check if sampling should continue.
+    fn is_active(&self) -> bool {
+        self.inner.lock().expect("SamplingState mutex poisoned").sampling_active
+    }
+
+    /// Signal the sampler to stop.
+    fn stop(&self) {
+        self.inner.lock().expect("SamplingState mutex poisoned").sampling_active = false;
+    }
+
+    /// Extract the final sampling results, consuming the collected data.
+    ///
+    /// Returns `None` if no samples were collected.
+    fn into_results(self) -> Option<SamplingResults> {
+        let mut data = self.inner.lock().expect("SamplingState mutex poisoned");
+
+        if data.cpu_ollama_samples.is_empty() || data.memory_samples.is_empty() {
+            return None;
+        }
+
+
+        Some(SamplingResults {
+            cpu_ollama_samples: std::mem::take(&mut data.cpu_ollama_samples),
+            cpu_tauri_samples: std::mem::take(&mut data.cpu_tauri_samples),
+            cpu_system_samples: std::mem::take(&mut data.cpu_system_samples),
+            memory_samples: std::mem::take(&mut data.memory_samples),
+            peak_memory_mb: data.peak_memory,
+        })
     }
 }
 
 /// Spawn a background task that samples CPU and memory at regular intervals.
 /// Returns a oneshot receiver that signals when sampling is complete.
+///
+/// ## CPU Measurements
+///
+/// This function collects three distinct CPU metrics:
+/// 1. **Ollama CPU**: The inference process (ollama_llama_server or similar)
+/// 2. **Tauri CPU**: This process (HTTP client, JSON parsing, async runtime overhead)
+/// 3. **System CPU**: Overall system load (all processes, all cores averaged)
+///
+/// These separate measurements enable accurate comparison when migrating from
+/// Ollama (HTTP-based, multi-process) to llama.cpp (in-process, single executable).
+///
+/// ## Threading Model
+///
+/// Uses `std::sync::Mutex` (not `tokio::sync::Mutex`) because:
+/// - Lock operations are trivial (nanoseconds)
+/// - Locks are released before any `.await` points
+/// - Lower overhead than async mutex for this use case
 fn spawn_resource_sampler(
     ollama_pid: sysinfo::Pid,
-    state: &SamplingState,
+    state: SamplingState,
 ) -> tokio::sync::oneshot::Receiver<()> {
     let (tx, rx) = tokio::sync::oneshot::channel();
 
-    let peak_memory = Arc::clone(&state.peak_memory);
-    let cpu_samples = Arc::clone(&state.cpu_samples);
-    let memory_samples = Arc::clone(&state.memory_samples);
-    let sampling_active = Arc::clone(&state.sampling_active);
+    // Get our own process ID for Tauri CPU measurement
+    let tauri_pid = sysinfo::Pid::from_u32(std::process::id());
 
     tokio::spawn(async move {
         let mut sys = System::new_all();
@@ -367,35 +469,48 @@ fn spawn_resource_sampler(
 
         // Establish CPU baseline - sysinfo requires two refresh cycles with delay
         sys.refresh_cpu_all();
-        tokio::time::sleep(tokio::time::Duration::from_millis(CPU_BASELINE_DELAY_MS)).await;
+        tokio::time::sleep(CPU_BASELINE_DELAY_MS).await;
         sys.refresh_cpu_all();
 
-        while *sampling_active.lock().await {
+        // Main sampling loop - check active flag, then sample, then sleep
+        while state.is_active() {
             sys.refresh_all();
             sys.refresh_cpu_all();
 
-            if let Some(process) = sys.process(ollama_pid) {
+            // Sample Ollama process CPU and memory
+            let ollama_data = sys.process(ollama_pid).map(|process| {
                 let memory = (process.memory() as f64) / BYTES_PER_MB;
                 let cpu = f64::from(process.cpu_usage());
+                (cpu, memory)
+            });
 
-                // Update peak memory
-                {
-                    let mut peak = peak_memory.lock().await;
-                    if memory > *peak {
-                        *peak = memory;
-                    }
+            // Sample Tauri (this) process CPU
+            let tauri_cpu = sys
+                .process(tauri_pid)
+                .map(|process| f64::from(process.cpu_usage()))
+                .unwrap_or(0.0);
+
+            // Sample system-wide CPU (average across all cores)
+            let system_cpu = {
+                let cpus = sys.cpus();
+                if cpus.is_empty() {
+                    0.0
+                } else {
+                    let total: f32 = cpus.iter().map(|cpu| cpu.cpu_usage()).sum();
+                    f64::from(total / cpus.len() as f32)
                 }
+            };
 
-                // Store samples
-                cpu_samples.lock().await.push(cpu);
-                memory_samples.lock().await.push(memory);
+            if let Some((ollama_cpu, memory)) = ollama_data {
+                // Record all metrics with a single lock acquisition
+                state.record_sample(ollama_cpu, tauri_cpu, system_cpu, memory);
             } else {
-                // Process disappeared - stop sampling
+                // Ollama process disappeared - stop sampling
                 log::warn!("Ollama process (PID {ollama_pid}) disappeared during sampling");
                 break;
             }
 
-            tokio::time::sleep(tokio::time::Duration::from_millis(RESOURCE_SAMPLING_INTERVAL_MS)).await;
+            tokio::time::sleep(RESOURCE_SAMPLING_INTERVAL_MS).await;
         }
 
         let _ = tx.send(());
@@ -405,30 +520,28 @@ fn spawn_resource_sampler(
 }
 
 /// Collect and validate sampling results after inference completes.
+///
+/// This function:
+/// 1. Signals the sampler to stop
+/// 2. Waits for the sampling task to complete
+/// 3. Extracts and validates the collected results
 async fn collect_sampling_results(
-    state: &SamplingState,
+    state: SamplingState,
     sampling_done: tokio::sync::oneshot::Receiver<()>,
     ollama_pid: sysinfo::Pid,
 ) -> Result<SamplingResults, String> {
-    // Signal sampling to stop and wait for completion
-    *state.sampling_active.lock().await = false;
+    // Signal sampling to stop
+    state.stop();
+
+    // Wait for the sampling task to complete
     let _ = sampling_done.await;
 
-    let cpu_samples = state.cpu_samples.lock().await.clone();
-    let memory_samples = state.memory_samples.lock().await.clone();
-    let peak_memory_mb = *state.peak_memory.lock().await;
-
-    if cpu_samples.is_empty() || memory_samples.is_empty() {
-        return Err(format!(
+    // Extract results - this consumes the state
+    state.into_results().ok_or_else(|| {
+        format!(
             "Resource sampling failed: no samples collected for Ollama process (PID {ollama_pid}). \
-             The process may have crashed or become unresponsive.",
-        ));
-    }
-
-    Ok(SamplingResults {
-        cpu_samples,
-        memory_samples,
-        peak_memory_mb,
+             The process may have crashed or become unresponsive."
+        )
     })
 }
 
@@ -559,14 +672,15 @@ fn build_request_messages(prompt: &str, context: Option<Vec<OllamaMessage>>) -> 
 // STATISTICAL HELPERS
 // =============================================================================
 
-/// Calculate the median of a slice of f64 values.
+/// Calculate the median - note that full sorting is slower but acceptable for benchmark sizes. 
 fn calculate_median(values: &[f64]) -> f64 {
     if values.is_empty() {
         return 0.0;
     }
 
-    let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mut sorted = values.to_vec(); // clones input (must clone if you can't mutate caller)
+    // Use total_cmp for a deterministic, NaN-handling comparison
+    sorted.sort_by(f64::total_cmp);
 
     let len = sorted.len();
     if len % 2 == 0 {
@@ -621,8 +735,9 @@ async fn run_single_test(
     };
 
     // Start resource sampling
+    // Clone the state for the spawned sampler task - both share the same Arc<Mutex<>>
     let sampling_state = SamplingState::new(memory_before_mb);
-    let sampling_done = spawn_resource_sampler(ollama_pid, &sampling_state);
+    let sampling_done = spawn_resource_sampler(ollama_pid, sampling_state.clone());
 
     // Make request with timeout
     let url = format!("{}/api/chat", config.base_url());
@@ -631,13 +746,13 @@ async fn run_single_test(
     let response = client
         .post(&url)
         .json(&request)
-        .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .timeout(REQUEST_TIMEOUT_SECS)
         .send()
         .await
         .map_err(|e| {
             if e.is_timeout() {
                 format!(
-                    "Request timed out after {}s for prompt '{}...'. \
+                    "Request timed out after {:?} for prompt '{}...'. \
                      Consider using a smaller model or shorter prompts.",
                     REQUEST_TIMEOUT_SECS,
                     prompt.chars().take(50).collect::<String>()
@@ -666,8 +781,8 @@ async fn run_single_test(
 
     let client_elapsed_ms = request_start.elapsed().as_secs_f64() * 1000.0;
 
-    // Collect sampling results
-    let sampling_results = collect_sampling_results(&sampling_state, sampling_done, ollama_pid).await?;
+    // Collect sampling results (consumes the state)
+    let sampling_results = collect_sampling_results(sampling_state, sampling_done, ollama_pid).await?;
 
     // Calculate timing metrics
     let timing = calculate_timing_metrics(&ollama_response, client_elapsed_ms);
@@ -688,9 +803,13 @@ async fn run_single_test(
         ))?;
 
     // Calculate resource metrics
-    let avg_cpu = calculate_average(&sampling_results.cpu_samples);
+    let avg_cpu_ollama = calculate_average(&sampling_results.cpu_ollama_samples);
+    let avg_cpu_tauri = calculate_average(&sampling_results.cpu_tauri_samples);
+    let avg_cpu_system = calculate_average(&sampling_results.cpu_system_samples);
+    let avg_cpu_total = avg_cpu_ollama + avg_cpu_tauri; // Combined process CPU
     let median_memory_during = calculate_median(&sampling_results.memory_samples);
 
+    #[allow(deprecated)] // We need to set the legacy cpu_usage_percent field
     Ok((
         BenchmarkMetrics {
             first_token_latency_ms: timing.first_token_latency_ms,
@@ -702,7 +821,12 @@ async fn run_single_test(
             memory_during_mb: median_memory_during,
             memory_after_mb,
             peak_memory_mb: sampling_results.peak_memory_mb,
-            cpu_usage_percent: avg_cpu,
+            // New CPU metrics for accurate Ollama vs llama.cpp comparison
+            cpu_ollama_percent: avg_cpu_ollama,
+            cpu_tauri_percent: avg_cpu_tauri,
+            cpu_system_percent: avg_cpu_system,
+            cpu_total_percent: avg_cpu_total,
+            cpu_usage_percent: avg_cpu_ollama, // Legacy: same as ollama for backwards compat
             model_name: model,
             prompt_type: category.as_str().to_string(),
             prompt,
@@ -811,7 +935,7 @@ pub async fn run_benchmark_suite(
             all_metrics.push(metrics);
 
             // Delay between tests to let system stabilize
-            tokio::time::sleep(tokio::time::Duration::from_millis(TEST_STABILIZATION_DELAY_MS)).await;
+            tokio::time::sleep(TEST_STABILIZATION_DELAY_MS).await;
         }
     }
 
