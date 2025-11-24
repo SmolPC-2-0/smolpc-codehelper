@@ -65,7 +65,30 @@ impl From<&BenchmarkMetrics> for CsvMetricRow {
     }
 }
 
-/// Get the benchmarks directory path (creates if doesn't exist)
+/// Get the benchmarks directory path using Tauri's app data directory
+/// This provides a stable, cross-platform location that doesn't depend on CWD
+pub fn get_benchmarks_dir_with_app_handle(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {e}"))?;
+
+    let benchmarks_dir = app_data_dir.join("benchmarks");
+
+    // Create directory if it doesn't exist
+    if !benchmarks_dir.exists() {
+        fs::create_dir_all(&benchmarks_dir)
+            .map_err(|e| format!("Failed to create benchmarks directory: {e}"))?;
+    }
+
+    Ok(benchmarks_dir)
+}
+
+/// Legacy function for backwards compatibility and tests
+/// Prefer get_benchmarks_dir_with_app_handle in production code
+#[deprecated(note = "Use get_benchmarks_dir_with_app_handle for stable paths")]
 pub fn get_benchmarks_dir() -> Result<PathBuf, String> {
     let current_dir = std::env::current_dir()
         .map_err(|e| format!("Failed to get current directory: {e}"))?;

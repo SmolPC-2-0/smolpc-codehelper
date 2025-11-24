@@ -1,43 +1,55 @@
 use crate::hardware::{self, types::HardwareInfo};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::OnceCell;
 
 /// State for caching hardware detection results
-#[derive(Default)]
+/// Uses OnceCell for write-once semantics to eliminate race conditions
 pub struct HardwareCache {
-    info: Arc<RwLock<Option<HardwareInfo>>>,
+    info: Arc<OnceCell<HardwareInfo>>,
+}
+
+impl Default for HardwareCache {
+    fn default() -> Self {
+        Self {
+            info: Arc::new(OnceCell::new()),
+        }
+    }
 }
 
 impl HardwareCache {
-    /// Get cached hardware info
-    pub async fn get(&self) -> Option<HardwareInfo> {
-        self.info.read().await.clone()
+    /// Get cached hardware info, or detect if not yet initialized
+    /// This ensures single detection even with concurrent requests
+    pub async fn get_or_detect(&self) -> Result<Arc<HardwareInfo>, String> {
+        self.info
+            .get_or_try_init(|| async {
+                log::info!("Detecting hardware for the first time");
+                hardware::detect_all().await.map_err(|e| e.to_string())
+            })
+            .await
+            .map(|info| Arc::new(info.clone()))
     }
 
-    /// Set cached hardware info
-    pub async fn set(&self, info: HardwareInfo) {
-        *self.info.write().await = Some(info);
+    /// Get cached hardware info if available, without triggering detection
+    pub fn get(&self) -> Option<Arc<HardwareInfo>> {
+        self.info.get().map(|info| Arc::new(info.clone()))
     }
 }
 
-/// Detect all hardware (CPU, GPU, NPU)
-/// Results are cached in app state
+/// Detect hardware or return cached results
+/// Uses get_or_detect to ensure single detection even with concurrent requests
 #[tauri::command]
 pub async fn detect_hardware(
     cache: tauri::State<'_, HardwareCache>,
 ) -> Result<HardwareInfo, String> {
-    let info = hardware::detect_all().await?;
-
-    // Cache the result
-    cache.set(info.clone()).await;
-
-    Ok(info)
+    let info = cache.get_or_detect().await?;
+    Ok((*info).clone())
 }
 
-/// Get cached hardware info without re-detecting
+/// Get cached hardware info without triggering detection
+/// Returns None if hardware hasn't been detected yet
 #[tauri::command]
 pub async fn get_cached_hardware(
     cache: tauri::State<'_, HardwareCache>,
 ) -> Result<Option<HardwareInfo>, String> {
-    Ok(cache.get().await)
+    Ok(cache.get().map(|arc| (*arc).clone()))
 }

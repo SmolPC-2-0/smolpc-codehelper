@@ -1,3 +1,4 @@
+use crate::hardware::errors::HardwareError;
 use crate::hardware::types::{
     CpuFeatures, CpuInfo, GpuInfo, GpuVendor, HardwareInfo, MemoryInfo, NpuConfidence, NpuInfo,
     StorageInfo,
@@ -5,10 +6,10 @@ use crate::hardware::types::{
 
 /// Main entry point for hardware detection using hardware-query crate
 /// Detects CPU, GPU, and NPU information offline
-pub async fn detect_all() -> Result<HardwareInfo, String> {
+pub async fn detect_all() -> Result<HardwareInfo, HardwareError> {
     // Query all hardware information using hardware-query
     let hw_info = hardware_query::HardwareInfo::query()
-        .map_err(|e| format!("Hardware query failed: {}", e))?;
+        .map_err(|e| HardwareError::QueryFailed(e.to_string()))?;
 
     // Convert CPU info
     let cpu_info = convert_cpu_info(&hw_info);
@@ -147,8 +148,7 @@ fn convert_storage_info(hw_info: &hardware_query::HardwareInfo) -> StorageInfo {
     // Find primary storage device (largest capacity or first device)
     if let Some(primary) = storage_devices.iter().max_by(|a, b| {
         a.capacity_gb()
-            .partial_cmp(&b.capacity_gb())
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .total_cmp(&b.capacity_gb())
     }) {
         let is_ssd = matches!(
             primary.drive_type().to_string().to_lowercase().as_str(),

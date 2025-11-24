@@ -63,7 +63,11 @@ impl SamplingState {
 
     /// Record a sample (single lock acquisition for all metrics).
     pub fn record_sample(&self, ollama_cpu: f64, tauri_cpu: f64, system_cpu: f64, memory: f64) {
-        let mut data = self.inner.lock().expect("SamplingState mutex poisoned");
+        let mut data = self.inner.lock()
+            .unwrap_or_else(|poisoned| {
+                log::warn!("SamplingState mutex poisoned, recovering data");
+                poisoned.into_inner()
+            });
         data.cpu_ollama_samples.push(ollama_cpu);
         data.cpu_tauri_samples.push(tauri_cpu);
         data.cpu_system_samples.push(system_cpu);
@@ -75,17 +79,31 @@ impl SamplingState {
 
     /// Check if sampling should continue.
     pub fn is_active(&self) -> bool {
-        self.inner.lock().expect("SamplingState mutex poisoned").sampling_active
+        self.inner.lock()
+            .unwrap_or_else(|poisoned| {
+                log::warn!("SamplingState mutex poisoned, recovering data");
+                poisoned.into_inner()
+            })
+            .sampling_active
     }
 
     /// Signal the sampler to stop.
     pub fn stop(&self) {
-        self.inner.lock().expect("SamplingState mutex poisoned").sampling_active = false;
+        self.inner.lock()
+            .unwrap_or_else(|poisoned| {
+                log::warn!("SamplingState mutex poisoned, recovering data");
+                poisoned.into_inner()
+            })
+            .sampling_active = false;
     }
 
     /// Extract results, returning `None` if no samples were collected.
     pub fn into_results(self) -> Option<SamplingResults> {
-        let mut data = self.inner.lock().expect("SamplingState mutex poisoned");
+        let mut data = self.inner.lock()
+            .unwrap_or_else(|poisoned| {
+                log::warn!("SamplingState mutex poisoned, recovering data");
+                poisoned.into_inner()
+            });
 
         if data.cpu_ollama_samples.is_empty() || data.memory_samples.is_empty() {
             return None;

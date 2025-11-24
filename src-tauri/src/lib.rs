@@ -8,7 +8,6 @@ use commands::ollama::{
     cancel_generation, check_ollama, generate_stream, get_ollama_models, HttpClient,
     OllamaConfig, StreamCancellation,
 };
-use tauri::Manager;
 
 #[allow(clippy::missing_panics_doc)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -23,19 +22,10 @@ pub fn run() {
                 )?;
             }
 
-            // Detect hardware on startup (async)
-            let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                match hardware::detect_all().await {
-                    Ok(info) => {
-                        log::info!("Hardware detected on startup: CPU={}, GPUs={}", info.cpu.brand, info.gpus.len());
-                        app_handle.state::<HardwareCache>().set(info).await;
-                    }
-                    Err(e) => {
-                        log::error!("Failed to detect hardware on startup: {}", e);
-                    }
-                }
-            });
+            // Hardware detection now happens lazily on first request via OnceCell
+            // This eliminates startup race conditions and ensures single detection
+            // The first call to detect_hardware() or get_cached_hardware() will trigger detection
+            log::info!("Hardware detection will occur on first request");
 
             Ok(())
         })
