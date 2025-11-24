@@ -23,7 +23,6 @@ struct CsvMetricRow {
     timing_source: String,
     memory_before_mb: String,
     memory_peak_mb: String,
-    // Comprehensive CPU metrics for Ollama vs llama.cpp comparison
     cpu_ollama_percent: String,
     cpu_tauri_percent: String,
     cpu_system_percent: String,
@@ -51,11 +50,10 @@ impl From<&BenchmarkMetrics> for CsvMetricRow {
             timing_source: metric.timing_source.as_str().to_string(),
             memory_before_mb: format!("{:.2}", metric.memory_before_mb),
             memory_peak_mb: format!("{:.2}", metric.peak_memory_mb),
-            // Comprehensive CPU metrics for Ollama vs llama.cpp comparison
             cpu_ollama_percent: format!("{:.2}", metric.cpu_ollama_percent),
             cpu_tauri_percent: format!("{:.2}", metric.cpu_tauri_percent),
-            cpu_system_percent: format!("{:.2}", metric.cpu_system_percent),
             cpu_total_percent: format!("{:.2}", metric.cpu_total_percent),
+            cpu_system_percent: format!("{:.2}", metric.cpu_system_percent),
             response_tokens: metric.response_tokens,
             cpu_model: metric.cpu_model.clone(),
             gpu_name: metric.gpu_name.clone(),
@@ -205,7 +203,6 @@ mod tests {
     use super::*;
     use crate::benchmark::metrics::{BenchmarkMetrics, TimingSource};
 
-    #[allow(deprecated)] // We need to set legacy cpu_usage_percent field
     fn create_test_metric() -> BenchmarkMetrics {
         BenchmarkMetrics {
             first_token_latency_ms: 100.0,
@@ -217,12 +214,10 @@ mod tests {
             memory_during_mb: 1100.0,
             memory_after_mb: 1000.0,
             peak_memory_mb: 1200.0,
-            // New CPU metrics
-            cpu_ollama_percent: 16.0,
-            cpu_tauri_percent: 40.0,
-            cpu_system_percent: 45.0,
-            cpu_total_percent: 56.0,
-            cpu_usage_percent: 16.0, // Legacy field
+            cpu_ollama_percent: 40.0,
+            cpu_tauri_percent: 10.0,
+            cpu_system_percent: 60.0,
+            cpu_total_percent: 50.0,
             model_name: "test-model".to_string(),
             prompt_type: "short".to_string(),
             prompt: "test prompt".to_string(),
@@ -254,7 +249,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)] // We need to set legacy cpu_usage_percent field
     fn test_csv_metric_row_formatting() {
         let metric = BenchmarkMetrics {
             first_token_latency_ms: 123.456,
@@ -265,11 +259,10 @@ mod tests {
             memory_during_mb: 1100.456,
             memory_after_mb: 1000.789,
             peak_memory_mb: 1200.987,
-            cpu_ollama_percent: 16.123,
-            cpu_tauri_percent: 40.456,
-            cpu_system_percent: 45.789,
-            cpu_total_percent: 56.579,
-            cpu_usage_percent: 16.123, // Legacy field
+            cpu_ollama_percent: 40.0,
+            cpu_tauri_percent: 15.56,
+            cpu_system_percent: 70.0,
+            cpu_total_percent: 55.56,
             model_name: "test".to_string(),
             prompt_type: "medium".to_string(),
             prompt: "prompt".to_string(),
@@ -291,11 +284,10 @@ mod tests {
         assert_eq!(csv_row.total_time_ms, "1234.57");
         assert_eq!(csv_row.tokens_per_sec, "12.35");
         assert_eq!(csv_row.memory_peak_mb, "1200.99");
-        // Verify CPU metrics formatting
-        assert_eq!(csv_row.cpu_ollama_percent, "16.12");
-        assert_eq!(csv_row.cpu_tauri_percent, "40.46");
-        assert_eq!(csv_row.cpu_system_percent, "45.79");
-        assert_eq!(csv_row.cpu_total_percent, "56.58");
+        assert_eq!(csv_row.cpu_ollama_percent, "40.00");
+        assert_eq!(csv_row.cpu_tauri_percent, "15.56");
+        assert_eq!(csv_row.cpu_system_percent, "70.00");
+        assert_eq!(csv_row.cpu_total_percent, "55.56");
     }
 
     #[test]

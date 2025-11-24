@@ -102,7 +102,6 @@ pub struct OllamaResponse {
     pub done: bool,
     // Token count metadata (only present when done=true)
     pub eval_count: Option<usize>,        // Number of tokens in the response
-    pub prompt_eval_count: Option<usize>, // Number of tokens in the prompt
     // Timing metadata (only present when done=true)
     pub total_duration: Option<u64>,      // Total time in nanoseconds
     pub prompt_eval_duration: Option<u64>, // Prompt evaluation time in nanoseconds

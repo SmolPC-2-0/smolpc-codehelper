@@ -73,10 +73,6 @@ pub struct BenchmarkMetrics {
     /// Primary metric for comparing Ollama vs llama.cpp performance.
     pub cpu_total_percent: f64,
 
-    /// Legacy field for backwards compatibility - same as cpu_ollama_percent
-    #[deprecated(note = "Use cpu_ollama_percent, cpu_tauri_percent, or cpu_total_percent instead")]
-    pub cpu_usage_percent: f64,
-
     // Metadata
     /// Model name used for inference
     pub model_name: String,
@@ -132,10 +128,6 @@ pub struct BenchmarkSummary {
     /// Average combined CPU usage: ollama + tauri (%)
     pub avg_cpu_total_percent: f64,
 
-    /// Legacy field - same as avg_cpu_ollama_percent
-    #[deprecated(note = "Use avg_cpu_ollama_percent or avg_cpu_total_percent instead")]
-    pub avg_cpu_percent: f64,
-
     pub test_count: usize,
 }
 
@@ -154,7 +146,6 @@ pub fn get_timestamp() -> String {
 }
 
 /// Calculate summary statistics from a collection of metrics
-#[allow(deprecated)] // We need to set legacy fields
 pub fn calculate_summary(metrics: &[BenchmarkMetrics]) -> Vec<BenchmarkSummary> {
     let categories = ["short", "medium", "long", "follow-up"];
     let mut summaries = Vec::new();
@@ -190,8 +181,7 @@ pub fn calculate_summary(metrics: &[BenchmarkMetrics]) -> Vec<BenchmarkSummary> 
             avg_cpu_ollama_percent: avg_cpu_ollama,
             avg_cpu_tauri_percent: avg_cpu_tauri,
             avg_cpu_system_percent: avg_cpu_system,
-            avg_cpu_total_percent: avg_cpu_total,
-            avg_cpu_percent: avg_cpu_ollama, // Legacy: same as ollama for backwards compat
+            avg_cpu_total_percent: avg_cpu_total, 
             test_count: count,
         });
     }
@@ -204,7 +194,6 @@ mod tests {
     use super::*;
 
     /// Helper to create a test metric with minimal required fields
-    #[allow(deprecated)] // We need to set legacy fields
     fn create_test_metric(
         category: &str,
         first_token: f64,
@@ -228,7 +217,6 @@ mod tests {
             cpu_tauri_percent: cpu * 0.4, // Simulate ~40% of ollama's CPU for HTTP overhead
             cpu_system_percent: cpu * 1.5, // Simulate system-wide being higher
             cpu_total_percent: cpu + (cpu * 0.4), // ollama + tauri
-            cpu_usage_percent: cpu, // Legacy field
             model_name: "test-model".to_string(),
             prompt_type: category.to_string(),
             prompt: "test prompt".to_string(),
@@ -258,7 +246,7 @@ mod tests {
         assert_eq!(summary[0].avg_tokens_per_sec, 15.0);
         assert_eq!(summary[0].avg_total_time_ms, 1500.0);
         assert_eq!(summary[0].avg_memory_mb, 550.0);
-        assert_eq!(summary[0].avg_cpu_percent, 55.0);
+        assert_eq!(summary[0].avg_cpu_total_percent, 77.0); // (50 + 50*0.4) + (60 + 60*0.4) / 2 = 70 + 84 / 2 = 77
         assert_eq!(summary[0].test_count, 2);
     }
 
@@ -324,7 +312,7 @@ mod tests {
         // Check that floating point averages are calculated correctly
         assert!((summary[0].avg_first_token_ms - 150.5).abs() < 0.01);
         assert!((summary[0].avg_tokens_per_sec - 15.5).abs() < 0.01);
-        assert!((summary[0].avg_cpu_percent - 55.5).abs() < 0.01);
+        assert!((summary[0].avg_cpu_total_percent - 77.7).abs() < 0.01);
     }
 
     #[test]
