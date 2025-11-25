@@ -225,18 +225,18 @@ fn find_python_executable(server_script: &Path) -> Result<PathBuf, LibreOfficeEr
 
 /// Find the MCP server script (main.py)
 fn find_server_script() -> Result<PathBuf, LibreOfficeError> {
-    // The server script should be at: src-tauri/mcp-servers/libreoffice/main.py
+    // The server script should be at: src-tauri/mcp-servers/libreoffice/libre.py
     // We need to find it relative to the executable or the project root
 
     // Try to get the executable directory (works in production)
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
             // In production (macOS .app bundle): Contents/MacOS/
-            // Script would be at: Contents/Resources/mcp-servers/libreoffice/main.py
+            // Script would be at: Contents/Resources/mcp-servers/libreoffice/libre.py
             let production_path = exe_dir
                 .parent() // Contents/
                 .and_then(|p| p.parent()) // .app/
-                .map(|p| p.join("Resources/mcp-servers/libreoffice/main.py"));
+                .map(|p| p.join("Resources/mcp-servers/libreoffice/libre.py"));
 
             if let Some(path) = production_path {
                 if path.exists() {
@@ -245,7 +245,7 @@ fn find_server_script() -> Result<PathBuf, LibreOfficeError> {
             }
 
             // Also try relative to exe_dir directly (for testing)
-            let dev_path = exe_dir.join("../../../mcp-servers/libreoffice/main.py");
+            let dev_path = exe_dir.join("../../../mcp-servers/libreoffice/libre.py");
             if dev_path.exists() {
                 return Ok(dev_path);
             }
@@ -258,9 +258,9 @@ fn find_server_script() -> Result<PathBuf, LibreOfficeError> {
     })?;
 
     let dev_paths = vec![
-        cwd.join("src-tauri/mcp-servers/libreoffice/main.py"),
-        cwd.join("mcp-servers/libreoffice/main.py"),
-        cwd.join("../mcp-servers/libreoffice/main.py"),
+        cwd.join("src-tauri/mcp-servers/libreoffice/libre.py"),
+        cwd.join("mcp-servers/libreoffice/libre.py"),
+        cwd.join("../mcp-servers/libreoffice/libre.py"),
     ];
 
     for path in dev_paths {
@@ -270,7 +270,7 @@ fn find_server_script() -> Result<PathBuf, LibreOfficeError> {
     }
 
     Err(LibreOfficeError::ServerFilesNotFound(
-        "Could not find main.py script".to_string(),
+        "Could not find libre.py script".to_string(),
     ))
 }
 
