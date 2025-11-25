@@ -17,7 +17,7 @@ pub async fn run_benchmark(
     let iterations = iterations.unwrap_or(3); // Default to 3 iterations
 
     // Create README if it doesn't exist
-    create_readme()
+    create_readme(&app_handle)
         .map_err(|e| Error::Other(format!("Failed to create benchmark README file: {}", e)))?;
 
     // Run benchmark with progress updates
@@ -29,7 +29,7 @@ pub async fn run_benchmark(
     .map_err(|e| Error::Other(format!("Benchmark suite failed for model '{}': {}", model, e)))?;
 
     // Export to CSV
-    let filepath = export_to_csv(&results, "benchmark")
+    let filepath = export_to_csv(&results, "benchmark", &app_handle)
         .map_err(|e| Error::Other(format!("Failed to export benchmark results to CSV: {}", e)))?;
 
     // Emit completion event with file path

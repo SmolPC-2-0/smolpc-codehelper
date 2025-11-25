@@ -20,6 +20,9 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const TEST_STABILIZATION_DELAY: Duration = Duration::from_millis(500);
 const BYTES_PER_MB: f64 = 1024.0 * 1024.0;
 
+/// Approximate character-to-token ratio for estimation when native token counts unavailable
+const CHARS_PER_TOKEN_ESTIMATE: usize = 4;
+
 /// ID of the test used for follow-up context.
 const CONTEXT_SOURCE_TEST_ID: &str = "short_1";
 
@@ -100,7 +103,7 @@ fn calculate_timing_metrics(response: &OllamaResponse, client_elapsed_ms: f64) -
     log::warn!("Ollama did not provide native timing data, using client-side estimates");
 
     let response_content = response.message.as_ref().map_or("", |m| m.content.as_str());
-    let estimated_tokens = (response_content.len() / 4).max(1); // ~4 chars per token
+    let estimated_tokens = (response_content.len() / CHARS_PER_TOKEN_ESTIMATE).max(1);
 
     let tokens_per_second = if client_elapsed_ms > 0.0 {
         (estimated_tokens as f64) / (client_elapsed_ms / 1000.0)

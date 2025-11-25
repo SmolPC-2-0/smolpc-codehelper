@@ -1,3 +1,5 @@
+
+
 use super::metrics::{BenchmarkMetrics, BenchmarkResults};
 use csv::Writer;
 use serde::Serialize;
@@ -111,8 +113,12 @@ pub fn generate_filename(prefix: &str) -> String {
 }
 
 /// Export benchmark results to CSV using serde for automatic column management
-pub fn export_to_csv(results: &BenchmarkResults, prefix: &str) -> Result<PathBuf, String> {
-    let benchmarks_dir = get_benchmarks_dir()?;
+pub fn export_to_csv(
+    results: &BenchmarkResults,
+    prefix: &str,
+    app_handle: &tauri::AppHandle,
+) -> Result<PathBuf, String> {
+    let benchmarks_dir = get_benchmarks_dir_with_app_handle(app_handle)?;
     let filename = generate_filename(prefix);
     let filepath = benchmarks_dir.join(&filename);
 
@@ -143,8 +149,8 @@ pub fn export_to_csv(results: &BenchmarkResults, prefix: &str) -> Result<PathBuf
 }
 
 /// Create a README.md in the benchmarks directory explaining the CSV format
-pub fn create_readme() -> Result<(), String> {
-    let benchmarks_dir = get_benchmarks_dir()?;
+pub fn create_readme(app_handle: &tauri::AppHandle) -> Result<(), String> {
+    let benchmarks_dir = get_benchmarks_dir_with_app_handle(app_handle)?;
     let readme_path = benchmarks_dir.join("README.md");
 
     // Only create if doesn't exist
@@ -225,6 +231,34 @@ Import CSV files into Excel, Google Sheets, or data analysis tools for visualiza
 mod tests {
     use super::*;
     use crate::benchmark::metrics::{BenchmarkMetrics, TimingSource};
+
+    /// Helper function for tests that uses the deprecated path function
+    /// Tests don't have access to AppHandle, so they use the legacy CWD-based path
+    #[allow(deprecated)]
+    fn export_to_csv_test(results: &BenchmarkResults, prefix: &str) -> Result<PathBuf, String> {
+        let benchmarks_dir = get_benchmarks_dir()?;
+        let filename = generate_filename(prefix);
+        let filepath = benchmarks_dir.join(&filename);
+
+        let mut wtr = Writer::from_path(&filepath)
+            .map_err(|e| format!("Failed to create CSV file: {e}"))?;
+
+        for (index, metric) in results.metrics.iter().enumerate() {
+            let csv_row = CsvMetricRow::from(metric);
+            wtr.serialize(csv_row)
+                .map_err(|e| format!("Failed to serialize metric row: {e}"))?;
+
+            if (index + 1) % FLUSH_INTERVAL == 0 {
+                wtr.flush()
+                    .map_err(|e| format!("Failed to flush CSV writer during periodic flush: {e}"))?;
+            }
+        }
+
+        wtr.flush()
+            .map_err(|e| format!("Failed to flush CSV writer: {e}"))?;
+
+        Ok(filepath)
+    }
 
     fn create_test_metric() -> BenchmarkMetrics {
         BenchmarkMetrics {
@@ -336,7 +370,7 @@ mod tests {
             timestamp: "2025-01-01T00:00:00Z".to_string(),
         };
 
-        let result = export_to_csv(&results, "test");
+        let result = export_to_csv_test(&results, "test");
 
         assert!(result.is_ok(), "CSV export should succeed");
 
@@ -360,7 +394,7 @@ mod tests {
 
         // Use unique prefix to avoid test interference
         let prefix = format!("test-content-{}", std::process::id());
-        let filepath = export_to_csv(&results, &prefix).unwrap();
+        let filepath = export_to_csv_test(&results, &prefix).unwrap();
 
         // Read the CSV file and verify content
         let content = std::fs::read_to_string(&filepath).unwrap();
@@ -397,7 +431,7 @@ mod tests {
 
         // Use unique prefix to avoid test interference
         let prefix = format!("test-multi-{}", std::process::id());
-        let filepath = export_to_csv(&results, &prefix).unwrap();
+        let filepath = export_to_csv_test(&results, &prefix).unwrap();
         let content = std::fs::read_to_string(&filepath).unwrap();
 
         // Should have header + 2 data rows
