@@ -19,11 +19,11 @@ pub struct CpuInfo {
     pub architecture: String,  // "x86_64", "aarch64", etc.
     pub cores_physical: usize,
     pub cores_logical: usize,
-    pub frequency_mhz: Option<u64>,
+    pub frequency_mhz: Option<u32>,
     pub features: CpuFeatures,
-    pub cache_l1_kb: Option<usize>,
-    pub cache_l2_kb: Option<usize>,
-    pub cache_l3_kb: Option<usize>,
+    pub cache_l1_kb: Option<u32>,
+    pub cache_l2_kb: Option<u32>,
+    pub cache_l3_kb: Option<u32>,
 }
 
 /// CPU feature flags (SIMD instruction sets)

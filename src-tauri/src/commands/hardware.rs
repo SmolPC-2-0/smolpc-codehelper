@@ -11,7 +11,7 @@ pub struct HardwareCache {
 impl Default for HardwareCache {
     fn default() -> Self {
         Self {
-            info: Arc::new(OnceCell::new()),
+            info: Arc::new(OnceCell::new()),    
         }
     }
 }

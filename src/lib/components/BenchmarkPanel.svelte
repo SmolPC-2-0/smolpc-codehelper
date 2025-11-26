@@ -84,11 +84,12 @@
 		} catch (error) {
 			console.error('Benchmark failed:', error);
 			// Properly extract error message from error object
-			const errorMessage = error instanceof Error
-				? error.message
-				: typeof error === 'string'
-					? error
-					: JSON.stringify(error);
+			const errorMessage =
+				error instanceof Error
+					? error.message
+					: typeof error === 'string'
+						? error
+						: JSON.stringify(error);
 			benchmarkStore.setError(errorMessage);
 		}
 	}
@@ -111,7 +112,7 @@
 
 {#if visible}
 	<div
-		class="fixed bottom-4 right-4 z-50 w-96 rounded-lg border border-border bg-background p-4 shadow-lg"
+		class="border-border bg-background fixed right-4 bottom-4 z-50 w-96 rounded-lg border p-4 shadow-lg"
 	>
 		<div class="mb-4 flex items-center justify-between">
 			<h3 class="text-lg font-semibold">Benchmark Suite</h3>
@@ -130,7 +131,7 @@
 						fill-rule="evenodd"
 						d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
 						clip-rule="evenodd"
-					/>
+					></path>
 				</svg>
 			</button>
 		</div>
@@ -157,15 +158,14 @@
 
 				{#if benchmarkStore.progress}
 					<div class="mt-2">
-						<div class="mb-1 flex justify-between text-xs text-muted-foreground">
+						<div class="text-muted-foreground mb-1 flex justify-between text-xs">
 							<span>{benchmarkStore.progress.current_test}</span>
 							<span>{benchmarkStore.progress.current}/{benchmarkStore.progress.total}</span>
 						</div>
-						<div class="h-2 w-full rounded-full bg-muted">
+						<div class="bg-muted h-2 w-full rounded-full">
 							<div
 								class="h-2 rounded-full bg-blue-500 transition-all duration-300"
-								style="width: {(benchmarkStore.progress.current /
-									benchmarkStore.progress.total) *
+								style="width: {(benchmarkStore.progress.current / benchmarkStore.progress.total) *
 									100}%"
 							></div>
 						</div>
@@ -177,21 +177,21 @@
 				{/if}
 
 				{#if benchmarkStore.lastResultPath}
-					<p class="mt-2 text-xs text-muted-foreground">
+					<p class="text-muted-foreground mt-2 text-xs">
 						Saved to: {benchmarkStore.lastResultPath}
 					</p>
 				{/if}
 			</div>
 
 			<!-- Current Model Info -->
-			<div class="rounded-md bg-muted p-3">
-				<p class="text-xs text-muted-foreground">Model</p>
+			<div class="bg-muted rounded-md p-3">
+				<p class="text-muted-foreground text-xs">Model</p>
 				<p class="font-medium">{settingsStore.selectedModel}</p>
 			</div>
 
 			<!-- Iterations Selector -->
 			<div class="space-y-2">
-				<label class="text-xs text-muted-foreground">Iterations (12 prompts each)</label>
+				<label class="text-muted-foreground text-xs">Iterations (12 prompts each)</label>
 				<div class="flex gap-2">
 					<button
 						onclick={() => (selectedIterations = 1)}
@@ -227,7 +227,7 @@
 						3 (Full)
 					</button>
 				</div>
-				<p class="text-xs text-muted-foreground">
+				<p class="text-muted-foreground text-xs">
 					Total tests: {selectedIterations * 12} (~{Math.ceil(selectedIterations * 2)} min)
 				</p>
 			</div>
@@ -237,7 +237,7 @@
 				<button
 					onclick={runBenchmark}
 					disabled={benchmarkStore.isRunning}
-					class="flex-1 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+					class="bg-primary text-primary-foreground hover:bg-primary/90 flex-1 rounded-md px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
 				>
 					{benchmarkStore.isRunning ? 'Running...' : 'Run Benchmark'}
 				</button>
@@ -245,8 +245,9 @@
 				{#if benchmarksDir}
 					<button
 						onclick={openBenchmarksFolder}
-						class="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+						class="hover:bg-muted rounded-md border px-4 py-2 text-sm font-medium"
 						title="Open benchmarks folder"
+						aria-label="Open benchmarks folder"
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
@@ -254,18 +255,19 @@
 							viewBox="0 0 20 20"
 							fill="currentColor"
 						>
-							<path
-								d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"
-							/>
+							<path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"
+							></path>
 						</svg>
 					</button>
 				{/if}
 			</div>
 
 			<!-- Help Text -->
-			<p class="text-xs text-muted-foreground">
-				Tests: {selectedIterations * 12} total (12 prompts × {selectedIterations} iteration{selectedIterations > 1 ? 's' : ''}).
-				Results exported to CSV for analysis.
+			<p class="text-muted-foreground text-xs">
+				Tests: {selectedIterations * 12} total (12 prompts × {selectedIterations} iteration{selectedIterations >
+				1
+					? 's'
+					: ''}). Results exported to CSV for analysis.
 			</p>
 		</div>
 	</div>
