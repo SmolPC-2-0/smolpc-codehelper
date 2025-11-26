@@ -4,6 +4,7 @@
 
 use crate::commands::ollama::{OllamaConfig, OllamaMessage, OllamaRequest};
 use crate::hardware;
+use crate::hardware::types::CPUFeature;
 use super::test_suite::SHORT_PROMPTS;
 use sysinfo::System;
 use std::time::Duration;
@@ -40,7 +41,7 @@ impl HardwareSnapshot {
                 Self {
                     cpu_model: info.cpu.brand.clone(),
                     gpu_name,
-                    avx2_supported: info.cpu.features.avx2,
+                    avx2_supported: info.cpu.features.contains(&CPUFeature::AVX2),
                     npu_detected: info.npu.as_ref().is_some_and(|n| n.detected),
                     detection_failed: false,
                 }

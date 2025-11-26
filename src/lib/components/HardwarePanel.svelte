@@ -141,26 +141,22 @@
 								{hardwareStore.info.cpu.architecture.includes('aarch64') ? 'SIMD Extensions:' : 'Instruction Sets:'}
 							</div>
 							<div class="flex flex-wrap gap-1.5">
-								{#each Object.entries(hardwareStore.info.cpu.features).filter(([feature, supported]) => {
+								{#each hardwareStore.info.cpu.features.filter((feature) => {
 									// Filter features based on architecture
-									const isArm = hardwareStore.info.cpu.architecture.includes('aarch64') || hardwareStore.info.cpu.architecture.includes('arm');
-									const armFeatures = ['neon', 'sve'];
-									const x86Features = ['sse42', 'avx', 'avx2', 'avx512f', 'fma'];
+									const isArm = hardwareStore.info!.cpu.architecture.includes('aarch64') || hardwareStore.info!.cpu.architecture.includes('arm');
+									const armFeatures = ['NEON', 'SVE'];
+									const x86Features = ['SSE42', 'AVX', 'AVX2', 'AVX512', 'FMA'];
 
 									if (isArm) {
-										return armFeatures.includes(feature);
+										return armFeatures.includes(feature.toUpperCase());
 									} else {
-										return x86Features.includes(feature);
+										return x86Features.includes(feature.toUpperCase());
 									}
-								}) as [feature, supported]}
+								}) as feature}
 									<span
-										class={`px-2 py-0.5 text-xs rounded-md ${
-											supported
-												? 'bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-900'
-												: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-500 border border-gray-200 dark:border-gray-700'
-										}`}
+										class="bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-900 px-2 py-0.5 text-xs rounded-md"
 									>
-										{feature.toUpperCase()}
+										{feature}
 									</span>
 								{/each}
 							</div>

@@ -14,22 +14,46 @@ export interface CpuInfo {
 	cores_physical: number;
 	cores_logical: number;
 	frequency_mhz?: number;
-	features: CpuFeatures;
+	features: string[]; // CPUFeature enum variants from hardware-query
 	cache_l1_kb?: number;
 	cache_l2_kb?: number;
 	cache_l3_kb?: number;
 }
 
-export interface CpuFeatures {
-	// x86/x86_64 features
-	sse42: boolean;
-	avx: boolean;
-	avx2: boolean;
-	avx512f: boolean;
-	fma: boolean;
-	// ARM features
-	neon: boolean;
-	sve: boolean;
+// CPU feature types from hardware-query CPUFeature enum
+export type CpuFeature =
+	| 'AVX'
+	| 'AVX2'
+	| 'AVX512'
+	| 'SSE'
+	| 'SSE2'
+	| 'SSE3'
+	| 'SSE41'
+	| 'SSE42'
+	| 'FMA'
+	| 'AES'
+	| 'SHA'
+	| 'BMI1'
+	| 'BMI2'
+	| 'RDRAND'
+	| 'RDSEED'
+	| 'POPCNT'
+	| 'LZCNT'
+	| 'MOVBE'
+	| 'PREFETCHWT1'
+	| 'CLFLUSHOPT'
+	| 'CLWB'
+	| 'XSAVE'
+	| 'XSAVEOPT'
+	| 'XSAVEC'
+	| 'XSAVES'
+	| 'FSGSBASE'
+	| 'RDTSCP'
+	| 'F16C';
+
+// Helper function to check if a CPU has a specific feature
+export function hasCpuFeature(cpu: CpuInfo, feature: CpuFeature): boolean {
+	return cpu.features.includes(feature);
 }
 
 export interface GpuInfo {

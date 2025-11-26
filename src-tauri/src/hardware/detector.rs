@@ -1,7 +1,6 @@
 use crate::hardware::errors::HardwareError;
 use crate::hardware::types::{
-    CpuFeatures, CpuInfo, GpuInfo, GpuVendor, HardwareInfo, MemoryInfo, NpuConfidence, NpuInfo,
-    StorageInfo,
+    CpuInfo, GpuInfo, GpuVendor, HardwareInfo, MemoryInfo, NpuConfidence, NpuInfo, StorageInfo,
 };
 
 /// Helper Functions
@@ -11,11 +10,6 @@ fn non_zero_u64(val: u64) -> Option<u64> {
 }
 
 fn non_zero_u32(val: u32) -> Option<u32> {
-    (val > 0).then_some(val)
-}
-
-/// Convert non-zero usize to Option (0 = detection failed)
-fn non_zero_usize(val: usize) -> Option<usize> {
     (val > 0).then_some(val)
 }
 
@@ -91,15 +85,7 @@ fn convert_cpu_info(hw_info: &hardware_query::HardwareInfo) -> CpuInfo {
         cores_physical: cpu.physical_cores() as usize,
         cores_logical: cpu.logical_cores() as usize,
         frequency_mhz,
-        features: CpuFeatures {
-            sse42: cpu.has_feature("sse4.2") || cpu.has_feature("sse42"),
-            avx: cpu.has_feature("avx"),
-            avx2: cpu.has_feature("avx2"),
-            avx512f: cpu.has_feature("avx512f"),
-            fma: cpu.has_feature("fma"),
-            neon: cpu.has_feature("neon"),
-            sve: cpu.has_feature("sve"),
-        },
+        features: cpu.features().to_vec(),
         cache_l1_kb,
         cache_l2_kb,
         cache_l3_kb,
@@ -145,9 +131,9 @@ fn convert_gpu_info(hw_info: &hardware_query::HardwareInfo) -> Vec<GpuInfo> {
             let vram_raw = gpu.memory_mb();
             let vram_mb = non_zero_u64(vram_raw);
             if vram_mb.is_none() {
-                log::warn!("GPU {} ({}) VRAM detection failed (returned 0)", idx, gpu_name);
+                log::warn!("GPU {idx} ({gpu_name}) VRAM detection failed (returned 0)");
             } else {
-                log::debug!("GPU {} ({}) VRAM detected: {} MB", idx, gpu_name, vram_raw);
+                log::debug!("GPU {idx} ({gpu_name}) VRAM detected: {vram_raw} MB");
             }
 
             GpuInfo {
@@ -158,7 +144,7 @@ fn convert_gpu_info(hw_info: &hardware_query::HardwareInfo) -> Vec<GpuInfo> {
                 vram_mb,
                 temperature_c: gpu.temperature().map(|t| t as u32),
                 utilization_percent: gpu.usage_percent().map(|u| u as u32),
-                cuda_compute_capability: gpu.cuda_capability().map(|s| s.to_string()),
+                cuda_compute_capability: gpu.cuda_capability().map(std::string::ToString::to_string),
             }
         })
         .collect()
@@ -171,9 +157,9 @@ fn convert_npu_info(hw_info: &hardware_query::HardwareInfo) -> Option<NpuInfo> {
     }
 
     let npu = &hw_info.npus()[0]; // Use first NPU
-
+ 
     let details = if let Some(tops) = npu.tops_performance() {
-        format!("{} {} - {:.1} TOPS", npu.vendor(), npu.model_name(), tops)
+        format!("{} - {:.1} TOPS", npu.model_name(), tops)
     } else {
         format!("{} {}", npu.vendor(), npu.model_name())
     };
@@ -216,16 +202,14 @@ fn convert_storage_info(hw_info: &hardware_query::HardwareInfo) -> StorageInfo {
 
         // Log storage detection results
         if total_gb == 0.0 {
-            log::warn!("Storage capacity detection failed for device '{}' (returned 0.0 GB)", device_name);
+            log::warn!("Storage capacity detection failed for device '{device_name}' (returned 0.0 GB)");
         } else {
             log::debug!(
-                "Storage detected: {} - {:.2} GB total, {:.2} GB available, SSD: {}",
-                device_name, total_gb, available_gb, is_ssd
-            );
+                "Storage detected: {device_name} - {total_gb:.2} GB total, {available_gb:.2} GB available, SSD: {is_ssd}");
         }
 
         if available_gb == 0.0 && total_gb > 0.0 {
-            log::warn!("Storage available space detection failed for device '{}' (returned 0.0 GB)", device_name);
+            log::warn!("Storage available space detection failed for device '{device_name}' (returned 0.0 GB)");
         }
 
         StorageInfo {

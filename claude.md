@@ -1,714 +1,417 @@
-# SmolPC Code Helper - Claude Development Guide
+# CLAUDE.md
 
-**Version:** 2.2.0
-**Last Updated:** January 2025
-
-This file provides comprehensive context for AI assistants (like Claude) working on the SmolPC Code Helper codebase. It documents architecture, conventions, patterns, and development workflows.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ---
 
 ## Project Overview
 
-**Purpose:** An offline AI-powered coding assistant for secondary school students (ages 11-18). Built with Tauri + Svelte 5, powered by local Ollama models.
+SmolPC Code Helper is an offline AI-powered coding assistant for secondary school students (ages 11-18). Built with **Tauri 2.6.2 + Svelte 5**, powered by local **Ollama** models. Runs 100% offline after initial setup.
 
-**Core Principles:**
-
-- 100% offline operation (after initial setup)
-- Privacy-first (no telemetry, no cloud)
-- Budget-friendly (runs on older hardware)
-- Educational focus (clear explanations, student-appropriate)
-- Cross-platform (Windows, macOS, Linux)
-
-**Current Focus (v2.2.0):** Hardware detection system complete. Next phase is llama.cpp integration with hardware-optimized compilation.
+**Key Principles:**
+- **Offline-First**: No cloud, no telemetry, no API keys
+- **Privacy-First**: Student data stays local (GDPR/FERPA compliant)
+- **Educational**: Clear explanations, age-appropriate
+- **Budget-Friendly**: Runs on older hardware
+- **Cross-Platform**: Windows, macOS, Linux (x86/ARM)
 
 ---
 
-## Tech Stack
+## Development Commands
 
-### Frontend
+### Frontend (Svelte 5 + TypeScript)
 
-- **Framework:** Svelte 5 (with runes for reactivity)
-- **Language:** TypeScript
-- **Styling:** Tailwind CSS 4 (utility-first, no `@apply`)
-- **UI Components:** shadcn-svelte
-- **Build Tool:** Vite 6
-- **State Management:** Svelte 5 runes (`$state`, `$derived`, `$effect`)
+```bash
+# Development server with hot reload
+npm run tauri dev
 
-### Backend
+# Type checking
+npm run check
 
-- **Framework:** Tauri 2.6.2
-- **Language:** Rust (edition 2021, rust version 1.77.2+)
-- **HTTP Client:** reqwest 0.12 (with connection pooling)
-- **Async Runtime:** Tokio 1.x
-- **Serialization:** serde + serde_json
-- **Hardware Detection:** hardware-query v0.2.1
-- **Logging:** log + tauri-plugin-log
+# Format code
+npm run format
 
-### AI Integration
+# Lint
+npm run lint
 
-- **Engine:** Ollama (local LLM runtime)
-- **Default Models:** Qwen 2.5 Coder (7B), DeepSeek Coder (6.7B)
-- **API:** Ollama HTTP API at `http://localhost:11434`
-
----
-
-## Architecture
-
-### High-Level Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                  Frontend (Svelte 5)                    │
-│  ┌───────────┐  ┌──────────┐  ┌────────────────────┐   │
-│  │ Components│  │  Stores  │  │  Types/Interfaces  │   │
-│  │  (.svelte)│◄─┤(.svelte.ts)├─►│    (.ts)          │   │
-│  └───────────┘  └──────────┘  └────────────────────┘   │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-                 Tauri IPC (JSON)
-                       │
-┌──────────────────────┴──────────────────────────────────┐
-│                  Backend (Rust/Tauri)                   │
-│  ┌──────────┐  ┌──────────┐  ┌─────────┐  ┌──────────┐ │
-│  │ Commands │  │ Hardware │  │Benchmark│  │  Utils   │ │
-│  │   (.rs)  │  │  Module  │  │ Module  │  │   (.rs)  │ │
-│  └──────────┘  └──────────┘  └─────────┘  └──────────┘ │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-          ┌────────────┴─────────────┐
-          │                          │
-    Ollama HTTP API          Native OS APIs
-   (localhost:11434)      (hardware detection)
+# Frontend-only dev server (for UI work without Tauri)
+npm run dev
 ```
 
-### State Management Philosophy
+### Backend (Rust/Tauri)
 
-**Svelte 5 Runes (Frontend):**
+```bash
+# Check Rust compilation
+cd src-tauri
+cargo check
 
-- Use `$state` for reactive state variables
-- Use `$derived` for computed values
-- Use `$effect` for side effects (sparingly)
-- **Pattern:** Create stores in `src/lib/stores/*.svelte.ts` with exported objects containing state and methods
-- **Example:**
+# Run clippy
+cargo clippy
 
-  ```typescript
-  export const hardwareStore = {
-  	info: $state<HardwareInfo | null>(null),
-  	isDetecting: $state(false),
+# Format Rust code
+cargo fmt
 
-  	async detect() {
-  		this.isDetecting = true;
-  		// ... detection logic
-  		this.isDetecting = false;
-  	}
-  };
-  ```
+# Clean build artifacts
+cargo clean
 
-**Rust State (Backend):**
-
-- Use Tauri's state management for shared resources
-- Pattern: `Arc<Mutex<T>>` for thread-safe shared state
-- Example: `HardwareCache`, connection pools
-- Initialize in `.setup()` hook in `src-tauri/src/lib.rs`
-
-### Data Flow
-
-**User Action → Response:**
-
+# Build production bundle
+npm run tauri build
+# Output: src-tauri/target/release/bundle/
 ```
-1. User clicks button (Component)
-2. Component calls store method (Store)
-3. Store invokes Tauri command via `@tauri-apps/api` (IPC)
-4. Rust command handler processes request
-5. Rust calls external API (Ollama) or OS API (hardware)
-6. Response serialized to JSON
-7. Store updates reactive state
-8. Svelte reactivity triggers UI update
+
+### Testing
+
+**Note:** Test suite is minimal. Tests exist at:
+- `src-tauri/src/benchmark/test_suite.rs`
+
+```bash
+# Run Rust tests (limited coverage)
+cd src-tauri
+cargo test
 ```
 
 ---
 
-## Directory Structure
+## Architecture & Key Concepts
 
-### Frontend (`src/`)
+### 1. Tauri IPC Communication Pattern
 
-```
-src/
-├── App.svelte                 # Root component, routing logic
-├── main.ts                    # Entry point, Tauri initialization
-├── app.css                    # Global styles (Tailwind imports)
-└── lib/
-    ├── components/            # Svelte components
-    │   ├── Sidebar.svelte     # Chat list sidebar
-    │   ├── ChatMessage.svelte # Individual chat message
-    │   ├── ChatInput.svelte   # Message input with streaming
-    │   ├── HardwarePanel.svelte      # Full hardware info display
-    │   ├── HardwareIndicator.svelte  # Status bar widget
-    │   └── ui/                # shadcn-svelte components
-    │       ├── button/
-    │       ├── card/
-    │       └── ...
-    ├── stores/                # Svelte 5 state stores
-    │   ├── chats.svelte.ts    # Chat state, message history
-    │   ├── settings.svelte.ts # App settings (context, model)
-    │   ├── ollama.svelte.ts   # Ollama connection status
-    │   └── hardware.svelte.ts # Hardware detection state
-    ├── types/                 # TypeScript type definitions
-    │   ├── chat.ts            # Chat, Message interfaces
-    │   ├── ollama.ts          # Ollama API types
-    │   └── hardware.ts        # Hardware info types
-    └── utils/                 # Utility functions
-        └── cn.ts              # Class name merger (shadcn)
-```
-
-### Backend (`src-tauri/src/`)
-
-```
-src-tauri/src/
-├── main.rs                    # Binary entry point (minimal)
-├── lib.rs                     # Library entry point, Tauri setup
-├── commands/                  # Tauri command handlers
-│   ├── mod.rs                 # Module exports
-│   ├── ollama.rs              # Ollama API integration
-│   │   ├── stream_chat()      # Streaming chat endpoint
-│   │   ├── list_models()      # Get available models
-│   │   └── check_connection() # Health check
-│   ├── hardware.rs            # Hardware detection commands
-│   │   ├── detect_hardware()  # Trigger detection
-│   │   └── get_cached_hardware() # Get cached results
-│   └── errors.rs              # Error types and handling
-├── hardware/                  # Hardware detection module
-│   ├── mod.rs                 # Module exports
-│   ├── types.rs               # HardwareInfo, CpuInfo, etc.
-│   └── detector.rs            # Detection implementation
-│       ├── detect_all()       # Main entry point
-│       ├── convert_cpu_info() # CPU conversion
-│       ├── convert_gpu_info() # GPU conversion
-│       ├── convert_memory_info() # Memory conversion
-│       ├── convert_storage_info() # Storage conversion
-│       └── convert_npu_info() # NPU conversion
-├── benchmark/                 # Benchmarking system
-│   ├── mod.rs                 # Module exports
-│   └── runner.rs              # llama.cpp benchmark execution
-└── utils/                     # Utility functions
-    └── mod.rs                 # Utilities (if needed)
-```
-
-### Configuration Files
-
-```
-.
-├── package.json               # Node.js dependencies, scripts
-├── tsconfig.json              # TypeScript configuration
-├── vite.config.ts             # Vite build configuration
-├── tailwind.config.ts         # Tailwind CSS configuration
-├── src-tauri/
-│   ├── Cargo.toml             # Rust dependencies
-│   ├── tauri.conf.json        # Tauri app configuration
-│   └── build.rs               # Rust build script
-├── docs/
-│   └── hardware-detection.md # Feature documentation
-├── README.md                  # User-facing documentation
-└── claude.md                  # This file
-```
-
----
-
-## Code Conventions
-
-### TypeScript/Svelte Conventions
-
-**File Naming:**
-
-- Components: PascalCase (e.g., `ChatMessage.svelte`)
-- Stores: camelCase with `.svelte.ts` (e.g., `chats.svelte.ts`)
-- Types: camelCase with `.ts` (e.g., `hardware.ts`)
-- Utilities: camelCase with `.ts` (e.g., `cn.ts`)
-
-**Component Structure:**
-
-```svelte
-<script lang="ts">
-	// 1. Imports
-	import { onMount } from 'svelte';
-	import { hardwareStore } from '$lib/stores/hardware.svelte';
-
-	// 2. Props (with types)
-	interface Props {
-		title: string;
-		optional?: boolean;
-	}
-	let { title, optional = false }: Props = $props();
-
-	// 3. State
-	let localState = $state(0);
-
-	// 4. Derived state
-	let computed = $derived(localState * 2);
-
-	// 5. Effects
-	$effect(() => {
-		console.log('State changed:', localState);
-	});
-
-	// 6. Functions
-	function handleClick() {
-		localState++;
-	}
-
-	// 7. Lifecycle
-	onMount(() => {
-		// initialization
-	});
-</script>
-
-<!-- 8. Template -->
-<div class="container">
-	<!-- markup -->
-</div>
-
-<!-- 9. Styles (if needed, prefer Tailwind) -->
-<style>
-	/* component-specific styles only */
-</style>
-```
-
-**Store Pattern:**
+**Frontend → Backend Communication:**
 
 ```typescript
-// src/lib/stores/example.svelte.ts
-import { invoke } from '@tauri-apps/api/core';
-import type { ExampleType } from '$lib/types/example';
-
-let data = $state<ExampleType[]>([]);
-let isLoading = $state(false);
-let error = $state<string | null>(null);
-
-export const exampleStore = {
-	// Expose state as getters (for reactivity)
-	get data() {
-		return data;
-	},
-	get isLoading() {
-		return isLoading;
-	},
-	get error() {
-		return error;
-	},
-
-	// Methods
-	async load() {
-		isLoading = true;
-		error = null;
-		try {
-			data = await invoke<ExampleType[]>('load_example');
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Unknown error';
-		} finally {
-			isLoading = false;
-		}
-	},
-
-	clear() {
-		data = [];
-	}
-};
-```
-
-**Naming Conventions:**
-
-- Variables: camelCase
-- Constants: SCREAMING_SNAKE_CASE
-- Types/Interfaces: PascalCase
-- Functions: camelCase (descriptive verbs: `handleClick`, `fetchData`)
-- Boolean variables: Prefix with `is`, `has`, `should` (e.g., `isLoading`, `hasError`)
-
-**Type Safety:**
-
-- Always use TypeScript (no `any` unless absolutely necessary)
-- Define interfaces for all data structures
-- Use type imports: `import type { ... }`
-- Prefer interfaces over types for objects
-
-### Rust Conventions
-
-**File Naming:**
-
-- Modules: snake_case (e.g., `hardware_detection.rs`)
-- Prefer `mod.rs` for module directories
-
-**Code Structure:**
-
-```rust
-// 1. Module imports
-use serde::{Deserialize, Serialize};
-use tauri::State;
-
-// 2. Type definitions
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Example {
-    pub field: String,
-}
-
-// 3. Implementation
-impl Example {
-    pub fn new(field: String) -> Self {
-        Self { field }
-    }
-}
-
-// 4. Tauri commands
-#[tauri::command]
-pub async fn example_command(state: State<'_, ExampleState>) -> Result<Example, String> {
-    // implementation
-    Ok(Example::new("value".to_string()))
-}
-```
-
-**Naming Conventions:**
-
-- Variables/functions: snake_case
-- Types/structs/enums: PascalCase
-- Constants: SCREAMING_SNAKE_CASE
-- Modules: snake_case
-
-**Error Handling:**
-
-- Use `Result<T, String>` for Tauri commands (String for frontend display)
-- Use `thiserror` for internal error types
-- Log errors with `log::error!()`, `log::warn!()`
-- Provide user-friendly error messages
-
-**Tauri Commands:**
-
-- Mark with `#[tauri::command]`
-- Use `async` for I/O operations
-- Return `Result<T, String>` for error handling
-- Keep commands focused (single responsibility)
-
-### CSS/Styling Conventions
-
-**Tailwind CSS:**
-
-- Use utility classes directly in components
-- **DO NOT** use `@apply` (Tailwind 4 doesn't support it)
-- Group utilities logically: layout → spacing → typography → colors → effects
-- Use shadcn-svelte components for consistency
-- Prefer `class:` directive for conditional classes in Svelte
-
-**Example:**
-
-```svelte
-<div class="border-border bg-card flex items-center gap-2 rounded-lg border p-4 shadow-sm">
-	<span class="text-foreground text-sm font-medium">Content</span>
-</div>
-
-<!-- Conditional classes -->
-<button class:opacity-50={isDisabled} class="bg-primary text-primary-foreground rounded px-4 py-2">
-	Click
-</button>
-```
-
-**Color System (shadcn):**
-
-- Use CSS variables: `bg-background`, `text-foreground`, `border-border`
-- Primary: `bg-primary`, `text-primary-foreground`
-- Muted: `bg-muted`, `text-muted-foreground`
-- Card: `bg-card`, `text-card-foreground`
-
----
-
-## Key Patterns and Practices
-
-### 1. Tauri IPC Communication
-
-**Frontend → Backend:**
-
-```typescript
+// Frontend (TypeScript)
 import { invoke } from '@tauri-apps/api/core';
 
-// Simple invocation
 const result = await invoke<ReturnType>('command_name', {
-	arg1: value1,
-	arg2: value2
+    arg1: value1
 });
-
-// With error handling
-try {
-	const data = await invoke<HardwareInfo>('detect_hardware');
-	hardwareStore.info = data;
-} catch (error) {
-	console.error('Detection failed:', error);
-}
 ```
 
-**Backend Command:**
-
 ```rust
+// Backend (Rust)
 #[tauri::command]
-async fn command_name(arg1: String, arg2: u32) -> Result<ReturnType, String> {
+async fn command_name(arg1: String) -> Result<ReturnType, String> {
     // implementation
     Ok(result)
 }
 
-// Register in lib.rs
-.invoke_handler(tauri::generate_handler![
-    commands::command_name,
-])
+// Register in src-tauri/src/lib.rs
+.invoke_handler(tauri::generate_handler![command_name])
 ```
 
-### 2. State Management Patterns
+**Streaming Responses (Ollama Chat):**
 
-**Frontend Store with Tauri:**
+Backend emits events via `window.emit()`, frontend listens via `listen()`:
+
+```rust
+// Backend: src-tauri/src/commands/ollama.rs
+window.emit("chat_chunk", chunk)?;
+```
 
 ```typescript
-let items = $state<Item[]>([]);
+// Frontend: src/lib/stores/chats.svelte.ts
+const unlisten = await listen<string>('chat_chunk', (event) => {
+    // Process chunk
+});
+```
+
+### 2. State Management (Svelte 5 Runes)
+
+**Frontend uses Svelte 5 runes** (`$state`, `$derived`, `$effect`), NOT Svelte 4 stores.
+
+**Pattern:**
+```typescript
+// src/lib/stores/example.svelte.ts
+let data = $state<T[]>([]);
 let isLoading = $state(false);
 
-export const itemStore = {
-	get items() {
-		return items;
-	},
-	get isLoading() {
-		return isLoading;
-	},
+export const exampleStore = {
+    get data() { return data; },
+    get isLoading() { return isLoading; },
 
-	async load() {
-		isLoading = true;
-		try {
-			items = await invoke<Item[]>('load_items');
-		} finally {
-			isLoading = false;
-		}
-	}
+    async load() {
+        isLoading = true;
+        data = await invoke<T[]>('load_data');
+        isLoading = false;
+    }
 };
 ```
 
-**Backend State:**
-
+**Backend State (Tauri Managed State):**
 ```rust
+// Thread-safe shared state with Arc<Mutex<T>>
 pub struct AppState {
     data: Arc<Mutex<HashMap<String, String>>>,
 }
 
-// In lib.rs setup
-.manage(AppState {
-    data: Arc::new(Mutex::new(HashMap::new())),
-})
+// Initialize in lib.rs .setup()
+.manage(AppState::default())
 
-// In command
+// Use in commands
 #[tauri::command]
 async fn use_state(state: State<'_, AppState>) -> Result<(), String> {
-    let mut data = state.data.lock().await;
-    data.insert("key".to_string(), "value".to_string());
-    Ok(())
+    let data = state.data.lock().await;
+    // ...
 }
 ```
 
-### 3. Streaming Responses (Ollama)
+### 3. Hardware Detection System (v2.2.0)
 
-**Backend:**
-
-```rust
-use futures_util::StreamExt;
-
-#[tauri::command]
-pub async fn stream_chat(
-    window: tauri::Window,
-    message: String,
-) -> Result<(), String> {
-    let stream = /* create HTTP stream */;
-
-    tokio::pin!(stream);
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| e.to_string())?;
-
-        // Emit to frontend
-        window.emit("chat_chunk", chunk)
-            .map_err(|e| e.to_string())?;
-    }
-
-    Ok(())
-}
-```
-
-**Frontend:**
-
-```typescript
-import { listen } from '@tauri-apps/api/event';
-
-// Start streaming
-await invoke('stream_chat', { message: 'Hello' });
-
-// Listen for chunks
-const unlisten = await listen<string>('chat_chunk', (event) => {
-	console.log('Received:', event.payload);
-});
-
-// Clean up when done
-unlisten();
-```
-
-### 4. Hardware Detection Pattern
-
-**Always:**
-
-- Detect on app startup (async, non-blocking)
-- Cache results in memory (HardwareCache)
-- Frontend requests cached data first
-- If cache empty, trigger manual detection (race condition handling)
-
-**Backend caching:**
+**Lazy initialization with OnceCell** (no startup race conditions):
 
 ```rust
+// src-tauri/src/commands/hardware.rs
 pub struct HardwareCache {
-    info: Arc<Mutex<Option<HardwareInfo>>>,
-}
-
-impl HardwareCache {
-    pub async fn set(&self, info: HardwareInfo) {
-        *self.info.lock().await = Some(info);
-    }
-
-    pub async fn get(&self) -> Option<HardwareInfo> {
-        self.info.lock().await.clone()
-    }
+    info: OnceCell<Mutex<Option<HardwareInfo>>>,
 }
 ```
 
-**Frontend auto-detection:**
+Detection triggers on first call to `detect_hardware()` or `get_cached_hardware()`.
 
-```typescript
-async getCached() {
-    const cached = await invoke<HardwareInfo | null>('get_cached_hardware');
-    if (cached) {
-        this.info = cached;
-    } else {
-        // Backend still detecting, trigger manual detection
-        await this.detect();
-    }
-}
-```
-
----
-
-## Hardware Detection System (v2.2.0)
-
-### Overview
-
-Comprehensive offline hardware profiling for intelligent AI optimization:
-
-- **CPU**: Vendor, cores, frequency, cache, instruction sets (AVX2/AVX512/NEON/SVE)
-- **GPU**: Name, VRAM, backend (Metal/DirectX/Vulkan/CUDA), CUDA compute capability
-- **Memory**: Total/available RAM for model size selection
-- **Storage**: Capacity, availability, type (SSD/HDD), device name
-- **NPU**: Detection with confidence (Apple Neural Engine, Intel AI Boost, AMD Ryzen AI, Qualcomm Hexagon)
-
-### Architecture
-
+**Architecture:**
 ```
 Frontend (hardware.svelte.ts)
-    │
-    ├─► detect() ──────► Tauri IPC ──► detect_hardware() command
-    │                                        │
+    ├─► detect() ──────► Tauri IPC ──► detect_hardware()
     └─► getCached() ───► Tauri IPC ──► get_cached_hardware()
                                              │
-                                   HardwareCache (in-memory)
+                                    HardwareCache (OnceCell)
                                              │
-                                   hardware::detect_all()
+                                    hardware::detector::detect_all()
                                              │
-                                   hardware_query crate
+                                    hardware_query crate v0.2.1
                                              │
                                       Native OS APIs
 ```
 
-### Implementation Details
+**Uses hardware-query crate** for unified cross-platform detection:
+- CPU: vendor, cores, frequency, cache, features (AVX2/AVX512/NEON/SVE)
+- GPU: name, VRAM, backend (Metal/DirectX/Vulkan/CUDA), compute capability
+- Memory: total/available GB
+- Storage: capacity, type (SSD/HDD)
+- NPU: detection with confidence (Apple Neural Engine, Intel AI Boost, AMD Ryzen AI)
 
-**Startup Detection:**
+**Type Synchronization Critical:**
+- Rust: `src-tauri/src/hardware/types.rs`
+- TypeScript: `src/lib/types/hardware.ts`
+- These MUST match exactly for serialization
 
+### 4. Ollama Integration
+
+**Connection Pooling:**
 ```rust
-// src-tauri/src/lib.rs
-.setup(|app| {
-    let app_handle = app.handle().clone();
-    tauri::async_runtime::spawn(async move {
-        match hardware::detect_all().await {
-            Ok(info) => {
-                app_handle.state::<HardwareCache>().set(info).await;
-            }
-            Err(e) => {
-                log::error!("Hardware detection failed: {}", e);
-            }
-        }
-    });
-    Ok(())
-})
-```
-
-**Race Condition Handling:**
-
-```typescript
-// Frontend automatically triggers detection if cache is empty
-async getCached() {
-    const cached = await invoke<HardwareInfo | null>('get_cached_hardware');
-    if (cached) {
-        hardware = cached;
-    } else {
-        // Backend hasn't finished startup detection yet
-        await this.detect();
-    }
+// src-tauri/src/commands/ollama.rs
+pub struct HttpClient {
+    client: Arc<reqwest::Client>,
 }
 ```
 
-**Type Synchronization:**
+Reuses HTTP connections to `localhost:11434` for performance.
 
-- Rust structs in `src-tauri/src/hardware/types.rs`
-- TypeScript interfaces in `src/lib/types/hardware.ts`
-- Must match exactly for proper serialization
+**Security:** OLLAMA_URL validation restricts to localhost only (prevents data exfiltration).
 
-**Key Files:**
+**Streaming Chat Flow:**
+1. Frontend calls `generate_stream()`
+2. Backend streams HTTP response from Ollama
+3. Backend emits chunks via Tauri events
+4. Frontend listens and updates UI reactively
+5. Cancel via `StreamCancellation` shared state
 
+### 5. Background Generation Pattern
+
+Chats can generate in background while user switches to other chats:
+
+```typescript
+// src/lib/stores/chats.svelte.ts
+let backgroundGenerations = $state<Map<string, boolean>>(new Map());
+```
+
+Only one active HTTP request at a time, but UI supports multiple chats.
+
+---
+
+## Critical File Locations
+
+### Frontend Entry Points
+- `src/main.ts` - App initialization
+- `src/App.svelte` - Root component, routing
+- `src/lib/stores/*.svelte.ts` - State management (Svelte 5 runes)
+- `src/lib/components/` - UI components
+
+### Backend Entry Points
+- `src-tauri/src/main.rs` - Binary entry (calls `lib::run()`)
+- `src-tauri/src/lib.rs` - Tauri setup, command registration, state initialization
+
+### Command Modules
+- `src-tauri/src/commands/ollama.rs` - Ollama API integration
+- `src-tauri/src/commands/hardware.rs` - Hardware detection commands
+- `src-tauri/src/commands/benchmark.rs` - Benchmarking system
+- `src-tauri/src/commands/default.rs` - File I/O commands
+
+### Hardware Detection
 - `src-tauri/src/hardware/detector.rs` - Detection implementation
 - `src-tauri/src/hardware/types.rs` - Rust type definitions
-- `src-tauri/src/commands/hardware.rs` - Tauri commands and caching
-- `src/lib/stores/hardware.svelte.ts` - Frontend state management
-- `src/lib/types/hardware.ts` - TypeScript interfaces
-- `src/lib/components/HardwarePanel.svelte` - Full hardware display
-- `src/lib/components/HardwareIndicator.svelte` - Status bar widget
+- `src/lib/types/hardware.ts` - TypeScript interfaces (MUST match Rust)
+- `src/lib/stores/hardware.svelte.ts` - Frontend state
 
-### Usage in Future Optimizations
+### Configuration
+- `src-tauri/tauri.conf.json` - Tauri app configuration
+- `src-tauri/Cargo.toml` - Rust dependencies
+- `package.json` - Node.js dependencies, scripts
+- `vite.config.ts` - Vite build configuration
+- `tsconfig.json` - TypeScript configuration
+- `tailwind.config.ts` - Tailwind CSS 4 configuration
 
+---
+
+## Code Conventions & Patterns
+
+### TypeScript/Svelte
+
+**File Naming:**
+- Components: `PascalCase.svelte`
+- Stores: `camelCase.svelte.ts`
+- Types: `camelCase.ts`
+
+**Component Structure:**
+```svelte
+<script lang="ts">
+    // 1. Imports
+    // 2. Props with $props()
+    // 3. State with $state
+    // 4. Derived with $derived
+    // 5. Effects with $effect
+    // 6. Functions
+</script>
+
+<div class="...">
+    <!-- Template -->
+</div>
+```
+
+**Store Pattern (Svelte 5):**
 ```typescript
-// Example: Model selection based on memory
-function recommendModel(): string {
-	const availableGB = hardwareStore.info?.memory.available_gb ?? 0;
-	if (availableGB >= 20) return 'qwen2.5-coder:32b';
-	if (availableGB >= 10) return 'qwen2.5-coder:14b';
-	if (availableGB >= 6) return 'qwen2.5-coder:7b';
-	return 'qwen2.5-coder:3b';
+let data = $state<T>(initialValue);
+
+export const store = {
+    get data() { return data; },  // Getter for reactivity
+
+    method() {
+        data = newValue;  // Direct assignment
+    }
+};
+```
+
+**Naming:**
+- Variables: `camelCase`
+- Constants: `SCREAMING_SNAKE_CASE`
+- Types/Interfaces: `PascalCase`
+- Functions: `camelCase` with descriptive verbs
+- Booleans: Prefix `is`, `has`, `should`
+
+### Rust
+
+**File Naming:** `snake_case.rs`
+
+**Command Pattern:**
+```rust
+#[tauri::command]
+pub async fn command_name(
+    arg: String,
+    state: State<'_, AppState>,
+) -> Result<ReturnType, String> {
+    // Return String for user-friendly errors
+    Ok(result)
 }
+```
 
-// Example: llama.cpp compilation flags
-function getCMakeFlags(): string[] {
-	const cpu = hardwareStore.info?.cpu;
-	const gpu = hardwareStore.info?.gpus[0];
-	const flags = [];
+**Error Handling:**
+- Use `Result<T, String>` for Tauri commands
+- Use `thiserror` for internal error types
+- Log with `log::error!()`, `log::warn!()`, `log::info!()`, `log::debug!()`
+- Provide user-friendly error messages
 
-	if (cpu?.features.includes('AVX2')) flags.push('-DLLAMA_AVX2=ON');
-	if (cpu?.features.includes('AVX512')) flags.push('-DLLAMA_AVX512=ON');
-	if (cpu?.features.includes('NEON')) flags.push('-DLLAMA_NEON=ON');
+**Naming:**
+- Variables/functions: `snake_case`
+- Types/structs/enums: `PascalCase`
+- Constants: `SCREAMING_SNAKE_CASE`
 
-	if (gpu?.backend === 'Metal') flags.push('-DLLAMA_METAL=ON');
-	if (gpu?.backend === 'CUDA') flags.push('-DLLAMA_CUDA=ON');
+### CSS/Styling (Tailwind 4)
 
-	return flags;
-}
+**DO NOT use `@apply`** (Tailwind 4 doesn't support it).
+
+Use utility classes directly:
+```svelte
+<div class="border-border bg-card flex items-center gap-2 rounded-lg border p-4">
+    <!-- ... -->
+</div>
+```
+
+**Conditional classes:**
+```svelte
+<button class:opacity-50={isDisabled} class="bg-primary ...">
+    Click
+</button>
+```
+
+**Color system (shadcn):**
+- `bg-background`, `text-foreground`
+- `bg-primary`, `text-primary-foreground`
+- `bg-card`, `text-card-foreground`
+- `bg-muted`, `text-muted-foreground`
+
+---
+
+## Important Implementation Details
+
+### Security Considerations
+
+**Implemented:**
+- OLLAMA_URL validation (localhost only)
+- HTTP connection pooling (prevents resource exhaustion)
+- Event listener cleanup in `$effect` (prevents memory leaks)
+
+**Needed (Known Issues):**
+- Input sanitization (XSS prevention)
+- Request timeouts
+- Rate limiting
+- Data size limits
+- DOMPurify for markdown rendering
+
+### Performance Optimizations
+
+**Frontend:**
+- Svelte 5 fine-grained reactivity (minimal re-renders)
+- Use `$derived` for computed values (not functions in template)
+- Avoid `$effect` unless necessary
+- Use `$state` objects for related data
+
+**Backend:**
+- Async/await for all I/O (non-blocking)
+- Tokio runtime handles concurrency
+- Hardware detection cached in memory
+- HTTP connection pooling
+
+### Git Workflow
+
+**Branch naming:**
+- Features: `feature/description`
+- Fixes: `fix/description`
+- AI work: `claude/description-sessionid`
+
+**Commit messages (Conventional Commits):**
+```
+feat: add hardware detection system
+fix: resolve startup race condition
+docs: update README with v2.2.0 changes
+refactor: migrate to hardware-query crate
+chore: update dependencies
 ```
 
 ---
 
 ## Development Workflow
 
-### Setting Up Development Environment
+### Setup Development Environment
 
 ```bash
 # 1. Clone repository
@@ -728,453 +431,310 @@ ollama pull qwen2.5-coder:7b
 npm run tauri dev
 ```
 
-### Common Tasks
+### Making Changes
 
-**Run Development Server:**
+**Frontend Changes (Hot Reload):**
+- Edit Svelte/TypeScript files
+- Save → Vite hot reloads automatically
+- No restart needed
 
-```bash
-npm run tauri dev
-# - Frontend: Hot reload on Svelte changes
-# - Backend: Rebuild required for Rust changes
-```
+**Backend Changes (Requires Restart):**
+- Edit Rust files
+- Save → Press Ctrl+C → `npm run tauri dev`
+- Rust recompiles on restart
 
-**Build Production:**
-
-```bash
-npm run tauri build
-# Output: src-tauri/target/release/bundle/
-```
-
-**Format Code:**
+### Before Committing
 
 ```bash
-# Frontend (TypeScript/Svelte)
+# Check types
+npm run check
+
+# Format code
 npm run format
 
-# Backend (Rust)
-cd src-tauri
-cargo fmt
-```
-
-**Lint Code:**
-
-```bash
-# Frontend
+# Lint
 npm run lint
 
-# Backend
-cd src-tauri
-cargo clippy
-```
-
-**Type Check:**
-
-```bash
-npm run check
-```
-
-**Clean Build:**
-
-```bash
-# Clean Rust artifacts
-cd src-tauri
-cargo clean
-cd ..
-
-# Clean node_modules (if needed)
-rm -rf node_modules
-npm install
-```
-
-### Git Workflow
-
-**Branch Naming:**
-
-- Features: `feature/description`
-- Fixes: `fix/description`
-- Claude work: `claude/description-sessionid`
-
-**Commit Messages (Conventional Commits):**
-
-```
-feat: add hardware detection system
-fix: resolve startup race condition
-docs: update README with v2.2.0 changes
-refactor: migrate to hardware-query crate
-chore: update dependencies
+# Compile Rust
+cd src-tauri && cargo check && cargo clippy
 ```
 
 ---
 
-## Important Files
+## Common Tasks
 
-### Configuration Files
+### Adding a New Tauri Command
 
-**`src-tauri/tauri.conf.json`** - Tauri app configuration
-
-- App identifier: `com.smolpc.codehelper`
-- Window settings (dimensions, title, etc.)
-- Security settings (allowlist)
-- Bundle configuration (icons, version)
-
-**`src-tauri/Cargo.toml`** - Rust dependencies
-
-- Current version: 2.2.0
-- Key dependencies: tauri, serde, reqwest, hardware-query, tokio
-
-**`package.json`** - Node.js dependencies and scripts
-
-- Scripts: `tauri dev`, `tauri build`
-- Frontend dependencies: svelte, vite, tailwindcss
-
-### Entry Points
-
-**`src/main.ts`** - Frontend entry
-
-- Initializes Svelte app
-- Mounts to `#app` div
-
-**`src-tauri/src/main.rs`** - Binary entry
-
-- Calls `lib::run()`
-
-**`src-tauri/src/lib.rs`** - Tauri setup
-
-- Command registration
-- State initialization
-- Hardware detection on startup
-- Window configuration
-
-### Core Logic Files
-
-**`src/lib/stores/chats.svelte.ts`** - Chat state management
-
-- Manages all chats and messages
-- Handles localStorage persistence
-- Current chat selection
-
-**`src-tauri/src/commands/ollama.rs`** - Ollama integration
-
-- Streaming chat endpoint
-- Model listing
-- Connection checking
-- HTTP client with connection pooling
-
-**`src-tauri/src/hardware/detector.rs`** - Hardware detection
-
-- Queries hardware-query crate
-- Converts to internal types
-- Handles platform differences
-
----
-
-## Testing and Debugging
-
-### Frontend Debugging
-
-**DevTools:**
-
-- Press `F12` in dev mode to open Chrome DevTools
-- Check Console for errors
-- Inspect Network tab for Tauri IPC calls
-
-**Logging:**
-
-```typescript
-console.log('Debug message');
-console.error('Error message');
-console.warn('Warning message');
-```
-
-### Backend Debugging
-
-**Logging:**
-
+1. **Define command in appropriate module:**
 ```rust
-use log::{info, warn, error, debug};
-
-info!("Info message");
-warn!("Warning message");
-error!("Error: {}", error);
-debug!("Debug message (dev only)");
+// src-tauri/src/commands/mymodule.rs
+#[tauri::command]
+pub async fn my_command(arg: String) -> Result<String, String> {
+    Ok(format!("Processed: {}", arg))
+}
 ```
 
-**Log Location:**
+2. **Export from module:**
+```rust
+// src-tauri/src/commands/mod.rs
+pub mod mymodule;
+```
 
-- macOS: `~/Library/Logs/com.smolpc.codehelper/`
-- Windows: `%APPDATA%\com.smolpc.codehelper\logs\`
-- Linux: `~/.local/share/com.smolpc.codehelper/logs/`
+3. **Import in lib.rs:**
+```rust
+use commands::mymodule::my_command;
+```
 
-### Testing Hardware Detection
+4. **Register in handler:**
+```rust
+.invoke_handler(tauri::generate_handler![
+    // ... existing commands
+    my_command
+])
+```
+
+5. **Call from frontend:**
+```typescript
+import { invoke } from '@tauri-apps/api/core';
+const result = await invoke<string>('my_command', { arg: 'test' });
+```
+
+### Adding Managed State
+
+1. **Define state struct:**
+```rust
+pub struct MyState {
+    data: Arc<Mutex<HashMap<String, String>>>,
+}
+
+impl Default for MyState {
+    fn default() -> Self {
+        Self {
+            data: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
+```
+
+2. **Register in lib.rs:**
+```rust
+.manage(MyState::default())
+```
+
+3. **Use in commands:**
+```rust
+#[tauri::command]
+async fn use_my_state(state: State<'_, MyState>) -> Result<(), String> {
+    let mut data = state.data.lock().await;
+    // ... use data
+    Ok(())
+}
+```
+
+### Adding a New Store (Svelte 5)
 
 ```typescript
-// In browser console (DevTools)
+// src/lib/stores/mystore.svelte.ts
+import { invoke } from '@tauri-apps/api/core';
+import type { MyType } from '$lib/types/mytype';
+
+let data = $state<MyType[]>([]);
+let isLoading = $state(false);
+let error = $state<string | null>(null);
+
+export const myStore = {
+    get data() { return data; },
+    get isLoading() { return isLoading; },
+    get error() { return error; },
+
+    async load() {
+        isLoading = true;
+        error = null;
+        try {
+            data = await invoke<MyType[]>('load_data');
+        } catch (e) {
+            error = e instanceof Error ? e.message : 'Unknown error';
+        } finally {
+            isLoading = false;
+        }
+    }
+};
+```
+
+### Type Synchronization (Rust ↔ TypeScript)
+
+When adding new types for IPC:
+
+1. **Define in Rust:**
+```rust
+// src-tauri/src/hardware/types.rs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MyInfo {
+    pub field1: String,
+    pub field2: Option<u32>,
+}
+```
+
+2. **Mirror in TypeScript:**
+```typescript
+// src/lib/types/mytype.ts
+export interface MyInfo {
+    field1: string;
+    field2: number | null;
+}
+```
+
+**Important:** Option<T> in Rust = T | null in TypeScript
+
+---
+
+## Debugging
+
+### Frontend
+
+- Press `F12` in dev mode for Chrome DevTools
+- Check Console for errors
+- Network tab shows Tauri IPC calls
+- Use `console.log()` for debugging
+
+### Backend
+
+- Logs written to:
+  - macOS: `~/Library/Logs/com.smolpc.codehelper/`
+  - Windows: `%APPDATA%\com.smolpc.codehelper\logs\`
+  - Linux: `~/.local/share/com.smolpc.codehelper/logs/`
+
+- Use log macros:
+```rust
+log::info!("Info message");
+log::warn!("Warning message");
+log::error!("Error: {}", error);
+log::debug!("Debug message (dev only)");
+```
+
+- In dev mode, logs also appear in terminal running `npm run tauri dev`
+
+### Hardware Detection Testing
+
+```typescript
+// In browser console (F12)
 await window.__TAURI__.invoke('detect_hardware');
 await window.__TAURI__.invoke('get_cached_hardware');
 ```
 
 ---
 
-## Security Considerations
+## External Dependencies
 
-### Implemented Security
+### Critical Dependencies
 
-**OLLAMA_URL Validation:**
+**Frontend:**
+- `svelte@^5.28.1` - Framework (uses runes)
+- `@tauri-apps/api@^2.5.0` - Tauri bindings
+- `tailwindcss@^4.1.7` - Styling
+- `vite@^6.3.5` - Build tool
 
-- Only localhost URLs allowed
-- Prevents data exfiltration to external servers
+**Backend:**
+- `tauri@2.6.2` - Desktop framework
+- `reqwest@0.12` - HTTP client
+- `hardware-query@0.2.1` - Hardware detection
+- `tokio@1` - Async runtime
+- `serde@1.0` - Serialization
 
-**HTTP Client Pooling:**
+### Ollama Requirement
 
-- Connection reuse prevents resource exhaustion
-
-**Event Listener Cleanup:**
-
-- Proper cleanup in `$effect` hooks
-- Prevents memory leaks
-
-### Future Security Improvements
-
-**Needed:**
-
-- [ ] Input sanitization (XSS prevention)
-- [ ] Request timeouts
-- [ ] Rate limiting
-- [ ] Data size limits
-- [ ] DOMPurify for markdown rendering
+App requires **Ollama** running at `http://localhost:11434`:
+- Not bundled with app
+- User must install separately
+- Models: Qwen 2.5 Coder (7B), DeepSeek Coder (6.7B)
 
 ---
 
-## Performance Considerations
+## Known Limitations
 
-### Frontend Performance
-
-**Svelte 5 Optimizations:**
-
-- Fine-grained reactivity (runes)
-- Minimal re-renders
-- Virtual DOM eliminated (compiled away)
-
-**Best Practices:**
-
-- Use `$derived` for computed values (not functions in template)
-- Avoid `$effect` unless necessary (prefer reactive assignments)
-- Use `$state` objects for related data
-
-### Backend Performance
-
-**Async Operations:**
-
-- Use `async/await` for all I/O
-- Tokio runtime handles concurrency
-- Non-blocking startup detection
-
-**Caching:**
-
-- Hardware info cached in memory
-- Prevents redundant expensive operations
-
-**Connection Pooling:**
-
-- HTTP client reuses connections
-- Reduces overhead for Ollama API calls
+1. **No tests** - Test suite needs to be added
+2. **No XSS protection** - Markdown rendering needs DOMPurify
+3. **No input validation** - Large prompts/contexts not limited
+4. **No request timeouts** - Long requests can hang
+5. **Single active request** - Only one Ollama request at a time
+6. **localStorage only** - No SQLite/IndexedDB for large data
 
 ---
 
-## Future Development Roadmap
+## Future Roadmap
 
-### Phase 2: Intelligent Optimization (Current)
+**Phase 2 (Q1 2025) - Current Focus:**
+- llama.cpp integration with hardware-optimized compilation
+- Automatic model selection based on RAM
+- GPU layer offloading configuration
+- CPU optimization flags (AVX2/AVX512/NEON)
+- Syntax highlighting in code blocks
+- Export chat to markdown
 
-**llama.cpp Integration:**
-
-1. Download/build llama.cpp based on detected hardware
-2. Generate CMake flags from CPU features (AVX2/AVX512/NEON)
-3. Configure GPU layer offloading (Metal/CUDA/Vulkan)
-4. Set optimal thread count based on CPU cores
-
-**Model Management:**
-
-1. Recommend models based on available RAM
-2. Download manager with storage validation
-3. Model format conversion (GGUF)
-4. Quantization selection (Q4/Q5/Q8)
-
-**Architecture Changes:**
-
-- Add `model` module for model management
-- Add `compiler` module for llama.cpp compilation
-- Extend hardware detection with performance benchmarking
-- Add persistent settings for user preferences
-
-### Phase 3: Advanced Features
-
+**Phase 3 (Q2 2025):**
+- Multiple simultaneous generations
 - Code execution sandbox
-- Multi-model simultaneous generation
-- Chat organization (folders, search)
-- Export functionality (markdown, PDF)
+- Image paste support
+- Comprehensive test suite
 
 ---
 
-## Key Decisions and Rationales
-
-### Why Svelte 5 over React/Vue?
-
-- Minimal boilerplate (less code = easier for students to understand)
-- True reactivity (no virtual DOM overhead)
-- Excellent TypeScript support
-- Smaller bundle size
-- Faster performance
-
-### Why Tauri over Electron?
-
-- Much smaller executables (~8MB vs 100MB+)
-- Lower memory usage (no embedded Chromium)
-- Better security model
-- Rust backend (performance + safety)
-- Modern architecture
-
-### Why Ollama over cloud APIs?
-
-- 100% offline operation (privacy + no API costs)
-- Student data stays local (GDPR/FERPA compliant)
-- Works without internet (schools, rural areas)
-- No rate limits or usage caps
-- Educational transparency
-
-### Why hardware-query over multiple crates?
-
-- Single unified API (simpler code)
-- Cross-platform consistency
-- Reduced dependency conflicts
-- Actively maintained
-- Comprehensive coverage (CPU, GPU, Memory, Storage, NPU)
-
-### Why localStorage over IndexedDB/SQLite?
-
-**Current (for chat persistence):**
-
-- Simpler API for current needs
-- No additional dependencies
-- Sufficient for current data volume
-
-**Future consideration:** May migrate to SQLite for:
-
-- Better performance with large chat history
-- Full-text search
-- Data integrity
-- Structured queries
-
----
-
-## Contributing Guidelines for AI Assistants
+## Important Notes for AI Assistants
 
 ### When Making Changes
 
 **Always:**
-
-1. Read relevant files before modifying
-2. Maintain existing code style and patterns
-3. Update types when changing data structures (both TS and Rust)
-4. Test changes in dev mode before committing
-5. Update documentation if adding features
-6. Use conventional commit messages
-7. Check for TypeScript/Rust compilation errors
+- Read relevant files before modifying
+- Maintain existing code style and patterns
+- Update types when changing data structures (BOTH Rust and TypeScript)
+- Test in dev mode before committing
+- Use conventional commit messages
+- Check for compilation errors (TypeScript + Rust)
 
 **Never:**
-
-1. Use `any` type in TypeScript
-2. Use `@apply` in CSS (Tailwind 4 doesn't support it)
-3. Commit untested code
-4. Break existing functionality
-5. Add dependencies without justification
-6. Bypass security measures
-7. Create features without user request
+- Use `any` type in TypeScript
+- Use `@apply` in CSS (Tailwind 4 doesn't support it)
+- Commit untested code
+- Break existing functionality
+- Add dependencies without justification
+- Bypass security measures
+- Use Svelte 4 stores (use Svelte 5 runes)
 
 ### Code Review Checklist
 
-Before considering work complete:
-
-- [ ] TypeScript compiles without errors (`npm run check`)
-- [ ] Rust compiles without errors (`cargo build`)
-- [ ] No console errors in browser DevTools
-- [ ] Changes work in dev mode (`npm run tauri dev`)
-- [ ] Types are synchronized (TS interfaces match Rust structs)
-- [ ] Error handling is implemented
+- [ ] TypeScript compiles (`npm run check`)
+- [ ] Rust compiles (`cargo check`)
+- [ ] No console errors in DevTools
+- [ ] Changes work in dev mode
+- [ ] Types synchronized (TS ↔ Rust)
+- [ ] Error handling implemented
 - [ ] Logging added for important operations
 - [ ] Documentation updated if needed
-- [ ] Git commit message follows conventions
-- [ ] No unintentional files committed
+- [ ] Commit message follows conventions
 
-### When Stuck or Uncertain
+### When Uncertain
 
-**Ask yourself:**
+If unsure about:
+- Project principles (offline, privacy, educational)
+- Existing patterns to follow
+- Potential breaking changes
+- Simplest solution
 
-1. Does this align with project principles? (offline, privacy, educational)
-2. Is there an existing pattern I should follow?
-3. Will this break existing functionality?
-4. Is this the simplest solution?
-5. Does this need user approval?
-
-**If yes to #5, stop and ask the user before proceeding.**
+**Stop and ask the user before proceeding.**
 
 ---
 
 ## Resources
 
-### Documentation
-
-- **Tauri:** https://v2.tauri.app/
+- **Tauri 2:** https://v2.tauri.app/
 - **Svelte 5:** https://svelte.dev/docs/svelte/overview
 - **Svelte 5 Runes:** https://svelte.dev/docs/svelte/what-are-runes
 - **Tailwind CSS 4:** https://tailwindcss.com/docs
-- **shadcn-svelte:** https://shadcn-svelte.com/
 - **hardware-query:** https://docs.rs/hardware-query/
-
-### Project Documentation
-
-- **README.md** - User-facing documentation
-- **docs/hardware-detection.md** - Hardware detection feature guide
-- **This file (claude.md)** - Developer/AI assistant guide
-
-### Related Projects
-
-- **Ollama:** https://ollama.com/
-- **Qwen 2.5 Coder:** https://huggingface.co/Qwen/Qwen2.5-Coder-7B
-- **DeepSeek Coder:** https://huggingface.co/deepseek-ai/deepseek-coder-6.7b-base
-
----
-
-## Changelog
-
-### v2.2.0 (January 2025)
-
-- Added comprehensive hardware detection system
-- CPU: vendor, cores, frequency, cache, instruction sets
-- GPU: name, VRAM, backend, CUDA compute capability
-- Memory: total/available RAM
-- Storage: capacity, type (SSD/HDD)
-- NPU: detection with confidence levels
-- Fixed startup race condition
-- Fixed NPU confidence badge display
-- Migrated to hardware-query v0.2.1 crate
-
-### v2.1.0 (December 2024)
-
-- Added production-grade benchmarking system
-- llama.cpp benchmark integration
-- Result caching and persistence
-
-### v2.0.0 (December 2024)
-
-- Migrated to Svelte 5 with runes
-- Background chat generation
-- HTTP connection pooling
-- Security improvements (URL validation)
-- Memory leak fixes
-- Tailwind 4 migration
+- **Ollama:** https://ollama.com/docs
 
 ---
 
 **Last Updated:** January 2025
-**Maintainer:** SmolPC Team
-**AI Assistant Context:** This file provides comprehensive project context for AI-assisted development
+**Project Version:** 2.2.0
+**Target Audience:** AI assistants working on SmolPC Code Helper
