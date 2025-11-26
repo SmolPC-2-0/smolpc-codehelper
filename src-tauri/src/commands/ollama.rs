@@ -102,7 +102,6 @@ pub struct OllamaResponse {
     pub done: bool,
     // Token count metadata (only present when done=true)
     pub eval_count: Option<usize>,        // Number of tokens in the response
-    pub prompt_eval_count: Option<usize>, // Number of tokens in the prompt
     // Timing metadata (only present when done=true)
     pub total_duration: Option<u64>,      // Total time in nanoseconds
     pub prompt_eval_duration: Option<u64>, // Prompt evaluation time in nanoseconds
@@ -134,21 +133,24 @@ impl Default for StreamCancellation {
 
 impl StreamCancellation {
     pub fn create_channel(&self) -> broadcast::Receiver<()> {
-        let mut sender_lock = self.sender.lock().unwrap();
+        let mut sender_lock = self.sender.lock()
+            .expect("StreamCancellation mutex poisoned - indicates panic in stream handler");
         let (tx, rx) = broadcast::channel(1);
         *sender_lock = Some(tx);
         rx
     }
 
     pub fn cancel(&self) {
-        let sender_lock = self.sender.lock().unwrap();
+        let sender_lock = self.sender.lock()
+            .expect("StreamCancellation mutex poisoned - indicates panic in stream handler");
         if let Some(sender) = sender_lock.as_ref() {
             let _ = sender.send(());
         }
     }
 
     pub fn clear(&self) {
-        let mut sender_lock = self.sender.lock().unwrap();
+        let mut sender_lock = self.sender.lock()
+            .expect("StreamCancellation mutex poisoned - indicates panic in stream handler");
         *sender_lock = None;
     }
 }
@@ -252,7 +254,9 @@ pub async fn generate_stream(
             _ = cancel_rx.recv() => {
                 // Stream was cancelled
                 cancellation.clear();
-                let _ = app_handle.emit("ollama_cancelled", ());
+                if let Err(e) = app_handle.emit("ollama_cancelled", ()) {
+                    log::debug!("Failed to emit cancellation event (frontend may be closed): {}", e);
+                }
                 return Ok(());
             }
             // Process stream chunks
@@ -262,17 +266,33 @@ pub async fn generate_stream(
                         if let Ok(text) = String::from_utf8(bytes.to_vec()) {
                             // Parse each line as JSON
                             for line in text.lines() {
-                                if let Ok(response) = serde_json::from_str::<OllamaResponse>(line) {
-                                    if let Some(message) = response.message {
-                                        // Emit chunk event with content
-                                        let _ = app_handle.emit("ollama_chunk", message.content);
-                                    }
+                                if line.trim().is_empty() {
+                                    continue;
+                                }
 
-                                    if response.done {
-                                        // Emit done event
-                                        cancellation.clear();
-                                        let _ = app_handle.emit("ollama_done", ());
-                                        return Ok(());
+                                match serde_json::from_str::<OllamaResponse>(line) {
+                                    Ok(response) => {
+                                        if let Some(message) = response.message {
+                                            // Emit chunk event with content
+                                            if let Err(e) = app_handle.emit("ollama_chunk", message.content) {
+                                                log::debug!("Frontend disconnected during stream, stopping: {}", e);
+                                                cancellation.clear();
+                                                return Ok(());
+                                            }
+                                        }
+
+                                        if response.done {
+                                            // Emit done event
+                                            cancellation.clear();
+                                            if let Err(e) = app_handle.emit("ollama_done", ()) {
+                                                log::debug!("Failed to emit done event (frontend may be closed): {}", e);
+                                            }
+                                            return Ok(());
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Failed to parse Ollama response: {} | Line: {}", e, line);
+                                        // Continue processing other lines - don't fail entire stream
                                     }
                                 }
                             }
@@ -280,7 +300,9 @@ pub async fn generate_stream(
                     }
                     Some(Err(e)) => {
                         cancellation.clear();
-                        let _ = app_handle.emit("ollama_error", format!("Stream error: {}", e));
+                        if let Err(emit_err) = app_handle.emit("ollama_error", format!("Stream error: {}", e)) {
+                            log::debug!("Failed to emit error event (frontend may be closed): {}", emit_err);
+                        }
                         return Err(Error::Other(format!("Stream error: {}", e)));
                     }
                     None => {

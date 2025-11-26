@@ -1,8 +1,14 @@
+
+
 use super::metrics::{BenchmarkMetrics, BenchmarkResults};
 use csv::Writer;
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
+
+
+const FLUSH_INTERVAL: usize = 10;
+
 
 /// CSV-specific format for benchmark metrics with proper column names and ordering
 /// This ensures automatic column ordering via serde and prevents manual column mismatches
@@ -16,14 +22,19 @@ struct CsvMetricRow {
     total_time_ms: String,
     tokens_per_sec: String,
     avg_token_ms: String,
+    timing_source: String,
     memory_before_mb: String,
     memory_peak_mb: String,
-    cpu_percent: String,
+    cpu_ollama_percent: String,
+    cpu_tauri_percent: String,
+    cpu_system_percent: String,
+    cpu_total_percent: String,
     response_tokens: usize,
     cpu_model: String,
     gpu_name: String,
     avx2_supported: bool,
     npu_detected: bool,
+    hardware_detection_failed: bool,
     prompt: String,
 }
 
@@ -38,30 +49,58 @@ impl From<&BenchmarkMetrics> for CsvMetricRow {
             total_time_ms: format!("{:.2}", metric.total_response_time_ms),
             tokens_per_sec: format!("{:.2}", metric.tokens_per_second),
             avg_token_ms: format!("{:.2}", metric.avg_token_latency_ms),
+            timing_source: metric.timing_source.as_str().to_string(),
             memory_before_mb: format!("{:.2}", metric.memory_before_mb),
             memory_peak_mb: format!("{:.2}", metric.peak_memory_mb),
-            cpu_percent: format!("{:.2}", metric.cpu_usage_percent),
+            cpu_ollama_percent: format!("{:.2}", metric.cpu_ollama_percent),
+            cpu_tauri_percent: format!("{:.2}", metric.cpu_tauri_percent),
+            cpu_total_percent: format!("{:.2}", metric.cpu_total_percent),
+            cpu_system_percent: format!("{:.2}", metric.cpu_system_percent),
             response_tokens: metric.response_tokens,
             cpu_model: metric.cpu_model.clone(),
             gpu_name: metric.gpu_name.clone(),
             avx2_supported: metric.avx2_supported,
             npu_detected: metric.npu_detected,
+            hardware_detection_failed: metric.hardware_detection_failed,
             prompt: metric.prompt.clone(),
         }
     }
 }
 
-/// Get the benchmarks directory path (creates if doesn't exist)
+/// Get the benchmarks directory path using Tauri's app data directory
+/// This provides a stable, cross-platform location that doesn't depend on CWD
+pub fn get_benchmarks_dir_with_app_handle(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {e}"))?;
+
+    let benchmarks_dir = app_data_dir.join("benchmarks");
+
+    // Create directory if it doesn't exist
+    if !benchmarks_dir.exists() {
+        fs::create_dir_all(&benchmarks_dir)
+            .map_err(|e| format!("Failed to create benchmarks directory: {e}"))?;
+    }
+
+    Ok(benchmarks_dir)
+}
+
+/// Legacy function for backwards compatibility and tests
+/// Prefer get_benchmarks_dir_with_app_handle in production code
+#[deprecated(note = "Use get_benchmarks_dir_with_app_handle for stable paths")]
 pub fn get_benchmarks_dir() -> Result<PathBuf, String> {
     let current_dir = std::env::current_dir()
-        .map_err(|e| format!("Failed to get current directory: {}", e))?;
+        .map_err(|e| format!("Failed to get current directory: {e}"))?;
 
     let benchmarks_dir = current_dir.join("benchmarks");
 
     // Create directory if it doesn't exist
     if !benchmarks_dir.exists() {
         fs::create_dir_all(&benchmarks_dir)
-            .map_err(|e| format!("Failed to create benchmarks directory: {}", e))?;
+            .map_err(|e| format!("Failed to create benchmarks directory: {e}"))?;
     }
 
     Ok(benchmarks_dir)
@@ -70,50 +109,53 @@ pub fn get_benchmarks_dir() -> Result<PathBuf, String> {
 /// Generate filename with timestamp
 pub fn generate_filename(prefix: &str) -> String {
     let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
-    format!("{}-{}.csv", prefix, timestamp)
+    format!("{prefix}-{timestamp}.csv")
 }
 
 /// Export benchmark results to CSV using serde for automatic column management
-pub fn export_to_csv(results: &BenchmarkResults, prefix: &str) -> Result<PathBuf, String> {
-    let benchmarks_dir = get_benchmarks_dir()?;
+pub fn export_to_csv(
+    results: &BenchmarkResults,
+    prefix: &str,
+    app_handle: &tauri::AppHandle,
+) -> Result<PathBuf, String> {
+    let benchmarks_dir = get_benchmarks_dir_with_app_handle(app_handle)?;
     let filename = generate_filename(prefix);
     let filepath = benchmarks_dir.join(&filename);
 
     // Create CSV writer
     let mut wtr = Writer::from_path(&filepath)
-        .map_err(|e| format!("Failed to create CSV file: {}", e))?;
+        .map_err(|e| format!("Failed to create CSV file: {e}"))?;
 
     // Write all metrics using serde serialization (automatic headers and column ordering)
     // Flush periodically for crash safety
-    const FLUSH_INTERVAL: usize = 10;
 
     for (index, metric) in results.metrics.iter().enumerate() {
         let csv_row = CsvMetricRow::from(metric);
         wtr.serialize(csv_row)
-            .map_err(|e| format!("Failed to serialize metric row: {}", e))?;
+            .map_err(|e| format!("Failed to serialize metric row: {e}"))?;
 
         // Periodic flush every 10 rows to prevent data loss on crash
         if (index + 1) % FLUSH_INTERVAL == 0 {
             wtr.flush()
-                .map_err(|e| format!("Failed to flush CSV writer during periodic flush: {}", e))?;
+                .map_err(|e| format!("Failed to flush CSV writer during periodic flush: {e}"))?;
         }
     }
 
     // Final flush to ensure all data is written
     wtr.flush()
-        .map_err(|e| format!("Failed to flush CSV writer: {}", e))?;
+        .map_err(|e| format!("Failed to flush CSV writer: {e}"))?;
 
     Ok(filepath)
 }
 
 /// Create a README.md in the benchmarks directory explaining the CSV format
-pub fn create_readme() -> Result<(), String> {
-    let benchmarks_dir = get_benchmarks_dir()?;
+pub fn create_readme(app_handle: &tauri::AppHandle) -> Result<(), String> {
+    let benchmarks_dir = get_benchmarks_dir_with_app_handle(app_handle)?;
     let readme_path = benchmarks_dir.join("README.md");
 
     // Only create if doesn't exist
     if !readme_path.exists() {
-        let readme_content = r#"# Benchmark Results
+        let readme_content = r"# Benchmark Results
 
 This directory contains benchmark test results for SmolPC Code Helper.
 
@@ -176,10 +218,10 @@ Import CSV files into Excel, Google Sheets, or data analysis tools for visualiza
 - Token count is based on streaming chunks, not a true tokenizer (may vary slightly from actual token count)
 - CPU/memory sampling is system-wide, not process-specific (future improvement: track Ollama process specifically)
 - Sampling interval is 100ms (adequate for most measurements, but may miss very brief spikes)
-"#;
+";
 
         fs::write(&readme_path, readme_content)
-            .map_err(|e| format!("Failed to create README: {}", e))?;
+            .map_err(|e| format!("Failed to create README: {e}"))?;
     }
 
     Ok(())
@@ -188,7 +230,35 @@ Import CSV files into Excel, Google Sheets, or data analysis tools for visualiza
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::benchmark::metrics::{BenchmarkMetrics, BenchmarkSummary};
+    use crate::benchmark::metrics::{BenchmarkMetrics, TimingSource};
+
+    /// Helper function for tests that uses the deprecated path function
+    /// Tests don't have access to AppHandle, so they use the legacy CWD-based path
+    #[allow(deprecated)]
+    fn export_to_csv_test(results: &BenchmarkResults, prefix: &str) -> Result<PathBuf, String> {
+        let benchmarks_dir = get_benchmarks_dir()?;
+        let filename = generate_filename(prefix);
+        let filepath = benchmarks_dir.join(&filename);
+
+        let mut wtr = Writer::from_path(&filepath)
+            .map_err(|e| format!("Failed to create CSV file: {e}"))?;
+
+        for (index, metric) in results.metrics.iter().enumerate() {
+            let csv_row = CsvMetricRow::from(metric);
+            wtr.serialize(csv_row)
+                .map_err(|e| format!("Failed to serialize metric row: {e}"))?;
+
+            if (index + 1) % FLUSH_INTERVAL == 0 {
+                wtr.flush()
+                    .map_err(|e| format!("Failed to flush CSV writer during periodic flush: {e}"))?;
+            }
+        }
+
+        wtr.flush()
+            .map_err(|e| format!("Failed to flush CSV writer: {e}"))?;
+
+        Ok(filepath)
+    }
 
     fn create_test_metric() -> BenchmarkMetrics {
         BenchmarkMetrics {
@@ -196,11 +266,15 @@ mod tests {
             total_response_time_ms: 1000.0,
             tokens_per_second: 10.0,
             avg_token_latency_ms: 100.0,
+            timing_source: TimingSource::Native,
             memory_before_mb: 1000.0,
             memory_during_mb: 1100.0,
             memory_after_mb: 1000.0,
             peak_memory_mb: 1200.0,
-            cpu_usage_percent: 50.0,
+            cpu_ollama_percent: 40.0,
+            cpu_tauri_percent: 10.0,
+            cpu_system_percent: 60.0,
+            cpu_total_percent: 50.0,
             model_name: "test-model".to_string(),
             prompt_type: "short".to_string(),
             prompt: "test prompt".to_string(),
@@ -211,6 +285,7 @@ mod tests {
             gpu_name: "Test GPU".to_string(),
             avx2_supported: true,
             npu_detected: false,
+            hardware_detection_failed: false,
         }
     }
 
@@ -241,7 +316,10 @@ mod tests {
             memory_during_mb: 1100.456,
             memory_after_mb: 1000.789,
             peak_memory_mb: 1200.987,
-            cpu_usage_percent: 55.555,
+            cpu_ollama_percent: 40.0,
+            cpu_tauri_percent: 15.56,
+            cpu_system_percent: 70.0,
+            cpu_total_percent: 55.56,
             model_name: "test".to_string(),
             prompt_type: "medium".to_string(),
             prompt: "prompt".to_string(),
@@ -252,6 +330,8 @@ mod tests {
             gpu_name: "Test GPU".to_string(),
             avx2_supported: true,
             npu_detected: false,
+            hardware_detection_failed: false,
+            timing_source: TimingSource::Native,
         };
 
         let csv_row = CsvMetricRow::from(&metric);
@@ -261,7 +341,10 @@ mod tests {
         assert_eq!(csv_row.total_time_ms, "1234.57");
         assert_eq!(csv_row.tokens_per_sec, "12.35");
         assert_eq!(csv_row.memory_peak_mb, "1200.99");
-        assert_eq!(csv_row.cpu_percent, "55.56");
+        assert_eq!(csv_row.cpu_ollama_percent, "40.00");
+        assert_eq!(csv_row.cpu_tauri_percent, "15.56");
+        assert_eq!(csv_row.cpu_system_percent, "70.00");
+        assert_eq!(csv_row.cpu_total_percent, "55.56");
     }
 
     #[test]
@@ -270,7 +353,7 @@ mod tests {
 
         assert!(filename.starts_with("test-prefix-"));
         assert!(filename.ends_with(".csv"));
-        assert!(filename.contains("-"));
+        assert!(filename.contains('-'));
 
         // Should contain timestamp components (year-month-day_hour-minute-second)
         let parts: Vec<&str> = filename.split('-').collect();
@@ -287,7 +370,7 @@ mod tests {
             timestamp: "2025-01-01T00:00:00Z".to_string(),
         };
 
-        let result = export_to_csv(&results, "test");
+        let result = export_to_csv_test(&results, "test");
 
         assert!(result.is_ok(), "CSV export should succeed");
 
@@ -309,7 +392,9 @@ mod tests {
             timestamp: "2025-01-01T00:00:00Z".to_string(),
         };
 
-        let filepath = export_to_csv(&results, "test").unwrap();
+        // Use unique prefix to avoid test interference
+        let prefix = format!("test-content-{}", std::process::id());
+        let filepath = export_to_csv_test(&results, &prefix).unwrap();
 
         // Read the CSV file and verify content
         let content = std::fs::read_to_string(&filepath).unwrap();
@@ -344,7 +429,9 @@ mod tests {
             timestamp: "2025-01-01T00:00:00Z".to_string(),
         };
 
-        let filepath = export_to_csv(&results, "test").unwrap();
+        // Use unique prefix to avoid test interference
+        let prefix = format!("test-multi-{}", std::process::id());
+        let filepath = export_to_csv_test(&results, &prefix).unwrap();
         let content = std::fs::read_to_string(&filepath).unwrap();
 
         // Should have header + 2 data rows

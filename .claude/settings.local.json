@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check:*)",
+      "Bash(tree:*)",
+      "Bash(cargo test:*)",
+      "Bash(find:*)",
+      "Bash(claude mcp remove:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo doc:*)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "python .claude/scripts/context-monitor.py"
+  }
+}

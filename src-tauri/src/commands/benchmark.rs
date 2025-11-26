@@ -17,7 +17,7 @@ pub async fn run_benchmark(
     let iterations = iterations.unwrap_or(3); // Default to 3 iterations
 
     // Create README if it doesn't exist
-    create_readme()
+    create_readme(&app_handle)
         .map_err(|e| Error::Other(format!("Failed to create benchmark README file: {}", e)))?;
 
     // Run benchmark with progress updates
@@ -29,7 +29,7 @@ pub async fn run_benchmark(
     .map_err(|e| Error::Other(format!("Benchmark suite failed for model '{}': {}", model, e)))?;
 
     // Export to CSV
-    let filepath = export_to_csv(&results, "benchmark")
+    let filepath = export_to_csv(&results, "benchmark", &app_handle)
         .map_err(|e| Error::Other(format!("Failed to export benchmark results to CSV: {}", e)))?;
 
     // Emit completion event with file path
@@ -43,16 +43,16 @@ pub async fn run_benchmark(
 
 /// Get the benchmarks directory path
 #[tauri::command]
-pub fn get_benchmarks_directory() -> Result<String, Error> {
-    let dir = crate::benchmark::get_benchmarks_dir()
+pub fn get_benchmarks_directory(app: tauri::AppHandle) -> Result<String, Error> {
+    let dir = crate::benchmark::get_benchmarks_dir_with_app_handle(&app)
         .map_err(|e| Error::Other(format!("Failed to locate benchmarks directory: {}", e)))?;
     Ok(dir.to_string_lossy().to_string())
 }
 
 /// Open the benchmarks folder in the system file manager
 #[tauri::command]
-pub fn open_benchmarks_folder() -> Result<(), Error> {
-    let dir = crate::benchmark::get_benchmarks_dir()
+pub fn open_benchmarks_folder(app: tauri::AppHandle) -> Result<(), Error> {
+    let dir = crate::benchmark::get_benchmarks_dir_with_app_handle(&app)
         .map_err(|e| Error::Other(format!("Failed to locate benchmarks directory for opening: {}", e)))?;
 
     // Use platform-specific commands to open the folder

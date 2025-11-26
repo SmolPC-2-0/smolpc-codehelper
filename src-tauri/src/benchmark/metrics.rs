@@ -1,5 +1,23 @@
 use serde::{Deserialize, Serialize};
 
+/// Source of timing data for benchmark metrics
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TimingSource {
+    /// Timing data from Ollama's native nanosecond-precision metrics (preferred)
+    Native,
+    /// Timing data calculated from client-side measurements (fallback)
+    Client,
+}
+
+impl TimingSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TimingSource::Native => "native",
+            TimingSource::Client => "client",
+        }
+    }
+}
+
 /// Performance metrics for a single benchmark test
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkMetrics {
@@ -16,6 +34,9 @@ pub struct BenchmarkMetrics {
     /// Average time per token (ms)
     pub avg_token_latency_ms: f64,
 
+    /// Source of timing data ("native" = Ollama's metrics, "client" = client-side fallback)
+    pub timing_source: TimingSource,
+
     // Memory metrics (SECONDARY)
     /// RAM usage before inference started (MB)
     pub memory_before_mb: f64,
@@ -30,8 +51,27 @@ pub struct BenchmarkMetrics {
     pub peak_memory_mb: f64,
 
     // CPU metrics (SECONDARY)
-    /// Average CPU utilization during inference (%)
-    pub cpu_usage_percent: f64,
+    // Note: Multiple CPU measurements enable accurate comparison when migrating from
+    // Ollama (HTTP-based) to llama.cpp (in-process). The HTTP architecture splits
+    // CPU usage across processes, so measuring only Ollama undercounts total cost.
+
+    /// Average CPU utilization of the Ollama/inference process during inference (%)
+    /// This measures only the inference engine's CPU usage.
+    pub cpu_ollama_percent: f64,
+
+    /// Average CPU utilization of this Tauri process during inference (%)
+    /// Captures HTTP overhead, JSON parsing, and async runtime costs.
+    /// Will be near-zero after llama.cpp migration (no HTTP overhead).
+    pub cpu_tauri_percent: f64,
+
+    /// Average system-wide CPU utilization during inference (%)
+    /// Provides context for overall system load and third-party processes.
+    pub cpu_system_percent: f64,
+
+    /// Combined CPU usage: ollama + tauri processes (%)
+    /// This is the true total CPU cost of inference in the current architecture.
+    /// Primary metric for comparing Ollama vs llama.cpp performance.
+    pub cpu_total_percent: f64,
 
     // Metadata
     /// Model name used for inference
@@ -64,6 +104,9 @@ pub struct BenchmarkMetrics {
 
     /// Whether NPU is detected
     pub npu_detected: bool,
+
+    /// Whether hardware detection failed (metadata may be unreliable)
+    pub hardware_detection_failed: bool,
 }
 
 /// Summary statistics across multiple benchmark runs
@@ -74,7 +117,17 @@ pub struct BenchmarkSummary {
     pub avg_tokens_per_sec: f64,
     pub avg_total_time_ms: f64,
     pub avg_memory_mb: f64,
-    pub avg_cpu_percent: f64,
+
+    // CPU summary metrics
+    /// Average Ollama/inference process CPU usage (%)
+    pub avg_cpu_ollama_percent: f64,
+    /// Average Tauri process CPU usage (%)
+    pub avg_cpu_tauri_percent: f64,
+    /// Average system-wide CPU usage (%)
+    pub avg_cpu_system_percent: f64,
+    /// Average combined CPU usage: ollama + tauri (%)
+    pub avg_cpu_total_percent: f64,
+
     pub test_count: usize,
 }
 
@@ -112,15 +165,23 @@ pub fn calculate_summary(metrics: &[BenchmarkMetrics]) -> Vec<BenchmarkSummary> 
         let avg_tokens_per_sec = category_metrics.iter().map(|m| m.tokens_per_second).sum::<f64>() / count as f64;
         let avg_total_time = category_metrics.iter().map(|m| m.total_response_time_ms).sum::<f64>() / count as f64;
         let avg_memory = category_metrics.iter().map(|m| m.peak_memory_mb).sum::<f64>() / count as f64;
-        let avg_cpu = category_metrics.iter().map(|m| m.cpu_usage_percent).sum::<f64>() / count as f64;
+
+        // Calculate all CPU metrics
+        let avg_cpu_ollama = category_metrics.iter().map(|m| m.cpu_ollama_percent).sum::<f64>() / count as f64;
+        let avg_cpu_tauri = category_metrics.iter().map(|m| m.cpu_tauri_percent).sum::<f64>() / count as f64;
+        let avg_cpu_system = category_metrics.iter().map(|m| m.cpu_system_percent).sum::<f64>() / count as f64;
+        let avg_cpu_total = category_metrics.iter().map(|m| m.cpu_total_percent).sum::<f64>() / count as f64;
 
         summaries.push(BenchmarkSummary {
             category: category.to_string(),
             avg_first_token_ms: avg_first_token,
-            avg_tokens_per_sec: avg_tokens_per_sec,
+            avg_tokens_per_sec,
             avg_total_time_ms: avg_total_time,
             avg_memory_mb: avg_memory,
-            avg_cpu_percent: avg_cpu,
+            avg_cpu_ollama_percent: avg_cpu_ollama,
+            avg_cpu_tauri_percent: avg_cpu_tauri,
+            avg_cpu_system_percent: avg_cpu_system,
+            avg_cpu_total_percent: avg_cpu_total, 
             test_count: count,
         });
     }
@@ -146,11 +207,16 @@ mod tests {
             total_response_time_ms: total_time,
             tokens_per_second: tokens_per_sec,
             avg_token_latency_ms: total_time / 100.0, // Simplified
+            timing_source: TimingSource::Native,
             memory_before_mb: 1000.0,
             memory_during_mb: 1100.0,
             memory_after_mb: 1000.0,
             peak_memory_mb: peak_memory,
-            cpu_usage_percent: cpu,
+            // New CPU metrics - using cpu as ollama, simulating typical values
+            cpu_ollama_percent: cpu,
+            cpu_tauri_percent: cpu * 0.4, // Simulate ~40% of ollama's CPU for HTTP overhead
+            cpu_system_percent: cpu * 1.5, // Simulate system-wide being higher
+            cpu_total_percent: cpu + (cpu * 0.4), // ollama + tauri
             model_name: "test-model".to_string(),
             prompt_type: category.to_string(),
             prompt: "test prompt".to_string(),
@@ -161,6 +227,7 @@ mod tests {
             gpu_name: "Test GPU".to_string(),
             avx2_supported: true,
             npu_detected: false,
+            hardware_detection_failed: false,
         }
     }
 
@@ -179,7 +246,7 @@ mod tests {
         assert_eq!(summary[0].avg_tokens_per_sec, 15.0);
         assert_eq!(summary[0].avg_total_time_ms, 1500.0);
         assert_eq!(summary[0].avg_memory_mb, 550.0);
-        assert_eq!(summary[0].avg_cpu_percent, 55.0);
+        assert_eq!(summary[0].avg_cpu_total_percent, 77.0); // (50 + 50*0.4) + (60 + 60*0.4) / 2 = 70 + 84 / 2 = 77
         assert_eq!(summary[0].test_count, 2);
     }
 
@@ -245,7 +312,7 @@ mod tests {
         // Check that floating point averages are calculated correctly
         assert!((summary[0].avg_first_token_ms - 150.5).abs() < 0.01);
         assert!((summary[0].avg_tokens_per_sec - 15.5).abs() < 0.01);
-        assert!((summary[0].avg_cpu_percent - 55.5).abs() < 0.01);
+        assert!((summary[0].avg_cpu_total_percent - 77.7).abs() < 0.01);
     }
 
     #[test]
