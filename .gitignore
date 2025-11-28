@@ -22,3 +22,4 @@ dist-ssr
 /src-tauri/gen/schemas
 /docs/.local_docs/
 .claude
+.claude/settings.local.json

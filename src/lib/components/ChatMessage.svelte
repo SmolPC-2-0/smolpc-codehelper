@@ -1,10 +1,16 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { Message } from '$lib/types/chat';
-	import { renderMarkdown, copyToClipboard, extractCode, setupCodeCopyHandlers } from '$lib/utils/markdown';
+	import {
+		renderMarkdown,
+		copyToClipboard,
+		extractCode,
+		setupCodeCopyHandlers
+	} from '$lib/utils/markdown';
 	import { invoke } from '@tauri-apps/api/core';
 	import { User, Bot, Copy, Check, Download } from '@lucide/svelte';
 
+	// src/lib/components/ChatMessage.svelte 9-30
 	interface Props {
 		message: Message;
 	}
@@ -46,7 +52,9 @@
 </script>
 
 <div
-	class="flex gap-3 rounded-lg p-4 transition-colors {message.role === 'user' ? 'bg-blue-50 dark:bg-blue-950/20' : 'bg-gray-50 dark:bg-gray-900/50'}"
+	class="flex gap-3 rounded-lg p-4 transition-colors {message.role === 'user'
+		? 'bg-blue-50 dark:bg-blue-950/20'
+		: 'bg-gray-50 dark:bg-gray-900/50'}"
 >
 	<!-- Avatar -->
 	<div class="flex-shrink-0">
@@ -64,12 +72,14 @@
 	</div>
 
 	<!-- Content -->
-	<div class="flex-1 min-w-0" bind:this={contentContainer}>
+	<div class="min-w-0 flex-1" bind:this={contentContainer}>
 		<div class="mb-1 text-sm font-semibold text-gray-700 dark:text-gray-300">
 			{message.role === 'user' ? 'You' : 'AI Assistant'}
 		</div>
 
-		<div class="prose prose-sm dark:prose-invert max-w-none break-words text-gray-800 dark:text-gray-200">
+		<div
+			class="prose prose-sm dark:prose-invert max-w-none break-words text-gray-800 dark:text-gray-200"
+		>
 			{@html renderedContent}
 		</div>
 

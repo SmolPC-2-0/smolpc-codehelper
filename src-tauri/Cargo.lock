@@ -4086,8 +4086,10 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-log",
+ "tempfile",
  "thiserror 2.0.12",
  "tokio",
+ "url",
 ]
 
 [[package]]

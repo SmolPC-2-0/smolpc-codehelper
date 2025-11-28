@@ -1,13 +1,14 @@
 use super::errors::Error;
+use crate::security;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::env;
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::broadcast;
-use std::env;
 
 // Student-friendly system prompt for coding assistance
-const SYSTEM_PROMPT: &str = r#"You are a helpful coding assistant designed for secondary school students (ages 11-18).
+const SYSTEM_PROMPT: &str = r"You are a helpful coding assistant designed for secondary school students (ages 11-18).
 Your goal is to explain programming concepts clearly and provide well-commented code examples.
 
 Guidelines:
@@ -16,7 +17,7 @@ Guidelines:
 - Always include helpful comments in code
 - Be patient and supportive
 - Adapt explanations to the student's level
-- Encourage learning and experimentation"#;
+- Encourage learning and experimentation";
 
 /// Shared HTTP client for connection pooling
 pub struct HttpClient {
@@ -48,36 +49,19 @@ impl Default for OllamaConfig {
         let base_url = env::var("OLLAMA_URL")
             .unwrap_or_else(|_| "http://localhost:11434".to_string());
 
-        // Validate URL is localhost only for security
-        let validated_url = Self::validate_url(&base_url);
+        // Validate URL is localhost only for security (uses proper URL parsing)
+        let validated_url = security::validate_ollama_url(&base_url)
+            .unwrap_or_else(|err| {
+                log::error!("{err}");
+                log::warn!("Falling back to default: http://localhost:11434");
+                "http://localhost:11434".to_string()
+            });
 
         Self { base_url: validated_url }
     }
 }
 
 impl OllamaConfig {
-    /// Validates that the URL is localhost only (prevents data exfiltration)
-    fn validate_url(url: &str) -> String {
-        // Allow localhost, 127.0.0.1, and ::1 (IPv6 localhost)
-        let is_safe = url.starts_with("http://localhost")
-            || url.starts_with("https://localhost")
-            || url.starts_with("http://127.0.0.1")
-            || url.starts_with("https://127.0.0.1")
-            || url.starts_with("http://[::1]")
-            || url.starts_with("https://[::1]");
-
-        if is_safe {
-            url.to_string()
-        } else {
-            // Log warning and fall back to safe default
-            eprintln!(
-                "WARNING: OLLAMA_URL '{}' is not localhost. Using default http://localhost:11434 for security.",
-                url
-            );
-            "http://localhost:11434".to_string()
-        }
-    }
-
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
@@ -120,13 +104,13 @@ pub struct OllamaModelsResponse {
 
 /// Global state to manage stream cancellation
 pub struct StreamCancellation {
-    sender: Arc<Mutex<Option<broadcast::Sender<()>>>>,
+    sender: Mutex<Option<broadcast::Sender<()>>>,
 }
 
 impl Default for StreamCancellation {
     fn default() -> Self {
         Self {
-            sender: Arc::new(Mutex::new(None)),
+            sender: Mutex::new(None),
         }
     }
 }
@@ -135,13 +119,13 @@ impl StreamCancellation {
     pub fn create_channel(&self) -> broadcast::Receiver<()> {
         let mut sender_lock = self.sender.lock()
             .expect("StreamCancellation mutex poisoned - indicates panic in stream handler");
-        let (tx, rx) = broadcast::channel(1);
-        *sender_lock = Some(tx);
-        rx
+        let (tx, rx) = broadcast::channel(1); 
+        *sender_lock = Some(tx); // Transmitter stored globally for cancellation
+        rx // Return receiver for this stream
     }
 
     pub fn cancel(&self) {
-        let sender_lock = self.sender.lock()
+        let sender_lock = self.sender.lock() // 
             .expect("StreamCancellation mutex poisoned - indicates panic in stream handler");
         if let Some(sender) = sender_lock.as_ref() {
             let _ = sender.send(());
@@ -184,21 +168,20 @@ pub async fn get_ollama_models(
         .get(&url)
         .send()
         .await
-        .map_err(|e| Error::Other(format!("Failed to connect to Ollama: {}", e)))?;
+        .map_err(|e| Error::Other(format!("Failed to connect to Ollama: {e}")))?;
 
     let models: OllamaModelsResponse = response
         .json()
         .await
-        .map_err(|e| Error::Other(format!("Failed to parse models: {}", e)))?;
+        .map_err(|e| Error::Other(format!("Failed to parse models: {e}")))?;
 
     Ok(models.models.into_iter().map(|m| m.name).collect())
 }
 
 /// Cancel ongoing generation
 #[tauri::command]
-pub fn cancel_generation(cancellation: State<StreamCancellation>) -> Result<(), Error> {
+pub fn cancel_generation(cancellation: State<StreamCancellation>) {
     cancellation.cancel();
-    Ok(())
 }
 
 /// Generate streaming response from Ollama
@@ -244,7 +227,7 @@ pub async fn generate_stream(
         .json(&request)
         .send()
         .await
-        .map_err(|e| Error::Other(format!("Failed to send request: {}", e)))?;
+        .map_err(|e| Error::Other(format!("Failed to send request: {e}")))?;
 
     let mut stream = response.bytes_stream();
 
@@ -255,7 +238,7 @@ pub async fn generate_stream(
                 // Stream was cancelled
                 cancellation.clear();
                 if let Err(e) = app_handle.emit("ollama_cancelled", ()) {
-                    log::debug!("Failed to emit cancellation event (frontend may be closed): {}", e);
+                    log::debug!("Failed to emit cancellation event (frontend may be closed): {e}");
                 }
                 return Ok(());
             }
@@ -275,7 +258,7 @@ pub async fn generate_stream(
                                         if let Some(message) = response.message {
                                             // Emit chunk event with content
                                             if let Err(e) = app_handle.emit("ollama_chunk", message.content) {
-                                                log::debug!("Frontend disconnected during stream, stopping: {}", e);
+                                                log::debug!("Frontend disconnected during stream, stopping: {e}");
                                                 cancellation.clear();
                                                 return Ok(());
                                             }
@@ -285,13 +268,13 @@ pub async fn generate_stream(
                                             // Emit done event
                                             cancellation.clear();
                                             if let Err(e) = app_handle.emit("ollama_done", ()) {
-                                                log::debug!("Failed to emit done event (frontend may be closed): {}", e);
+                                                log::debug!("Failed to emit done event (frontend may be closed): {e}");
                                             }
                                             return Ok(());
                                         }
                                     }
                                     Err(e) => {
-                                        log::warn!("Failed to parse Ollama response: {} | Line: {}", e, line);
+                                        log::warn!("Failed to parse Ollama response: {e} | Line: {line}");
                                         // Continue processing other lines - don't fail entire stream
                                     }
                                 }
@@ -300,10 +283,10 @@ pub async fn generate_stream(
                     }
                     Some(Err(e)) => {
                         cancellation.clear();
-                        if let Err(emit_err) = app_handle.emit("ollama_error", format!("Stream error: {}", e)) {
-                            log::debug!("Failed to emit error event (frontend may be closed): {}", emit_err);
+                        if let Err(emit_err) = app_handle.emit("ollama_error", format!("Stream error: {e}")) {
+                            log::debug!("Failed to emit error event (frontend may be closed): {emit_err}");
                         }
-                        return Err(Error::Other(format!("Stream error: {}", e)));
+                        return Err(Error::Other(format!("Stream error: {e}")));
                     }
                     None => {
                         // Stream ended
