@@ -1,15 +1,24 @@
 /**
- * Custom lightweight markdown renderer
+ * Custom lightweight markdown renderer with DOMPurify sanitization
  *
- * NOTE: For production use, install 'marked' package:
+ * Security: All HTML output is sanitized with DOMPurify to prevent XSS attacks.
+ * This includes protection against:
+ * - Script injection
+ * - Unsafe URL protocols (javascript:, data:, etc.)
+ * - Malicious HTML attributes
+ * - SVG-based attacks
+ *
+ * NOTE: For production use, consider migrating to 'marked' package:
  * npm install marked
  *
  * Then replace this implementation with:
  * import { marked } from 'marked';
  * export function renderMarkdown(text: string): string {
- *   return marked(text);
+ *   return DOMPurify.sanitize(marked(text));
  * }
  */
+
+import DOMPurify from 'isomorphic-dompurify';
 
 /**
  * Escape HTML to prevent XSS
@@ -23,6 +32,33 @@ function escapeHtml(text: string): string {
 		"'": '&#039;'
 	};
 	return text.replace(/[&<>"']/g, (m) => map[m]);
+}
+
+/**
+ * Validate URL to prevent XSS attacks via unsafe protocols
+ * Only allows http, https, and mailto protocols
+ */
+function sanitizeUrl(url: string): string {
+	const allowedProtocols = /^(?:https?|mailto):/i;
+
+	// Trim whitespace
+	url = url.trim();
+
+	// Check for allowed protocols
+	if (!allowedProtocols.test(url)) {
+		// If it starts with a protocol we don't allow, return safe placeholder
+		if (/^[a-z][a-z0-9+.-]*:/i.test(url)) {
+			return '#';
+		}
+		// If it's a relative URL or fragment, allow it
+		if (url.startsWith('/') || url.startsWith('#') || url.startsWith('.')) {
+			return url;
+		}
+		// Default to https for bare URLs
+		return 'https://' + url;
+	}
+
+	return url;
 }
 
 /**
@@ -133,11 +169,11 @@ export function renderMarkdown(text: string): string {
 	// Italic
 	html = html.replace(/\*(.*?)\*/g, '<em class="italic">$1</em>');
 
-	// Links
-	html = html.replace(
-		/\[([^\]]+)\]\(([^)]+)\)/g,
-		'<a href="$2" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">$1</a>'
-	);
+	// Links (with URL sanitization)
+	html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+		const safeUrl = sanitizeUrl(url);
+		return `<a href="${safeUrl}" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">${text}</a>`;
+	});
 
 	// Unordered lists (support both * and - markers)
 	html = html.replace(/^[*-] (.+)$/gim, '<li class="ml-6 list-disc">$1</li>');
@@ -173,7 +209,50 @@ export function renderMarkdown(text: string): string {
 	html = html.replace(/<p class="my-2">(<div class="code-block)/g, '$1');
 	html = html.replace(/(<\/div>)<\/p>/g, '$1');
 
-	return html;
+	// Sanitize with DOMPurify to prevent XSS attacks
+	// This is the final security layer that catches any malicious HTML
+	return DOMPurify.sanitize(html, {
+		ALLOWED_TAGS: [
+			'h1',
+			'h2',
+			'h3',
+			'p',
+			'br',
+			'strong',
+			'em',
+			'code',
+			'pre',
+			'ul',
+			'ol',
+			'li',
+			'a',
+			'div',
+			'span',
+			'button',
+			'svg',
+			'path'
+		],
+		ALLOWED_ATTR: [
+			'href',
+			'class',
+			'data-code',
+			'title',
+			'aria-label',
+			'target',
+			'rel',
+			'stroke',
+			'fill',
+			'viewBox',
+			'stroke-linecap',
+			'stroke-linejoin',
+			'stroke-width',
+			'd'
+		],
+		ALLOWED_URI_REGEXP: /^(?:https?|mailto|#):/i,
+		KEEP_CONTENT: true,
+		RETURN_DOM_FRAGMENT: false,
+		RETURN_DOM: false
+	});
 }
 
 /**

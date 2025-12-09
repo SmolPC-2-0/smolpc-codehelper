@@ -1,4 +1,7 @@
 {
+  "env": {
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "64000"
+  },
   "permissions": {
     "allow": [
       "Bash(cargo check:*)",
@@ -7,7 +10,23 @@
       "Bash(find:*)",
       "Bash(claude mcp remove:*)",
       "Bash(cargo clippy:*)",
-      "Bash(cargo doc:*)"
+      "Bash(cargo doc:*)",
+      "WebSearch",
+      "WebFetch(domain:www.lurklurk.org)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:markaicode.com)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "Bash(npm run tauri:*)",
+      "Bash(timeout 10 sleep:*)",
+      "Bash(exit 0)",
+      "WebFetch(domain:)",
+      "Bash(npm run check:*)",
+      "Bash(cargo tree:*)",
+      "Bash(npm install:*)",
+      "Bash(npx prettier:*)",
+      "Bash(npm run build:*)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { settingsStore } from '$lib/stores/settings.svelte';
-	import { AVAILABLE_MODELS } from '$lib/types/settings';
+	import { ollamaStore } from '$lib/stores/ollama.svelte';
 	import { Brain } from '@lucide/svelte';
 
 	function handleModelChange(event: Event) {
@@ -16,11 +16,16 @@
 		onchange={handleModelChange}
 		class="flex-1 bg-transparent text-sm text-gray-700 outline-none dark:text-gray-300"
 	>
-		{#each AVAILABLE_MODELS as model}
-			<option value={model.name}>
-				{model.displayName}
-				{#if model.size}({model.size}){/if}
+		{#if ollamaStore.availableModels.length > 0}
+			{#each ollamaStore.availableModels as model}
+				<option value={model}>
+					{model}
+				</option>
+			{/each}
+		{:else}
+			<option value={settingsStore.selectedModel}>
+				{settingsStore.selectedModel} (No models detected)
 			</option>
-		{/each}
+		{/if}
 	</select>
 </div>

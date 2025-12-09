@@ -1,6 +1,7 @@
 mod benchmark;
 mod commands;
 mod hardware;
+mod security;
 use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_benchmark};
 use commands::default::{read, save_code, write};
 use commands::hardware::{detect_hardware, get_cached_hardware, HardwareCache};
