@@ -395,15 +395,19 @@ Use utility classes directly:
 
 **Implemented:**
 
-- OLLAMA_URL validation (localhost only)
-- HTTP connection pooling (prevents resource exhaustion)
-- Event listener cleanup in `$effect` (prevents memory leaks)
+- **Path traversal prevention**: Allowlist validation for file I/O operations
+- **File size limits**: 10 MB limit on read/write operations (prevents memory exhaustion)
+- **OLLAMA_URL validation**: Localhost-only with proper URL parsing (prevents data exfiltration)
+- **XSS protection**: DOMPurify sanitization in markdown rendering
+- **HTTP connection pooling**: Prevents resource exhaustion
+- **Event listener cleanup**: `$effect` cleanup prevents memory leaks
+- **Async file I/O**: Non-blocking operations
 
-**Needed (Known Issues):**
+**Future Improvements (Non-Critical):**
 
-- Request timeouts
-- Rate limiting
-- Data size limits
+- Request timeouts for Ollama HTTP client
+- Rate limiting (low priority for single-user desktop app)
+- Prompt/context size limits (Ollama handles gracefully, but user-friendly limits would be nice)
 
 ### Performance Optimizations
 
@@ -707,12 +711,11 @@ App requires **Ollama** running at `http://localhost:11434`:
 
 ## Known Limitations
 
-1. **No tests** - Test suite needs to be added
-2. **No XSS protection** - Markdown rendering needs DOMPurify
-3. **No input validation** - Large prompts/contexts not limited
-4. **No request timeouts** - Long requests can hang
-5. **Single active request** - Only one Ollama request at a time
-6. **localStorage only** - No SQLite/IndexedDB for large data
+1. **Limited test coverage** - Comprehensive test suite needs expansion (7 security tests exist)
+2. **No prompt/context size limits** - Large prompts/contexts not validated (Ollama handles internally)
+3. **No request timeouts** - Long Ollama requests can hang (low priority for local server)
+4. **Single active request** - Only one Ollama request at a time
+5. **localStorage only** - No SQLite/IndexedDB for large data
 
 ---
 
