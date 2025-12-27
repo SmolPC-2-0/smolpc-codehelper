@@ -23,3 +23,10 @@ dist-ssr
 /docs/.local_docs/
 .claude
 .claude/settings.local.json
+
+# ONNX Runtime and models
+/ort-extracted/
+/onnxruntime-*.zip
+/src-tauri/models/
+/src-tauri/*.dll
+nul

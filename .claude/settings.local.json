@@ -26,7 +26,11 @@
       "Bash(npm install:*)",
       "Bash(npx prettier:*)",
       "Bash(npm run build:*)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:onnxruntime.ai)",
+      "Bash(dir /s /b \"C:\\Users\\Student\\smolpc\\CodeHelper\\working-codehelper\\smolpc-codehelper\\src-tauri\\src\")",
+      "Bash(dir:*)",
+      "Bash(where:*)"
     ],
     "deny": [],
     "ask": []
