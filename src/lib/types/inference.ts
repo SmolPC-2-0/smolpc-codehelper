@@ -63,6 +63,23 @@ export interface AvailableModel {
 }
 
 /**
+ * Generation configuration
+ */
+export interface GenerationConfig {
+	/** Maximum tokens to generate */
+	max_length: number;
+
+	/** Temperature for sampling (0 = greedy, higher = more random) */
+	temperature: number;
+
+	/** Top-k filtering (only consider top k tokens) */
+	top_k: number | null;
+
+	/** Top-p (nucleus) sampling threshold */
+	top_p: number | null;
+}
+
+/**
  * Current inference state
  */
 export interface InferenceStatus {

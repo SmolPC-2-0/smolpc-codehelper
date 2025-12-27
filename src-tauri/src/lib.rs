@@ -8,8 +8,8 @@ use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_
 use commands::default::{read, save_code, write};
 use commands::hardware::{detect_hardware, get_cached_hardware, HardwareCache};
 use commands::inference::{
-    check_model_exists, generate_text, get_current_model, list_models, load_model, unload_model,
-    InferenceState,
+    check_model_exists, generate_text, get_current_model, inference_cancel, inference_generate,
+    is_generating, list_models, load_model, unload_model, InferenceState,
 };
 use commands::ollama::{
     cancel_generation, check_ollama, generate_stream, get_ollama_models, HttpClient,
@@ -57,9 +57,13 @@ pub fn run() {
             open_benchmarks_folder,
             detect_hardware,
             get_cached_hardware,
+            // ONNX inference commands
             load_model,
             unload_model,
             generate_text,
+            inference_generate,
+            inference_cancel,
+            is_generating,
             list_models,
             get_current_model,
             check_model_exists

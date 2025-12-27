@@ -23,6 +23,7 @@ use ndarray::{Array2, Array4, ArrayView1};
 use ort::session::SessionInputValue;
 use ort::value::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
@@ -235,6 +236,245 @@ impl Generator {
         })
     }
 
+    /// Generate text with streaming output
+    ///
+    /// # Arguments
+    /// * `prompt` - Input text prompt
+    /// * `config` - Optional generation configuration
+    /// * `cancelled` - Cancellation flag to stop generation
+    /// * `on_token` - Callback invoked for each generated token
+    ///
+    /// # Returns
+    /// Generation metrics (tokens generated, timing, etc.)
+    pub async fn generate_stream<F>(
+        &self,
+        prompt: &str,
+        config: Option<GenerationConfig>,
+        cancelled: Arc<AtomicBool>,
+        mut on_token: F,
+    ) -> Result<GenerationMetrics, String>
+    where
+        F: FnMut(String),
+    {
+        let start = Instant::now();
+        let mut first_token_time = None;
+
+        // Use provided config or default
+        let gen_config = config.unwrap_or(self.config.clone());
+
+        log::info!(
+            "Starting streaming generation for prompt (length: {} chars)",
+            prompt.len()
+        );
+
+        // 1. Tokenize prompt
+        let input_ids = self.tokenizer.encode(prompt, true)?;
+        let mut generated_ids = input_ids.clone();
+        let mut tokens_generated = 0usize;
+
+        log::debug!("Prompt tokenized: {} tokens", input_ids.len());
+
+        // 2. Generation loop
+        for step in 0..gen_config.max_length {
+            // Check for cancellation
+            if cancelled.load(Ordering::Relaxed) {
+                log::info!("Generation cancelled at step {}", step);
+                break;
+            }
+
+            // Prepare input tensors
+            let seq_length = generated_ids.len();
+
+            // Create input_ids tensor: [batch_size=1, seq_length]
+            let input_ids_array = Array2::from_shape_vec(
+                (1, seq_length),
+                generated_ids.iter().map(|&id| id as i64).collect(),
+            )
+            .map_err(|e| format!("Failed to create input_ids tensor: {e}"))?;
+
+            // Create attention_mask tensor: [batch_size=1, seq_length]
+            let attention_mask_array =
+                Array2::from_shape_vec((1, seq_length), vec![1i64; seq_length])
+                    .map_err(|e| format!("Failed to create attention_mask tensor: {e}"))?;
+
+            // Build inputs HashMap
+            let mut inputs: HashMap<String, SessionInputValue<'static>> = HashMap::new();
+
+            inputs.insert(
+                "input_ids".to_string(),
+                SessionInputValue::Owned(
+                    Value::from_array(input_ids_array)
+                        .map_err(|e| format!("Failed to create input_ids tensor: {e}"))?
+                        .into(),
+                ),
+            );
+            inputs.insert(
+                "attention_mask".to_string(),
+                SessionInputValue::Owned(
+                    Value::from_array(attention_mask_array)
+                        .map_err(|e| format!("Failed to create attention_mask tensor: {e}"))?
+                        .into(),
+                ),
+            );
+
+            // Add empty KV cache for all layers
+            let kv_cache = Self::create_empty_kv_cache()?;
+            inputs.extend(kv_cache);
+
+            // Run inference
+            let next_token = {
+                let mut session = self.session.lock().await;
+                let outputs = session
+                    .session
+                    .run(inputs)
+                    .map_err(|e| format!("Inference failed at step {}: {e}", step))?;
+
+                // Extract logits tensor
+                let (logits_shape, logits_data) = outputs["logits"]
+                    .try_extract_tensor::<f32>()
+                    .map_err(|e| format!("Failed to extract logits: {e}"))?;
+
+                let seq_len = logits_shape[1] as usize;
+                let vocab_size = logits_shape[2] as usize;
+
+                let logits = Array2::from_shape_vec(
+                    (seq_len, vocab_size),
+                    logits_data[0..(seq_len * vocab_size)].to_vec(),
+                )
+                .map_err(|e| format!("Failed to reshape logits: {e}"))?;
+
+                // Get logits for last position
+                let last_token_logits = logits.row(seq_len - 1).to_owned();
+
+                // Sample next token
+                self.sample(last_token_logits.view(), &gen_config)?
+            };
+
+            // Record time to first token
+            if step == 0 {
+                first_token_time = Some(start.elapsed());
+                log::debug!("Time to first token: {:?}", first_token_time.unwrap());
+            }
+
+            // Check stop condition
+            if next_token == self.tokenizer.eos_token_id() {
+                log::info!("EOS token generated at step {}", step);
+                break;
+            }
+
+            // Decode token and emit via callback
+            let token_text = self.tokenizer.decode(&[next_token], false)?;
+            on_token(token_text);
+
+            // Append token to sequence
+            generated_ids.push(next_token);
+            tokens_generated += 1;
+
+            // Progress logging
+            if step % 10 == 0 && step > 0 {
+                log::debug!("Generation step {}: {} tokens", step, generated_ids.len());
+            }
+        }
+
+        // Calculate metrics
+        let total_time = start.elapsed();
+        let tokens_per_sec = if total_time.as_secs_f64() > 0.0 {
+            tokens_generated as f64 / total_time.as_secs_f64()
+        } else {
+            0.0
+        };
+
+        log::info!(
+            "Streaming generation complete: {} tokens in {:.2}s ({:.2} tok/s)",
+            tokens_generated,
+            total_time.as_secs_f64(),
+            tokens_per_sec
+        );
+
+        Ok(GenerationMetrics {
+            total_tokens: tokens_generated,
+            time_to_first_token_ms: first_token_time.map(|d| d.as_millis() as u64),
+            tokens_per_second: tokens_per_sec,
+            total_time_ms: total_time.as_millis() as u64,
+        })
+    }
+
+    /// Sample next token from logits
+    ///
+    /// Supports:
+    /// - Greedy sampling (temperature = 0 or top_k = 1)
+    /// - Temperature scaling
+    /// - Top-k filtering
+    /// - Top-p (nucleus) sampling
+    fn sample(&self, logits: ArrayView1<f32>, config: &GenerationConfig) -> Result<u32, String> {
+        // Greedy sampling: temperature = 0 or effectively disabled
+        if config.temperature <= 0.0 || config.top_k == Some(1) {
+            return self.sample_greedy(logits);
+        }
+
+        // Apply temperature scaling
+        let scaled_logits: Vec<f32> = logits.iter().map(|&x| x / config.temperature).collect();
+
+        // Convert to probabilities via softmax
+        let max_logit = scaled_logits
+            .iter()
+            .cloned()
+            .fold(f32::NEG_INFINITY, f32::max);
+        let exp_logits: Vec<f32> = scaled_logits.iter().map(|&x| (x - max_logit).exp()).collect();
+        let sum_exp: f32 = exp_logits.iter().sum();
+        let mut probs: Vec<(usize, f32)> = exp_logits
+            .iter()
+            .enumerate()
+            .map(|(i, &e)| (i, e / sum_exp))
+            .collect();
+
+        // Sort by probability descending
+        probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Apply top-k filtering
+        if let Some(k) = config.top_k {
+            if k > 0 && k < probs.len() {
+                probs.truncate(k);
+            }
+        }
+
+        // Apply top-p (nucleus) filtering
+        if let Some(p) = config.top_p {
+            if p > 0.0 && p < 1.0 {
+                let mut cumsum = 0.0f32;
+                let mut cutoff_idx = probs.len();
+                for (i, (_, prob)) in probs.iter().enumerate() {
+                    cumsum += prob;
+                    if cumsum >= p {
+                        cutoff_idx = i + 1;
+                        break;
+                    }
+                }
+                probs.truncate(cutoff_idx);
+            }
+        }
+
+        // Renormalize probabilities
+        let total_prob: f32 = probs.iter().map(|(_, p)| p).sum();
+        if total_prob <= 0.0 {
+            // Fallback to greedy if something went wrong
+            return self.sample_greedy(logits);
+        }
+
+        // Sample from the distribution
+        let r: f32 = rand::random::<f32>() * total_prob;
+        let mut cumsum = 0.0f32;
+        for (idx, prob) in &probs {
+            cumsum += prob;
+            if cumsum >= r {
+                return Ok(*idx as u32);
+            }
+        }
+
+        // Fallback to first token
+        Ok(probs[0].0 as u32)
+    }
+
     /// Greedy sampling: Pick token with highest probability
     ///
     /// Phase 0: Simple greedy decoding
@@ -243,9 +483,7 @@ impl Generator {
         let (max_idx, _max_val) = logits
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| {
-                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-            })
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .ok_or("Empty logits tensor")?;
 
         Ok(max_idx as u32)

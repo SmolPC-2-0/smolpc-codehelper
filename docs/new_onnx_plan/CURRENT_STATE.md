@@ -57,58 +57,35 @@ cargo test test_generate_simple -- --ignored   # ✅ Generation works
 
 ## What's NOT Working / Missing
 
-### Priority 1: Required for Phase 1
+### ✅ Priority 1: COMPLETED
 
-#### 1. Streaming Generation
-**Current:** `generate_text` returns full result after completion
-**Needed:** Emit tokens via Tauri events as they're generated
+#### ✅ 1. Streaming Generation - DONE
+**Implementation:**
+- Added `generate_stream` method to Generator with callback parameter
+- Added `inference_generate` Tauri command that emits events
+- Frontend store has `generateStream()` method with event listeners
 
-```rust
-// In generator.rs, add streaming callback
-window.emit("inference_token", &token_text)?;
-```
+**Events emitted:**
+- `inference_token` (String) - Each generated token
+- `inference_done` (GenerationMetrics) - Generation complete
+- `inference_error` (String) - On error
+- `inference_cancelled` () - When cancelled
 
-**Files to modify:**
-- `src/inference/generator.rs` - Add callback parameter
-- `src/commands/inference.rs` - Pass Window to generator, emit events
-- `src/lib/stores/inference.svelte.ts` - Listen for `inference_token` events
+#### ✅ 2. Cancellation Support - DONE
+**Implementation:**
+- Added `cancelled: Arc<AtomicBool>` to `InferenceState`
+- Generator checks cancellation flag in generation loop
+- Added `inference_cancel` Tauri command
+- Frontend store has `cancel()` method
 
-#### 2. Cancellation Support
-**Current:** No way to stop generation once started
-**Needed:** `cancel_generation` command that stops the loop
-
-```rust
-// Add to Generator or InferenceState
-cancelled: Arc<AtomicBool>
-
-// In generation loop
-if self.cancelled.load(Ordering::Relaxed) {
-    break;
-}
-```
-
-**Files to modify:**
-- `src/inference/generator.rs` - Add cancellation flag check
-- `src/commands/inference.rs` - Add `cancel_generation` command
-- `src/lib/stores/inference.svelte.ts` - Add `cancel()` method
-
-#### 3. Sampling Methods (Temperature/Top-k/Top-p)
-**Current:** Greedy only (always picks highest probability)
-**Needed:** Temperature scaling, top-k filtering, top-p (nucleus) sampling
-
-```rust
-// In generator.rs, replace sample_greedy with:
-fn sample(&self, logits: ArrayView1<f32>, config: &GenerationConfig) -> Result<u32, String> {
-    // 1. Apply temperature: logits / temperature
-    // 2. Apply top-k: keep only top k logits
-    // 3. Apply top-p: keep tokens until cumulative prob > p
-    // 4. Sample from remaining distribution
-}
-```
-
-**Files to modify:**
-- `src/inference/generator.rs` - Implement `sample()` method
-- Consider creating `src/inference/sampler.rs` for cleaner separation
+#### ✅ 3. Sampling Methods (Temperature/Top-k/Top-p) - DONE
+**Implementation:**
+- Added `sample()` method to Generator supporting:
+  - Temperature scaling
+  - Top-k filtering
+  - Top-p (nucleus) sampling
+  - Fallback to greedy for temperature=0 or top_k=1
+- Uses `rand` crate for random sampling
 
 ### Priority 2: Performance Critical
 
@@ -245,15 +222,17 @@ Note: Performance will improve significantly with KV cache reuse.
 
 ## Next Session Checklist
 
-1. [ ] Implement streaming generation with Tauri events
-2. [ ] Add cancellation support
-3. [ ] Implement temperature sampling (at minimum)
+1. [x] Implement streaming generation with Tauri events ✅
+2. [x] Add cancellation support ✅
+3. [x] Implement temperature/top-k/top-p sampling ✅
 4. [ ] (Optional) Start KV cache reuse for better performance
 5. [ ] Test on Mac to ensure cross-platform works
+6. [ ] Integrate streaming with existing chat UI
+7. [ ] Remove Ollama code when ONNX inference is fully validated
 
 ---
 
-## Files Changed This Session
+## Files Changed (Session 1 - Phase 0)
 
 ### New Files
 - `src-tauri/src/inference/mod.rs`
@@ -273,6 +252,19 @@ Note: Performance will improve significantly with KV cache reuse.
 - `src-tauri/src/commands/mod.rs` - Added inference module
 - `src-tauri/Cargo.toml` - Added ort, tokenizers, ndarray dependencies
 - `.gitignore` - Added ONNX/model exclusions
+
+---
+
+## Files Changed (Session 2 - Phase 1 Streaming)
+
+### Modified Files
+- `src-tauri/src/inference/generator.rs` - Added `generate_stream()` method, `sample()` with temperature/top-k/top-p
+- `src-tauri/src/commands/inference.rs` - Added `inference_generate`, `inference_cancel`, `is_generating` commands
+- `src-tauri/src/lib.rs` - Registered new commands
+- `src/lib/stores/inference.svelte.ts` - Added `generateStream()`, `cancel()`, event listeners
+- `src/lib/types/inference.ts` - Added `GenerationConfig` type
+
+---
 
 ### Not Committed (in .gitignore)
 - `ort-extracted/` - ONNX Runtime DLLs
