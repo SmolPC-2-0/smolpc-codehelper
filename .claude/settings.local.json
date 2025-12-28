@@ -30,7 +30,9 @@
       "WebFetch(domain:onnxruntime.ai)",
       "Bash(dir /s /b \"C:\\Users\\Student\\smolpc\\CodeHelper\\working-codehelper\\smolpc-codehelper\\src-tauri\\src\")",
       "Bash(dir:*)",
-      "Bash(where:*)"
+      "Bash(where:*)",
+      "WebFetch(domain:www.esperanto.ai)",
+      "WebFetch(domain:ort.pyke.io)"
     ],
     "deny": [],
     "ask": []

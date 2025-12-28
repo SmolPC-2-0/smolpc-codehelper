@@ -12,12 +12,14 @@
 /// - `types`: Shared type definitions
 
 pub mod generator;
+pub mod kv_cache;
 pub mod session;
 pub mod tokenizer;
 pub mod types;
 
 // Re-export commonly used types
 pub use generator::Generator;
+pub use kv_cache::KVCache;
 pub use session::InferenceSession;
 pub use tokenizer::TokenizerWrapper;
 

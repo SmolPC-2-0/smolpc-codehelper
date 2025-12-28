@@ -27,6 +27,13 @@
 - [ ] Refactor CPU provider to use trait
 - [ ] Implement provider registry/selection
 
+### Cache Backend Abstraction
+
+- [ ] Define `CacheBackend` trait for device-agnostic KV caching
+- [ ] Implement `CpuCacheBackend` using current `Vec<f32>` implementation
+- [ ] Implement `GpuCacheBackend` using ORT IoBinding for zero-copy
+- [ ] Add cache backend selection based on EP
+
 ### Hardware Detection
 
 - [ ] Detect Intel NPU (Core Ultra)
@@ -110,6 +117,141 @@ pub struct CudaProvider {
     device_id: usize,
 }
 ```
+
+### CacheBackend Trait
+
+The KV cache implementation needs to support both CPU (Vec-based) and GPU (IoBinding) storage to avoid expensive device-to-host copies during generation.
+
+```rust
+use ndarray::Array4;
+
+/// Trait for device-agnostic KV cache storage
+pub trait CacheBackend: Send + Sync {
+    /// Append a single token's KV values for a layer
+    fn append(&mut self, layer: usize, key: &[f32], value: &[f32]) -> Result<(), EngineError>;
+
+    /// Extend cache with multiple tokens (used during prefill)
+    fn extend(&mut self, layer: usize, keys: &[f32], values: &[f32]) -> Result<(), EngineError>;
+
+    /// Get key tensor for a layer (for ORT input binding)
+    fn get_key_tensor(&self, layer: usize) -> CacheTensor;
+
+    /// Get value tensor for a layer (for ORT input binding)
+    fn get_value_tensor(&self, layer: usize) -> CacheTensor;
+
+    /// Get current sequence length in cache
+    fn len(&self) -> usize;
+
+    /// Check if Attention Sinks shift is needed
+    fn needs_shift(&self) -> bool;
+
+    /// Perform Attention Sinks shift (preserve sink tokens, slide window)
+    fn shift(&mut self) -> Result<(), EngineError>;
+}
+
+/// Tensor reference that works with IoBinding
+pub enum CacheTensor<'a> {
+    /// CPU: owned Array4 created on demand
+    Cpu(Array4<f32>),
+    /// GPU: reference to pre-allocated CUDA tensor via IoBinding
+    Gpu(&'a ort::Value),
+}
+```
+
+### CPU Cache Backend
+
+Uses the current `Vec<f32>` implementation from Phase 1:
+
+```rust
+pub struct CpuCacheBackend {
+    key_caches: Vec<LayerCache>,
+    value_caches: Vec<LayerCache>,
+    position: usize,
+    sink_size: usize,
+    max_context: usize,
+}
+
+impl CacheBackend for CpuCacheBackend {
+    fn get_key_tensor(&self, layer: usize) -> CacheTensor {
+        // Uses bulk copy with extend_from_slice (Phase 1 optimized)
+        CacheTensor::Cpu(self.key_caches[layer].to_array())
+    }
+    // ... other methods wrap existing LayerCache/KVCache logic
+}
+```
+
+### GPU Cache Backend (IoBinding)
+
+For CUDA/OpenVINO, tensors stay on device:
+
+```rust
+pub struct GpuCacheBackend {
+    /// Pre-allocated key tensors on GPU [layer][batch, heads, max_seq, head_dim]
+    key_tensors: Vec<ort::Value>,
+    /// Pre-allocated value tensors on GPU
+    value_tensors: Vec<ort::Value>,
+    /// Current valid sequence length
+    current_length: usize,
+    /// Attention sink configuration
+    sink_size: usize,
+    max_context: usize,
+    /// IoBinding for zero-copy input/output
+    io_binding: ort::IoBinding,
+}
+
+impl CacheBackend for GpuCacheBackend {
+    fn get_key_tensor(&self, layer: usize) -> CacheTensor {
+        // Zero-copy: returns reference to GPU tensor
+        CacheTensor::Gpu(&self.key_tensors[layer])
+    }
+
+    fn append(&mut self, layer: usize, key: &[f32], value: &[f32]) -> Result<(), EngineError> {
+        // Use CUDA copy to append at current_length position
+        // This avoids GPU->CPU->GPU round trip
+        self.copy_to_device_at_offset(layer, key, value, self.current_length)?;
+        Ok(())
+    }
+
+    fn shift(&mut self) -> Result<(), EngineError> {
+        // Launch CUDA kernel to shift data in-place
+        // Preserves sink tokens, slides window
+        self.launch_shift_kernel()?;
+        Ok(())
+    }
+}
+```
+
+### Generator Integration
+
+```rust
+impl Generator {
+    pub fn new_with_backend<B: CacheBackend>(
+        session: Arc<Mutex<InferenceSession>>,
+        tokenizer: Arc<TokenizerWrapper>,
+        config: GenerationConfig,
+        cache_backend: B,
+    ) -> Self {
+        // ...
+    }
+
+    async fn run_decode_with_backend<B: CacheBackend>(
+        &self,
+        token_id: i64,
+        cache: &mut B,
+    ) -> Result<Array2<f32>, String> {
+        // Build inputs using cache.get_key_tensor() / get_value_tensor()
+        // For GPU: these bind directly to device memory via IoBinding
+        // For CPU: these create Array4 copies (current behavior)
+    }
+}
+```
+
+### Migration Path
+
+1. **Phase 2a**: Extract current KVCache logic into `CpuCacheBackend`
+2. **Phase 2b**: Add `CacheBackend` trait, make Generator generic over backend
+3. **Phase 2c**: Implement `GpuCacheBackend` with IoBinding for CUDA EP
+4. **Phase 2d**: Extend to OpenVINO (may need different approach for NPU)
 
 ### EP Selection Logic
 
@@ -243,7 +385,22 @@ fn load_runtime_libraries(config: &EngineConfig) -> Result<(), EngineError> {
 
 ## Research Tasks
 
-### 1. OpenVINO EP in ORT
+### 1. IoBinding for KV Cache
+
+**Questions:**
+- How to use `ort::IoBinding` to bind pre-allocated GPU tensors?
+- Can we bind only a slice of a tensor (for growing cache)?
+- What's the memory allocation pattern for dynamic sequence lengths?
+
+**Actions:**
+- Read `ort` crate IoBinding documentation
+- Test with simple model on CUDA
+- Benchmark zero-copy vs current copy approach
+
+**Reference from Phase 1:**
+The current CPU implementation uses bulk copies via `extend_from_slice()`. True zero-copy requires IoBinding with pre-allocated device tensors.
+
+### 2. OpenVINO EP in ORT
 
 **Questions:**
 - How to configure OpenVINO EP in `ort` crate?
@@ -255,7 +412,7 @@ fn load_runtime_libraries(config: &EngineConfig) -> Result<(), EngineError> {
 - Test with simple model
 - Document configuration
 
-### 2. OpenVINO DLL Requirements
+### 3. OpenVINO DLL Requirements
 
 **Questions:**
 - Exact DLLs needed for NPU inference?
@@ -267,7 +424,7 @@ fn load_runtime_libraries(config: &EngineConfig) -> Result<(), EngineError> {
 - Identify minimal DLL set
 - Verify licensing allows bundling
 
-### 3. CUDA EP in ORT
+### 4. CUDA EP in ORT
 
 **Questions:**
 - How to configure CUDA EP?
@@ -279,7 +436,7 @@ fn load_runtime_libraries(config: &EngineConfig) -> Result<(), EngineError> {
 - Document DLL requirements
 - Test memory usage
 
-### 4. Input Bucketing Impact
+### 5. Input Bucketing Impact
 
 **Questions:**
 - Performance impact of padding?
