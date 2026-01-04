@@ -1,18 +1,19 @@
 # ONNX Migration - Current State
 
-**Last Updated:** December 2025
+**Last Updated:** January 2026
 **Branch:** `feature/ort_setup`
-**Phase:** 1 Complete
+**Phase:** 1.5 Complete (Frontend Integration)
 
 ---
 
 ## Summary
 
-Phase 1 is complete. The ONNX Runtime inference pipeline is fully functional with KV caching:
-- Model loads and runs
-- Generation produces correct output with streaming
-- KV Cache with Attention Sinks implemented for efficient long-context inference
-- Performance significantly improved with cache reuse
+Phase 1.5 is complete. The ONNX Runtime inference is now integrated with the chat UI:
+- Model loads and runs via chat interface
+- Streaming tokens display in real-time in chat messages
+- KV Cache with Attention Sinks for efficient long-context inference
+- ~8 tok/s performance on CPU
+- Ollama dependency removed from chat flow (still available as fallback)
 
 ---
 
@@ -37,7 +38,10 @@ Phase 1 is complete. The ONNX Runtime inference pipeline is fully functional wit
 | Component | File | Status |
 |-----------|------|--------|
 | Types | `src/lib/types/inference.ts` | ✅ Matches Rust types |
-| Store | `src/lib/stores/inference.svelte.ts` | ✅ Basic store with all commands |
+| Store | `src/lib/stores/inference.svelte.ts` | ✅ Full store with streaming, cancel, model loading |
+| Chat Integration | `src/App.svelte` | ✅ Uses ONNX inference for chat messages |
+| Model Selector | `src/lib/components/ModelSelector.svelte` | ✅ Lists/loads ONNX models |
+| Status Indicator | `src/lib/components/StatusIndicator.svelte` | ✅ Shows model load status |
 
 ### Model Files
 
@@ -248,10 +252,10 @@ See `docs/new_onnx_plan/KV_CACHE_BENCHMARK.md` for detailed analysis.
 4. [x] Implement KV cache with Attention Sinks ✅
 5. [x] Run end-to-end performance benchmarks with KV cache ✅ (8 tok/s achieved!)
 
-### Phase 1.5 - Frontend Integration (Current)
-6. [ ] Integrate streaming with existing chat UI
-7. [ ] Remove Ollama code when ONNX inference is fully validated
-8. [ ] Add memory management (model unload timeout)
+### Phase 1.5 - Frontend Integration - COMPLETE
+6. [x] Integrate streaming with existing chat UI ✅
+7. [ ] Remove Ollama code when ONNX inference is fully validated (kept as fallback)
+8. [ ] Add memory management (model unload timeout) (deferred to Phase 2)
 
 ### Phase 2 - GPU/NPU Acceleration
 9. [ ] Test on Mac to ensure cross-platform works
@@ -326,6 +330,35 @@ See `docs/new_onnx_plan/KV_CACHE_BENCHMARK.md` for detailed analysis.
 - `src-tauri/src/inference/mod.rs` - Added benchmark module (test-only)
 - `src-tauri/src/inference/generator.rs` - Added tokenizer() getter for tests
 - `docs/new_onnx_plan/CURRENT_STATE.md` - Updated with benchmark results
+
+---
+
+---
+
+## Files Changed (Session 5 - Phase 1.5 Frontend Integration)
+
+### Modified Files
+- `src/App.svelte` - Replaced Ollama with ONNX inference:
+  - Removed `ollamaStore` import, added `inferenceStore`
+  - Changed event listeners from `ollama_*` to `inference_*`
+  - Updated `handleSendMessage()` to use `inferenceStore.generateStream()`
+  - Updated `handleCancelGeneration()` to use `inferenceStore.cancel()`
+  - Changed status checks from `ollamaStore.isConnected` to `inferenceStore.isLoaded`
+  - Added auto-load on mount for first available model
+- `src/lib/components/ModelSelector.svelte` - ONNX model selection:
+  - Shows available ONNX models from `inferenceStore`
+  - Loads model on selection
+  - Shows loading spinner during model load
+- `src/lib/components/StatusIndicator.svelte` - ONNX status display:
+  - Changed from `OllamaStatus` to `InferenceStatus` type
+  - Shows model load state (loaded/loading/not loaded)
+  - Shows current model name when loaded
+
+### Key Implementation Details
+- **Auto-load on startup**: First available model loads automatically via `initInference()`
+- **Streaming callback pattern**: `inferenceStore.generateStream()` takes callback for token updates
+- **Context building**: Conversation history formatted as `User: ... / Assistant: ...` prompt
+- **Generation config**: Uses temperature from settings store
 
 ---
 
