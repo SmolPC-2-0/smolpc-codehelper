@@ -224,15 +224,18 @@ npm run tauri dev
 | Tokens/sec | 2.44 | > 2 ✅ |
 | Model load | ~4s | < 30s ✅ |
 
-### Phase 1 (With KV Cache)
+### Phase 1 (With KV Cache) - VERIFIED ✅
 
-| Metric | Expected Improvement |
-|--------|---------------------|
-| TTFT | Similar (prefill is same) |
-| Tokens/sec | 5-10x improvement |
-| Memory (cache) | ~224 MB for 4096 context |
+| Metric | Value | Target | Status |
+|--------|-------|--------|--------|
+| TTFT (warm) | ~420ms | < 3s | ✅ Met |
+| Tokens/sec | **8.0** | > 2 | ✅ **4x target!** |
+| Decode ms/tok | ~125ms | - | - |
+| Memory (cache) | ~112 MB | < 224 MB | ✅ Efficient |
 
-Note: Actual benchmarks pending with KV cache. The improvement comes from only processing 1 token per decode step instead of the full sequence.
+**Improvement achieved: 3.3x speedup** (from 2.44 to 8.0 tok/s)
+
+See `docs/new_onnx_plan/KV_CACHE_BENCHMARK.md` for detailed analysis.
 
 ---
 
@@ -243,13 +246,18 @@ Note: Actual benchmarks pending with KV cache. The improvement comes from only p
 2. [x] Add cancellation support ✅
 3. [x] Implement temperature/top-k/top-p sampling ✅
 4. [x] Implement KV cache with Attention Sinks ✅
+5. [x] Run end-to-end performance benchmarks with KV cache ✅ (8 tok/s achieved!)
 
-### Phase 2 - Remaining Work
-5. [ ] Run end-to-end performance benchmarks with KV cache
-6. [ ] Test on Mac to ensure cross-platform works
-7. [ ] Integrate streaming with existing chat UI
-8. [ ] Remove Ollama code when ONNX inference is fully validated
-9. [ ] Begin GPU/NPU acceleration (see PHASE-2.MD)
+### Phase 1.5 - Frontend Integration (Current)
+6. [ ] Integrate streaming with existing chat UI
+7. [ ] Remove Ollama code when ONNX inference is fully validated
+8. [ ] Add memory management (model unload timeout)
+
+### Phase 2 - GPU/NPU Acceleration
+9. [ ] Test on Mac to ensure cross-platform works
+10. [ ] Begin GPU/NPU acceleration (see PHASE-2.MD)
+11. [ ] Implement ring buffer cache for long-context optimization
+12. [ ] Add IoBinding for zero-copy inference
 
 ---
 
@@ -303,6 +311,21 @@ Note: Actual benchmarks pending with KV cache. The improvement comes from only p
 - **Decode phase**: Processes single token, appends to cache with shift-and-sink logic
 - **Memory layout**: `[heads, seq_len, head_dim]` flattened contiguously
 - **Bulk copies**: Uses `extend_from_slice()` for efficient array generation
+
+---
+
+---
+
+## Files Changed (Session 4 - KV Cache Benchmarks)
+
+### New Files
+- `src-tauri/src/inference/benchmark.rs` - Comprehensive benchmark suite for KV cache performance
+- `docs/new_onnx_plan/KV_CACHE_BENCHMARK.md` - Benchmark results and analysis
+
+### Modified Files
+- `src-tauri/src/inference/mod.rs` - Added benchmark module (test-only)
+- `src-tauri/src/inference/generator.rs` - Added tokenizer() getter for tests
+- `docs/new_onnx_plan/CURRENT_STATE.md` - Updated with benchmark results
 
 ---
 

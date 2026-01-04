@@ -12,10 +12,14 @@
 /// - `types`: Shared type definitions
 
 pub mod generator;
+pub mod input_builder;
 pub mod kv_cache;
 pub mod session;
 pub mod tokenizer;
 pub mod types;
+
+#[cfg(test)]
+pub mod benchmark;
 
 // Re-export commonly used types
 pub use generator::Generator;

@@ -17,6 +17,7 @@
 /// # References
 /// - [StreamingLLM Paper](https://arxiv.org/abs/2309.17453)
 
+use super::input_builder::InputBuilder;
 use super::kv_cache::{KVCache, HEAD_DIM, NUM_KV_HEADS, NUM_LAYERS};
 use super::session::InferenceSession;
 use super::tokenizer::TokenizerWrapper;
@@ -24,7 +25,6 @@ use super::types::{GenerationConfig, GenerationMetrics, GenerationResult};
 use ndarray::{Array1, Array2, ArrayView1};
 use ort::session::SessionInputValue;
 use ort::value::Value;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -146,15 +146,16 @@ impl Generator {
 
         log::debug!("Prompt tokenized: {} tokens", prompt_length);
 
-        // 2. Create KV cache
+        // 2. Create KV cache and pre-allocated input builder
         let mut kv_cache = KVCache::new(self.max_context, self.sink_size);
+        let mut input_builder = InputBuilder::new();
 
         // 3. Prefill phase: Process entire prompt, build initial KV cache
         log::debug!("Starting prefill phase...");
         let prefill_start = Instant::now();
 
         let (first_logits, _) = self
-            .run_prefill(&input_ids, &mut kv_cache)
+            .run_prefill(&input_ids, &mut kv_cache, &mut input_builder)
             .await?;
 
         log::debug!(
@@ -199,7 +200,7 @@ impl Generator {
 
             // Run decode step with single token
             let logits = self
-                .run_decode(next_token, &mut kv_cache)
+                .run_decode(next_token, &mut kv_cache, &mut input_builder)
                 .await?;
 
             // Sample next token
@@ -265,11 +266,12 @@ impl Generator {
         &self,
         input_ids: &[u32],
         kv_cache: &mut KVCache,
+        input_builder: &mut InputBuilder,
     ) -> Result<(Array1<f32>, ()), String> {
         let seq_length = input_ids.len();
 
-        // Build inputs
-        let mut inputs: HashMap<String, SessionInputValue<'static>> = HashMap::new();
+        // Clear and reuse input builder
+        input_builder.clear();
 
         // input_ids: [batch=1, seq_length]
         let input_ids_array = Array2::from_shape_vec(
@@ -278,46 +280,36 @@ impl Generator {
         )
         .map_err(|e| format!("Failed to create input_ids tensor: {e}"))?;
 
-        inputs.insert(
-            "input_ids".to_string(),
-            SessionInputValue::Owned(
-                Value::from_array(input_ids_array)
-                    .map_err(|e| format!("Failed to create input_ids value: {e}"))?
-                    .into(),
-            ),
-        );
+        input_builder.set_input_ids(SessionInputValue::Owned(
+            Value::from_array(input_ids_array)
+                .map_err(|e| format!("Failed to create input_ids value: {e}"))?
+                .into(),
+        ));
 
         // attention_mask: [batch=1, seq_length] (all 1s for prefill)
         let attention_mask = Array2::from_shape_vec((1, seq_length), vec![1i64; seq_length])
             .map_err(|e| format!("Failed to create attention_mask tensor: {e}"))?;
 
-        inputs.insert(
-            "attention_mask".to_string(),
-            SessionInputValue::Owned(
-                Value::from_array(attention_mask)
-                    .map_err(|e| format!("Failed to create attention_mask value: {e}"))?
-                    .into(),
-            ),
-        );
+        input_builder.set_attention_mask(SessionInputValue::Owned(
+            Value::from_array(attention_mask)
+                .map_err(|e| format!("Failed to create attention_mask value: {e}"))?
+                .into(),
+        ));
 
         // Empty KV cache for prefill (shape: [1, num_kv_heads, 0, head_dim])
         for layer in 0..NUM_LAYERS {
-            let empty_cache =
-                ndarray::Array4::<f32>::zeros((1, NUM_KV_HEADS, 0, HEAD_DIM));
+            let empty_cache = ndarray::Array4::<f32>::zeros((1, NUM_KV_HEADS, 0, HEAD_DIM));
 
-            let key_name = format!("past_key_values.{}.key", layer);
-            let value_name = format!("past_key_values.{}.value", layer);
-
-            inputs.insert(
-                key_name,
+            input_builder.set_past_key(
+                layer,
                 SessionInputValue::Owned(
                     Value::from_array(empty_cache.clone())
                         .map_err(|e| format!("Failed to create KV cache tensor: {e}"))?
                         .into(),
                 ),
             );
-            inputs.insert(
-                value_name,
+            input_builder.set_past_value(
+                layer,
                 SessionInputValue::Owned(
                     Value::from_array(empty_cache)
                         .map_err(|e| format!("Failed to create KV cache tensor: {e}"))?
@@ -325,6 +317,9 @@ impl Generator {
                 ),
             );
         }
+
+        // Take ownership of inputs for session.run()
+        let inputs = input_builder.take_inputs();
 
         // Run inference - keep session locked while we extract outputs
         let mut session = self.session.lock().await;
@@ -363,22 +358,20 @@ impl Generator {
         &self,
         token_id: u32,
         kv_cache: &mut KVCache,
+        input_builder: &mut InputBuilder,
     ) -> Result<Array1<f32>, String> {
-        // Build inputs
-        let mut inputs: HashMap<String, SessionInputValue<'static>> = HashMap::new();
+        // Clear and reuse input builder (keeps capacity, avoids reallocation)
+        input_builder.clear();
 
         // input_ids: [batch=1, 1] (single token)
         let input_ids_array = Array2::from_shape_vec((1, 1), vec![token_id as i64])
             .map_err(|e| format!("Failed to create input_ids tensor: {e}"))?;
 
-        inputs.insert(
-            "input_ids".to_string(),
-            SessionInputValue::Owned(
-                Value::from_array(input_ids_array)
-                    .map_err(|e| format!("Failed to create input_ids value: {e}"))?
-                    .into(),
-            ),
-        );
+        input_builder.set_input_ids(SessionInputValue::Owned(
+            Value::from_array(input_ids_array)
+                .map_err(|e| format!("Failed to create input_ids value: {e}"))?
+                .into(),
+        ));
 
         // attention_mask: [batch=1, past_length + 1]
         let past_length = kv_cache.physical_length();
@@ -386,33 +379,27 @@ impl Generator {
             Array2::from_shape_vec((1, past_length + 1), vec![1i64; past_length + 1])
                 .map_err(|e| format!("Failed to create attention_mask tensor: {e}"))?;
 
-        inputs.insert(
-            "attention_mask".to_string(),
-            SessionInputValue::Owned(
-                Value::from_array(attention_mask)
-                    .map_err(|e| format!("Failed to create attention_mask value: {e}"))?
-                    .into(),
-            ),
-        );
+        input_builder.set_attention_mask(SessionInputValue::Owned(
+            Value::from_array(attention_mask)
+                .map_err(|e| format!("Failed to create attention_mask value: {e}"))?
+                .into(),
+        ));
 
-        // Add KV cache from previous steps
+        // Add KV cache from previous steps using pre-allocated key names
         for layer in 0..NUM_LAYERS {
             let key_cache = kv_cache.get_key_array(layer);
             let value_cache = kv_cache.get_value_array(layer);
 
-            let key_name = format!("past_key_values.{}.key", layer);
-            let value_name = format!("past_key_values.{}.value", layer);
-
-            inputs.insert(
-                key_name,
+            input_builder.set_past_key(
+                layer,
                 SessionInputValue::Owned(
                     Value::from_array(key_cache)
                         .map_err(|e| format!("Failed to create key cache tensor: {e}"))?
                         .into(),
                 ),
             );
-            inputs.insert(
-                value_name,
+            input_builder.set_past_value(
+                layer,
                 SessionInputValue::Owned(
                     Value::from_array(value_cache)
                         .map_err(|e| format!("Failed to create value cache tensor: {e}"))?
@@ -420,6 +407,9 @@ impl Generator {
                 ),
             );
         }
+
+        // Take ownership of inputs for session.run()
+        let inputs = input_builder.take_inputs();
 
         // Run inference - keep session locked while we extract outputs
         let mut session = self.session.lock().await;
@@ -652,6 +642,12 @@ impl Generator {
     #[allow(dead_code)]
     pub fn set_sink_size(&mut self, sink_size: usize) {
         self.sink_size = sink_size;
+    }
+
+    /// Get reference to tokenizer (for benchmarking/testing)
+    #[cfg(test)]
+    pub fn tokenizer(&self) -> &TokenizerWrapper {
+        &self.tokenizer
     }
 }
 
