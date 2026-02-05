@@ -32,7 +32,10 @@
       "Bash(dir:*)",
       "Bash(where:*)",
       "WebFetch(domain:www.esperanto.ai)",
-      "WebFetch(domain:ort.pyke.io)"
+      "WebFetch(domain:ort.pyke.io)",
+      "mcp__serena__list_dir",
+      "mcp__serena__check_onboarding_performed",
+      "mcp__serena__get_symbols_overview"
     ],
     "deny": [],
     "ask": []
