@@ -2,7 +2,7 @@
 
 This file guides Claude Code sessions working on SmolPC Code Helper.
 
-**Last Updated:** 2026-02-05
+**Last Updated:** 2026-02-07
 **Current Phase:** 1.5 Complete (Frontend Integration) → Phase 2 (GPU/NPU Acceleration)
 **Branch:** `feature/ort_setup`
 
@@ -26,27 +26,20 @@ _Updated at end of each session. Provides immediate context without reading exte
 
 **Phase**: 1.5 Complete → Phase 2 (GPU/NPU Acceleration)
 **Branch**: `feature/ort_setup`
-**Last Session**: 2026-02-05 (Session 2) - Event race condition fix planned
+**Last Session**: 2026-02-07 (Session 3) - Migrated streaming to Tauri Channels
 
 **What's Working**:
 
 - ONNX inference via `ort` crate with Qwen2.5-Coder-1.5B
 - KV Cache with Attention Sinks (~8 tok/s on CPU)
-- Streaming generation with Tauri events
-- Frontend semi-integrated with bugs (chat UI uses ONNX, not Ollama)
-
-**Known Bug** (plan ready, not yet implemented):
-
-- `inference.svelte.ts` has event listener race condition
-- Plan at `docs/new_onnx_plan/FIX-EVENT-RACE-CONDITION.md`
-- Fix: Promise-wrapper pattern (await event, not invoke)
+- Streaming generation via Tauri Channels (race condition fixed)
+- Frontend integrated (chat UI uses ONNX, not Ollama)
 
 **Next Up**:
 
-1. **Implement race condition fix** (plan ready)
-2. Phase 2: Execution Provider abstraction (trait-based)
-3. Intel NPU detection + OpenVINO EP
-4. NVIDIA GPU detection + CUDA EP
+1. Phase 2: Execution Provider abstraction (trait-based)
+2. Intel NPU detection + OpenVINO EP
+3. NVIDIA GPU detection + CUDA EP
 
 **Blockers**: None currently
 
@@ -320,15 +313,28 @@ import { writable } from 'svelte/store'; // DON'T USE
 - **DO NOT use `@apply`** - Not supported in Tailwind 4
 - Use utility classes directly in templates
 
-### Tauri Streaming Pattern
+### Tauri Streaming Pattern (Channels)
 
 ```rust
-// Backend emits events
-window.emit("inference_token", token)?;
-window.emit("inference_done", metrics)?;
+// Backend: accept Channel param, send tokens through it, return result directly
+#[tauri::command]
+async fn inference_generate(
+    prompt: String,
+    on_token: Channel<String>,
+    state: State<'_, InferenceState>,
+) -> Result<GenerationMetrics, String> {
+    // ... send tokens via on_token.send(token)
+    Ok(metrics)
+}
+```
 
-// Frontend listens
-const unlisten = await listen<string>('inference_token', (e) => { ... });
+```typescript
+// Frontend: create Channel, pass to invoke, await result
+const onTokenChannel = new Channel<string>();
+onTokenChannel.onmessage = (token) => { /* handle token */ };
+const metrics = await invoke<GenerationMetrics>('inference_generate', {
+    prompt, onToken: onTokenChannel
+});
 ```
 
 ---
@@ -339,11 +345,11 @@ Corrections and patterns discovered during development. Categorized for easy ref
 
 ### Rust/Tauri
 
-_(None recorded yet)_
+- **Use Channels over Events for streaming**: `tauri::ipc::Channel<T>` is command-scoped and ordered. Events are global broadcast with no lifecycle tie to `invoke()`. Channels eliminate listener race conditions by design.
 
 ### Frontend/Svelte
 
-- **Tauri event streaming**: Don't await `invoke()` for event-based completion. Use Promise-wrapper pattern: set up listeners, create completion Promise, fire-and-forget invoke, await Promise. See `FIX-EVENT-RACE-CONDITION.md`.
+- **Tauri Channel pattern**: Create `new Channel<T>()`, set `onmessage`, pass to `invoke()`. The `invoke()` promise resolves with the command's return value only after all channel messages are delivered. No manual listener cleanup needed.
 
 ### ONNX/Inference
 
@@ -360,7 +366,7 @@ _(None recorded yet)_
 1. **Forgetting type sync** - Change Rust type → must update TypeScript
 2. **Using Svelte 4 patterns** - This project uses Svelte 5 runes only
 3. **Using `@apply`** - Tailwind 4 doesn't support it
-4. **Not cleaning up event listeners** - Use `$effect` cleanup or unlisten
+4. **Using Events for streaming** - Use Tauri Channels instead; they auto-cleanup and prevent race conditions
 5. **Blocking the main thread** - All inference is async with Tokio
 
 ---
