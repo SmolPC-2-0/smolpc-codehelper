@@ -98,7 +98,7 @@ mod tests {
         // Run with: cargo test test_load_model -- --ignored --nocapture
 
         // Initialize ONNX Runtime with correct DLL path first
-        init_onnx_runtime().expect("Failed to initialize ONNX Runtime");
+        init_onnx_runtime(None).expect("Failed to initialize ONNX Runtime");
 
         let model_path = "models/qwen2.5-coder-1.5b/model.onnx";
 

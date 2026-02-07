@@ -660,7 +660,7 @@ mod tests {
     #[ignore] // Requires model files - run manually
     async fn test_generate_simple() {
         // Initialize ONNX Runtime
-        init_onnx_runtime().expect("Failed to initialize ONNX Runtime");
+        init_onnx_runtime(None).expect("Failed to initialize ONNX Runtime");
 
         // Load model and tokenizer
         let model_path = "models/qwen2.5-coder-1.5b/model.onnx";
@@ -702,7 +702,7 @@ mod tests {
     #[ignore] // Requires model files - run manually
     async fn test_generate_stream_with_cache() {
         // Initialize ONNX Runtime
-        init_onnx_runtime().expect("Failed to initialize ONNX Runtime");
+        init_onnx_runtime(None).expect("Failed to initialize ONNX Runtime");
 
         // Load model and tokenizer
         let model_path = "models/qwen2.5-coder-1.5b/model.onnx";
@@ -753,7 +753,7 @@ mod tests {
         // Test that KV cache works for longer generations
         // This will eventually trigger Attention Sinks shifting
 
-        init_onnx_runtime().expect("Failed to initialize ONNX Runtime");
+        init_onnx_runtime(None).expect("Failed to initialize ONNX Runtime");
 
         let model_path = "models/qwen2.5-coder-1.5b/model.onnx";
         let tokenizer_path = "models/qwen2.5-coder-1.5b/tokenizer.json";

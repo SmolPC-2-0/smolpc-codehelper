@@ -28,5 +28,7 @@ dist-ssr
 /ort-extracted/
 /onnxruntime-*.zip
 /src-tauri/models/
+/src-tauri/libs/*
+!/src-tauri/libs/README.md
 /src-tauri/*.dll
 nul
