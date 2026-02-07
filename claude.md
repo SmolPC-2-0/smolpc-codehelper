@@ -26,7 +26,8 @@ _Updated at end of each session. Provides immediate context without reading exte
 
 **Phase**: 1.5 Complete → Phase 2 (GPU/NPU Acceleration)
 **Branch**: `feature/ort_setup`
-**Last Session**: 2026-02-07 (Session 3) - Migrated streaming to Tauri Channels
+**Last Session**: 2026-02-07 (Session 4) - ONNX Runtime bundling + code review fixes
+**PR**: #24 (`fix/channel-migration` → `feature/ort_setup`) — ready to merge
 
 **What's Working**:
 
@@ -34,14 +35,18 @@ _Updated at end of each session. Provides immediate context without reading exte
 - KV Cache with Attention Sinks (~8 tok/s on CPU)
 - Streaming generation via Tauri Channels (race condition fixed)
 - Frontend integrated (chat UI uses ONNX, not Ollama)
+- ONNX Runtime bundled via Tauri resources (cross-platform)
+- Setup script: `scripts/setup-libs.sh` downloads ONNX Runtime per platform
+- OnceLock for init error propagation, AtomicBool for is_generating
 
 **Next Up**:
 
-1. Phase 2: Execution Provider abstraction (trait-based)
-2. Intel NPU detection + OpenVINO EP
-3. NVIDIA GPU detection + CUDA EP
+1. Merge PR #24, verify everything works on Windows with model loaded
+2. Phase 2: Execution Provider abstraction (trait-based)
+3. Intel NPU detection + OpenVINO EP
+4. NVIDIA GPU detection + CUDA EP
 
-**Blockers**: None currently
+**Blockers**: Must verify on Windows before Phase 2 (model/ONNX Runtime are gitignored)
 
 ---
 
@@ -346,18 +351,23 @@ Corrections and patterns discovered during development. Categorized for easy ref
 ### Rust/Tauri
 
 - **Use Channels over Events for streaming**: `tauri::ipc::Channel<T>` is command-scoped and ordered. Events are global broadcast with no lifecycle tie to `invoke()`. Channels eliminate listener race conditions by design.
+- **Use `OnceLock<Result>` over `Once` for fallible init**: `Once::call_once` doesn't return values. If you need to cache and return a result from one-time init, use `OnceLock::get_or_init()`.
+- **Fatal init in production, non-fatal in dev**: `if !cfg!(debug_assertions) { return Err(...) }` in Tauri's `.setup()` — lets dev work continue without model files.
+- **Use dedicated `AtomicBool` over `try_lock()` for state tracking**: `try_lock()` creates TOCTOU races. An explicit flag set/cleared in the function lifecycle is reliable.
 
 ### Frontend/Svelte
 
 - **Tauri Channel pattern**: Create `new Channel<T>()`, set `onmessage`, pass to `invoke()`. The `invoke()` promise resolves with the command's return value only after all channel messages are delivered. No manual listener cleanup needed.
+- **Single source of truth for state**: Don't duplicate reactive state between component and store. If the store tracks `isGenerating` with proper `finally` cleanup, the component should read from the store — not maintain its own copy.
 
 ### ONNX/Inference
 
-_(None recorded yet)_
+- **ONNX Runtime version split**: v1.22.1 only ships Windows builds. Use v1.22.0 for macOS/Linux.
+- **Tauri `resources` glob must match files**: `bundle.resources: ["libs/*"]` fails at compile time if no files match. Use a README.md as glob satisfier with `.gitignore` exception.
 
 ### Workflow
 
-_(None recorded yet)_
+- **Parallel specialist reviews catch cascading issues**: Running Rust, Frontend, and Architecture reviews in parallel, then fixing and re-reviewing, is effective for thorough audits.
 
 ---
 
