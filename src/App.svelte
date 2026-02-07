@@ -21,7 +21,6 @@
 
 	// UI State
 	let isSidebarOpen = $state(true);
-	let isGenerating = $state(false);
 	let showQuickExamples = $state(true);
 	let messagesContainer: HTMLDivElement;
 	let inputAreaRef: HTMLDivElement;
@@ -113,7 +112,7 @@
 
 	// Handle sending a message
 	async function handleSendMessage(content: string) {
-		if (!inferenceStore.isLoaded || isGenerating) return;
+		if (!inferenceStore.isLoaded || inferenceStore.isGenerating) return;
 
 		// Create new chat if none exists or if this is first message after switching
 		if (!currentChat) {
@@ -150,7 +149,6 @@
 		chatsStore.addMessage(currentChat.id, assistantMessage);
 		scrollToBottom();
 
-		isGenerating = true;
 		cancelRequested = false; // Reset cancel flag
 		currentStreamingChatId = currentChat.id; // Track which chat is streaming
 		currentStreamingMessageId = assistantMessage.id; // Track which message is streaming
@@ -209,7 +207,6 @@
 				isStreaming: false
 			});
 		} finally {
-			isGenerating = false;
 			currentStreamingChatId = null;
 			currentStreamingMessageId = null;
 		}
@@ -230,8 +227,6 @@
 		} catch (error) {
 			console.error('Failed to cancel generation:', error);
 		}
-
-		isGenerating = false;
 
 		// Mark the streaming message as no longer streaming
 		if (currentStreamingChatId && currentStreamingMessageId) {
@@ -420,7 +415,7 @@
 			style="bottom: {bottomOffset}px"
 		>
 			<div class="mx-auto max-w-4xl">
-				{#if isGenerating}
+				{#if inferenceStore.isGenerating}
 					<div class="mb-3 flex items-center justify-center">
 						<Button
 							type="button"
@@ -435,8 +430,8 @@
 				{/if}
 				<ChatInput
 					onSend={handleSendMessage}
-					disabled={!inferenceStore.isLoaded || isGenerating}
-					placeholder={isGenerating
+					disabled={!inferenceStore.isLoaded || inferenceStore.isGenerating}
+					placeholder={inferenceStore.isGenerating
 						? 'Generating response...'
 						: !inferenceStore.isLoaded
 							? 'Loading model...'

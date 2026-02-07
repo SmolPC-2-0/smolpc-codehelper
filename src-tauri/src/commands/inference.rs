@@ -21,6 +21,9 @@ pub struct InferenceState {
 
     /// Cancellation flag for generation
     cancelled: Arc<AtomicBool>,
+
+    /// Whether generation is currently in progress (explicit flag, no TOCTOU race)
+    generating: Arc<AtomicBool>,
 }
 
 impl Default for InferenceState {
@@ -29,6 +32,7 @@ impl Default for InferenceState {
             generator: Arc::new(Mutex::new(None)),
             current_model: Arc::new(Mutex::new(None)),
             cancelled: Arc::new(AtomicBool::new(false)),
+            generating: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -184,13 +188,18 @@ pub async fn inference_generate(
     on_token: Channel<String>,
     state: State<'_, InferenceState>,
 ) -> Result<GenerationMetrics, String> {
-    // Reset cancellation flag
+    // Reset cancellation flag and mark generation as active
     state.cancelled.store(false, Ordering::SeqCst);
+    state.generating.store(true, Ordering::SeqCst);
 
     let gen_state = state.generator.lock().await;
-    let generator = gen_state
-        .as_ref()
-        .ok_or("No model loaded. Call load_model first.")?;
+    let generator = match gen_state.as_ref() {
+        Some(g) => g,
+        None => {
+            state.generating.store(false, Ordering::SeqCst);
+            return Err("No model loaded. Call load_model first.".to_string());
+        }
+    };
 
     log::info!(
         "Starting streaming generation (prompt length: {} chars)",
@@ -215,6 +224,9 @@ pub async fn inference_generate(
             },
         )
         .await;
+
+    // Always clear the generating flag before returning
+    state.generating.store(false, Ordering::SeqCst);
 
     match result {
         Ok(metrics) => {
@@ -248,8 +260,5 @@ pub async fn inference_cancel(state: State<'_, InferenceState>) -> Result<(), St
 /// Check if generation is currently in progress
 #[tauri::command]
 pub async fn is_generating(state: State<'_, InferenceState>) -> Result<bool, String> {
-    // If cancelled is false and generator is locked, we're generating
-    // This is a simple heuristic - for more accurate tracking we'd need a separate flag
-    let gen_state = state.generator.try_lock();
-    Ok(gen_state.is_err()) // If we can't lock, generation is in progress
+    Ok(state.generating.load(Ordering::SeqCst))
 }

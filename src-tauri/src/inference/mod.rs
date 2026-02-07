@@ -28,30 +28,32 @@ pub use session::InferenceSession;
 pub use tokenizer::TokenizerWrapper;
 
 use std::path::{Path, PathBuf};
-use std::sync::Once;
+use std::sync::OnceLock;
 
-static ORT_INIT: Once = Once::new();
+static ORT_INIT: OnceLock<Result<(), String>> = OnceLock::new();
 
 /// Initialize ONNX Runtime with the bundled library.
 /// Must be called before any `ort` operations.
 ///
 /// `resource_dir` is the Tauri resource directory (from `app.path().resource_dir()`).
 /// Pass `None` when running outside of Tauri (e.g., tests, CLI tools).
+///
+/// The result is cached — subsequent calls return the stored outcome without re-initializing.
 pub fn init_onnx_runtime(resource_dir: Option<&Path>) -> Result<(), String> {
-    let mut init_result: Result<(), String> = Ok(());
+    ORT_INIT
+        .get_or_init(|| {
+            let dylib_path = find_onnxruntime_dylib(resource_dir);
+            log::info!("Initializing ONNX Runtime from: {}", dylib_path.display());
 
-    ORT_INIT.call_once(|| {
-        let dylib_path = find_onnxruntime_dylib(resource_dir);
-        log::info!("Initializing ONNX Runtime from: {}", dylib_path.display());
-
-        if let Err(e) = ort::init_from(dylib_path.to_string_lossy().to_string()).commit() {
-            init_result = Err(format!("Failed to initialize ONNX Runtime: {}", e));
-        } else {
-            log::info!("ONNX Runtime initialized successfully");
-        }
-    });
-
-    init_result
+            match ort::init_from(dylib_path.to_string_lossy().to_string()).commit() {
+                Ok(_) => {
+                    log::info!("ONNX Runtime initialized successfully");
+                    Ok(())
+                }
+                Err(e) => Err(format!("Failed to initialize ONNX Runtime: {}", e)),
+            }
+        })
+        .clone()
 }
 
 /// Find the ONNX Runtime library by searching several locations in priority order:
