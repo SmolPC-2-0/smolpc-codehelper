@@ -3,8 +3,7 @@
  *
  * Supports both blocking and streaming generation modes.
  */
-import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { invoke, Channel } from '@tauri-apps/api/core';
 import type {
 	GenerationResult,
 	GenerationMetrics,
@@ -21,65 +20,6 @@ let error = $state<string | null>(null);
 let availableModels = $state<AvailableModel[]>([]);
 let lastResult = $state<GenerationResult | null>(null);
 let lastMetrics = $state<GenerationMetrics | null>(null);
-
-// Event listeners for streaming
-let tokenUnlisten: UnlistenFn | null = null;
-let doneUnlisten: UnlistenFn | null = null;
-let errorUnlisten: UnlistenFn | null = null;
-let cancelledUnlisten: UnlistenFn | null = null;
-
-// Callback for streaming tokens
-let streamCallback: ((token: string) => void) | null = null;
-
-/**
- * Set up event listeners for streaming generation
- */
-async function setupStreamListeners(): Promise<void> {
-	// Clean up any existing listeners
-	await cleanupStreamListeners();
-
-	tokenUnlisten = await listen<string>('inference_token', (event) => {
-		if (streamCallback) {
-			streamCallback(event.payload);
-		}
-	});
-
-	doneUnlisten = await listen<GenerationMetrics>('inference_done', (event) => {
-		lastMetrics = event.payload;
-		isGenerating = false;
-	});
-
-	errorUnlisten = await listen<string>('inference_error', (event) => {
-		error = event.payload;
-		isGenerating = false;
-	});
-
-	cancelledUnlisten = await listen('inference_cancelled', () => {
-		isGenerating = false;
-	});
-}
-
-/**
- * Clean up event listeners
- */
-async function cleanupStreamListeners(): Promise<void> {
-	if (tokenUnlisten) {
-		tokenUnlisten();
-		tokenUnlisten = null;
-	}
-	if (doneUnlisten) {
-		doneUnlisten();
-		doneUnlisten = null;
-	}
-	if (errorUnlisten) {
-		errorUnlisten();
-		errorUnlisten = null;
-	}
-	if (cancelledUnlisten) {
-		cancelledUnlisten();
-		cancelledUnlisten = null;
-	}
-}
 
 export const inferenceStore = {
 	// Getters
@@ -197,12 +137,12 @@ export const inferenceStore = {
 	},
 
 	/**
-	 * Generate text with streaming output
+	 * Generate text with streaming output via Tauri Channel
 	 *
 	 * @param prompt - Input prompt
 	 * @param onToken - Callback for each generated token
 	 * @param config - Optional generation configuration
-	 * @returns Promise that resolves when generation is complete
+	 * @returns Metrics on success, null on cancellation or error
 	 */
 	async generateStream(
 		prompt: string,
@@ -222,11 +162,11 @@ export const inferenceStore = {
 		isGenerating = true;
 		error = null;
 		lastMetrics = null;
-		streamCallback = onToken;
 
 		try {
-			// Set up event listeners
-			await setupStreamListeners();
+			// Create channel — tokens delivered via onmessage callback
+			const onTokenChannel = new Channel<string>();
+			onTokenChannel.onmessage = onToken;
 
 			// Build config with defaults
 			const fullConfig: GenerationConfig | undefined = config
@@ -238,19 +178,28 @@ export const inferenceStore = {
 					}
 				: undefined;
 
-			// Start streaming generation
-			await invoke('inference_generate', { prompt, config: fullConfig });
+			// invoke() now returns metrics directly when generation completes
+			const metrics = await invoke<GenerationMetrics>('inference_generate', {
+				prompt,
+				config: fullConfig,
+				onToken: onTokenChannel
+			});
 
-			// Return metrics (will be set by event listener)
-			return lastMetrics;
+			lastMetrics = metrics;
+			return metrics;
 		} catch (e) {
-			error = String(e);
+			const message = String(e);
+
+			// Cancellation is not an error — return null
+			if (message.includes('Generation cancelled')) {
+				return null;
+			}
+
+			error = message;
 			console.error('Streaming generation failed:', e);
-			isGenerating = false;
 			return null;
 		} finally {
-			streamCallback = null;
-			await cleanupStreamListeners();
+			isGenerating = false;
 		}
 	},
 

@@ -206,7 +206,7 @@ mod tests {
     async fn bench_full_generation() {
         println!("\n=== Full Generation Benchmark (with KV Cache) ===\n");
 
-        init_onnx_runtime().expect("Failed to init ONNX Runtime");
+        init_onnx_runtime(None).expect("Failed to init ONNX Runtime");
 
         let model_path = "models/qwen2.5-coder-1.5b/model.onnx";
         let tokenizer_path = "models/qwen2.5-coder-1.5b/tokenizer.json";
@@ -285,7 +285,7 @@ mod tests {
     async fn bench_cache_fill_levels() {
         println!("\n=== Cache Fill Level Comparison ===\n");
 
-        init_onnx_runtime().expect("Failed to init ONNX Runtime");
+        init_onnx_runtime(None).expect("Failed to init ONNX Runtime");
 
         let model_path = "models/qwen2.5-coder-1.5b/model.onnx";
         let tokenizer_path = "models/qwen2.5-coder-1.5b/tokenizer.json";
@@ -330,7 +330,7 @@ mod tests {
         println!("\n=== Single Decode Step Timing Analysis ===\n");
         println!("This measures where time is spent in each decode step.\n");
 
-        init_onnx_runtime().expect("Failed to init ONNX Runtime");
+        init_onnx_runtime(None).expect("Failed to init ONNX Runtime");
 
         let model_path = "models/qwen2.5-coder-1.5b/model.onnx";
         let tokenizer_path = "models/qwen2.5-coder-1.5b/tokenizer.json";

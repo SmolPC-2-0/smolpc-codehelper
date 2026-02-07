@@ -3,11 +3,12 @@
 /// Provides IPC interface between frontend and inference engine.
 
 use crate::inference::{Generator, InferenceSession, TokenizerWrapper};
-use crate::inference::types::{GenerationConfig, GenerationResult};
+use crate::inference::types::{GenerationConfig, GenerationMetrics, GenerationResult};
 use crate::models::{ModelLoader, ModelRegistry};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::ipc::Channel;
+use tauri::State;
 use tokio::sync::Mutex;
 
 /// Global inference state (managed by Tauri)
@@ -20,6 +21,9 @@ pub struct InferenceState {
 
     /// Cancellation flag for generation
     cancelled: Arc<AtomicBool>,
+
+    /// Whether generation is currently in progress (explicit flag, no TOCTOU race)
+    generating: Arc<AtomicBool>,
 }
 
 impl Default for InferenceState {
@@ -28,6 +32,7 @@ impl Default for InferenceState {
             generator: Arc::new(Mutex::new(None)),
             current_model: Arc::new(Mutex::new(None)),
             cancelled: Arc::new(AtomicBool::new(false)),
+            generating: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -167,78 +172,81 @@ pub fn check_model_exists(model_id: String) -> Result<bool, String> {
     Ok(model_exists && tokenizer_exists)
 }
 
-/// Generate text with streaming output via Tauri events (ONNX Runtime)
+/// Generate text with streaming output via Tauri Channel
 ///
-/// Emits events:
-/// - `inference_token` (String) - Each generated token
-/// - `inference_done` (GenerationMetrics) - Generation complete with metrics
-/// - `inference_error` (String) - On error
-/// - `inference_cancelled` () - When cancelled
+/// Tokens are streamed to the frontend via the `on_token` Channel.
+/// The command returns `GenerationMetrics` directly when generation completes.
 ///
 /// # Arguments
 /// * `prompt` - Input text prompt
 /// * `config` - Optional generation configuration (temperature, top_k, etc.)
+/// * `on_token` - Channel for streaming tokens to frontend
 #[tauri::command]
 pub async fn inference_generate(
-    app_handle: AppHandle,
     prompt: String,
     config: Option<GenerationConfig>,
+    on_token: Channel<String>,
     state: State<'_, InferenceState>,
-) -> Result<(), String> {
-    // Reset cancellation flag
+) -> Result<GenerationMetrics, String> {
+    // Reset cancellation flag and mark generation as active
     state.cancelled.store(false, Ordering::SeqCst);
+    state.generating.store(true, Ordering::SeqCst);
 
     let gen_state = state.generator.lock().await;
-    let generator = gen_state
-        .as_ref()
-        .ok_or("No model loaded. Call load_model first.")?;
+    let generator = match gen_state.as_ref() {
+        Some(g) => g,
+        None => {
+            state.generating.store(false, Ordering::SeqCst);
+            return Err("No model loaded. Call load_model first.".to_string());
+        }
+    };
 
     log::info!(
         "Starting streaming generation (prompt length: {} chars)",
         prompt.len()
     );
 
-    // Get the cancellation flag for the generator
     let cancelled = Arc::clone(&state.cancelled);
 
-    // Generate with streaming callback
+    // Clone channel for use in closure (Channel is Clone + Send)
+    let token_channel = on_token.clone();
+
+    // Generate with streaming callback — tokens sent via Channel
     let result = generator
         .generate_stream(
             &prompt,
             config,
             cancelled,
-            |token| {
-                // Emit each token to frontend
-                if let Err(e) = app_handle.emit("inference_token", &token) {
-                    log::warn!("Failed to emit token: {}", e);
+            move |token| {
+                if let Err(e) = token_channel.send(token) {
+                    log::warn!("Failed to send token via channel: {}", e);
                 }
             },
         )
         .await;
 
+    // Always clear the generating flag before returning
+    state.generating.store(false, Ordering::SeqCst);
+
     match result {
         Ok(metrics) => {
-            // Check if we were cancelled
             if state.cancelled.load(Ordering::SeqCst) {
                 log::info!("Generation was cancelled");
-                let _ = app_handle.emit("inference_cancelled", ());
+                Err("Generation cancelled".to_string())
             } else {
                 log::info!(
                     "Streaming generation complete: {} tokens, {:.2} tok/s",
                     metrics.total_tokens,
                     metrics.tokens_per_second
                 );
-                let _ = app_handle.emit("inference_done", &metrics);
+                Ok(metrics)
             }
         }
         Err(e) => {
             log::error!("Generation error: {}", e);
-            let _ = app_handle.emit("inference_error", &e);
-            return Err(e);
+            Err(e)
         }
     }
-
-    Ok(())
 }
 
 /// Cancel the current ONNX generation
@@ -252,8 +260,5 @@ pub async fn inference_cancel(state: State<'_, InferenceState>) -> Result<(), St
 /// Check if generation is currently in progress
 #[tauri::command]
 pub async fn is_generating(state: State<'_, InferenceState>) -> Result<bool, String> {
-    // If cancelled is false and generator is locked, we're generating
-    // This is a simple heuristic - for more accurate tracking we'd need a separate flag
-    let gen_state = state.generator.try_lock();
-    Ok(gen_state.is_err()) // If we can't lock, generation is in progress
+    Ok(state.generating.load(Ordering::SeqCst))
 }

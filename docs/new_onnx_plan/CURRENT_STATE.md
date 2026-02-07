@@ -1,8 +1,8 @@
 # ONNX Migration - Current State
 
-**Last Updated:** January 2026
-**Branch:** `feature/ort_setup`
-**Phase:** 1.5 Complete (Frontend Integration)
+**Last Updated:** February 2026
+**Branch:** `feature/ort_setup` (PR #24 pending merge from `fix/channel-migration`)
+**Phase:** 1.5 Complete (Frontend Integration) + ONNX Runtime Bundling
 
 ---
 
@@ -23,7 +23,7 @@ Phase 1.5 is complete. The ONNX Runtime inference is now integrated with the cha
 
 | Component | File | Status |
 |-----------|------|--------|
-| ONNX Runtime init | `src/inference/mod.rs` | ✅ `init_onnx_runtime()` with programmatic DLL path |
+| ONNX Runtime init | `src/inference/mod.rs` | ✅ `init_onnx_runtime()` with OnceLock + 5-location dylib search |
 | Session wrapper | `src/inference/session.rs` | ✅ `InferenceSession` wraps `ort::Session` |
 | Tokenizer | `src/inference/tokenizer.rs` | ✅ `TokenizerWrapper` with encode/decode |
 | Generator | `src/inference/generator.rs` | ✅ Autoregressive loop with KV cache and sampling |
@@ -31,7 +31,9 @@ Phase 1.5 is complete. The ONNX Runtime inference is now integrated with the cha
 | Types | `src/inference/types.rs` | ✅ `GenerationResult`, `GenerationConfig`, etc. |
 | Model registry | `src/models/registry.rs` | ✅ Hardcoded model definitions |
 | Model loader | `src/models/loader.rs` | ✅ Path utilities for model files |
-| Tauri commands | `src/commands/inference.rs` | ✅ `load_model`, `unload_model`, `generate_text`, `list_models`, `get_current_model`, `check_model_exists` |
+| Tauri commands | `src/commands/inference.rs` | ✅ `load_model`, `unload_model`, `generate_text`, `inference_generate` (Channel streaming), `inference_cancel`, `is_generating` (AtomicBool), `list_models`, `get_current_model`, `check_model_exists` |
+| Setup script | `scripts/setup-libs.sh` | ✅ Cross-platform ONNX Runtime download |
+| Bundle config | `tauri.conf.json` | ✅ `resources: ["libs/*"]` bundles dylib |
 
 ### Frontend (TypeScript/Svelte)
 
@@ -49,7 +51,7 @@ Phase 1.5 is complete. The ONNX Runtime inference is now integrated with the cha
 |------|----------|--------|
 | model.onnx | `src-tauri/models/qwen2.5-coder-1.5b/` | ✅ Present |
 | tokenizer.json | `src-tauri/models/qwen2.5-coder-1.5b/` | ✅ Present |
-| onnxruntime.dll | `ort-extracted/onnxruntime-win-x64-1.22.1/lib/` | ✅ v1.22.1 |
+| onnxruntime.dll | `src-tauri/libs/` (new) or `ort-extracted/.../lib/` (legacy) | ✅ v1.22.1 (Windows), v1.22.0 (macOS/Linux) |
 
 ### Tests Passing
 
@@ -65,17 +67,17 @@ cargo test test_generate_simple -- --ignored   # ✅ Generation works
 
 ### ✅ Priority 1: COMPLETED
 
-#### ✅ 1. Streaming Generation - DONE
+#### ✅ 1. Streaming Generation - DONE (Migrated to Channels)
 **Implementation:**
 - Added `generate_stream` method to Generator with callback parameter
-- Added `inference_generate` Tauri command that emits events
-- Frontend store has `generateStream()` method with event listeners
+- Added `inference_generate` Tauri command using `Channel<String>` for token streaming
+- Frontend store has `generateStream()` method using `new Channel<string>()`
+- `invoke()` returns `GenerationMetrics` directly when generation completes
 
-**Events emitted:**
-- `inference_token` (String) - Each generated token
-- `inference_done` (GenerationMetrics) - Generation complete
-- `inference_error` (String) - On error
-- `inference_cancelled` () - When cancelled
+**Pattern (Tauri 2 Channels — replaces Events):**
+- Rust: `on_token: Channel<String>` param, `on_token.send(token)` per token
+- TS: `new Channel<string>()`, set `onmessage`, pass to `invoke()`
+- No manual listener cleanup needed (Channel is command-scoped)
 
 #### ✅ 2. Cancellation Support - DONE
 **Implementation:**

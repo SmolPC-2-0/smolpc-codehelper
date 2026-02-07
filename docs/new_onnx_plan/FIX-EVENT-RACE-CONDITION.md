@@ -1,7 +1,19 @@
 # Plan: Fix Event Listener Race Condition in inference.svelte.ts
 
-**Status**: Ready for implementation
+**Status**: RESOLVED — Migrated to Tauri 2 Channels (not Promise-wrapper)
 **Created**: 2026-02-05
+**Resolved**: 2026-02-07
+
+> **Resolution**: Instead of patching the event-based pattern with the Promise-wrapper
+> described below, we migrated to **Tauri 2 Channels** (`tauri::ipc::Channel`).
+> Channels eliminate the entire class of listener-timing bugs by design:
+> the frontend creates a `Channel`, passes it to the command, and `await invoke()`
+> returns the final result directly. See the updated code in
+> `src-tauri/src/commands/inference.rs` and `src/lib/stores/inference.svelte.ts`.
+
+---
+
+**Original plan below (kept for reference):**
 
 ## Problem Summary
 

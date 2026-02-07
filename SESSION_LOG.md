@@ -4,6 +4,64 @@ This file tracks progress across Claude Code sessions for SmolPC Code Helper.
 
 ---
 
+## 2026-02-07 (Session 4) - ONNX Runtime Bundling + Code Review Fixes
+
+**Focus**: Bundle ONNX Runtime into app, comprehensive code review, fix 4 issues
+
+**Branch**: `fix/channel-migration` (PR #24 → `feature/ort_setup`)
+
+**Completed**:
+- Implemented ONNX Runtime bundling plan (5 steps):
+  - Created `scripts/setup-libs.sh` — cross-platform download script
+  - Configured `tauri.conf.json` with `resources: ["libs/*"]`
+  - Refactored `init_onnx_runtime()` to accept Tauri resource dir
+  - Updated `lib.rs` to resolve and pass resource dir
+  - Updated `.gitignore` for `src-tauri/libs/`
+- Ran 3-way parallel code review (Rust, Frontend, Architecture)
+- Fixed 4 issues identified by review:
+  1. `Once` → `OnceLock<Result>` for proper error propagation
+  2. Fatal ONNX init in production, non-fatal in dev
+  3. `try_lock()` TOCTOU → dedicated `AtomicBool` for `is_generating`
+  4. Removed duplicate `isGenerating` state from `App.svelte`
+- Re-ran frontend review — all MUST FIX items resolved
+
+**Key Discoveries**:
+- ONNX Runtime v1.22.1 only ships Windows builds; v1.22.0 needed for macOS/Linux
+- Tauri `resources` glob fails at compile time if no files match
+- BSD `tar` on macOS doesn't extract single files same as GNU tar
+
+**Files Changed**:
+- `scripts/setup-libs.sh` (NEW)
+- `src-tauri/libs/README.md` (NEW — glob satisfier)
+- `src-tauri/tauri.conf.json` (resources config)
+- `src-tauri/src/inference/mod.rs` (OnceLock, dylib search)
+- `src-tauri/src/lib.rs` (resource dir, fatal init)
+- `src-tauri/src/commands/inference.rs` (AtomicBool)
+- `src-tauri/src/inference/generator.rs` (test call sites)
+- `src-tauri/src/inference/benchmark.rs` (test call sites)
+- `src-tauri/src/inference/session.rs` (test call sites)
+- `src/App.svelte` (single source of truth for isGenerating)
+- `.gitignore` (libs directory)
+
+**Review Findings (SHOULD FIX — deferred to future sessions)**:
+- GenerationConfig defaults mismatch (frontend temp=0.7 vs backend temp=1.0)
+- AvailableModel TS type missing fields from Rust ModelDefinition
+- Missing error display on auto-load failure
+- Windows DLL search priority could be shadowed by user-placed DLL
+- macOS code signing needed for bundled dylib (Phase 2 concern)
+
+**Next Session (Windows laptop)**:
+1. Check if Git Bash is available (needed for setup-libs.sh)
+2. Merge PR #24 into `feature/ort_setup`
+3. Run `scripts/setup-libs.sh` OR verify legacy `ort-extracted/` path works
+4. Run full verification: `cargo check`, `cargo clippy`, `cargo test -- --ignored`, `npm run tauri dev`
+5. Verify streaming generation works end-to-end with model loaded
+6. If all passes → begin Phase 2
+
+**Blockers**: Must verify on Windows with model loaded before Phase 2
+
+---
+
 ## 2026-02-05 (Session 2) - Event Race Condition Fix Planning
 
 **Focus**: Fix event listener race condition in `inference.svelte.ts`
