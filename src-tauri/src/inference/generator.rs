@@ -139,7 +139,7 @@ impl Generator {
         );
 
         // 1. Tokenize prompt
-        let input_ids = self.tokenizer.encode(prompt, true)?;
+        let input_ids = self.tokenizer.encode(prompt, false)?;
         let prompt_length = input_ids.len();
         let mut generated_ids = input_ids.clone();
         let mut tokens_generated = 0usize;
@@ -165,15 +165,17 @@ impl Generator {
         );
 
         // Sample first token from prefill output
-        let mut next_token = self.sample(first_logits.view(), &gen_config)?;
+        // Pass generated tokens so far (empty for first token — penalty is a no-op)
+        let mut next_token =
+            self.sample(first_logits.view(), &gen_config, &generated_ids[prompt_length..])?;
 
         // Record time to first token
         first_token_time = Some(start.elapsed());
         log::debug!("Time to first token: {:?}", first_token_time.unwrap());
 
-        // Check if first token is EOS
-        if next_token == self.tokenizer.eos_token_id() {
-            log::info!("EOS token generated immediately");
+        // Check if first token is a stop token
+        if self.tokenizer.is_stop_token(next_token) {
+            log::info!("Stop token generated immediately (token ID: {})", next_token);
             return Ok(GenerationMetrics {
                 total_tokens: 0,
                 time_to_first_token_ms: first_token_time.map(|d| d.as_millis() as u64),
@@ -203,12 +205,12 @@ impl Generator {
                 .run_decode(next_token, &mut kv_cache, &mut input_builder)
                 .await?;
 
-            // Sample next token
-            next_token = self.sample(logits.view(), &gen_config)?;
+            // Sample next token (pass all generated tokens for repetition penalty)
+            next_token = self.sample(logits.view(), &gen_config, &generated_ids[prompt_length..])?;
 
             // Check stop condition
-            if next_token == self.tokenizer.eos_token_id() {
-                log::info!("EOS token generated at step {}", step);
+            if self.tokenizer.is_stop_token(next_token) {
+                log::info!("Stop token generated at step {} (token ID: {})", step, next_token);
                 break;
             }
 
@@ -533,21 +535,67 @@ impl Generator {
         Ok(())
     }
 
+    /// Apply repetition penalty to raw logits (sign-aware, per HuggingFace/llama.cpp)
+    ///
+    /// Positive logits are divided by the penalty (reduced probability),
+    /// negative logits are multiplied by the penalty (pushed further negative).
+    /// Each unique token is penalized once regardless of how many times it appeared.
+    fn apply_repetition_penalty(logits: &mut [f32], token_ids: &[u32], penalty: f32) {
+        let seen: std::collections::HashSet<u32> = token_ids.iter().copied().collect();
+        for token_id in seen {
+            let idx = token_id as usize;
+            if idx < logits.len() {
+                if logits[idx] >= 0.0 {
+                    logits[idx] /= penalty;
+                } else {
+                    logits[idx] *= penalty;
+                }
+            }
+        }
+    }
+
     /// Sample next token from logits
     ///
     /// Supports:
+    /// - Repetition penalty (applied before all other sampling)
     /// - Greedy sampling (temperature = 0 or top_k = 1)
     /// - Temperature scaling
     /// - Top-k filtering
     /// - Top-p (nucleus) sampling
-    fn sample(&self, logits: ArrayView1<f32>, config: &GenerationConfig) -> Result<u32, String> {
+    fn sample(
+        &self,
+        logits: ArrayView1<f32>,
+        config: &GenerationConfig,
+        generated_ids: &[u32],
+    ) -> Result<u32, String> {
+        // Clone logits to mutable vec for in-place penalty application
+        let mut logits_vec: Vec<f32> = logits.to_vec();
+
+        // Apply repetition penalty before any other sampling
+        if config.repetition_penalty > 1.0 && !generated_ids.is_empty() {
+            let window = if config.repetition_penalty_last_n == 0 {
+                generated_ids
+            } else {
+                let start =
+                    generated_ids.len().saturating_sub(config.repetition_penalty_last_n);
+                &generated_ids[start..]
+            };
+            Self::apply_repetition_penalty(&mut logits_vec, window, config.repetition_penalty);
+        }
+
         // Greedy sampling: temperature = 0 or effectively disabled
         if config.temperature <= 0.0 || config.top_k == Some(1) {
-            return self.sample_greedy(logits);
+            let (max_idx, _) = logits_vec
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .ok_or("Empty logits tensor")?;
+            return Ok(max_idx as u32);
         }
 
         // Apply temperature scaling
-        let scaled_logits: Vec<f32> = logits.iter().map(|&x| x / config.temperature).collect();
+        let scaled_logits: Vec<f32> =
+            logits_vec.iter().map(|&x| x / config.temperature).collect();
 
         // Convert to probabilities via softmax
         let max_logit = scaled_logits
@@ -726,6 +774,7 @@ mod tests {
             temperature: 0.7,
             top_k: Some(40),
             top_p: Some(0.9),
+            ..Default::default()
         };
 
         let metrics = generator
@@ -773,6 +822,7 @@ mod tests {
             temperature: 0.0, // Greedy for reproducibility
             top_k: None,
             top_p: None,
+            ..Default::default()
         };
 
         let mut token_count = 0;

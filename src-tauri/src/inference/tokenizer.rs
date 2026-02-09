@@ -9,7 +9,7 @@ use tokenizers::Tokenizer;
 /// Wrapper around Hugging Face tokenizer
 pub struct TokenizerWrapper {
     tokenizer: Tokenizer,
-    eos_token_id: u32,
+    stop_token_ids: Vec<u32>,
 }
 
 impl TokenizerWrapper {
@@ -19,22 +19,22 @@ impl TokenizerWrapper {
     /// * `path` - Path to tokenizer.json file
     ///
     /// # Qwen2.5-Coder Special Tokens
-    /// - BOS (Beginning of Sequence): 151643
-    /// - EOS (End of Sequence): 151645
-    /// - PAD (Padding): 151643 (same as BOS)
+    /// - 151643: `<|endoftext|>` — raw completion EOS
+    /// - 151644: `<|im_start|>` — ChatML turn start
+    /// - 151645: `<|im_end|>` — ChatML turn end
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let tokenizer = Tokenizer::from_file(path)
             .map_err(|e| format!("Failed to load tokenizer: {e}"))?;
 
-        // Qwen2.5-Coder specific EOS token
-        let eos_token_id = 151645;
+        // Qwen2.5-Coder stop tokens: both <|endoftext|> and <|im_end|>
+        let stop_token_ids = vec![151643, 151645];
 
         log::info!("Tokenizer loaded successfully");
-        log::debug!("EOS token ID: {}", eos_token_id);
+        log::debug!("Stop token IDs: {:?}", stop_token_ids);
 
         Ok(Self {
             tokenizer,
-            eos_token_id,
+            stop_token_ids,
         })
     }
 
@@ -69,9 +69,9 @@ impl TokenizerWrapper {
             .map_err(|e| format!("Detokenization failed: {e}"))
     }
 
-    /// Get EOS (end-of-sequence) token ID
-    pub fn eos_token_id(&self) -> u32 {
-        self.eos_token_id
+    /// Check if a token ID is a stop token (EOS or im_end)
+    pub fn is_stop_token(&self, token_id: u32) -> bool {
+        self.stop_token_ids.contains(&token_id)
     }
 
     /// Get vocabulary size
@@ -117,7 +117,11 @@ mod tests {
         let tokenizer = TokenizerWrapper::from_file(tokenizer_path)
             .expect("Failed to load tokenizer");
 
-        println!("EOS token ID: {}", tokenizer.eos_token_id());
+        println!("Is 151643 a stop token: {}", tokenizer.is_stop_token(151643));
+        println!("Is 151645 a stop token: {}", tokenizer.is_stop_token(151645));
+        assert!(tokenizer.is_stop_token(151643)); // <|endoftext|>
+        assert!(tokenizer.is_stop_token(151645)); // <|im_end|>
+        assert!(!tokenizer.is_stop_token(0));      // regular token
 
         // Test with special tokens
         let text = "print('hello')";

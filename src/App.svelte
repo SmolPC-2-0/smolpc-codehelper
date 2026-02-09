@@ -93,21 +93,31 @@
 		}
 	}
 
-	// Build context string from previous messages for ONNX inference
-	function buildContextPrompt(userMessage: string): string {
-		if (!settingsStore.contextEnabled || !currentChat || currentChat.messages.length === 0) {
-			return userMessage;
+	const SYSTEM_PROMPT =
+		'You are a helpful coding assistant for students. ' +
+		'Give clear, concise explanations. ' +
+		'When showing code, use simple examples and add brief comments.';
+
+	// Build ChatML-formatted prompt for Qwen2.5-Coder
+	function buildChatMLPrompt(userMessage: string): string {
+		let prompt = `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>\n`;
+
+		// Include conversation history if context is enabled
+		if (settingsStore.contextEnabled && currentChat) {
+			// Exclude last 2 messages: the user msg + empty assistant placeholder
+			// we just added to the store before calling this function
+			const historyMessages = currentChat.messages.slice(0, -2);
+
+			for (const msg of historyMessages) {
+				const role = msg.role === 'user' ? 'user' : 'assistant';
+				prompt += `<|im_start|>${role}\n${msg.content}<|im_end|>\n`;
+			}
 		}
 
-		// Build conversation history as a string
-		const history = currentChat.messages
-			.map((msg) => {
-				const role = msg.role === 'user' ? 'User' : 'Assistant';
-				return `${role}: ${msg.content}`;
-			})
-			.join('\n\n');
+		// Add current user message and open assistant turn
+		prompt += `<|im_start|>user\n${userMessage}<|im_end|>\n<|im_start|>assistant\n`;
 
-		return `${history}\n\nUser: ${userMessage}\n\nAssistant:`;
+		return prompt;
 	}
 
 	// Handle sending a message
@@ -159,14 +169,16 @@
 
 		try {
 			// Build prompt with context
-			const prompt = buildContextPrompt(content);
+			const prompt = buildChatMLPrompt(content);
 
 			// Generation config using settings
 			const config: Partial<GenerationConfig> = {
 				max_length: 2048,
 				temperature: settingsStore.temperature,
 				top_k: 40,
-				top_p: 0.9
+				top_p: 0.9,
+				repetition_penalty: 1.1,
+				repetition_penalty_last_n: 64
 			};
 
 			// Start streaming generation with callback
