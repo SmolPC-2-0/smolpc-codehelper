@@ -12,9 +12,28 @@ use tokio::sync::Mutex;
 
 const ERR_GENERATION_IN_PROGRESS: &str = "Generation already in progress";
 const ERR_GENERATION_CANCELLED: &str = "Generation cancelled";
+const ERR_CODE_GENERATION_CANCELLED: &str = "INFERENCE_GENERATION_CANCELLED";
 const ERR_MODEL_CHANGE_DURING_GENERATION: &str =
     "Cannot load or unload model while generation is in progress";
-const ERR_CANCELLATION_STATE_UNAVAILABLE: &str = "Inference cancellation state is unavailable";
+
+fn generation_cancelled_error() -> String {
+    format!("{ERR_CODE_GENERATION_CANCELLED}: {ERR_GENERATION_CANCELLED}")
+}
+
+fn lock_active_cancel_recover<'a>(
+    active_cancel: &'a StdMutex<Option<Arc<AtomicBool>>>,
+    context: &str,
+) -> std::sync::MutexGuard<'a, Option<Arc<AtomicBool>>> {
+    match active_cancel.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::warn!(
+                "Recovering from poisoned active cancellation mutex in {context}; continuing with recovered state"
+            );
+            poisoned.into_inner()
+        }
+    }
+}
 
 /// Global inference state (managed by Tauri)
 pub struct InferenceState {
@@ -53,12 +72,9 @@ struct GenerationPermit {
 impl Drop for GenerationPermit {
     fn drop(&mut self) {
         self.generating.store(false, Ordering::SeqCst);
-        match self.active_cancel.lock() {
-            Ok(mut active_cancel) => *active_cancel = None,
-            Err(_) => log::error!(
-                "Failed to clear active cancellation token: cancellation state mutex poisoned"
-            ),
-        }
+        let mut active_cancel =
+            lock_active_cancel_recover(&self.active_cancel, "GenerationPermit::drop");
+        *active_cancel = None;
     }
 }
 
@@ -73,15 +89,9 @@ impl InferenceState {
         }
 
         let cancel_token = Arc::new(AtomicBool::new(false));
-        match self.active_cancel.lock() {
-            Ok(mut active_cancel) => {
-                *active_cancel = Some(Arc::clone(&cancel_token));
-            }
-            Err(_) => {
-                self.generating.store(false, Ordering::SeqCst);
-                return Err(ERR_CANCELLATION_STATE_UNAVAILABLE.to_string());
-            }
-        }
+        let mut active_cancel =
+            lock_active_cancel_recover(&self.active_cancel, "InferenceState::try_begin_generation");
+        *active_cancel = Some(Arc::clone(&cancel_token));
 
         Ok((
             GenerationPermit {
@@ -221,7 +231,7 @@ pub async fn generate_text(
 
     if cancelled.load(Ordering::SeqCst) {
         log::info!("Generation was cancelled");
-        return Err(ERR_GENERATION_CANCELLED.to_string());
+        return Err(generation_cancelled_error());
     }
 
     log::info!(
@@ -305,7 +315,7 @@ pub async fn inference_generate(
         Ok(metrics) => {
             if cancelled.load(Ordering::SeqCst) {
                 log::info!("Generation was cancelled");
-                Err(ERR_GENERATION_CANCELLED.to_string())
+                Err(generation_cancelled_error())
             } else {
                 log::info!(
                     "Streaming generation complete: {} tokens, {:.2} tok/s",
@@ -325,11 +335,8 @@ pub async fn inference_generate(
 /// Cancel the current ONNX generation
 #[tauri::command]
 pub async fn inference_cancel(state: State<'_, InferenceState>) -> Result<(), String> {
-    let active_cancel = state
-        .active_cancel
-        .lock()
-        .map_err(|_| ERR_CANCELLATION_STATE_UNAVAILABLE.to_string())?
-        .clone();
+    let active_cancel =
+        lock_active_cancel_recover(&state.active_cancel, "inference_cancel").clone();
 
     if let Some(cancel_token) = active_cancel {
         cancel_token.store(true, Ordering::SeqCst);
@@ -415,5 +422,12 @@ mod tests {
             .lock()
             .expect("active cancel mutex should not be poisoned");
         assert!(active.is_none());
+    }
+
+    #[test]
+    fn cancellation_error_has_stable_code_and_message() {
+        let err = generation_cancelled_error();
+        assert!(err.contains(ERR_CODE_GENERATION_CANCELLED));
+        assert!(err.contains(ERR_GENERATION_CANCELLED));
     }
 }
