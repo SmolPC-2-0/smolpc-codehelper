@@ -104,3 +104,26 @@ impl ModelRegistry {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ModelRegistry;
+
+    #[test]
+    fn available_models_excludes_unsupported_7b() {
+        let ids: Vec<String> = ModelRegistry::available_models()
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+
+        assert!(ids.contains(&"qwen2.5-coder-1.5b".to_string()));
+        assert!(!ids.contains(&"qwen2.5-coder-7b".to_string()));
+    }
+
+    #[test]
+    fn runtime_spec_only_defined_for_1_5b() {
+        assert!(ModelRegistry::runtime_spec("qwen2.5-coder-1.5b").is_some());
+        assert!(ModelRegistry::runtime_spec("qwen2.5-coder-7b").is_none());
+        assert!(ModelRegistry::runtime_spec("unknown").is_none());
+    }
+}
