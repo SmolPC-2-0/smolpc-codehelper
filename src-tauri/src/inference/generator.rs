@@ -16,7 +16,6 @@
 ///
 /// # References
 /// - [StreamingLLM Paper](https://arxiv.org/abs/2309.17453)
-
 use super::input_builder::InputBuilder;
 use super::kv_cache::{KVCache, HEAD_DIM, NUM_KV_HEADS, NUM_LAYERS};
 use super::session::InferenceSession;
@@ -67,7 +66,86 @@ impl Generator {
                 runtime_spec.architecture.head_dim
             ));
         }
+        Ok(())
+    }
 
+    fn get_required_output<'a>(
+        outputs: &'a ort::session::SessionOutputs<'_>,
+        output_name: &str,
+    ) -> Result<&'a ort::value::DynValue, String> {
+        outputs
+            .get(output_name)
+            .ok_or_else(|| format!("Missing required model output: {output_name}"))
+    }
+
+    fn validate_rank(
+        shape: &ort::tensor::Shape,
+        expected_rank: usize,
+        tensor_name: &str,
+    ) -> Result<(), String> {
+        if shape.len() != expected_rank {
+            return Err(format!(
+                "Invalid rank for tensor '{tensor_name}': expected {expected_rank}, got {} ({shape:?})",
+                shape.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn dim_to_usize(
+        shape: &ort::tensor::Shape,
+        dim_index: usize,
+        tensor_name: &str,
+    ) -> Result<usize, String> {
+        let dim = shape.get(dim_index).copied().ok_or_else(|| {
+            format!("Missing dimension {dim_index} for tensor '{tensor_name}' with shape {shape:?}")
+        })?;
+
+        usize::try_from(dim).map_err(|_| {
+            format!(
+                "Invalid negative dimension {dim} at index {dim_index} for tensor '{tensor_name}'"
+            )
+        })
+    }
+
+    fn checked_product(
+        values: &[usize],
+        tensor_name: &str,
+        context: &str,
+    ) -> Result<usize, String> {
+        values.iter().try_fold(1usize, |acc, &value| {
+            acc.checked_mul(value).ok_or_else(|| {
+                format!(
+                    "Overflow while calculating {context} for tensor '{tensor_name}' with dimensions {values:?}"
+                )
+            })
+        })
+    }
+
+    fn validate_tensor_len(
+        expected_len: usize,
+        actual_len: usize,
+        tensor_name: &str,
+    ) -> Result<(), String> {
+        if expected_len != actual_len {
+            return Err(format!(
+                "Tensor '{tensor_name}' data length mismatch: expected {expected_len}, got {actual_len}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_batch_dim(
+        shape: &ort::tensor::Shape,
+        tensor_name: &str,
+        expected_batch: usize,
+    ) -> Result<(), String> {
+        let batch = Self::dim_to_usize(shape, 0, tensor_name)?;
+        if batch != expected_batch {
+            return Err(format!(
+                "Unsupported batch size for tensor '{tensor_name}': expected {expected_batch}, got {batch}"
+            ));
+        }
         Ok(())
     }
 
@@ -204,8 +282,11 @@ impl Generator {
 
         // Sample first token from prefill output
         // Pass generated tokens so far (empty for first token — penalty is a no-op)
-        let mut next_token =
-            self.sample(first_logits.view(), &gen_config, &generated_ids[prompt_length..])?;
+        let mut next_token = self.sample(
+            first_logits.view(),
+            &gen_config,
+            &generated_ids[prompt_length..],
+        )?;
 
         // Record time to first token
         let first_token_time = start.elapsed();
@@ -213,7 +294,10 @@ impl Generator {
 
         // Check if first token is a stop token
         if self.tokenizer.is_stop_token(next_token) {
-            log::info!("Stop token generated immediately (token ID: {})", next_token);
+            log::info!(
+                "Stop token generated immediately (token ID: {})",
+                next_token
+            );
             return Ok(GenerationMetrics {
                 total_tokens: 0,
                 time_to_first_token_ms: Some(first_token_time.as_millis() as u64),
@@ -244,11 +328,16 @@ impl Generator {
                 .await?;
 
             // Sample next token (pass all generated tokens for repetition penalty)
-            next_token = self.sample(logits.view(), &gen_config, &generated_ids[prompt_length..])?;
+            next_token =
+                self.sample(logits.view(), &gen_config, &generated_ids[prompt_length..])?;
 
             // Check stop condition
             if self.tokenizer.is_stop_token(next_token) {
-                log::info!("Stop token generated at step {} (token ID: {})", step, next_token);
+                log::info!(
+                    "Stop token generated at step {} (token ID: {})",
+                    step,
+                    next_token
+                );
                 break;
             }
 
@@ -374,18 +463,41 @@ impl Generator {
             .map_err(|e| format!("Prefill inference failed: {e}"))?;
 
         // Extract logits for last position
-        let (logits_shape, logits_data) = outputs[self.runtime_spec.io.logits]
+        let logits_name = self.runtime_spec.io.logits;
+        let logits_output = Self::get_required_output(&outputs, logits_name)?;
+        let (logits_shape, logits_data) = logits_output
             .try_extract_tensor::<f32>()
             .map_err(|e| format!("Failed to extract logits: {e}"))?;
 
-        let seq_len = logits_shape[1] as usize;
-        let vocab_size = logits_shape[2] as usize;
+        Self::validate_rank(logits_shape, 3, logits_name)?;
+        Self::validate_batch_dim(logits_shape, logits_name, 1)?;
+
+        let seq_len = Self::dim_to_usize(logits_shape, 1, logits_name)?;
+        let vocab_size = Self::dim_to_usize(logits_shape, 2, logits_name)?;
+
+        if seq_len == 0 {
+            return Err(format!(
+                "Model output '{logits_name}' has empty sequence dimension"
+            ));
+        }
+        if vocab_size == 0 {
+            return Err(format!(
+                "Model output '{logits_name}' has empty vocabulary dimension"
+            ));
+        }
+
+        let expected_logits_len =
+            Self::checked_product(&[seq_len, vocab_size], logits_name, "data length")?;
+        Self::validate_tensor_len(expected_logits_len, logits_data.len(), logits_name)?;
 
         // Get logits for last position only
-        let last_pos_start = (seq_len - 1) * vocab_size;
-        let last_logits = Array1::from_vec(
-            logits_data[last_pos_start..last_pos_start + vocab_size].to_vec(),
-        );
+        let last_pos_start = (seq_len - 1).checked_mul(vocab_size).ok_or_else(|| {
+            "Overflow while calculating logits offset for last position".to_string()
+        })?;
+        let last_pos_end = last_pos_start
+            .checked_add(vocab_size)
+            .ok_or_else(|| "Overflow while calculating logits slice end".to_string())?;
+        let last_logits = Array1::from_vec(logits_data[last_pos_start..last_pos_end].to_vec());
 
         // Extract present.*.key/value and populate cache
         // The present outputs have shape [batch, heads, total_seq, head_dim]
@@ -464,12 +576,40 @@ impl Generator {
             .map_err(|e| format!("Decode inference failed: {e}"))?;
 
         // Extract logits (shape: [1, 1, vocab_size])
-        let (logits_shape, logits_data) = outputs[self.runtime_spec.io.logits]
+        let logits_name = self.runtime_spec.io.logits;
+        let logits_output = Self::get_required_output(&outputs, logits_name)?;
+        let (logits_shape, logits_data) = logits_output
             .try_extract_tensor::<f32>()
             .map_err(|e| format!("Failed to extract logits: {e}"))?;
 
-        let vocab_size = logits_shape[2] as usize;
-        let logits = Array1::from_vec(logits_data[0..vocab_size].to_vec());
+        Self::validate_rank(logits_shape, 3, logits_name)?;
+        Self::validate_batch_dim(logits_shape, logits_name, 1)?;
+
+        let seq_len = Self::dim_to_usize(logits_shape, 1, logits_name)?;
+        let vocab_size = Self::dim_to_usize(logits_shape, 2, logits_name)?;
+
+        if seq_len == 0 {
+            return Err(format!(
+                "Decode output '{logits_name}' has empty sequence dimension"
+            ));
+        }
+        if vocab_size == 0 {
+            return Err(format!(
+                "Decode output '{logits_name}' has empty vocabulary dimension"
+            ));
+        }
+
+        let expected_logits_len =
+            Self::checked_product(&[seq_len, vocab_size], logits_name, "data length")?;
+        Self::validate_tensor_len(expected_logits_len, logits_data.len(), logits_name)?;
+
+        let last_pos_start = (seq_len - 1)
+            .checked_mul(vocab_size)
+            .ok_or_else(|| "Overflow while calculating decode logits offset".to_string())?;
+        let last_pos_end = last_pos_start
+            .checked_add(vocab_size)
+            .ok_or_else(|| "Overflow while calculating decode logits slice end".to_string())?;
+        let logits = Array1::from_vec(logits_data[last_pos_start..last_pos_end].to_vec());
 
         // Extract the new token's KV and append to cache
         self.extract_and_append_single_token(&outputs, kv_cache)?;
@@ -503,22 +643,67 @@ impl Generator {
             let key_name = self.runtime_spec.present_key_name(layer);
             let value_name = self.runtime_spec.present_value_name(layer);
 
-            let (_key_shape, key_data) = outputs[key_name.as_str()]
+            let key_output = Self::get_required_output(outputs, key_name.as_str())?;
+            let value_output = Self::get_required_output(outputs, value_name.as_str())?;
+
+            let (key_shape, key_data) = key_output
                 .try_extract_tensor::<f32>()
                 .map_err(|e| format!("Failed to extract {}: {}", key_name, e))?;
 
-            let (_value_shape, value_data) = outputs[value_name.as_str()]
+            let (value_shape, value_data) = value_output
                 .try_extract_tensor::<f32>()
                 .map_err(|e| format!("Failed to extract {}: {}", value_name, e))?;
+
+            Self::validate_rank(key_shape, 4, key_name.as_str())?;
+            Self::validate_rank(value_shape, 4, value_name.as_str())?;
+            Self::validate_batch_dim(key_shape, key_name.as_str(), 1)?;
+            Self::validate_batch_dim(value_shape, value_name.as_str(), 1)?;
+
+            let key_heads = Self::dim_to_usize(key_shape, 1, key_name.as_str())?;
+            let key_seq_len = Self::dim_to_usize(key_shape, 2, key_name.as_str())?;
+            let key_head_dim = Self::dim_to_usize(key_shape, 3, key_name.as_str())?;
+
+            let value_heads = Self::dim_to_usize(value_shape, 1, value_name.as_str())?;
+            let value_seq_len = Self::dim_to_usize(value_shape, 2, value_name.as_str())?;
+            let value_head_dim = Self::dim_to_usize(value_shape, 3, value_name.as_str())?;
+
+            if key_heads != NUM_KV_HEADS || value_heads != NUM_KV_HEADS {
+                return Err(format!(
+                    "Unexpected KV head count for layer {layer}: key={key_heads}, value={value_heads}, expected {NUM_KV_HEADS}"
+                ));
+            }
+            if key_head_dim != HEAD_DIM || value_head_dim != HEAD_DIM {
+                return Err(format!(
+                    "Unexpected head dimension for layer {layer}: key={key_head_dim}, value={value_head_dim}, expected {HEAD_DIM}"
+                ));
+            }
+            if key_seq_len != num_tokens || value_seq_len != num_tokens {
+                return Err(format!(
+                    "Unexpected KV sequence length for layer {layer}: key={key_seq_len}, value={value_seq_len}, expected {num_tokens}"
+                ));
+            }
+
+            let expected_key_len = Self::checked_product(
+                &[key_heads, key_seq_len, key_head_dim],
+                key_name.as_str(),
+                "data length",
+            )?;
+            let expected_value_len = Self::checked_product(
+                &[value_heads, value_seq_len, value_head_dim],
+                value_name.as_str(),
+                "data length",
+            )?;
+
+            Self::validate_tensor_len(expected_key_len, key_data.len(), key_name.as_str())?;
+            Self::validate_tensor_len(expected_value_len, value_data.len(), value_name.as_str())?;
 
             // Copy data for each token position
             // present shape: [1, NUM_KV_HEADS, seq_len, HEAD_DIM]
             for pos in 0..num_tokens {
                 for head in 0..num_kv_heads {
                     let src_offset = head * num_tokens * head_dim + pos * head_dim;
-                    let dst_offset = pos * token_kv_size
-                        + layer * num_kv_heads * head_dim
-                        + head * head_dim;
+                    let dst_offset =
+                        pos * token_kv_size + layer * num_kv_heads * head_dim + head * head_dim;
 
                     all_keys[dst_offset..dst_offset + head_dim]
                         .copy_from_slice(&key_data[src_offset..src_offset + head_dim]);
@@ -554,16 +739,67 @@ impl Generator {
             let key_name = self.runtime_spec.present_key_name(layer);
             let value_name = self.runtime_spec.present_value_name(layer);
 
-            let (key_shape, key_data) = outputs[key_name.as_str()]
+            let key_output = Self::get_required_output(outputs, key_name.as_str())?;
+            let value_output = Self::get_required_output(outputs, value_name.as_str())?;
+
+            let (key_shape, key_data) = key_output
                 .try_extract_tensor::<f32>()
                 .map_err(|e| format!("Failed to extract {}: {}", key_name, e))?;
 
-            let (_value_shape, value_data) = outputs[value_name.as_str()]
+            let (value_shape, value_data) = value_output
                 .try_extract_tensor::<f32>()
                 .map_err(|e| format!("Failed to extract {}: {}", value_name, e))?;
 
+            Self::validate_rank(key_shape, 4, key_name.as_str())?;
+            Self::validate_rank(value_shape, 4, value_name.as_str())?;
+            Self::validate_batch_dim(key_shape, key_name.as_str(), 1)?;
+            Self::validate_batch_dim(value_shape, value_name.as_str(), 1)?;
+
+            let key_heads = Self::dim_to_usize(key_shape, 1, key_name.as_str())?;
+            let total_seq_len = Self::dim_to_usize(key_shape, 2, key_name.as_str())?;
+            let key_head_dim = Self::dim_to_usize(key_shape, 3, key_name.as_str())?;
+
+            let value_heads = Self::dim_to_usize(value_shape, 1, value_name.as_str())?;
+            let value_seq_len = Self::dim_to_usize(value_shape, 2, value_name.as_str())?;
+            let value_head_dim = Self::dim_to_usize(value_shape, 3, value_name.as_str())?;
+
+            if key_heads != NUM_KV_HEADS || value_heads != NUM_KV_HEADS {
+                return Err(format!(
+                    "Unexpected KV head count for decode layer {layer}: key={key_heads}, value={value_heads}, expected {NUM_KV_HEADS}"
+                ));
+            }
+            if key_head_dim != HEAD_DIM || value_head_dim != HEAD_DIM {
+                return Err(format!(
+                    "Unexpected head dimension for decode layer {layer}: key={key_head_dim}, value={value_head_dim}, expected {HEAD_DIM}"
+                ));
+            }
+            if value_seq_len != total_seq_len {
+                return Err(format!(
+                    "Mismatched KV sequence lengths for decode layer {layer}: key={total_seq_len}, value={value_seq_len}"
+                ));
+            }
+
+            if total_seq_len == 0 {
+                return Err(format!(
+                    "Decode present tensor '{key_name}' has empty sequence dimension"
+                ));
+            }
+
+            let expected_key_len = Self::checked_product(
+                &[key_heads, total_seq_len, key_head_dim],
+                key_name.as_str(),
+                "data length",
+            )?;
+            let expected_value_len = Self::checked_product(
+                &[value_heads, value_seq_len, value_head_dim],
+                value_name.as_str(),
+                "data length",
+            )?;
+
+            Self::validate_tensor_len(expected_key_len, key_data.len(), key_name.as_str())?;
+            Self::validate_tensor_len(expected_value_len, value_data.len(), value_name.as_str())?;
+
             // Get the last position (new token)
-            let total_seq_len = key_shape[2] as usize;
             let last_pos = total_seq_len - 1;
 
             // Extract last token's KV for all heads
@@ -625,8 +861,9 @@ impl Generator {
             let window = if config.repetition_penalty_last_n == 0 {
                 generated_ids
             } else {
-                let start =
-                    generated_ids.len().saturating_sub(config.repetition_penalty_last_n);
+                let start = generated_ids
+                    .len()
+                    .saturating_sub(config.repetition_penalty_last_n);
                 &generated_ids[start..]
             };
             Self::apply_repetition_penalty(&mut logits_vec, window, config.repetition_penalty);
@@ -643,15 +880,17 @@ impl Generator {
         }
 
         // Apply temperature scaling
-        let scaled_logits: Vec<f32> =
-            logits_vec.iter().map(|&x| x / config.temperature).collect();
+        let scaled_logits: Vec<f32> = logits_vec.iter().map(|&x| x / config.temperature).collect();
 
         // Convert to probabilities via softmax
         let max_logit = scaled_logits
             .iter()
             .cloned()
             .fold(f32::NEG_INFINITY, f32::max);
-        let exp_logits: Vec<f32> = scaled_logits.iter().map(|&x| (x - max_logit).exp()).collect();
+        let exp_logits: Vec<f32> = scaled_logits
+            .iter()
+            .map(|&x| (x - max_logit).exp())
+            .collect();
         let sum_exp: f32 = exp_logits.iter().sum();
         let mut probs: Vec<(usize, f32)> = exp_logits
             .iter()
@@ -753,10 +992,53 @@ mod tests {
     use super::*;
     use crate::inference::{init_onnx_runtime, InferenceSession, TokenizerWrapper};
     use crate::models::ModelRegistry;
+    use ort::tensor::Shape;
 
     fn runtime_spec() -> crate::models::ModelRuntimeSpec {
         ModelRegistry::runtime_spec("qwen2.5-coder-1.5b")
             .expect("Missing runtime spec for qwen2.5-coder-1.5b")
+    }
+
+    #[test]
+    fn test_validate_rank() {
+        let shape = Shape::from([1_i64, 2, 3]);
+
+        assert!(Generator::validate_rank(&shape, 3, "logits").is_ok());
+
+        let err = Generator::validate_rank(&shape, 4, "logits").unwrap_err();
+        assert!(err.contains("Invalid rank"));
+    }
+
+    #[test]
+    fn test_dim_to_usize_rejects_negative_dim() {
+        let shape = Shape::from([1_i64, -1, 3]);
+        let err = Generator::dim_to_usize(&shape, 1, "logits").unwrap_err();
+        assert!(err.contains("Invalid negative dimension"));
+    }
+
+    #[test]
+    fn test_validate_tensor_len() {
+        assert!(Generator::validate_tensor_len(10, 10, "logits").is_ok());
+
+        let err = Generator::validate_tensor_len(10, 9, "logits").unwrap_err();
+        assert!(err.contains("data length mismatch"));
+    }
+
+    #[test]
+    fn test_validate_batch_dim() {
+        let shape_ok = Shape::from([1_i64, 2, 3]);
+        assert!(Generator::validate_batch_dim(&shape_ok, "logits", 1).is_ok());
+
+        let shape_bad = Shape::from([2_i64, 2, 3]);
+        let err = Generator::validate_batch_dim(&shape_bad, "logits", 1).unwrap_err();
+        assert!(err.contains("Unsupported batch size"));
+    }
+
+    #[test]
+    fn test_checked_product_overflow() {
+        let err =
+            Generator::checked_product(&[usize::MAX, 2], "logits", "data length").unwrap_err();
+        assert!(err.contains("Overflow"));
     }
 
     #[tokio::test]
@@ -774,8 +1056,8 @@ mod tests {
             TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
         // Create generator with reduced max_length for testing
-        let mut generator = Generator::new(session, tokenizer, runtime_spec())
-            .expect("Failed to create generator");
+        let mut generator =
+            Generator::new(session, tokenizer, runtime_spec()).expect("Failed to create generator");
         generator.set_config(GenerationConfig {
             max_length: 10, // Just generate a few tokens for testing
             ..Default::default()
@@ -876,7 +1158,7 @@ mod tests {
         let cancelled = Arc::new(AtomicBool::new(false));
 
         let config = GenerationConfig {
-            max_length: 100, // Should exceed our 32-token context
+            max_length: 100,  // Should exceed our 32-token context
             temperature: 0.0, // Greedy for reproducibility
             top_k: None,
             top_p: None,
@@ -891,8 +1173,10 @@ mod tests {
             .await
             .expect("Generation failed");
 
-        println!("Generated {} tokens with {} context window",
-                 metrics.total_tokens, 32);
+        println!(
+            "Generated {} tokens with {} context window",
+            metrics.total_tokens, 32
+        );
         println!("Tokens/sec: {:.2}", metrics.tokens_per_second);
 
         // Should have generated tokens beyond context limit using Attention Sinks
