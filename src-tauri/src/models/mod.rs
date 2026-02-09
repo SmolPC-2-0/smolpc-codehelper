@@ -13,9 +13,11 @@
 
 pub mod loader;
 pub mod registry;
+pub mod runtime_spec;
 
 // Phase 5: Download manager
 // pub mod downloader;
 
 pub use loader::ModelLoader;
 pub use registry::ModelRegistry;
+pub use runtime_spec::ModelRuntimeSpec;

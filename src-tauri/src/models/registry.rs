@@ -5,6 +5,7 @@
 /// Phase 5: Dynamic registry with download support
 
 use serde::{Deserialize, Serialize};
+use super::runtime_spec::{ModelArchitecture, ModelIoSpec, ModelRuntimeSpec};
 
 /// Model definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,15 +54,6 @@ impl ModelRegistry {
                 directory: "qwen2.5-coder-1.5b".to_string(),
                 description: "Lightweight coding model for basic tasks and low-RAM devices".to_string(),
             },
-            ModelDefinition {
-                id: "qwen2.5-coder-7b".to_string(),
-                name: "Qwen2.5-Coder 7B".to_string(),
-                size: "7B".to_string(),
-                disk_size_gb: 4.5,
-                min_ram_gb: 6.0,
-                directory: "qwen2.5-coder-7b".to_string(),
-                description: "High-capability coding model for complex tasks".to_string(),
-            },
         ]
     }
 
@@ -83,5 +75,55 @@ impl ModelRegistry {
                     .partial_cmp(&b.min_ram_gb)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
+    }
+
+    /// Runtime inference spec for a model.
+    ///
+    /// Only models with implemented runtime specs are considered supported for ONNX inference.
+    pub fn runtime_spec(model_id: &str) -> Option<ModelRuntimeSpec> {
+        match model_id {
+            "qwen2.5-coder-1.5b" => Some(ModelRuntimeSpec {
+                model_id: "qwen2.5-coder-1.5b",
+                architecture: ModelArchitecture {
+                    num_layers: 28,
+                    num_kv_heads: 2,
+                    head_dim: 128,
+                },
+                io: ModelIoSpec {
+                    input_ids: "input_ids",
+                    attention_mask: "attention_mask",
+                    logits: "logits",
+                    past_key_template: "past_key_values.{layer}.key",
+                    past_value_template: "past_key_values.{layer}.value",
+                    present_key_template: "present.{layer}.key",
+                    present_value_template: "present.{layer}.value",
+                },
+                stop_token_ids: &[151643, 151645],
+            }),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ModelRegistry;
+
+    #[test]
+    fn available_models_excludes_unsupported_7b() {
+        let ids: Vec<String> = ModelRegistry::available_models()
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+
+        assert!(ids.contains(&"qwen2.5-coder-1.5b".to_string()));
+        assert!(!ids.contains(&"qwen2.5-coder-7b".to_string()));
+    }
+
+    #[test]
+    fn runtime_spec_only_defined_for_1_5b() {
+        assert!(ModelRegistry::runtime_spec("qwen2.5-coder-1.5b").is_some());
+        assert!(ModelRegistry::runtime_spec("qwen2.5-coder-7b").is_none());
+        assert!(ModelRegistry::runtime_spec("unknown").is_none());
     }
 }
