@@ -193,7 +193,10 @@ export const inferenceStore = {
 			const message = String(e);
 
 			// Cancellation is not an error — return null
-			if (message.includes('Generation cancelled')) {
+			if (
+				message.includes('INFERENCE_GENERATION_CANCELLED') ||
+				message.includes('Generation cancelled')
+			) {
 				return null;
 			}
 
