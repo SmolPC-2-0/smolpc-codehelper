@@ -174,7 +174,9 @@ export const inferenceStore = {
 						max_length: config.max_length ?? 2048,
 						temperature: config.temperature ?? 0.7,
 						top_k: config.top_k ?? 40,
-						top_p: config.top_p ?? 0.9
+						top_p: config.top_p ?? 0.9,
+						repetition_penalty: config.repetition_penalty ?? 1.1,
+						repetition_penalty_last_n: config.repetition_penalty_last_n ?? 64
 					}
 				: undefined;
 

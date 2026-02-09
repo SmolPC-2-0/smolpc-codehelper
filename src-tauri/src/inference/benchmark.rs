@@ -230,6 +230,7 @@ mod tests {
                 temperature: 0.0, // Greedy for reproducibility
                 top_k: None,
                 top_p: None,
+                ..Default::default()
             };
 
             let prompt_tokens = generator.tokenizer().encode(prompt, true).unwrap().len();
@@ -305,6 +306,7 @@ mod tests {
                 temperature: 0.0,
                 top_k: None,
                 top_p: None,
+                ..Default::default()
             };
 
             let metrics = generator.generate_stream(
@@ -350,6 +352,7 @@ mod tests {
             temperature: 0.0,
             top_k: None,
             top_p: None,
+            ..Default::default()
         };
 
         let _ = generator.generate_stream(

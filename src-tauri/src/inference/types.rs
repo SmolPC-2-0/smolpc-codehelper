@@ -54,6 +54,22 @@ pub struct GenerationConfig {
 
     /// Top-p (nucleus) sampling parameter (Phase 1)
     pub top_p: Option<f32>,
+
+    /// Repetition penalty (1.0 = disabled, >1.0 = penalize repeats)
+    #[serde(default = "default_repetition_penalty")]
+    pub repetition_penalty: f32,
+
+    /// Number of recent tokens to consider for repetition penalty (0 = all generated tokens)
+    #[serde(default = "default_repetition_penalty_last_n")]
+    pub repetition_penalty_last_n: usize,
+}
+
+fn default_repetition_penalty() -> f32 {
+    1.1
+}
+
+fn default_repetition_penalty_last_n() -> usize {
+    64
 }
 
 impl Default for GenerationConfig {
@@ -63,6 +79,8 @@ impl Default for GenerationConfig {
             temperature: 1.0,
             top_k: None,
             top_p: None,
+            repetition_penalty: default_repetition_penalty(),
+            repetition_penalty_last_n: default_repetition_penalty_last_n(),
         }
     }
 }

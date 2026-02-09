@@ -77,6 +77,12 @@ export interface GenerationConfig {
 
 	/** Top-p (nucleus) sampling threshold */
 	top_p: number | null;
+
+	/** Repetition penalty (1.0 = disabled, >1.0 = penalize repeats) */
+	repetition_penalty: number;
+
+	/** Number of recent tokens to consider for repetition penalty (0 = all generated tokens) */
+	repetition_penalty_last_n: number;
 }
 
 /**

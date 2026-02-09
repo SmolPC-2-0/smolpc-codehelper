@@ -336,7 +336,13 @@ impl KVCache {
         }
     }
 
-    /// Generate position IDs for the next inference step
+    /// Compute position IDs for new tokens based on logical sequence position.
+    ///
+    /// NOTE: Intentionally unused in production inference. The StreamingLLM approach
+    /// relies on the ONNX model deriving positions internally from cache length,
+    /// which gives correct relative distances for RoPE after Attention Sinks shifting.
+    /// Wiring this into the model would produce INCORRECT results after a cache shift.
+    /// Kept for testing and debugging purposes.
     ///
     /// # Arguments
     /// * `num_new_tokens` - Number of new tokens being processed (1 for decode, N for prefill)
@@ -348,6 +354,7 @@ impl KVCache {
     /// - During prefill (cache empty): [0, 1, 2, ..., num_new_tokens - 1]
     /// - During decode (cache has data): [logical_length] (single position)
     /// - With Attention Sinks (cache full): continues logical counting
+    #[allow(dead_code)]
     pub fn get_position_ids(&self, num_new_tokens: usize) -> Vec<i64> {
         if self.logical_length == 0 {
             // Prefill: positions are 0..num_new_tokens
@@ -359,7 +366,11 @@ impl KVCache {
         }
     }
 
-    /// Get attention mask for current cache state
+    /// Get attention mask for current cache state.
+    ///
+    /// NOTE: Intentionally unused in production inference. The generator builds
+    /// attention masks inline from `physical_length()`. Kept for testing and
+    /// debugging purposes.
     ///
     /// # Arguments
     /// * `num_new_tokens` - Number of new tokens being processed
@@ -367,6 +378,7 @@ impl KVCache {
     /// # Returns
     /// Attention mask with shape [1, past_length + num_new_tokens]
     /// All 1s (attend to all positions)
+    #[allow(dead_code)]
     pub fn get_attention_mask(&self, num_new_tokens: usize) -> Vec<i64> {
         let total_length = self.physical_length() + num_new_tokens;
         vec![1i64; total_length]
