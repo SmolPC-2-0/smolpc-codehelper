@@ -230,6 +230,50 @@ Packaging and build:
 - `scripts/setup-libs.sh`
 - `scripts/build-windows-offline-installer.ps1`
 
+## Future EP Expansion (Post-DirectML)
+
+This section captures next-session guidance for extending beyond DirectML while preserving
+"hardware agnostic + zero user setup" behavior.
+
+### Feasibility Under Current Product Constraints
+
+1. DirectML (Windows DX12 GPUs): high viability and primary path for broad coverage.
+2. CUDA (NVIDIA): medium viability; strong upside, but runtime dependency packaging is harder.
+3. OpenVINO (Intel CPU/GPU/NPU): medium-low viability for no-setup installer workflows.
+4. QNN (Qualcomm NPU / Windows ARM64): medium long-term viability, low short-term priority for current x64 scope.
+
+### EP-Specific Notes
+
+1. CUDA:
+   - Requires NVIDIA runtime dependencies (CUDA/cuDNN compatible set) to be present.
+   - Automatic no-setup delivery is possible but increases installer/runtime complexity.
+   - Should be introduced after DirectML selector/fallback logic is proven stable.
+
+2. OpenVINO:
+   - ONNX Runtime docs call out OpenVINO runtime environment setup considerations.
+   - For true zero-setup, packaging/runtime bootstrapping must be solved first.
+   - Best treated as a separate packaging milestone, not a quick EP toggle.
+
+3. QNN:
+   - Strongly tied to Snapdragon/ARM64 ecosystem.
+   - Requires model compatibility constraints (quantized model and fixed-shape considerations).
+   - Should follow ARM64 platform expansion and dedicated model-variant planning.
+
+### Recommended Sequencing
+
+1. Complete DirectML with benchmark-gated auto-selection and robust fallback.
+2. Add CUDA as an optional backend path, only after dependency packaging is repeatable.
+3. Add OpenVINO once no-setup packaging for Intel runtime components is validated.
+4. Add QNN when Windows ARM64 and model quantization pipeline are officially in scope.
+
+### Cross-EP Architectural Requirement
+
+Before adding more EPs, keep one shared policy engine:
+1. Candidate discovery from hardware detection.
+2. Health check + short benchmark gate per EP.
+3. Persisted per-device/per-model backend decision.
+4. Automatic demotion on repeated EP failures.
+
 ## Open Questions to Resolve Before Implementation Starts
 
 1. Confirm exact performance threshold policy (+30% target and +15% TTFT tolerance).
@@ -245,3 +289,7 @@ Packaging and build:
 4. `ort` crate IOBinding notes (`2.0.0-rc.10`): `.../ort-2.0.0-rc.10/src/io_binding.rs`
 5. Existing session code: `src-tauri/src/inference/session.rs`
 6. Existing generator and KV cache code: `src-tauri/src/inference/generator.rs`, `src-tauri/src/inference/kv_cache.rs`
+7. `ort` crate execution provider docs: https://ort.pyke.io/perf/execution-providers
+8. ONNX Runtime CUDA EP docs: https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html
+9. ONNX Runtime OpenVINO EP docs: https://onnxruntime.ai/docs/execution-providers/OpenVINO-ExecutionProvider.html
+10. ONNX Runtime QNN EP docs: https://onnxruntime.ai/docs/execution-providers/QNN-ExecutionProvider.html
