@@ -1,15 +1,20 @@
+use crate::inference::types::{GenerationConfig, GenerationMetrics, GenerationResult};
 /// Tauri commands for ONNX Runtime inference
 ///
 /// Provides IPC interface between frontend and inference engine.
-
 use crate::inference::{Generator, InferenceSession, TokenizerWrapper};
-use crate::inference::types::{GenerationConfig, GenerationMetrics, GenerationResult};
 use crate::models::{ModelLoader, ModelRegistry};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use tauri::ipc::Channel;
 use tauri::State;
 use tokio::sync::Mutex;
+
+const ERR_GENERATION_IN_PROGRESS: &str = "Generation already in progress";
+const ERR_GENERATION_CANCELLED: &str = "Generation cancelled";
+const ERR_MODEL_CHANGE_DURING_GENERATION: &str =
+    "Cannot load or unload model while generation is in progress";
+const ERR_CANCELLATION_STATE_UNAVAILABLE: &str = "Inference cancellation state is unavailable";
 
 /// Global inference state (managed by Tauri)
 pub struct InferenceState {
@@ -19,8 +24,8 @@ pub struct InferenceState {
     /// Currently loaded model ID
     current_model: Arc<Mutex<Option<String>>>,
 
-    /// Cancellation flag for generation
-    cancelled: Arc<AtomicBool>,
+    /// Cancellation token for the currently active generation (if any)
+    active_cancel: Arc<StdMutex<Option<Arc<AtomicBool>>>>,
 
     /// Whether generation is currently in progress (explicit flag, no TOCTOU race)
     generating: Arc<AtomicBool>,
@@ -31,9 +36,60 @@ impl Default for InferenceState {
         Self {
             generator: Arc::new(Mutex::new(None)),
             current_model: Arc::new(Mutex::new(None)),
-            cancelled: Arc::new(AtomicBool::new(false)),
+            active_cancel: Arc::new(StdMutex::new(None)),
             generating: Arc::new(AtomicBool::new(false)),
         }
+    }
+}
+
+/// RAII guard for a single active generation.
+///
+/// When dropped, this guard always clears generation state and active cancellation token.
+struct GenerationPermit {
+    generating: Arc<AtomicBool>,
+    active_cancel: Arc<StdMutex<Option<Arc<AtomicBool>>>>,
+}
+
+impl Drop for GenerationPermit {
+    fn drop(&mut self) {
+        self.generating.store(false, Ordering::SeqCst);
+        match self.active_cancel.lock() {
+            Ok(mut active_cancel) => *active_cancel = None,
+            Err(_) => log::error!(
+                "Failed to clear active cancellation token: cancellation state mutex poisoned"
+            ),
+        }
+    }
+}
+
+impl InferenceState {
+    fn try_begin_generation(&self) -> Result<(GenerationPermit, Arc<AtomicBool>), String> {
+        if self
+            .generating
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return Err(ERR_GENERATION_IN_PROGRESS.to_string());
+        }
+
+        let cancel_token = Arc::new(AtomicBool::new(false));
+        match self.active_cancel.lock() {
+            Ok(mut active_cancel) => {
+                *active_cancel = Some(Arc::clone(&cancel_token));
+            }
+            Err(_) => {
+                self.generating.store(false, Ordering::SeqCst);
+                return Err(ERR_CANCELLATION_STATE_UNAVAILABLE.to_string());
+            }
+        }
+
+        Ok((
+            GenerationPermit {
+                generating: Arc::clone(&self.generating),
+                active_cancel: Arc::clone(&self.active_cancel),
+            },
+            cancel_token,
+        ))
     }
 }
 
@@ -49,6 +105,10 @@ pub async fn load_model(
     model_id: String,
     state: State<'_, InferenceState>,
 ) -> Result<String, String> {
+    if state.generating.load(Ordering::SeqCst) {
+        return Err(ERR_MODEL_CHANGE_DURING_GENERATION.to_string());
+    }
+
     log::info!("Loading model: {}", model_id);
 
     // Validate model exists in registry
@@ -99,6 +159,10 @@ pub async fn load_model(
 /// Unload the current model and free memory
 #[tauri::command]
 pub async fn unload_model(state: State<'_, InferenceState>) -> Result<String, String> {
+    if state.generating.load(Ordering::SeqCst) {
+        return Err(ERR_MODEL_CHANGE_DURING_GENERATION.to_string());
+    }
+
     let mut gen_state = state.generator.lock().await;
     *gen_state = None;
 
@@ -129,23 +193,41 @@ pub async fn generate_text(
     prompt: String,
     state: State<'_, InferenceState>,
 ) -> Result<GenerationResult, String> {
+    let (_permit, cancelled) = state.try_begin_generation()?;
+
     let gen_state = state.generator.lock().await;
 
     let generator = gen_state
         .as_ref()
         .ok_or("No model loaded. Call load_model first.")?;
 
-    log::info!("Starting generation (prompt length: {} chars)", prompt.len());
+    log::info!(
+        "Starting generation (prompt length: {} chars)",
+        prompt.len()
+    );
 
-    let result = generator.generate(&prompt).await?;
+    let mut generated_text = String::new();
+    let metrics = generator
+        .generate_stream(&prompt, None, Arc::clone(&cancelled), |token| {
+            generated_text.push_str(&token);
+        })
+        .await?;
+
+    if cancelled.load(Ordering::SeqCst) {
+        log::info!("Generation was cancelled");
+        return Err(ERR_GENERATION_CANCELLED.to_string());
+    }
 
     log::info!(
         "Generation complete: {} tokens, {:.2} tok/s",
-        result.metrics.total_tokens,
-        result.metrics.tokens_per_second
+        metrics.total_tokens,
+        metrics.tokens_per_second
     );
 
-    Ok(result)
+    Ok(GenerationResult {
+        text: generated_text,
+        metrics,
+    })
 }
 
 /// Get list of available models
@@ -188,17 +270,12 @@ pub async fn inference_generate(
     on_token: Channel<String>,
     state: State<'_, InferenceState>,
 ) -> Result<GenerationMetrics, String> {
-    // Reset cancellation flag and mark generation as active
-    state.cancelled.store(false, Ordering::SeqCst);
-    state.generating.store(true, Ordering::SeqCst);
+    let (_permit, cancelled) = state.try_begin_generation()?;
 
     let gen_state = state.generator.lock().await;
     let generator = match gen_state.as_ref() {
         Some(g) => g,
-        None => {
-            state.generating.store(false, Ordering::SeqCst);
-            return Err("No model loaded. Call load_model first.".to_string());
-        }
+        None => return Err("No model loaded. Call load_model first.".to_string()),
     };
 
     log::info!(
@@ -206,33 +283,23 @@ pub async fn inference_generate(
         prompt.len()
     );
 
-    let cancelled = Arc::clone(&state.cancelled);
-
     // Clone channel for use in closure (Channel is Clone + Send)
     let token_channel = on_token.clone();
 
     // Generate with streaming callback — tokens sent via Channel
     let result = generator
-        .generate_stream(
-            &prompt,
-            config,
-            cancelled,
-            move |token| {
-                if let Err(e) = token_channel.send(token) {
-                    log::warn!("Failed to send token via channel: {}", e);
-                }
-            },
-        )
+        .generate_stream(&prompt, config, Arc::clone(&cancelled), move |token| {
+            if let Err(e) = token_channel.send(token) {
+                log::warn!("Failed to send token via channel: {}", e);
+            }
+        })
         .await;
-
-    // Always clear the generating flag before returning
-    state.generating.store(false, Ordering::SeqCst);
 
     match result {
         Ok(metrics) => {
-            if state.cancelled.load(Ordering::SeqCst) {
+            if cancelled.load(Ordering::SeqCst) {
                 log::info!("Generation was cancelled");
-                Err("Generation cancelled".to_string())
+                Err(ERR_GENERATION_CANCELLED.to_string())
             } else {
                 log::info!(
                     "Streaming generation complete: {} tokens, {:.2} tok/s",
@@ -252,8 +319,20 @@ pub async fn inference_generate(
 /// Cancel the current ONNX generation
 #[tauri::command]
 pub async fn inference_cancel(state: State<'_, InferenceState>) -> Result<(), String> {
-    state.cancelled.store(true, Ordering::SeqCst);
-    log::info!("Generation cancellation requested");
+    let active_cancel = state
+        .active_cancel
+        .lock()
+        .map_err(|_| ERR_CANCELLATION_STATE_UNAVAILABLE.to_string())?
+        .clone();
+
+    if let Some(cancel_token) = active_cancel {
+        cancel_token.store(true, Ordering::SeqCst);
+        log::info!("Generation cancellation requested");
+    } else {
+        // No active generation: no-op success by design.
+        log::debug!("Cancellation requested with no active generation");
+    }
+
     Ok(())
 }
 
@@ -261,4 +340,74 @@ pub async fn inference_cancel(state: State<'_, InferenceState>) -> Result<(), St
 #[tauri::command]
 pub async fn is_generating(state: State<'_, InferenceState>) -> Result<bool, String> {
     Ok(state.generating.load(Ordering::SeqCst))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_flight_rejects_second_generation() {
+        let state = InferenceState::default();
+        let _first = state
+            .try_begin_generation()
+            .expect("first generation should start");
+
+        let second = state.try_begin_generation();
+        assert!(second.is_err());
+        let err = second.err().expect("second generation must be rejected");
+        assert_eq!(err, ERR_GENERATION_IN_PROGRESS);
+    }
+
+    #[test]
+    fn permit_drop_clears_generation_state() {
+        let state = InferenceState::default();
+        {
+            let (_permit, _token) = state
+                .try_begin_generation()
+                .expect("generation should start");
+            assert!(state.generating.load(Ordering::SeqCst));
+            let active = state
+                .active_cancel
+                .lock()
+                .expect("active cancel mutex should not be poisoned");
+            assert!(active.is_some());
+        }
+
+        assert!(!state.generating.load(Ordering::SeqCst));
+        let active = state
+            .active_cancel
+            .lock()
+            .expect("active cancel mutex should not be poisoned");
+        assert!(active.is_none());
+    }
+
+    #[test]
+    fn cancellation_scopes_to_active_generation() {
+        let state = InferenceState::default();
+        let (_permit, cancel_token) = state
+            .try_begin_generation()
+            .expect("generation should start");
+        assert!(!cancel_token.load(Ordering::SeqCst));
+
+        let active_cancel = state
+            .active_cancel
+            .lock()
+            .expect("active cancel mutex should not be poisoned")
+            .clone()
+            .expect("active cancel token should be set");
+        active_cancel.store(true, Ordering::SeqCst);
+
+        assert!(cancel_token.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn no_active_generation_has_no_cancel_token() {
+        let state = InferenceState::default();
+        let active = state
+            .active_cancel
+            .lock()
+            .expect("active cancel mutex should not be poisoned");
+        assert!(active.is_none());
+    }
 }
