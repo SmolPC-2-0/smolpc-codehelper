@@ -1,13 +1,13 @@
 //! Pre-allocated input builder for efficient ONNX session input creation.
 //!
-//! This module eliminates per-token heap allocations by:
-//! 1. Pre-computing all input key names once at initialization
-//! 2. Pre-sizing the HashMap to avoid rehashing
-//! 3. Reusing the HashMap across decode steps via `clear()`
+//! This module reduces hot-path overhead by:
+//! 1. Pre-computing all input names and their model-order indices at initialization
+//! 2. Storing inputs in pre-allocated slots keyed by index (no per-step key cloning)
+//! 3. Reusing an ordered value vector for `session.run(&[...])`
 //!
 //! # Performance Impact
-//! - Before: ~58 String allocations + HashMap alloc per token
-//! - After: ~0 allocations per token (only Value tensor creation)
+//! - Before: per-step key cloning + HashMap ownership handoff
+//! - After: index-based writes + reusable ordered input buffer
 //!
 //! # Usage
 //! ```ignore
@@ -18,31 +18,36 @@
 //! builder.set_input_ids(input_ids_value);
 //! builder.set_attention_mask(attention_mask_value);
 //! for layer in 0..NUM_LAYERS {
-//!     builder.set_past_key(layer, key_value);
-//!     builder.set_past_value(layer, value_value);
+//!     builder.set_past_key(layer, key_value)?;
+//!     builder.set_past_value(layer, value_value)?;
 //! }
-//! let inputs = builder.take_inputs();
+//! let inputs = builder.ordered_inputs()?;
 //! session.run(inputs)?;
 //! ```
 
 use super::kv_cache::NUM_LAYERS;
 use ort::session::SessionInputValue;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Pre-allocated input builder for ONNX inference
 ///
-/// Holds pre-computed key strings and a reusable HashMap to avoid
-/// per-token allocations during the decode loop.
+/// Holds pre-computed key/index metadata and reusable input buffers to avoid
+/// per-token key handling overhead during the decode loop.
 pub struct InputBuilder {
-    // Pre-allocated key strings (created once)
-    input_ids_key: String,
-    attention_mask_key: String,
-    past_key_names: Vec<String>,
-    past_value_names: Vec<String>,
+    // Input names in model-declared order
+    model_input_names: Vec<String>,
 
-    // Pre-sized, reusable HashMap
-    // Capacity: 2 (input_ids, attention_mask) + 28*2 (KV cache) = 58
-    inputs: HashMap<String, SessionInputValue<'static>>,
+    // Pre-computed indices into model input order
+    input_ids_index: usize,
+    attention_mask_index: usize,
+    past_key_indices: Vec<usize>,
+    past_value_indices: Vec<usize>,
+
+    // Input storage by model input order
+    input_slots: Vec<Option<SessionInputValue<'static>>>,
+
+    // Reusable ordered values for session.run(&[...])
+    ordered_inputs: Vec<SessionInputValue<'static>>,
 }
 
 impl InputBuilder {
@@ -62,8 +67,13 @@ impl InputBuilder {
             .map(|i| format!("past_key_values.{}.value", i))
             .collect();
 
-        Self::with_names("input_ids", "attention_mask", past_key_names, past_value_names)
-            .expect("InputBuilder::new should always construct valid default names")
+        Self::with_names(
+            "input_ids",
+            "attention_mask",
+            past_key_names,
+            past_value_names,
+        )
+        .expect("InputBuilder::new should always construct valid default names")
     }
 
     /// Create an InputBuilder with explicit input/cache tensor names.
@@ -72,6 +82,31 @@ impl InputBuilder {
         attention_mask_key: impl Into<String>,
         past_key_names: Vec<String>,
         past_value_names: Vec<String>,
+    ) -> Result<Self, String> {
+        let input_ids_key = input_ids_key.into();
+        let attention_mask_key = attention_mask_key.into();
+        let mut model_input_names = Vec::with_capacity(2 + past_key_names.len() * 2);
+        model_input_names.push(input_ids_key.clone());
+        model_input_names.push(attention_mask_key.clone());
+        model_input_names.extend(past_key_names.iter().cloned());
+        model_input_names.extend(past_value_names.iter().cloned());
+
+        Self::with_names_and_input_order(
+            input_ids_key,
+            attention_mask_key,
+            past_key_names,
+            past_value_names,
+            model_input_names,
+        )
+    }
+
+    /// Create an InputBuilder with explicit input/cache tensor names and model input order.
+    pub fn with_names_and_input_order(
+        input_ids_key: impl Into<String>,
+        attention_mask_key: impl Into<String>,
+        past_key_names: Vec<String>,
+        past_value_names: Vec<String>,
+        model_input_names: Vec<String>,
     ) -> Result<Self, String> {
         let input_ids_key = input_ids_key.into();
         let attention_mask_key = attention_mask_key.into();
@@ -92,88 +127,198 @@ impl InputBuilder {
                 past_value_names.len()
             ));
         }
+        if model_input_names.is_empty() {
+            return Err("InputBuilder requires at least one model input name".to_string());
+        }
 
-        // Pre-size HashMap: 2 base inputs + N layers * 2 (key + value)
-        let capacity = 2 + past_key_names.len() * 2;
+        let mut required_names = Vec::with_capacity(2 + past_key_names.len() * 2);
+        required_names.push(input_ids_key.clone());
+        required_names.push(attention_mask_key.clone());
+        required_names.extend(past_key_names.iter().cloned());
+        required_names.extend(past_value_names.iter().cloned());
+
+        let mut seen_required = HashSet::with_capacity(required_names.len());
+        for name in &required_names {
+            if !seen_required.insert(name.as_str()) {
+                return Err(format!("Duplicate runtime input tensor name: '{name}'"));
+            }
+        }
+
+        if model_input_names.len() != required_names.len() {
+            return Err(format!(
+                "Model input count mismatch: runtime expects {}, model declares {}",
+                required_names.len(),
+                model_input_names.len()
+            ));
+        }
+
+        let mut model_index_by_name = HashMap::with_capacity(model_input_names.len());
+        for (index, name) in model_input_names.iter().enumerate() {
+            if name.trim().is_empty() {
+                return Err(format!("Model input name at index {index} is empty"));
+            }
+            if model_index_by_name.insert(name.clone(), index).is_some() {
+                return Err(format!("Duplicate model input tensor name: '{name}'"));
+            }
+        }
+
+        for name in &required_names {
+            if !model_index_by_name.contains_key(name) {
+                return Err(format!("Model is missing required input tensor '{name}'"));
+            }
+        }
+
+        for name in &model_input_names {
+            if !seen_required.contains(name.as_str()) {
+                return Err(format!(
+                    "Model input tensor '{name}' is not declared in runtime spec"
+                ));
+            }
+        }
+
+        let input_ids_index = *model_index_by_name
+            .get(input_ids_key.as_str())
+            .ok_or_else(|| format!("Model is missing required input tensor '{}'", input_ids_key))?;
+        let attention_mask_index = *model_index_by_name
+            .get(attention_mask_key.as_str())
+            .ok_or_else(|| {
+                format!(
+                    "Model is missing required input tensor '{}'",
+                    attention_mask_key
+                )
+            })?;
+
+        let past_key_indices = past_key_names
+            .iter()
+            .map(|name| {
+                model_index_by_name
+                    .get(name.as_str())
+                    .copied()
+                    .ok_or_else(|| format!("Model is missing required input tensor '{name}'"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let past_value_indices = past_value_names
+            .iter()
+            .map(|name| {
+                model_index_by_name
+                    .get(name.as_str())
+                    .copied()
+                    .ok_or_else(|| format!("Model is missing required input tensor '{name}'"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let capacity = model_input_names.len();
 
         Ok(Self {
-            input_ids_key,
-            attention_mask_key,
-            past_key_names,
-            past_value_names,
-            inputs: HashMap::with_capacity(capacity),
+            model_input_names,
+            input_ids_index,
+            attention_mask_index,
+            past_key_indices,
+            past_value_indices,
+            input_slots: (0..capacity).map(|_| None).collect(),
+            ordered_inputs: Vec::with_capacity(capacity),
         })
     }
 
-    /// Clear the inputs HashMap for reuse
+    fn resolve_layer_index(
+        indices: &[usize],
+        layer: usize,
+        tensor_kind: &str,
+    ) -> Result<usize, String> {
+        indices.get(layer).copied().ok_or_else(|| {
+            format!(
+                "Invalid {tensor_kind} layer index {layer}; configured layers: {}",
+                indices.len()
+            )
+        })
+    }
+
+    /// Clear input slots for reuse.
     ///
-    /// This keeps the allocated capacity, avoiding reallocation.
-    /// Must be called at the start of each decode step.
+    /// Must be called at the start of each prefill/decode step.
     #[inline]
     pub fn clear(&mut self) {
-        self.inputs.clear();
+        for slot in &mut self.input_slots {
+            *slot = None;
+        }
+        self.ordered_inputs.clear();
     }
 
     /// Set the input_ids tensor
     #[inline]
     pub fn set_input_ids(&mut self, value: SessionInputValue<'static>) {
-        self.inputs.insert(self.input_ids_key.clone(), value);
+        self.input_slots[self.input_ids_index] = Some(value);
     }
 
     /// Set the attention_mask tensor
     #[inline]
     pub fn set_attention_mask(&mut self, value: SessionInputValue<'static>) {
-        self.inputs.insert(self.attention_mask_key.clone(), value);
+        self.input_slots[self.attention_mask_index] = Some(value);
     }
 
     /// Set the past key cache for a specific layer
-    ///
-    /// # Panics
-    /// Panics if `layer` is out of bounds for the configured KV name set.
     #[inline]
-    pub fn set_past_key(&mut self, layer: usize, value: SessionInputValue<'static>) {
-        self.inputs
-            .insert(self.past_key_names[layer].clone(), value);
+    pub fn set_past_key(
+        &mut self,
+        layer: usize,
+        value: SessionInputValue<'static>,
+    ) -> Result<(), String> {
+        let index = Self::resolve_layer_index(&self.past_key_indices, layer, "past_key")?;
+        self.input_slots[index] = Some(value);
+        Ok(())
     }
 
     /// Set the past value cache for a specific layer
-    ///
-    /// # Panics
-    /// Panics if `layer` is out of bounds for the configured KV name set.
     #[inline]
-    pub fn set_past_value(&mut self, layer: usize, value: SessionInputValue<'static>) {
-        self.inputs
-            .insert(self.past_value_names[layer].clone(), value);
+    pub fn set_past_value(
+        &mut self,
+        layer: usize,
+        value: SessionInputValue<'static>,
+    ) -> Result<(), String> {
+        let index = Self::resolve_layer_index(&self.past_value_indices, layer, "past_value")?;
+        self.input_slots[index] = Some(value);
+        Ok(())
     }
 
-    /// Take ownership of the built inputs HashMap
+    /// Build ordered input values in model input order for `session.run(&[...])`.
     ///
-    /// Returns the HashMap and replaces it with a new pre-sized one.
-    /// This is needed because `session.run()` takes ownership.
-    ///
-    /// After calling this, the InputBuilder is ready for the next use
-    /// (no need to call `clear()`).
-    pub fn take_inputs(&mut self) -> HashMap<String, SessionInputValue<'static>> {
-        let capacity = 2 + self.past_key_names.len() * 2;
-        std::mem::replace(&mut self.inputs, HashMap::with_capacity(capacity))
+    /// Returns an error when any required input has not been set for this step.
+    pub fn ordered_inputs(&mut self) -> Result<&[SessionInputValue<'static>], String> {
+        self.ordered_inputs.clear();
+
+        for index in 0..self.input_slots.len() {
+            let value = self.input_slots[index].take().ok_or_else(|| {
+                format!(
+                    "Missing value for required model input '{}'",
+                    self.model_input_names[index]
+                )
+            })?;
+            self.ordered_inputs.push(value);
+        }
+
+        Ok(self.ordered_inputs.as_slice())
     }
 
     /// Get a reference to the inputs (for inspection/debugging)
     #[allow(dead_code)]
-    pub fn inputs(&self) -> &HashMap<String, SessionInputValue<'static>> {
-        &self.inputs
+    pub fn inputs(&self) -> &[Option<SessionInputValue<'static>>] {
+        self.input_slots.as_slice()
     }
 
-    /// Get the number of inputs currently set
+    /// Get the number of currently populated inputs
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
-        self.inputs.len()
+        self.input_slots
+            .iter()
+            .filter(|slot| slot.is_some())
+            .count()
     }
 
     /// Check if no inputs are set
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
-        self.inputs.is_empty()
+        self.len() == 0
     }
 }
 
@@ -191,17 +336,23 @@ mod tests {
     fn test_input_builder_creation() {
         let builder = InputBuilder::new();
 
-        // Verify pre-allocated key names
-        assert_eq!(builder.input_ids_key, "input_ids");
-        assert_eq!(builder.attention_mask_key, "attention_mask");
-        assert_eq!(builder.past_key_names.len(), NUM_LAYERS);
-        assert_eq!(builder.past_value_names.len(), NUM_LAYERS);
-
-        // Check a few key names
-        assert_eq!(builder.past_key_names[0], "past_key_values.0.key");
-        assert_eq!(builder.past_key_names[27], "past_key_values.27.key");
-        assert_eq!(builder.past_value_names[0], "past_key_values.0.value");
-        assert_eq!(builder.past_value_names[27], "past_key_values.27.value");
+        // Verify model-order names are precomputed correctly
+        assert_eq!(builder.model_input_names.len(), 2 + NUM_LAYERS * 2);
+        assert_eq!(builder.model_input_names[0], "input_ids");
+        assert_eq!(builder.model_input_names[1], "attention_mask");
+        assert_eq!(builder.model_input_names[2], "past_key_values.0.key");
+        assert_eq!(
+            builder.model_input_names[2 + NUM_LAYERS - 1],
+            "past_key_values.27.key"
+        );
+        assert_eq!(
+            builder.model_input_names[2 + NUM_LAYERS],
+            "past_key_values.0.value"
+        );
+        assert_eq!(
+            builder.model_input_names[2 + NUM_LAYERS * 2 - 1],
+            "past_key_values.27.value"
+        );
     }
 
     #[test]
@@ -218,9 +369,9 @@ mod tests {
     fn test_input_builder_capacity() {
         let builder = InputBuilder::new();
 
-        // Verify HashMap has correct pre-allocated capacity
-        // capacity() returns at least the requested capacity
-        assert!(builder.inputs.capacity() >= 2 + NUM_LAYERS * 2);
+        // Verify internal buffers have correct pre-allocated capacity
+        assert_eq!(builder.input_slots.len(), 2 + NUM_LAYERS * 2);
+        assert!(builder.ordered_inputs.capacity() >= 2 + NUM_LAYERS * 2);
     }
 
     #[test]
@@ -255,5 +406,60 @@ mod tests {
         .expect("mismatched KV counts should be rejected");
 
         assert!(err.contains("Mismatched KV name counts"));
+    }
+
+    #[test]
+    fn test_with_names_and_input_order_accepts_reordered_model_inputs() {
+        let key_names = vec!["past_key_values.0.key".to_string()];
+        let value_names = vec!["past_key_values.0.value".to_string()];
+        let model_input_order = vec![
+            "past_key_values.0.value".to_string(),
+            "input_ids".to_string(),
+            "past_key_values.0.key".to_string(),
+            "attention_mask".to_string(),
+        ];
+
+        let builder = InputBuilder::with_names_and_input_order(
+            "input_ids",
+            "attention_mask",
+            key_names,
+            value_names,
+            model_input_order,
+        )
+        .expect("reordered model input names should be accepted");
+
+        assert_eq!(builder.input_ids_index, 1);
+        assert_eq!(builder.attention_mask_index, 3);
+        assert_eq!(builder.past_key_indices, vec![2]);
+        assert_eq!(builder.past_value_indices, vec![0]);
+        assert_eq!(builder.input_slots.len(), 4);
+    }
+
+    #[test]
+    fn test_with_names_and_input_order_rejects_missing_required_input() {
+        let err = InputBuilder::with_names_and_input_order(
+            "input_ids",
+            "attention_mask",
+            vec!["past_key_values.0.key".to_string()],
+            vec!["past_key_values.0.value".to_string()],
+            vec![
+                "input_ids".to_string(),
+                "attention_mask".to_string(),
+                "past_key_values.0.key".to_string(),
+                "unexpected_input".to_string(),
+            ],
+        )
+        .err()
+        .expect("missing required input should be rejected");
+
+        assert!(err.contains("missing required input tensor"));
+    }
+
+    #[test]
+    fn test_resolve_layer_index_rejects_out_of_bounds() {
+        let err = InputBuilder::resolve_layer_index(&[0usize, 1usize], 2, "past_key")
+            .err()
+            .expect("out-of-bounds layer should return an error");
+        assert!(err.contains("Invalid past_key layer index"));
     }
 }
