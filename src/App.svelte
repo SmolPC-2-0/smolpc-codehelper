@@ -1,7 +1,5 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { invoke } from '@tauri-apps/api/core';
-	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
@@ -14,16 +12,15 @@
 	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
 	import { chatsStore } from '$lib/stores/chats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
-	import { ollamaStore } from '$lib/stores/ollama.svelte';
+	import { inferenceStore } from '$lib/stores/inference.svelte';
 	import { hardwareStore } from '$lib/stores/hardware.svelte';
 	import type { Message } from '$lib/types/chat';
-	import type { OllamaMessage } from '$lib/types/ollama';
+	import type { GenerationConfig } from '$lib/types/inference';
 	import { Menu, X } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 
 	// UI State
 	let isSidebarOpen = $state(true);
-	let isGenerating = $state(false);
 	let showQuickExamples = $state(true);
 	let messagesContainer: HTMLDivElement;
 	let inputAreaRef: HTMLDivElement;
@@ -96,25 +93,40 @@
 		}
 	}
 
-	// Build context from previous messages
-	function buildContext(): OllamaMessage[] {
-		if (!settingsStore.contextEnabled || !currentChat) {
-			return [];
+	const SYSTEM_PROMPT =
+		'You are a helpful coding assistant for students. ' +
+		'Give clear, concise explanations. ' +
+		'When showing code, use simple examples and add brief comments.';
+
+	// Build ChatML-formatted prompt for Qwen2.5-Coder
+	function buildChatMLPrompt(userMessage: string): string {
+		let prompt = `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>\n`;
+
+		// Include conversation history if context is enabled
+		if (settingsStore.contextEnabled && currentChat) {
+			// Exclude last 2 messages: the user msg + empty assistant placeholder
+			// we just added to the store before calling this function
+			const historyMessages = currentChat.messages.slice(0, -2);
+
+			for (const msg of historyMessages) {
+				const role = msg.role === 'user' ? 'user' : 'assistant';
+				prompt += `<|im_start|>${role}\n${msg.content}<|im_end|>\n`;
+			}
 		}
 
-		return currentChat.messages.map((msg) => ({
-			role: msg.role === 'user' ? 'user' : 'assistant',
-			content: msg.content
-		}));
+		// Add current user message and open assistant turn
+		prompt += `<|im_start|>user\n${userMessage}<|im_end|>\n<|im_start|>assistant\n`;
+
+		return prompt;
 	}
 
 	// Handle sending a message
 	async function handleSendMessage(content: string) {
-		if (!ollamaStore.isConnected || isGenerating) return;
+		if (!inferenceStore.isLoaded || inferenceStore.isGenerating) return;
 
 		// Create new chat if none exists or if this is first message after switching
 		if (!currentChat) {
-			chatsStore.createChat(settingsStore.selectedModel);
+			chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
 		}
 
 		if (!currentChat) return; // Safety check
@@ -147,28 +159,66 @@
 		chatsStore.addMessage(currentChat.id, assistantMessage);
 		scrollToBottom();
 
-		isGenerating = true;
 		cancelRequested = false; // Reset cancel flag
 		currentStreamingChatId = currentChat.id; // Track which chat is streaming
 		currentStreamingMessageId = assistantMessage.id; // Track which message is streaming
 
-		try {
-			// Build context from previous messages
-			const context = buildContext();
+		// Capture chat and message IDs for the callback closure
+		const chatId = currentChat.id;
+		const messageId = assistantMessage.id;
 
-			// Start streaming generation
-			await invoke('generate_stream', {
-				prompt: content,
-				model: settingsStore.selectedModel,
-				context: context.length > 0 ? context : null
+		try {
+			// Build prompt with context
+			const prompt = buildChatMLPrompt(content);
+
+			// Generation config using settings
+			const config: Partial<GenerationConfig> = {
+				max_length: 2048,
+				temperature: settingsStore.temperature,
+				top_k: 40,
+				top_p: 0.9,
+				repetition_penalty: 1.1,
+				repetition_penalty_last_n: 64
+			};
+
+			// Start streaming generation with callback
+			await inferenceStore.generateStream(
+				prompt,
+				(token: string) => {
+					// Only process tokens if not cancelled
+					if (cancelRequested) return;
+
+					// Find the streaming message and update it
+					const streamingChat = chatsStore.chats.find((c) => c.id === chatId);
+					if (!streamingChat) return;
+
+					const streamingMessage = streamingChat.messages.find((m) => m.id === messageId);
+					if (!streamingMessage || !streamingMessage.isStreaming) return;
+
+					// Update the message content
+					chatsStore.updateMessage(chatId, messageId, {
+						content: streamingMessage.content + token
+					});
+
+					// Only scroll if this is the currently displayed chat
+					if (currentChat?.id === chatId) {
+						scrollToBottom();
+					}
+				},
+				config
+			);
+
+			// Generation complete - mark message as done
+			chatsStore.updateMessage(chatId, messageId, {
+				isStreaming: false
 			});
 		} catch (error) {
 			console.error('Generation error:', error);
-			chatsStore.updateMessage(currentChat.id, assistantMessage.id, {
+			chatsStore.updateMessage(chatId, messageId, {
 				content: `Error: ${error}`,
 				isStreaming: false
 			});
-			isGenerating = false;
+		} finally {
 			currentStreamingChatId = null;
 			currentStreamingMessageId = null;
 		}
@@ -185,12 +235,10 @@
 
 		// Cancel the backend stream
 		try {
-			await invoke('cancel_generation');
+			await inferenceStore.cancel();
 		} catch (error) {
 			console.error('Failed to cancel generation:', error);
 		}
-
-		isGenerating = false;
 
 		// Mark the streaming message as no longer streaming
 		if (currentStreamingChatId && currentStreamingMessageId) {
@@ -227,11 +275,6 @@
 
 	// Setup event listeners and initialization
 	onMount(() => {
-		let unlistenChunk: UnlistenFn;
-		let unlistenDone: UnlistenFn;
-		let unlistenError: UnlistenFn;
-		let unlistenCancelled: UnlistenFn;
-
 		// Calculate initial offset
 		calculateBottomOffset();
 
@@ -242,95 +285,34 @@
 			window.visualViewport.addEventListener('resize', handleResize);
 		}
 
-		async function setupListeners() {
-			// Listen for streaming chunks
-			unlistenChunk = await listen<string>('ollama_chunk', (event) => {
-				// Only process chunks if we're streaming
-				if (!currentStreamingChatId || !currentStreamingMessageId || cancelRequested) {
-					return;
-				}
+		// Initialize ONNX inference
+		async function initInference() {
+			// List available models
+			await inferenceStore.listModels();
 
-				// Find the streaming chat and message
-				const streamingChat = chatsStore.chats.find((c) => c.id === currentStreamingChatId);
-				if (!streamingChat) return;
-
-				const streamingMessage = streamingChat.messages.find((m) => m.id === currentStreamingMessageId);
-				if (!streamingMessage || streamingMessage.role !== 'assistant' || !streamingMessage.isStreaming) {
-					return;
-				}
-
-				// Update the message content
-				chatsStore.updateMessage(currentStreamingChatId, currentStreamingMessageId, {
-					content: streamingMessage.content + event.payload
-				});
-
-				// Only scroll if this is the currently displayed chat
-				if (currentChat?.id === currentStreamingChatId) {
-					scrollToBottom();
-				}
-			});
-
-			// Listen for generation complete
-			unlistenDone = await listen('ollama_done', () => {
-				if (!currentStreamingChatId || !currentStreamingMessageId) return;
-
-				// Mark the streaming message as complete
-				chatsStore.updateMessage(currentStreamingChatId, currentStreamingMessageId, {
-					isStreaming: false
-				});
-
-				isGenerating = false;
-				currentStreamingChatId = null;
-				currentStreamingMessageId = null;
-			});
-
-			// Listen for cancellation
-			unlistenCancelled = await listen('ollama_cancelled', () => {
-				isGenerating = false;
-				currentStreamingChatId = null;
-				currentStreamingMessageId = null;
-			});
-
-			// Listen for errors
-			unlistenError = await listen<string>('ollama_error', (event) => {
-				if (!currentStreamingChatId || !currentStreamingMessageId) return;
-
-				// Update the streaming message with error
-				chatsStore.updateMessage(currentStreamingChatId, currentStreamingMessageId, {
-					content: `Error: ${event.payload}`,
-					isStreaming: false
-				});
-
-				isGenerating = false;
-				currentStreamingChatId = null;
-				currentStreamingMessageId = null;
-			});
+			// Auto-load first model if available and none loaded
+			if (!inferenceStore.isLoaded && inferenceStore.availableModels.length > 0) {
+				const firstModel = inferenceStore.availableModels[0];
+				console.log('Auto-loading model:', firstModel.id);
+				await inferenceStore.loadModel(firstModel.id);
+			}
 		}
 
-		// Initial Ollama check
-		ollamaStore.checkConnection();
+		initInference();
 
 		// Load cached hardware info
 		hardwareStore.getCached();
 
-		// Setup event listeners and track cleanup
-		const cleanupPromise = setupListeners();
-
 		// Create initial chat if none exists
 		if (hasNoChats) {
-			chatsStore.createChat(settingsStore.selectedModel);
+			chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
 		}
 
 		// Add keyboard event listener
 		window.addEventListener('keydown', handleKeyDown);
 
-		// Cleanup - wait for setup to complete before cleaning up
-		return async () => {
-			await cleanupPromise;
-			if (unlistenChunk) unlistenChunk();
-			if (unlistenDone) unlistenDone();
-			if (unlistenError) unlistenError();
-			if (unlistenCancelled) unlistenCancelled();
+		// Cleanup
+		return () => {
 			window.removeEventListener('keydown', handleKeyDown);
 			window.removeEventListener('resize', handleResize);
 			if (window.visualViewport) {
@@ -382,7 +364,7 @@
 
 			<div class="flex items-center gap-3">
 				<HardwareIndicator onclick={() => (showHardwarePanel = !showHardwarePanel)} />
-				<StatusIndicator status={ollamaStore.status} />
+				<StatusIndicator status={inferenceStore.status} />
 			</div>
 		</header>
 
@@ -445,7 +427,7 @@
 			style="bottom: {bottomOffset}px"
 		>
 			<div class="mx-auto max-w-4xl">
-				{#if isGenerating}
+				{#if inferenceStore.isGenerating}
 					<div class="mb-3 flex items-center justify-center">
 						<Button
 							type="button"
@@ -460,10 +442,12 @@
 				{/if}
 				<ChatInput
 					onSend={handleSendMessage}
-					disabled={!ollamaStore.isConnected || isGenerating}
-					placeholder={isGenerating
+					disabled={!inferenceStore.isLoaded || inferenceStore.isGenerating}
+					placeholder={inferenceStore.isGenerating
 						? 'Generating response...'
-						: 'Ask a coding question (Shift+Enter for new line)...'}
+						: !inferenceStore.isLoaded
+							? 'Loading model...'
+							: 'Ask a coding question (Shift+Enter for new line)...'}
 				/>
 			</div>
 		</div>
