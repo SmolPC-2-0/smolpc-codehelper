@@ -19,13 +19,15 @@ Notes:
 - Added focused unit tests for validation helpers
 
 2. Issue: Model runtime spec and architecture contract (1.5B-first)
-Status: In progress
+Status: Completed in child branch
 Branch: `fix/inference-runtime-spec-per-model`
-Planned outcomes:
-- Introduce model runtime spec for inference/model contract
-- Keep code modular for future model variants
-- Remove 7B model from list until supported
-- Fail fast on unsupported model runtime specs
+PR: https://github.com/SmolPC-2-0/smolpc-codehelper/pull/27
+Notes:
+- Added runtime spec abstraction (`ModelRuntimeSpec`) for model architecture + I/O naming + stop tokens
+- Integrated runtime spec validation into model load path
+- Updated generator/input builder to be runtime-spec-driven
+- Removed 7B from visible model list until supported
+- Added guardrail tests for 1.5B-only registry/runtime mapping
 
 3. Issue: Single-flight generation and cancellation scoping
 Status: Pending
