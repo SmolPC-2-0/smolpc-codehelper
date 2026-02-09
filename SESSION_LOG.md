@@ -4,6 +4,51 @@ This file tracks progress across Claude Code sessions for SmolPC Code Helper.
 
 ---
 
+## 2026-02-09 (Session 5) - Stop Token Fix + ChatML + Repetition Penalty
+
+**Focus**: Fix runaway generation (model producing self-Q&A training data patterns)
+
+**Branch**: `fix/stop-token-chatml` (PR → `feature/ort_setup`)
+
+**Completed**:
+- Diagnosed root cause: two bugs working together
+  1. Only checked `<|im_end|>` (151645) stop token, but model generates `<|endoftext|>` (151643) without ChatML
+  2. Raw text prompts caused model to fall into pretraining-data patterns
+- Fixed tokenizer: `eos_token_id: u32` → `stop_token_ids: Vec<u32>` with both 151643 and 151645
+- Added `is_stop_token(token_id)` method replacing `eos_token_id()` getter
+- Updated generator stop checks (prefill + decode loop) to use `is_stop_token()`
+- Changed `encode(prompt, true)` → `encode(prompt, false)` (ChatML tokens already in prompt)
+- Replaced `buildContextPrompt()` with `buildChatMLPrompt()` using proper ChatML template
+- Fixed message duplication bug (`slice(0, -2)` excludes just-added messages)
+- Added repetition penalty (sign-aware, configurable window) to generation pipeline
+- Synced `repetition_penalty` fields across Rust types, TS types, and inference store
+- Fixed KV cache `dead_code` warnings with `#[allow(dead_code)]` + doc notes
+- All checks pass: `cargo check`, `cargo clippy`, `cargo test`, `npm run check`
+
+**Key Discoveries**:
+- Qwen2.5-Coder special tokens: 151643 (`<|endoftext|>`), 151644 (`<|im_start|>`), 151645 (`<|im_end|>`)
+- Without ChatML, model never generates `<|im_end|>` — only `<|endoftext|>` which passed through as literal text
+- `buildContextPrompt()` was called AFTER adding user message to store, causing duplication
+
+**Files Changed**:
+- `src-tauri/src/inference/tokenizer.rs` (stop token set)
+- `src-tauri/src/inference/generator.rs` (is_stop_token, encode false, repetition penalty)
+- `src-tauri/src/inference/types.rs` (repetition_penalty fields)
+- `src-tauri/src/inference/kv_cache.rs` (dead_code fixes)
+- `src-tauri/src/inference/benchmark.rs` (Default::default fixes)
+- `src/App.svelte` (ChatML template, config)
+- `src/lib/types/inference.ts` (repetition_penalty fields)
+- `src/lib/stores/inference.svelte.ts` (repetition_penalty passthrough)
+
+**Next Session**:
+1. Merge `fix/stop-token-chatml` PR
+2. Verify on Windows with model loaded — test clean stop, no self-Q&A
+3. Begin Phase 2: Execution Provider abstraction
+
+**Blockers**: Must verify on Windows with model loaded
+
+---
+
 ## 2026-02-07 (Session 4) - ONNX Runtime Bundling + Code Review Fixes
 
 **Focus**: Bundle ONNX Runtime into app, comprehensive code review, fix 4 issues

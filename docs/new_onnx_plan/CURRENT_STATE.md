@@ -1,7 +1,7 @@
 # ONNX Migration - Current State
 
-**Last Updated:** February 2026
-**Branch:** `feature/ort_setup` (PR #24 pending merge from `fix/channel-migration`)
+**Last Updated:** 2026-02-09
+**Branch:** `feature/ort_setup` (PR `fix/stop-token-chatml` pending)
 **Phase:** 1.5 Complete (Frontend Integration) + ONNX Runtime Bundling
 
 ---
@@ -13,6 +13,9 @@ Phase 1.5 is complete. The ONNX Runtime inference is now integrated with the cha
 - Streaming tokens display in real-time in chat messages
 - KV Cache with Attention Sinks for efficient long-context inference
 - ~8 tok/s performance on CPU
+- ChatML prompt template (system + multi-turn history + assistant opener)
+- Multi-stop-token detection (`<|endoftext|>` + `<|im_end|>`)
+- Repetition penalty (sign-aware, configurable window)
 - Ollama dependency removed from chat flow (still available as fallback)
 
 ---
@@ -25,8 +28,8 @@ Phase 1.5 is complete. The ONNX Runtime inference is now integrated with the cha
 |-----------|------|--------|
 | ONNX Runtime init | `src/inference/mod.rs` | ✅ `init_onnx_runtime()` with OnceLock + 5-location dylib search |
 | Session wrapper | `src/inference/session.rs` | ✅ `InferenceSession` wraps `ort::Session` |
-| Tokenizer | `src/inference/tokenizer.rs` | ✅ `TokenizerWrapper` with encode/decode |
-| Generator | `src/inference/generator.rs` | ✅ Autoregressive loop with KV cache and sampling |
+| Tokenizer | `src/inference/tokenizer.rs` | ✅ `TokenizerWrapper` with encode/decode + multi-stop-token detection |
+| Generator | `src/inference/generator.rs` | ✅ Autoregressive loop with KV cache, sampling, and repetition penalty |
 | KV Cache | `src/inference/kv_cache.rs` | ✅ Pre-allocated buffer with Attention Sinks |
 | Types | `src/inference/types.rs` | ✅ `GenerationResult`, `GenerationConfig`, etc. |
 | Model registry | `src/models/registry.rs` | ✅ Hardcoded model definitions |
@@ -41,7 +44,7 @@ Phase 1.5 is complete. The ONNX Runtime inference is now integrated with the cha
 |-----------|------|--------|
 | Types | `src/lib/types/inference.ts` | ✅ Matches Rust types |
 | Store | `src/lib/stores/inference.svelte.ts` | ✅ Full store with streaming, cancel, model loading |
-| Chat Integration | `src/App.svelte` | ✅ Uses ONNX inference for chat messages |
+| Chat Integration | `src/App.svelte` | ✅ Uses ONNX inference with ChatML prompt template |
 | Model Selector | `src/lib/components/ModelSelector.svelte` | ✅ Lists/loads ONNX models |
 | Status Indicator | `src/lib/components/StatusIndicator.svelte` | ✅ Shows model load status |
 

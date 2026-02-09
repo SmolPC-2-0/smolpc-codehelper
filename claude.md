@@ -2,7 +2,7 @@
 
 This file guides Claude Code sessions working on SmolPC Code Helper.
 
-**Last Updated:** 2026-02-07
+**Last Updated:** 2026-02-09
 **Current Phase:** 1.5 Complete (Frontend Integration) → Phase 2 (GPU/NPU Acceleration)
 **Branch:** `feature/ort_setup`
 
@@ -25,9 +25,9 @@ This file guides Claude Code sessions working on SmolPC Code Helper.
 _Updated at end of each session. Provides immediate context without reading external files._
 
 **Phase**: 1.5 Complete → Phase 2 (GPU/NPU Acceleration)
-**Branch**: `feature/ort_setup`
-**Last Session**: 2026-02-07 (Session 4) - ONNX Runtime bundling + code review fixes
-**PR**: #24 (`fix/channel-migration` → `feature/ort_setup`) — ready to merge
+**Branch**: `feature/ort_setup` (PRs: #24 merged, `fix/stop-token-chatml` pending)
+**Last Session**: 2026-02-09 (Session 5) - Stop token fix + ChatML + repetition penalty
+**PR**: `fix/stop-token-chatml` → `feature/ort_setup`
 
 **What's Working**:
 
@@ -36,12 +36,14 @@ _Updated at end of each session. Provides immediate context without reading exte
 - Streaming generation via Tauri Channels (race condition fixed)
 - Frontend integrated (chat UI uses ONNX, not Ollama)
 - ONNX Runtime bundled via Tauri resources (cross-platform)
-- Setup script: `scripts/setup-libs.sh` downloads ONNX Runtime per platform
+- ChatML prompt template (system + multi-turn history + assistant opener)
+- Multi-stop-token detection (`<|endoftext|>` + `<|im_end|>`)
+- Repetition penalty (sign-aware, configurable window)
 - OnceLock for init error propagation, AtomicBool for is_generating
 
 **Next Up**:
 
-1. Merge PR #24, verify everything works on Windows with model loaded
+1. Merge `fix/stop-token-chatml` PR, verify on Windows with model loaded
 2. Phase 2: Execution Provider abstraction (trait-based)
 3. Intel NPU detection + OpenVINO EP
 4. NVIDIA GPU detection + CUDA EP
@@ -364,6 +366,9 @@ Corrections and patterns discovered during development. Categorized for easy ref
 
 - **ONNX Runtime version split**: v1.22.1 only ships Windows builds. Use v1.22.0 for macOS/Linux.
 - **Tauri `resources` glob must match files**: `bundle.resources: ["libs/*"]` fails at compile time if no files match. Use a README.md as glob satisfier with `.gitignore` exception.
+- **Qwen2.5 has TWO stop tokens**: `<|endoftext|>` (151643) for raw completion EOS and `<|im_end|>` (151645) for ChatML turn end. Without ChatML the model only emits 151643, so you must check both.
+- **ChatML is mandatory for chat behavior**: Without `<|im_start|>system/user/assistant<|im_end|>` formatting, Qwen falls into pretraining-data completion patterns (self-Q&A, training data regurgitation).
+- **Set `add_special_tokens: false` when embedding special tokens in prompt**: If the prompt already contains ChatML tokens, don't let the tokenizer add its own — they'd be duplicated or wrong.
 
 ### Workflow
 
@@ -378,6 +383,8 @@ Corrections and patterns discovered during development. Categorized for easy ref
 3. **Using `@apply`** - Tailwind 4 doesn't support it
 4. **Using Events for streaming** - Use Tauri Channels instead; they auto-cleanup and prevent race conditions
 5. **Blocking the main thread** - All inference is async with Tokio
+6. **Sending raw prompts without ChatML** - Model will generate pretraining patterns, not chat responses
+7. **Only checking one stop token** - Qwen uses different EOS tokens depending on prompt format
 
 ---
 
