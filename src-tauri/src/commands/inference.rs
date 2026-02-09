@@ -54,6 +54,11 @@ pub async fn load_model(
     // Validate model exists in registry
     let model_def = ModelRegistry::get_model(&model_id)
         .ok_or_else(|| format!("Unknown model ID: {}", model_id))?;
+    let runtime_spec = ModelRegistry::runtime_spec(&model_id)
+        .ok_or_else(|| format!("Runtime spec not implemented for model ID: {}", model_id))?;
+    runtime_spec
+        .validate()
+        .map_err(|e| format!("Invalid runtime spec for '{}': {}", model_id, e))?;
 
     log::info!("Model definition: {} ({})", model_def.name, model_def.size);
 
@@ -75,11 +80,12 @@ pub async fn load_model(
     log::info!("Session loaded - Outputs: {:?}", session_info.outputs);
 
     // Load tokenizer
-    let tokenizer = TokenizerWrapper::from_file(&tokenizer_path)?;
+    let tokenizer =
+        TokenizerWrapper::from_file_with_stop_tokens(&tokenizer_path, runtime_spec.stop_token_ids)?;
     log::info!("Tokenizer loaded - Vocab size: {}", tokenizer.vocab_size());
 
     // Create generator
-    let generator = Generator::new(session, tokenizer);
+    let generator = Generator::new(session, tokenizer, runtime_spec)?;
 
     // Store in state
     let mut gen_state = state.generator.lock().await;

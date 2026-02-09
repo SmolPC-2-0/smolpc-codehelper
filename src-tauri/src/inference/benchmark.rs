@@ -11,11 +11,9 @@ use super::session::InferenceSession;
 use super::tokenizer::TokenizerWrapper;
 use super::types::GenerationConfig;
 use super::Generator;
-use ndarray::{Array2, Array4};
-use ort::session::SessionInputValue;
-use ort::value::Value;
+use ndarray::Array4;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -129,6 +127,12 @@ pub fn bench_decode_overhead(cache: &KVCache) -> Duration {
 mod tests {
     use super::*;
     use crate::inference::init_onnx_runtime;
+    use crate::models::ModelRegistry;
+
+    fn runtime_spec() -> crate::models::ModelRuntimeSpec {
+        ModelRegistry::runtime_spec("qwen2.5-coder-1.5b")
+            .expect("Missing runtime spec for qwen2.5-coder-1.5b")
+    }
 
     /// Benchmark pure KV cache operations (no model needed)
     #[test]
@@ -214,7 +218,8 @@ mod tests {
         let session = InferenceSession::new(model_path).expect("Failed to load model");
         let tokenizer = TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
-        let generator = Generator::with_context(session, tokenizer, 2048, 4);
+        let generator = Generator::with_context(session, tokenizer, runtime_spec(), 2048, 4)
+            .expect("Failed to create generator");
         let cancelled = Arc::new(AtomicBool::new(false));
 
         // Test prompts of varying lengths
@@ -235,7 +240,6 @@ mod tests {
 
             let prompt_tokens = generator.tokenizer().encode(prompt, true).unwrap().len();
 
-            let start = Instant::now();
             let mut token_count = 0;
             let decode_start: Arc<std::sync::Mutex<Option<Instant>>> = Arc::new(std::sync::Mutex::new(None));
             let decode_start_clone = decode_start.clone();
@@ -253,7 +257,6 @@ mod tests {
                 }
             ).await.expect("Generation failed");
 
-            let total_time = start.elapsed();
             let decode_time = decode_start.lock().unwrap()
                 .map(|s| Instant::now().duration_since(s))
                 .unwrap_or(Duration::ZERO);
@@ -298,7 +301,9 @@ mod tests {
             let session = InferenceSession::new(model_path).expect("Failed to load model");
             let tokenizer = TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
-            let generator = Generator::with_context(session, tokenizer, ctx_size, 4);
+            let generator =
+                Generator::with_context(session, tokenizer, runtime_spec(), ctx_size, 4)
+                    .expect("Failed to create generator");
             let cancelled = Arc::new(AtomicBool::new(false));
 
             let config = GenerationConfig {
@@ -340,7 +345,8 @@ mod tests {
         let session = InferenceSession::new(model_path).expect("Failed to load model");
         let tokenizer = TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
-        let generator = Generator::with_context(session, tokenizer, 512, 4);
+        let generator = Generator::with_context(session, tokenizer, runtime_spec(), 512, 4)
+            .expect("Failed to create generator");
         let cancelled = Arc::new(AtomicBool::new(false));
 
         // Generate tokens and track per-token timing

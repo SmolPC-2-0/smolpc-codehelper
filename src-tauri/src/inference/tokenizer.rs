@@ -23,11 +23,18 @@ impl TokenizerWrapper {
     /// - 151644: `<|im_start|>` — ChatML turn start
     /// - 151645: `<|im_end|>` — ChatML turn end
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
+        // Default stop tokens for Qwen2.5-Coder
+        Self::from_file_with_stop_tokens(path, &[151643, 151645])
+    }
+
+    /// Load tokenizer from tokenizer.json with explicit stop token IDs
+    pub fn from_file_with_stop_tokens<P: AsRef<Path>>(
+        path: P,
+        stop_token_ids: &[u32],
+    ) -> Result<Self, String> {
         let tokenizer = Tokenizer::from_file(path)
             .map_err(|e| format!("Failed to load tokenizer: {e}"))?;
-
-        // Qwen2.5-Coder stop tokens: both <|endoftext|> and <|im_end|>
-        let stop_token_ids = vec![151643, 151645];
+        let stop_token_ids = stop_token_ids.to_vec();
 
         log::info!("Tokenizer loaded successfully");
         log::debug!("Stop token IDs: {:?}", stop_token_ids);

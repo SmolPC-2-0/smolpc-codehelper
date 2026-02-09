@@ -22,6 +22,7 @@ use super::kv_cache::{KVCache, HEAD_DIM, NUM_KV_HEADS, NUM_LAYERS};
 use super::session::InferenceSession;
 use super::tokenizer::TokenizerWrapper;
 use super::types::{GenerationConfig, GenerationMetrics, GenerationResult};
+use crate::models::ModelRuntimeSpec;
 use ndarray::{Array1, Array2, ArrayView1};
 use ort::session::SessionInputValue;
 use ort::value::Value;
@@ -40,25 +41,53 @@ const DEFAULT_SINK_SIZE: usize = 4;
 pub struct Generator {
     session: Arc<Mutex<InferenceSession>>,
     tokenizer: Arc<TokenizerWrapper>,
+    runtime_spec: ModelRuntimeSpec,
     config: GenerationConfig,
     max_context: usize,
     sink_size: usize,
 }
 
 impl Generator {
+    fn validate_runtime_spec_compatibility(runtime_spec: ModelRuntimeSpec) -> Result<(), String> {
+        runtime_spec.validate()?;
+
+        if runtime_spec.architecture.num_layers != NUM_LAYERS
+            || runtime_spec.architecture.num_kv_heads != NUM_KV_HEADS
+            || runtime_spec.architecture.head_dim != HEAD_DIM
+        {
+            return Err(format!(
+                "Runtime spec for '{}' is not supported by current inference core. \
+                 Expected layers={}, kv_heads={}, head_dim={}, got layers={}, kv_heads={}, head_dim={}",
+                runtime_spec.model_id,
+                NUM_LAYERS,
+                NUM_KV_HEADS,
+                HEAD_DIM,
+                runtime_spec.architecture.num_layers,
+                runtime_spec.architecture.num_kv_heads,
+                runtime_spec.architecture.head_dim
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Create a new generator
     ///
     /// # Arguments
     /// * `session` - ONNX Runtime session (wrapped for thread safety)
     /// * `tokenizer` - Tokenizer for text conversion
-    pub fn new(session: InferenceSession, tokenizer: TokenizerWrapper) -> Self {
-        Self {
-            session: Arc::new(Mutex::new(session)),
-            tokenizer: Arc::new(tokenizer),
-            config: GenerationConfig::default(),
-            max_context: DEFAULT_MAX_CONTEXT,
-            sink_size: DEFAULT_SINK_SIZE,
-        }
+    pub fn new(
+        session: InferenceSession,
+        tokenizer: TokenizerWrapper,
+        runtime_spec: ModelRuntimeSpec,
+    ) -> Result<Self, String> {
+        Self::with_context(
+            session,
+            tokenizer,
+            runtime_spec,
+            DEFAULT_MAX_CONTEXT,
+            DEFAULT_SINK_SIZE,
+        )
     }
 
     /// Create a new generator with custom context settings
@@ -71,16 +100,20 @@ impl Generator {
     pub fn with_context(
         session: InferenceSession,
         tokenizer: TokenizerWrapper,
+        runtime_spec: ModelRuntimeSpec,
         max_context: usize,
         sink_size: usize,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, String> {
+        Self::validate_runtime_spec_compatibility(runtime_spec)?;
+
+        Ok(Self {
             session: Arc::new(Mutex::new(session)),
             tokenizer: Arc::new(tokenizer),
+            runtime_spec,
             config: GenerationConfig::default(),
             max_context,
             sink_size,
-        }
+        })
     }
 
     /// Generate text from prompt (non-streaming, for backward compatibility)
@@ -127,13 +160,13 @@ impl Generator {
         F: FnMut(String),
     {
         let start = Instant::now();
-        let mut first_token_time = None;
 
         // Use provided config or default
         let gen_config = config.unwrap_or(self.config.clone());
 
         log::info!(
-            "Starting streaming generation with KV cache (max_context: {}, sink_size: {})",
+            "Starting streaming generation with KV cache (model: {}, max_context: {}, sink_size: {})",
+            self.runtime_spec.model_id,
             self.max_context,
             self.sink_size
         );
@@ -148,7 +181,12 @@ impl Generator {
 
         // 2. Create KV cache and pre-allocated input builder
         let mut kv_cache = KVCache::new(self.max_context, self.sink_size);
-        let mut input_builder = InputBuilder::new();
+        let mut input_builder = InputBuilder::with_names(
+            self.runtime_spec.io.input_ids,
+            self.runtime_spec.io.attention_mask,
+            self.runtime_spec.past_key_names(),
+            self.runtime_spec.past_value_names(),
+        )?;
 
         // 3. Prefill phase: Process entire prompt, build initial KV cache
         log::debug!("Starting prefill phase...");
@@ -170,15 +208,15 @@ impl Generator {
             self.sample(first_logits.view(), &gen_config, &generated_ids[prompt_length..])?;
 
         // Record time to first token
-        first_token_time = Some(start.elapsed());
-        log::debug!("Time to first token: {:?}", first_token_time.unwrap());
+        let first_token_time = start.elapsed();
+        log::debug!("Time to first token: {:?}", first_token_time);
 
         // Check if first token is a stop token
         if self.tokenizer.is_stop_token(next_token) {
             log::info!("Stop token generated immediately (token ID: {})", next_token);
             return Ok(GenerationMetrics {
                 total_tokens: 0,
-                time_to_first_token_ms: first_token_time.map(|d| d.as_millis() as u64),
+                time_to_first_token_ms: Some(first_token_time.as_millis() as u64),
                 tokens_per_second: 0.0,
                 total_time_ms: start.elapsed().as_millis() as u64,
             });
@@ -254,7 +292,7 @@ impl Generator {
 
         Ok(GenerationMetrics {
             total_tokens: tokens_generated,
-            time_to_first_token_ms: first_token_time.map(|d| d.as_millis() as u64),
+            time_to_first_token_ms: Some(first_token_time.as_millis() as u64),
             tokens_per_second: tokens_per_sec,
             total_time_ms: total_time.as_millis() as u64,
         })
@@ -299,8 +337,13 @@ impl Generator {
         ));
 
         // Empty KV cache for prefill (shape: [1, num_kv_heads, 0, head_dim])
-        for layer in 0..NUM_LAYERS {
-            let empty_cache = ndarray::Array4::<f32>::zeros((1, NUM_KV_HEADS, 0, HEAD_DIM));
+        for layer in 0..self.runtime_spec.architecture.num_layers {
+            let empty_cache = ndarray::Array4::<f32>::zeros((
+                1,
+                self.runtime_spec.architecture.num_kv_heads,
+                0,
+                self.runtime_spec.architecture.head_dim,
+            ));
 
             input_builder.set_past_key(
                 layer,
@@ -331,7 +374,7 @@ impl Generator {
             .map_err(|e| format!("Prefill inference failed: {e}"))?;
 
         // Extract logits for last position
-        let (logits_shape, logits_data) = outputs["logits"]
+        let (logits_shape, logits_data) = outputs[self.runtime_spec.io.logits]
             .try_extract_tensor::<f32>()
             .map_err(|e| format!("Failed to extract logits: {e}"))?;
 
@@ -388,7 +431,7 @@ impl Generator {
         ));
 
         // Add KV cache from previous steps using pre-allocated key names
-        for layer in 0..NUM_LAYERS {
+        for layer in 0..self.runtime_spec.architecture.num_layers {
             let key_cache = kv_cache.get_key_array(layer);
             let value_cache = kv_cache.get_value_array(layer);
 
@@ -421,7 +464,7 @@ impl Generator {
             .map_err(|e| format!("Decode inference failed: {e}"))?;
 
         // Extract logits (shape: [1, 1, vocab_size])
-        let (logits_shape, logits_data) = outputs["logits"]
+        let (logits_shape, logits_data) = outputs[self.runtime_spec.io.logits]
             .try_extract_tensor::<f32>()
             .map_err(|e| format!("Failed to extract logits: {e}"))?;
 
@@ -448,14 +491,17 @@ impl Generator {
         // Extract all tokens' KV embeddings
         // present.*.key has shape [batch=1, heads, seq_len, head_dim]
         // We need to flatten to [num_tokens, NUM_LAYERS, NUM_KV_HEADS, HEAD_DIM]
+        let num_layers = self.runtime_spec.architecture.num_layers;
+        let num_kv_heads = self.runtime_spec.architecture.num_kv_heads;
+        let head_dim = self.runtime_spec.architecture.head_dim;
 
-        let token_kv_size = NUM_LAYERS * NUM_KV_HEADS * HEAD_DIM;
+        let token_kv_size = num_layers * num_kv_heads * head_dim;
         let mut all_keys = vec![0.0f32; num_tokens * token_kv_size];
         let mut all_values = vec![0.0f32; num_tokens * token_kv_size];
 
-        for layer in 0..NUM_LAYERS {
-            let key_name = format!("present.{}.key", layer);
-            let value_name = format!("present.{}.value", layer);
+        for layer in 0..num_layers {
+            let key_name = self.runtime_spec.present_key_name(layer);
+            let value_name = self.runtime_spec.present_value_name(layer);
 
             let (_key_shape, key_data) = outputs[key_name.as_str()]
                 .try_extract_tensor::<f32>()
@@ -468,16 +514,16 @@ impl Generator {
             // Copy data for each token position
             // present shape: [1, NUM_KV_HEADS, seq_len, HEAD_DIM]
             for pos in 0..num_tokens {
-                for head in 0..NUM_KV_HEADS {
-                    let src_offset = head * num_tokens * HEAD_DIM + pos * HEAD_DIM;
+                for head in 0..num_kv_heads {
+                    let src_offset = head * num_tokens * head_dim + pos * head_dim;
                     let dst_offset = pos * token_kv_size
-                        + layer * NUM_KV_HEADS * HEAD_DIM
-                        + head * HEAD_DIM;
+                        + layer * num_kv_heads * head_dim
+                        + head * head_dim;
 
-                    all_keys[dst_offset..dst_offset + HEAD_DIM]
-                        .copy_from_slice(&key_data[src_offset..src_offset + HEAD_DIM]);
-                    all_values[dst_offset..dst_offset + HEAD_DIM]
-                        .copy_from_slice(&value_data[src_offset..src_offset + HEAD_DIM]);
+                    all_keys[dst_offset..dst_offset + head_dim]
+                        .copy_from_slice(&key_data[src_offset..src_offset + head_dim]);
+                    all_values[dst_offset..dst_offset + head_dim]
+                        .copy_from_slice(&value_data[src_offset..src_offset + head_dim]);
                 }
             }
         }
@@ -496,14 +542,17 @@ impl Generator {
     ) -> Result<(), String> {
         // present.*.key has shape [batch=1, heads, past_len+1, head_dim]
         // We only need the last position (the new token)
+        let num_layers = self.runtime_spec.architecture.num_layers;
+        let num_kv_heads = self.runtime_spec.architecture.num_kv_heads;
+        let head_dim = self.runtime_spec.architecture.head_dim;
 
-        let embedding_size = NUM_KV_HEADS * HEAD_DIM;
-        let mut new_keys = vec![0.0f32; NUM_LAYERS * embedding_size];
-        let mut new_values = vec![0.0f32; NUM_LAYERS * embedding_size];
+        let embedding_size = num_kv_heads * head_dim;
+        let mut new_keys = vec![0.0f32; num_layers * embedding_size];
+        let mut new_values = vec![0.0f32; num_layers * embedding_size];
 
-        for layer in 0..NUM_LAYERS {
-            let key_name = format!("present.{}.key", layer);
-            let value_name = format!("present.{}.value", layer);
+        for layer in 0..num_layers {
+            let key_name = self.runtime_spec.present_key_name(layer);
+            let value_name = self.runtime_spec.present_value_name(layer);
 
             let (key_shape, key_data) = outputs[key_name.as_str()]
                 .try_extract_tensor::<f32>()
@@ -518,14 +567,14 @@ impl Generator {
             let last_pos = total_seq_len - 1;
 
             // Extract last token's KV for all heads
-            for head in 0..NUM_KV_HEADS {
-                let src_offset = head * total_seq_len * HEAD_DIM + last_pos * HEAD_DIM;
-                let dst_offset = layer * embedding_size + head * HEAD_DIM;
+            for head in 0..num_kv_heads {
+                let src_offset = head * total_seq_len * head_dim + last_pos * head_dim;
+                let dst_offset = layer * embedding_size + head * head_dim;
 
-                new_keys[dst_offset..dst_offset + HEAD_DIM]
-                    .copy_from_slice(&key_data[src_offset..src_offset + HEAD_DIM]);
-                new_values[dst_offset..dst_offset + HEAD_DIM]
-                    .copy_from_slice(&value_data[src_offset..src_offset + HEAD_DIM]);
+                new_keys[dst_offset..dst_offset + head_dim]
+                    .copy_from_slice(&key_data[src_offset..src_offset + head_dim]);
+                new_values[dst_offset..dst_offset + head_dim]
+                    .copy_from_slice(&value_data[src_offset..src_offset + head_dim]);
             }
         }
 
@@ -703,6 +752,12 @@ impl Generator {
 mod tests {
     use super::*;
     use crate::inference::{init_onnx_runtime, InferenceSession, TokenizerWrapper};
+    use crate::models::ModelRegistry;
+
+    fn runtime_spec() -> crate::models::ModelRuntimeSpec {
+        ModelRegistry::runtime_spec("qwen2.5-coder-1.5b")
+            .expect("Missing runtime spec for qwen2.5-coder-1.5b")
+    }
 
     #[tokio::test]
     #[ignore] // Requires model files - run manually
@@ -719,7 +774,8 @@ mod tests {
             TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
         // Create generator with reduced max_length for testing
-        let mut generator = Generator::new(session, tokenizer);
+        let mut generator = Generator::new(session, tokenizer, runtime_spec())
+            .expect("Failed to create generator");
         generator.set_config(GenerationConfig {
             max_length: 10, // Just generate a few tokens for testing
             ..Default::default()
@@ -761,7 +817,8 @@ mod tests {
             TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
         // Create generator
-        let generator = Generator::with_context(session, tokenizer, 512, 4);
+        let generator = Generator::with_context(session, tokenizer, runtime_spec(), 512, 4)
+            .expect("Failed to create generator");
 
         let prompt = "def fibonacci(n):";
         println!("Prompt: {}", prompt);
@@ -812,7 +869,8 @@ mod tests {
             TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
         // Small context to trigger shifting quickly
-        let generator = Generator::with_context(session, tokenizer, 32, 4);
+        let generator = Generator::with_context(session, tokenizer, runtime_spec(), 32, 4)
+            .expect("Failed to create generator");
 
         let prompt = "Write a function to calculate factorial:";
         let cancelled = Arc::new(AtomicBool::new(false));
