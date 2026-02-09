@@ -12,8 +12,8 @@ use commands::inference::{
     is_generating, list_models, load_model, unload_model, InferenceState,
 };
 use commands::ollama::{
-    cancel_generation, check_ollama, generate_stream, get_ollama_models, HttpClient,
-    OllamaConfig, StreamCancellation,
+    cancel_generation, check_ollama, generate_stream, get_ollama_models, HttpClient, OllamaConfig,
+    StreamCancellation,
 };
 use tauri::Manager;
 
@@ -32,6 +32,49 @@ pub fn run() {
 
             // Resolve resource directory for bundled libraries
             let resource_dir = app.path().resource_dir().ok();
+
+            if let Some(res_dir) = resource_dir.as_deref() {
+                let bundled_models_dir = res_dir.join("models");
+                if bundled_models_dir.exists() {
+                    if let Err(e) =
+                        models::ModelLoader::set_runtime_models_dir(bundled_models_dir.clone())
+                    {
+                        log::warn!("Failed to configure runtime models directory: {}", e);
+                    } else {
+                        log::info!(
+                            "Configured runtime models directory: {}",
+                            bundled_models_dir.display()
+                        );
+                    }
+
+                    let bundled_model_file = bundled_models_dir
+                        .join("qwen2.5-coder-1.5b")
+                        .join("model.onnx");
+                    let bundled_tokenizer_file = bundled_models_dir
+                        .join("qwen2.5-coder-1.5b")
+                        .join("tokenizer.json");
+
+                    if !bundled_model_file.exists() || !bundled_tokenizer_file.exists() {
+                        let msg = format!(
+                            "Bundled model assets are missing. Expected files:\n- {}\n- {}",
+                            bundled_model_file.display(),
+                            bundled_tokenizer_file.display()
+                        );
+                        log::error!("{}", msg);
+                        if !cfg!(debug_assertions) {
+                            return Err(msg.into());
+                        }
+                    }
+                } else if !cfg!(debug_assertions) {
+                    let msg = format!(
+                        "Bundled models directory not found: {}",
+                        bundled_models_dir.display()
+                    );
+                    log::error!("{}", msg);
+                    return Err(msg.into());
+                }
+            }
+
             if let Err(e) = inference::init_onnx_runtime(resource_dir.as_deref()) {
                 log::error!("Failed to initialize ONNX Runtime: {}", e);
 
