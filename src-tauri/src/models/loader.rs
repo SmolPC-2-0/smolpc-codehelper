@@ -1,19 +1,32 @@
 /// Model file loading utilities
 use std::path::PathBuf;
 
+const MODELS_DIR_OVERRIDE_ENV: &str = "SMOLPC_MODELS_DIR";
+
 /// Model loader for finding and validating model files
 pub struct ModelLoader;
 
 impl ModelLoader {
+    fn default_models_dir() -> PathBuf {
+        // Resolve from crate root (`src-tauri`) so paths are stable regardless of process CWD.
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models")
+    }
+
+    fn resolve_models_dir(override_dir: Option<PathBuf>) -> PathBuf {
+        match override_dir {
+            Some(path) if !path.as_os_str().is_empty() => path,
+            _ => Self::default_models_dir(),
+        }
+    }
+
     /// Get the models directory path
     ///
-    /// # Phase 0
-    /// Models are expected at: `src-tauri/models/`
-    ///
-    /// # Phase 5
-    /// Will use app data directory for user downloads
+    /// Resolution order:
+    /// 1. `SMOLPC_MODELS_DIR` environment variable (if set and non-empty)
+    /// 2. Deterministic default: `<src-tauri>/models`
     pub fn models_dir() -> PathBuf {
-        PathBuf::from("models")
+        let override_dir = std::env::var_os(MODELS_DIR_OVERRIDE_ENV).map(PathBuf::from);
+        Self::resolve_models_dir(override_dir)
     }
 
     /// Get path to a specific model
@@ -66,5 +79,31 @@ impl ModelLoader {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ModelLoader;
+    use std::path::PathBuf;
+
+    #[test]
+    fn default_models_dir_is_absolute_and_points_to_models_folder() {
+        let path = ModelLoader::default_models_dir();
+        assert!(path.is_absolute());
+        assert!(path.ends_with("models"));
+    }
+
+    #[test]
+    fn resolve_models_dir_uses_non_empty_override() {
+        let override_path = PathBuf::from("C:/custom/models");
+        let resolved = ModelLoader::resolve_models_dir(Some(override_path.clone()));
+        assert_eq!(resolved, override_path);
+    }
+
+    #[test]
+    fn resolve_models_dir_falls_back_for_empty_override() {
+        let resolved = ModelLoader::resolve_models_dir(Some(PathBuf::new()));
+        assert_eq!(resolved, ModelLoader::default_models_dir());
     }
 }
