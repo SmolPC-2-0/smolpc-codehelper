@@ -41,6 +41,7 @@ pub struct Generator {
     session: Arc<Mutex<InferenceSession>>,
     tokenizer: Arc<TokenizerWrapper>,
     runtime_spec: ModelRuntimeSpec,
+    model_input_names: Vec<String>,
     config: GenerationConfig,
     max_context: usize,
     sink_size: usize,
@@ -183,11 +184,18 @@ impl Generator {
         sink_size: usize,
     ) -> Result<Self, String> {
         Self::validate_runtime_spec_compatibility(runtime_spec)?;
+        let model_input_names = session
+            .session
+            .inputs
+            .iter()
+            .map(|input| input.name.clone())
+            .collect();
 
         Ok(Self {
             session: Arc::new(Mutex::new(session)),
             tokenizer: Arc::new(tokenizer),
             runtime_spec,
+            model_input_names,
             config: GenerationConfig::default(),
             max_context,
             sink_size,
@@ -259,11 +267,12 @@ impl Generator {
 
         // 2. Create KV cache and pre-allocated input builder
         let mut kv_cache = KVCache::new(self.max_context, self.sink_size);
-        let mut input_builder = InputBuilder::with_names(
+        let mut input_builder = InputBuilder::with_names_and_input_order(
             self.runtime_spec.io.input_ids,
             self.runtime_spec.io.attention_mask,
             self.runtime_spec.past_key_names(),
             self.runtime_spec.past_value_names(),
+            self.model_input_names.clone(),
         )?;
 
         // 3. Prefill phase: Process entire prompt, build initial KV cache
@@ -441,7 +450,7 @@ impl Generator {
                         .map_err(|e| format!("Failed to create KV cache tensor: {e}"))?
                         .into(),
                 ),
-            );
+            )?;
             input_builder.set_past_value(
                 layer,
                 SessionInputValue::Owned(
@@ -449,11 +458,11 @@ impl Generator {
                         .map_err(|e| format!("Failed to create KV cache tensor: {e}"))?
                         .into(),
                 ),
-            );
+            )?;
         }
 
-        // Take ownership of inputs for session.run()
-        let inputs = input_builder.take_inputs();
+        // Build ordered inputs for session.run()
+        let inputs = input_builder.ordered_inputs()?;
 
         // Run inference - keep session locked while we extract outputs
         let mut session = self.session.lock().await;
@@ -554,7 +563,7 @@ impl Generator {
                         .map_err(|e| format!("Failed to create key cache tensor: {e}"))?
                         .into(),
                 ),
-            );
+            )?;
             input_builder.set_past_value(
                 layer,
                 SessionInputValue::Owned(
@@ -562,11 +571,11 @@ impl Generator {
                         .map_err(|e| format!("Failed to create value cache tensor: {e}"))?
                         .into(),
                 ),
-            );
+            )?;
         }
 
-        // Take ownership of inputs for session.run()
-        let inputs = input_builder.take_inputs();
+        // Build ordered inputs for session.run()
+        let inputs = input_builder.ordered_inputs()?;
 
         // Run inference - keep session locked while we extract outputs
         let mut session = self.session.lock().await;
