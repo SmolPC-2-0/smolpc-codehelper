@@ -25,6 +25,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-windows-offline-install
 The script will:
 
 1. Ensure `src-tauri/libs/onnxruntime.dll` exists (downloads it if missing).
+   - Download path verifies the ONNX Runtime archive SHA256 before extraction.
 2. Verify required model/tokenizer/runtime files.
 3. Run `npm ci` and `cargo check`.
 4. Build NSIS installer via `npm run tauri build -- --bundles nsis`.

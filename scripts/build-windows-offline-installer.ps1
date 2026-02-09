@@ -27,6 +27,7 @@ function Ensure-OnnxRuntimeDll {
 
     $version = "1.22.1"
     $archiveName = "onnxruntime-win-x64-$version.zip"
+    $expectedArchiveSha256 = "855276cd4be3cda14fe636c69eb038d75bf5bcd552bda1193a5d79c51f436dfe"
     $url = "https://github.com/microsoft/onnxruntime/releases/download/v$version/$archiveName"
 
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("smolpc-ort-" + [Guid]::NewGuid().ToString("N"))
@@ -40,6 +41,13 @@ function Ensure-OnnxRuntimeDll {
     try {
         Write-Host "Downloading ONNX Runtime from $url"
         Invoke-WebRequest -Uri $url -OutFile $zipPath
+
+        $actualArchiveSha256 = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualArchiveSha256 -ne $expectedArchiveSha256) {
+            throw "ONNX Runtime archive checksum mismatch. expected=$expectedArchiveSha256 actual=$actualArchiveSha256"
+        }
+        Write-Host "Verified ONNX Runtime archive SHA256: $actualArchiveSha256"
+
         Expand-Archive -LiteralPath $zipPath -DestinationPath $extractedRoot -Force
 
         if (-not (Test-Path -LiteralPath $sourceDll)) {

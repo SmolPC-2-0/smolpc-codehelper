@@ -47,12 +47,9 @@ pub fn run() {
                         );
                     }
 
-                    let bundled_model_file = bundled_models_dir
-                        .join("qwen2.5-coder-1.5b")
-                        .join("model.onnx");
-                    let bundled_tokenizer_file = bundled_models_dir
-                        .join("qwen2.5-coder-1.5b")
-                        .join("tokenizer.json");
+                    let bundled_model_dir = bundled_models_dir.join(models::registry::PRIMARY_MODEL_ID);
+                    let bundled_model_file = bundled_model_dir.join("model.onnx");
+                    let bundled_tokenizer_file = bundled_model_dir.join("tokenizer.json");
 
                     if !bundled_model_file.exists() || !bundled_tokenizer_file.exists() {
                         let msg = format!(

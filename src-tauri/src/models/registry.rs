@@ -1,11 +1,12 @@
+use super::runtime_spec::{ModelArchitecture, ModelIoSpec, ModelRuntimeSpec};
 /// Model registry for available models
 ///
 /// Defines which models are supported and their metadata.
 /// Phase 0: Hard-coded list
 /// Phase 5: Dynamic registry with download support
-
 use serde::{Deserialize, Serialize};
-use super::runtime_spec::{ModelArchitecture, ModelIoSpec, ModelRuntimeSpec};
+
+pub const PRIMARY_MODEL_ID: &str = "qwen2.5-coder-1.5b";
 
 /// Model definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,17 +45,15 @@ impl ModelRegistry {
     /// # Phase 5
     /// Will include multiple variants per hardware type
     pub fn available_models() -> Vec<ModelDefinition> {
-        vec![
-            ModelDefinition {
-                id: "qwen2.5-coder-1.5b".to_string(),
-                name: "Qwen2.5-Coder 1.5B".to_string(),
-                size: "1.5B".to_string(),
-                disk_size_gb: 0.9,
-                min_ram_gb: 2.0,
-                directory: "qwen2.5-coder-1.5b".to_string(),
-                description: "Lightweight coding model for basic tasks and low-RAM devices".to_string(),
-            },
-        ]
+        vec![ModelDefinition {
+            id: PRIMARY_MODEL_ID.to_string(),
+            name: "Qwen2.5-Coder 1.5B".to_string(),
+            size: "1.5B".to_string(),
+            disk_size_gb: 0.9,
+            min_ram_gb: 2.0,
+            directory: PRIMARY_MODEL_ID.to_string(),
+            description: "Lightweight coding model for basic tasks and low-RAM devices".to_string(),
+        }]
     }
 
     /// Get model by ID
@@ -82,8 +81,8 @@ impl ModelRegistry {
     /// Only models with implemented runtime specs are considered supported for ONNX inference.
     pub fn runtime_spec(model_id: &str) -> Option<ModelRuntimeSpec> {
         match model_id {
-            "qwen2.5-coder-1.5b" => Some(ModelRuntimeSpec {
-                model_id: "qwen2.5-coder-1.5b",
+            PRIMARY_MODEL_ID => Some(ModelRuntimeSpec {
+                model_id: PRIMARY_MODEL_ID,
                 architecture: ModelArchitecture {
                     num_layers: 28,
                     num_kv_heads: 2,
@@ -107,7 +106,7 @@ impl ModelRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::ModelRegistry;
+    use super::{ModelRegistry, PRIMARY_MODEL_ID};
 
     #[test]
     fn available_models_excludes_unsupported_7b() {
@@ -116,13 +115,13 @@ mod tests {
             .map(|m| m.id)
             .collect();
 
-        assert!(ids.contains(&"qwen2.5-coder-1.5b".to_string()));
+        assert!(ids.contains(&PRIMARY_MODEL_ID.to_string()));
         assert!(!ids.contains(&"qwen2.5-coder-7b".to_string()));
     }
 
     #[test]
     fn runtime_spec_only_defined_for_1_5b() {
-        assert!(ModelRegistry::runtime_spec("qwen2.5-coder-1.5b").is_some());
+        assert!(ModelRegistry::runtime_spec(PRIMARY_MODEL_ID).is_some());
         assert!(ModelRegistry::runtime_spec("qwen2.5-coder-7b").is_none());
         assert!(ModelRegistry::runtime_spec("unknown").is_none());
     }
