@@ -8,9 +8,10 @@
 
 	interface Props {
 		visible: boolean;
+		onClose?: () => void;
 	}
 
-	let { visible = $bindable() }: Props = $props();
+	let { visible, onClose }: Props = $props();
 
 	let benchmarksDir = $state<string>('');
 	let selectedIterations = $state<number>(1); // Default to 1 for faster testing
@@ -106,7 +107,7 @@
 	}
 
 	function closePanel() {
-		visible = false;
+		onClose?.();
 	}
 </script>
 
@@ -191,8 +192,10 @@
 
 			<!-- Iterations Selector -->
 			<div class="space-y-2">
-				<label class="text-muted-foreground text-xs">Iterations (12 prompts each)</label>
-				<div class="flex gap-2">
+				<p id="benchmark-iterations-label" class="text-muted-foreground text-xs">
+					Iterations (12 prompts each)
+				</p>
+				<div class="flex gap-2" role="group" aria-labelledby="benchmark-iterations-label">
 					<button
 						onclick={() => (selectedIterations = 1)}
 						class={`flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${

@@ -102,12 +102,12 @@ function generateCodeBlockHTML(
 	formattedCode: string,
 	encodedCode: string
 ): string {
-	return `<div class="code-block my-4 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
-		<div class="flex items-center justify-between px-4 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 rounded-t-lg">
-			<span class="text-xs font-mono text-gray-600 dark:text-gray-400 uppercase">${language}</span>
+	return `<div class="code-block code-block-frame">
+		<div class="code-block-head">
+			<span class="code-block-lang">${language}</span>
 			<button
 				data-code="${encodedCode}"
-				class="code-copy-btn p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 transition-colors"
+				class="code-copy-btn code-copy-btn-frame"
 				title="Copy code"
 				aria-label="Copy code to clipboard"
 			>
@@ -116,7 +116,7 @@ function generateCodeBlockHTML(
 				</svg>
 			</button>
 		</div>
-		<pre class="p-4 overflow-x-auto"><code class="text-sm font-mono text-gray-800 dark:text-gray-200">${formattedCode}</code></pre>
+		<pre class="code-block-pre"><code class="code-block-code">${formattedCode}</code></pre>
 	</div>`;
 }
 
@@ -155,7 +155,7 @@ export function renderMarkdown(text: string): string {
 	// Step 3: Process inline code (backticks survived HTML escaping, content is already escaped)
 	html = html.replace(
 		/`([^`]+)`/g,
-		'<code class="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-sm font-mono text-red-600 dark:text-red-400">$1</code>'
+		'<code class="inline-code">$1</code>'
 	);
 
 	// Headers
@@ -172,7 +172,7 @@ export function renderMarkdown(text: string): string {
 	// Links (with URL sanitization)
 	html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
 		const safeUrl = sanitizeUrl(url);
-		return `<a href="${safeUrl}" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">${text}</a>`;
+		return `<a href="${safeUrl}" class="markdown-link" target="_blank" rel="noopener noreferrer">${text}</a>`;
 	});
 
 	// Unordered lists (support both * and - markers)

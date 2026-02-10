@@ -1,6 +1,8 @@
 import { mount } from 'svelte';
 import './app.css';
 import App from './App.svelte';
+import { settingsStore } from '$lib/stores/settings.svelte';
+import { applyTheme } from '$lib/utils/theme';
 
 // Global error handler to catch unhandled errors
 window.addEventListener('error', (event) => {
@@ -21,6 +23,9 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 try {
+	// Apply saved theme before mount to avoid light/dark flash.
+	applyTheme(settingsStore.theme);
+
 	mount(App, {
 		target: document.getElementById('app')!
 	});

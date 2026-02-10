@@ -1,94 +1,65 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { invoke } from '@tauri-apps/api/core';
 	import Sidebar from '$lib/components/Sidebar.svelte';
-	import ChatMessage from '$lib/components/ChatMessage.svelte';
-	import ChatInput from '$lib/components/ChatInput.svelte';
-	import StatusIndicator from '$lib/components/StatusIndicator.svelte';
-	import HardwareIndicator from '$lib/components/HardwareIndicator.svelte';
-	import ModelSelector from '$lib/components/ModelSelector.svelte';
-	import ContextToggle from '$lib/components/ContextToggle.svelte';
-	import QuickExamples from '$lib/components/QuickExamples.svelte';
 	import BenchmarkPanel from '$lib/components/BenchmarkPanel.svelte';
 	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
+	import KeyboardShortcutsOverlay from '$lib/components/KeyboardShortcutsOverlay.svelte';
+	import WorkspaceHeader from '$lib/components/layout/WorkspaceHeader.svelte';
+	import WorkspaceControls from '$lib/components/layout/WorkspaceControls.svelte';
+	import ConversationView from '$lib/components/chat/ConversationView.svelte';
+	import ComposerBar from '$lib/components/chat/ComposerBar.svelte';
 	import { chatsStore } from '$lib/stores/chats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { inferenceStore } from '$lib/stores/inference.svelte';
 	import { hardwareStore } from '$lib/stores/hardware.svelte';
+	import { uiStore } from '$lib/stores/ui.svelte';
+	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
 	import type { GenerationConfig } from '$lib/types/inference';
-	import { Menu, X } from '@lucide/svelte';
-	import { Button } from '$lib/components/ui/button';
 
-	// UI State
-	let isSidebarOpen = $state(true);
-	let showQuickExamples = $state(true);
-	let messagesContainer: HTMLDivElement;
-	let inputAreaRef: HTMLDivElement;
-	let userHasScrolledUp = $state(false);
+	let messagesContainer: HTMLDivElement | undefined = $state();
 	let cancelRequested = $state(false);
 	let currentStreamingChatId = $state<string | null>(null);
 	let currentStreamingMessageId = $state<string | null>(null);
-	let userInteractedWithScroll = $state(false);
-	let touchStartY = $state(0);
-	let showBenchmarkPanel = $state(false);
-	let showHardwarePanel = $state(false);
 	let bottomOffset = $state(0);
+	let showShortcutsOverlay = $state(false);
 
-	// Derived state
 	const currentChat = $derived(chatsStore.currentChat);
 	const messages = $derived(currentChat?.messages ?? []);
 	const hasNoChats = $derived(chatsStore.chats.length === 0);
+	const pageTitle = $derived(currentChat?.title ?? 'New Chat');
+	const showBenchmarkPanel = $derived(uiStore.activeOverlay === 'benchmark');
+	const showHardwarePanel = $derived(uiStore.activeOverlay === 'hardware');
+	const showScrollToLatest = $derived(uiStore.userHasScrolledUp && messages.length > 0);
+	const latestAssistantMessageId = $derived(
+		[...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null
+	);
 
-	// Check if user is at bottom of scroll
+	function setMessagesContainer(element: HTMLDivElement) {
+		messagesContainer = element;
+	}
+
 	function isAtBottom(): boolean {
 		if (!messagesContainer) return true;
-		const threshold = 5; // Very small threshold - basically at the bottom
+		const threshold = 5;
 		const distanceFromBottom =
 			messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight;
 		return distanceFromBottom <= threshold;
 	}
 
-	// Detect when user scrolls UP (instant detection)
-	function handleUserScrollIntent(event: WheelEvent) {
-		// Only break autoscroll if user is scrolling UP (deltaY < 0)
-		// Scrolling down should not break autoscroll
-		if (event.deltaY < 0) {
-			userInteractedWithScroll = true;
-			userHasScrolledUp = true;
-		}
+	function markScrollIntentUp() {
+		uiStore.setUserHasScrolledUp(true);
 	}
 
-	// Handle touch scrolling
-	function handleTouchStart(event: TouchEvent) {
-		touchStartY = event.touches[0].clientY;
-	}
-
-	function handleTouchMove(event: TouchEvent) {
-		const touchY = event.touches[0].clientY;
-		const deltaY = touchStartY - touchY;
-		// If scrolling up (deltaY < 0), break autoscroll
-		if (deltaY < 0) {
-			userInteractedWithScroll = true;
-			userHasScrolledUp = true;
-		}
-	}
-
-	// Handle scroll events to re-enable autoscroll when at bottom
 	function handleScroll() {
-		// Check if user scrolled to bottom
-		if (messagesContainer) {
-			const atBottom = isAtBottom();
-			if (atBottom) {
-				// User is at bottom - resume autoscroll
-				userHasScrolledUp = false;
-				userInteractedWithScroll = false;
-			}
+		if (isAtBottom()) {
+			uiStore.resetScrollState();
 		}
 	}
 
-	// Scroll to bottom of messages (only if user hasn't scrolled up)
 	function scrollToBottom() {
-		if (messagesContainer && !userHasScrolledUp) {
+		if (messagesContainer && !uiStore.userHasScrolledUp) {
 			messagesContainer.scrollTop = messagesContainer.scrollHeight;
 		}
 	}
@@ -99,15 +70,11 @@
 		'When showing code, use simple examples and add brief comments.';
 
 	// Build ChatML-formatted prompt for Qwen2.5-Coder
-	function buildChatMLPrompt(userMessage: string): string {
+	function buildChatMLPrompt(userMessage: string, historyMessages: Message[]): string {
 		let prompt = `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>\n`;
 
 		// Include conversation history if context is enabled
-		if (settingsStore.contextEnabled && currentChat) {
-			// Exclude last 2 messages: the user msg + empty assistant placeholder
-			// we just added to the store before calling this function
-			const historyMessages = currentChat.messages.slice(0, -2);
-
+		if (settingsStore.contextEnabled) {
 			for (const msg of historyMessages) {
 				const role = msg.role === 'user' ? 'user' : 'assistant';
 				prompt += `<|im_start|>${role}\n${msg.content}<|im_end|>\n`;
@@ -120,35 +87,41 @@
 		return prompt;
 	}
 
-	// Handle sending a message
+	function handleScrollToLatest() {
+		uiStore.resetScrollState();
+		if (!messagesContainer) return;
+		messagesContainer.scrollTop = messagesContainer.scrollHeight;
+	}
+
+	function isTypingTarget(target: EventTarget | null): boolean {
+		if (!(target instanceof HTMLElement)) return false;
+		if (target.isContentEditable) return true;
+		return (
+			target.tagName === 'TEXTAREA' ||
+			target.tagName === 'INPUT' ||
+			target.tagName === 'SELECT'
+		);
+	}
+
 	async function handleSendMessage(content: string) {
 		if (!inferenceStore.isLoaded || inferenceStore.isGenerating) return;
 
-		// Create new chat if none exists or if this is first message after switching
-		if (!currentChat) {
-			chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
-		}
+		const activeChat = currentChat ?? chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
+		if (!activeChat) return;
+		const historyBeforeMessage = [...activeChat.messages];
 
-		if (!currentChat) return; // Safety check
+		uiStore.setShowQuickExamples(false);
+		uiStore.resetScrollState();
 
-		// Hide quick examples after first message
-		showQuickExamples = false;
-
-		// Reset scroll state for new message
-		userHasScrolledUp = false;
-		userInteractedWithScroll = false;
-
-		// Add user message
 		const userMessage: Message = {
 			id: crypto.randomUUID(),
 			role: 'user',
 			content,
 			timestamp: Date.now()
 		};
-		chatsStore.addMessage(currentChat.id, userMessage);
+		chatsStore.addMessage(activeChat.id, userMessage);
 		scrollToBottom();
 
-		// Create placeholder for assistant response
 		const assistantMessage: Message = {
 			id: crypto.randomUUID(),
 			role: 'assistant',
@@ -156,22 +129,18 @@
 			timestamp: Date.now(),
 			isStreaming: true
 		};
-		chatsStore.addMessage(currentChat.id, assistantMessage);
+		chatsStore.addMessage(activeChat.id, assistantMessage);
 		scrollToBottom();
 
-		cancelRequested = false; // Reset cancel flag
-		currentStreamingChatId = currentChat.id; // Track which chat is streaming
-		currentStreamingMessageId = assistantMessage.id; // Track which message is streaming
+		cancelRequested = false;
+		currentStreamingChatId = activeChat.id;
+		currentStreamingMessageId = assistantMessage.id;
 
-		// Capture chat and message IDs for the callback closure
-		const chatId = currentChat.id;
+		const chatId = activeChat.id;
 		const messageId = assistantMessage.id;
 
 		try {
-			// Build prompt with context
-			const prompt = buildChatMLPrompt(content);
-
-			// Generation config using settings
+			const prompt = buildChatMLPrompt(content, historyBeforeMessage);
 			const config: Partial<GenerationConfig> = {
 				max_length: 2048,
 				temperature: settingsStore.temperature,
@@ -181,26 +150,21 @@
 				repetition_penalty_last_n: 64
 			};
 
-			// Start streaming generation with callback
 			await inferenceStore.generateStream(
 				prompt,
 				(token: string) => {
-					// Only process tokens if not cancelled
 					if (cancelRequested) return;
 
-					// Find the streaming message and update it
-					const streamingChat = chatsStore.chats.find((c) => c.id === chatId);
+					const streamingChat = chatsStore.chats.find((chat) => chat.id === chatId);
 					if (!streamingChat) return;
 
-					const streamingMessage = streamingChat.messages.find((m) => m.id === messageId);
+					const streamingMessage = streamingChat.messages.find((msg) => msg.id === messageId);
 					if (!streamingMessage || !streamingMessage.isStreaming) return;
 
-					// Update the message content
 					chatsStore.updateMessage(chatId, messageId, {
 						content: streamingMessage.content + token
 					});
 
-					// Only scroll if this is the currently displayed chat
 					if (currentChat?.id === chatId) {
 						scrollToBottom();
 					}
@@ -208,7 +172,6 @@
 				config
 			);
 
-			// Generation complete - mark message as done
 			chatsStore.updateMessage(chatId, messageId, {
 				isStreaming: false
 			});
@@ -224,23 +187,98 @@
 		}
 	}
 
-	// Handle example selection
+	function findNearestUserPrompt(messageId: string): string | null {
+		if (!currentChat) return null;
+		const messageIndex = currentChat.messages.findIndex((message) => message.id === messageId);
+		if (messageIndex < 0) return null;
+
+		for (let index = messageIndex - 1; index >= 0; index -= 1) {
+			const candidate = currentChat.messages[index];
+			if (candidate.role === 'user') {
+				return candidate.content;
+			}
+		}
+
+		return null;
+	}
+
+	function handleRegenerateMessage(messageId: string) {
+		if (inferenceStore.isGenerating) return;
+		const sourcePrompt = findNearestUserPrompt(messageId);
+		if (!sourcePrompt) return;
+		handleSendMessage(sourcePrompt);
+	}
+
+	function handleContinueMessage(messageId: string) {
+		if (inferenceStore.isGenerating) return;
+		const basePrompt = findNearestUserPrompt(messageId);
+		const continuationPrompt = basePrompt
+			? `Continue your previous response to: "${basePrompt}". Expand with more details and an example.`
+			: 'Continue your previous response with additional detail and examples.';
+		handleSendMessage(continuationPrompt);
+	}
+
+	function handleBranchFromMessage(messageId: string) {
+		if (!currentChat) return;
+		const messageIndex = currentChat.messages.findIndex((message) => message.id === messageId);
+		if (messageIndex < 0) return;
+
+		const branchSource = currentChat.messages.slice(0, messageIndex + 1);
+		if (branchSource.length === 0) return;
+
+		const targetModel = currentChat.model ?? inferenceStore.currentModel ?? 'onnx-model';
+		const branchChat = chatsStore.createChat(targetModel);
+
+		for (const message of branchSource) {
+			chatsStore.addMessage(branchChat.id, {
+				...message,
+				id: crypto.randomUUID(),
+				isStreaming: false
+			});
+		}
+
+		chatsStore.updateChatTitle(branchChat.id, `${currentChat.title} · Branch`);
+		uiStore.setShowQuickExamples(false);
+		uiStore.resetScrollState();
+	}
+
+	async function handleExportChat() {
+		if (!currentChat || currentChat.messages.length === 0) return;
+
+		const markdown = [
+			`# ${currentChat.title}`,
+			'',
+			`Exported: ${new Date().toLocaleString()}`,
+			`Model: ${currentChat.model}`,
+			'',
+			...currentChat.messages.flatMap((message) => [
+				`## ${message.role === 'user' ? 'User' : 'Assistant'} • ${new Date(message.timestamp).toLocaleString()}`,
+				'',
+				message.content,
+				''
+			])
+		].join('\n');
+
+		try {
+			await invoke('save_code', { code: markdown });
+		} catch (error) {
+			console.error('Failed to export chat:', error);
+		}
+	}
+
 	function handleExampleSelect(prompt: string) {
 		handleSendMessage(prompt);
 	}
 
-	// Handle cancel generation
 	async function handleCancelGeneration() {
 		cancelRequested = true;
 
-		// Cancel the backend stream
 		try {
 			await inferenceStore.cancel();
 		} catch (error) {
 			console.error('Failed to cancel generation:', error);
 		}
 
-		// Mark the streaming message as no longer streaming
 		if (currentStreamingChatId && currentStreamingMessageId) {
 			chatsStore.updateMessage(currentStreamingChatId, currentStreamingMessageId, {
 				isStreaming: false
@@ -251,211 +289,196 @@
 		currentStreamingMessageId = null;
 	}
 
-	// Handle keyboard shortcuts
 	function handleKeyDown(event: KeyboardEvent) {
-		// Ctrl+Shift+B (Windows/Linux) or Cmd+Shift+B (Mac) to toggle benchmark panel
 		const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 		const modifierKey = isMac ? event.metaKey : event.ctrlKey;
+		const typingInInput = isTypingTarget(event.target);
 
 		if (modifierKey && event.shiftKey && event.key.toLowerCase() === 'b') {
 			event.preventDefault();
-			showBenchmarkPanel = !showBenchmarkPanel;
+			uiStore.toggleOverlay('benchmark');
+			return;
+		}
+
+		if (modifierKey && event.key === '\\') {
+			event.preventDefault();
+			uiStore.toggleSidebar();
+			return;
+		}
+
+		if (modifierKey && event.key === '/') {
+			event.preventDefault();
+			showShortcutsOverlay = !showShortcutsOverlay;
+			return;
+		}
+
+		if (!typingInInput && event.key === '?') {
+			event.preventDefault();
+			showShortcutsOverlay = true;
+			return;
+		}
+
+		if (event.key === 'Escape') {
+			if (showShortcutsOverlay) {
+				showShortcutsOverlay = false;
+				event.preventDefault();
+				return;
+			}
+
+			if (uiStore.activeOverlay !== 'none') {
+				uiStore.closeOverlay();
+				event.preventDefault();
+			}
 		}
 	}
 
-	// Calculate bottom offset to account for taskbar
 	function calculateBottomOffset() {
-		// Calculate the difference between visual viewport and window
-		// This accounts for system UI like taskbars
 		const visualViewportHeight = window.visualViewport?.height || window.innerHeight;
 		const windowHeight = window.innerHeight;
-		const offset = Math.max(0, windowHeight - visualViewportHeight);
-		bottomOffset = offset;
+		bottomOffset = Math.max(0, windowHeight - visualViewportHeight);
 	}
 
-	// Setup event listeners and initialization
 	onMount(() => {
-		// Calculate initial offset
 		calculateBottomOffset();
 
-		// Update offset on resize
 		const handleResize = () => calculateBottomOffset();
 		window.addEventListener('resize', handleResize);
-		if (window.visualViewport) {
-			window.visualViewport.addEventListener('resize', handleResize);
-		}
+		window.visualViewport?.addEventListener('resize', handleResize);
 
-		// Initialize ONNX inference
 		async function initInference() {
-			// List available models
 			await inferenceStore.listModels();
-
-			// Auto-load first model if available and none loaded
 			if (!inferenceStore.isLoaded && inferenceStore.availableModels.length > 0) {
 				const firstModel = inferenceStore.availableModels[0];
-				console.log('Auto-loading model:', firstModel.id);
 				await inferenceStore.loadModel(firstModel.id);
 			}
 		}
 
 		initInference();
-
-		// Load cached hardware info
 		hardwareStore.getCached();
 
-		// Create initial chat if none exists
 		if (hasNoChats) {
 			chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
 		}
 
-		// Add keyboard event listener
 		window.addEventListener('keydown', handleKeyDown);
 
-		// Cleanup
 		return () => {
 			window.removeEventListener('keydown', handleKeyDown);
 			window.removeEventListener('resize', handleResize);
-			if (window.visualViewport) {
-				window.visualViewport.removeEventListener('resize', handleResize);
-			}
+			window.visualViewport?.removeEventListener('resize', handleResize);
 		};
 	});
 
-	// Watch for chat changes
 	$effect(() => {
-		// Track current chat ID to trigger effect
 		currentChat?.id;
-
-		// Reset scroll state when switching chats
-		userHasScrolledUp = false;
-		userInteractedWithScroll = false;
+		uiStore.resetScrollState();
 	});
 
-	// Watch messages to auto-scroll
 	$effect(() => {
 		if (messages.length > 0) {
 			scrollToBottom();
 		}
 	});
+
+	$effect(() => {
+		const theme = settingsStore.theme;
+		applyTheme(theme);
+		if (theme !== 'system') {
+			return;
+		}
+
+		const unwatch = watchSystemTheme(() => applyTheme(theme));
+		return () => unwatch();
+	});
 </script>
 
-<div class="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
-	<!-- Sidebar -->
-	{#if isSidebarOpen}
-		<Sidebar isOpen={isSidebarOpen} onClose={() => (isSidebarOpen = false)} />
+<div class="app-shell">
+	{#if uiStore.isSidebarOpen}
+		<Sidebar isOpen={uiStore.isSidebarOpen} onClose={() => uiStore.setSidebarOpen(false)} />
 	{/if}
 
-	<!-- Main Content -->
-	<div class="flex flex-1 flex-col overflow-hidden">
-		<!-- Header -->
-		<header
-			class="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900"
-		>
-			<div class="flex items-center gap-3">
-				{#if !isSidebarOpen}
-					<Button variant="ghost" size="icon" onclick={() => (isSidebarOpen = true)}>
-						<Menu class="h-5 w-5" />
-					</Button>
-				{/if}
-				<h1 class="text-lg font-semibold text-gray-900 dark:text-white">
-					{currentChat?.title ?? 'New Chat'}
-				</h1>
-			</div>
+	<div class="workspace-shell">
+		<WorkspaceHeader
+			title={pageTitle}
+			showSidebarToggle={!uiStore.isSidebarOpen}
+			status={inferenceStore.status}
+			hardwareActive={showHardwarePanel}
+			shortcutsOpen={showShortcutsOverlay}
+			canExport={messages.length > 0}
+			onOpenSidebar={() => uiStore.setSidebarOpen(true)}
+			onToggleHardware={() => uiStore.toggleOverlay('hardware')}
+			onToggleShortcuts={() => (showShortcutsOverlay = !showShortcutsOverlay)}
+			onExportChat={handleExportChat}
+		/>
 
-			<div class="flex items-center gap-3">
-				<HardwareIndicator onclick={() => (showHardwarePanel = !showHardwarePanel)} />
-				<StatusIndicator status={inferenceStore.status} />
-			</div>
-		</header>
+		<WorkspaceControls />
 
-		<!-- Controls Bar -->
-		<div
-			class="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900"
-		>
-			<ModelSelector />
-			<ContextToggle />
-		</div>
+		<ConversationView
+			{messages}
+			{latestAssistantMessageId}
+			showQuickExamples={uiStore.showQuickExamples}
+			onSelectExample={handleExampleSelect}
+			onToggleExamples={(show) => uiStore.setShowQuickExamples(show)}
+			onUserScrollUp={markScrollIntentUp}
+			onScroll={handleScroll}
+			{showScrollToLatest}
+			onScrollToLatest={handleScrollToLatest}
+			onRegenerateMessage={handleRegenerateMessage}
+			onContinueMessage={handleContinueMessage}
+			onBranchFromMessage={handleBranchFromMessage}
+			onContainerReady={setMessagesContainer}
+		/>
 
-		<!-- Messages Area -->
-		<div
-			class="flex-1 overflow-y-auto p-4"
-			bind:this={messagesContainer}
-			onscroll={handleScroll}
-			onwheel={handleUserScrollIntent}
-			ontouchstart={handleTouchStart}
-			ontouchmove={handleTouchMove}
-		>
-			<div class="mx-auto max-w-4xl">
-				{#if messages.length === 0}
-					<div class="flex min-h-[60vh] flex-col items-center justify-center text-center">
-						<div class="mb-8">
-							<h2 class="mb-2 text-2xl font-bold text-gray-900 dark:text-white">
-								Welcome to SmolPC Code Helper!
-							</h2>
-							<p class="text-gray-600 dark:text-gray-400">
-								Your offline AI coding assistant for learning and problem-solving
-							</p>
-						</div>
-
-						{#if showQuickExamples}
-							<div class="w-full max-w-3xl">
-								<QuickExamples
-									onSelectExample={handleExampleSelect}
-									onClose={() => (showQuickExamples = false)}
-								/>
-							</div>
-						{:else}
-							<Button onclick={() => (showQuickExamples = true)} variant="outline">
-								Show Quick Examples
-							</Button>
-						{/if}
-					</div>
-				{:else}
-					<div class="space-y-4">
-						{#each messages as message (message.id)}
-							<ChatMessage {message} />
-						{/each}
-					</div>
-				{/if}
-			</div>
-		</div>
-
-		<!-- Input Area -->
-		<div
-			bind:this={inputAreaRef}
-			class="sticky z-10 border-t border-gray-200 bg-white px-4 py-4 shadow-lg dark:border-gray-800 dark:bg-gray-900"
-			style="bottom: {bottomOffset}px"
-		>
-			<div class="mx-auto max-w-4xl">
-				{#if inferenceStore.isGenerating}
-					<div class="mb-3 flex items-center justify-center">
-						<Button
-							type="button"
-							variant="outline"
-							onclick={handleCancelGeneration}
-							class="border-red-300 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/20"
-						>
-							<X class="mr-2 h-4 w-4" />
-							Cancel Generation
-						</Button>
-					</div>
-				{/if}
-				<ChatInput
-					onSend={handleSendMessage}
-					disabled={!inferenceStore.isLoaded || inferenceStore.isGenerating}
-					placeholder={inferenceStore.isGenerating
-						? 'Generating response...'
-						: !inferenceStore.isLoaded
-							? 'Loading model...'
-							: 'Ask a coding question (Shift+Enter for new line)...'}
-				/>
-			</div>
-		</div>
+		<ComposerBar
+			isLoaded={inferenceStore.isLoaded}
+			isGenerating={inferenceStore.isGenerating}
+			{bottomOffset}
+			onSend={handleSendMessage}
+			onCancel={handleCancelGeneration}
+		/>
 	</div>
 
-	<!-- Hidden Benchmark Panel (Ctrl+Shift+B / Cmd+Shift+B to toggle) -->
-	<BenchmarkPanel bind:visible={showBenchmarkPanel} />
-
-	<!-- Hardware Panel -->
-	<HardwarePanel bind:visible={showHardwarePanel} />
+	<BenchmarkPanel visible={showBenchmarkPanel} onClose={() => uiStore.closeOverlay()} />
+	<HardwarePanel visible={showHardwarePanel} onClose={() => uiStore.closeOverlay()} />
+	<KeyboardShortcutsOverlay open={showShortcutsOverlay} onClose={() => (showShortcutsOverlay = false)} />
 </div>
+
+<style>
+	.app-shell {
+		display: flex;
+		height: 100vh;
+		overflow: hidden;
+		background: var(--color-background);
+		position: relative;
+	}
+
+	.app-shell::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		background:
+			radial-gradient(
+				60rem 30rem at 10% 0%,
+				color-mix(in srgb, var(--color-primary) 14%, transparent),
+				transparent
+			),
+			radial-gradient(
+				48rem 26rem at 100% 100%,
+				color-mix(in srgb, var(--color-accent) 10%, transparent),
+				transparent
+			);
+	}
+
+	.workspace-shell {
+		position: relative;
+		z-index: 1;
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		background: color-mix(in srgb, var(--color-card) 82%, transparent);
+		backdrop-filter: blur(10px);
+	}
+</style>
