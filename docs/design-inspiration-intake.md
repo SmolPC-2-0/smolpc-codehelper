@@ -1,89 +1,113 @@
 # Design Inspiration Intake (Frontend Restyle)
 
-Use this template to share design direction clearly between sessions.
+Last Updated: 2026-02-10
 
-## 1) Product Vibe (pick 2-3)
+## Direction Summary
 
-- [ ] Serious / professional
-- [ ] Friendly / playful
-- [ ] Technical / terminal-like
-- [ ] Editorial / content-first
-- [ ] Bold / experimental
-- [ ] Minimal / quiet
+- Product vibe: serious + friendly + minimal.
+- Core goals: cleaner hierarchy, stronger sidebar utility, softer modern surfaces, better message readability.
+- Color caution: avoid loud/saturated palettes even when layout/style is strong.
 
-## 2) References (6-10 links or screenshots)
+## Round 1 Decisions (User-Approved)
 
-For each reference, include:
+### Kept
 
-1. Link or image path
-2. What you like (2 bullets)
-3. What you dislike (1 bullet)
-4. Where to apply it in SmolPC (sidebar, message cards, header, etc.)
+1. **#9 Linear**
+   - Link: https://linear.app/
+   - Local capture: `docs/design-references/kept-online/09-linear-homepage.png`
+   - Why: strong product-grade structure, tight spacing, premium neutral palette.
 
-Example format:
+2. **#8 Light vs Dark Sidebar (Dribbble)**
+   - Link: https://dribbble.com/shots/22501121-Light-vs-Dark-Sidebar
+   - Local capture: `docs/design-references/kept-online/08-dribbble-light-vs-dark-sidebar.png`
+   - Why: clear nav hierarchy and high legibility in compact sidebar patterns.
 
-```
-Reference 1: https://example.com
-Likes:
-- Dense but readable sidebar
-- Strong active state in nav
-Dislike:
-- Too much animation on hover
-Apply to:
-- Sidebar grouping + active chat row
-```
+3. **#7 AI Chat Assistant Model (Dribbble)**
+   - Link: https://dribbble.com/shots/25220634-AI-chat-assistant-model
+   - Local capture: `docs/design-references/kept-online/07-dribbble-ai-chat-assistant-model.png`
+   - Why: useful modular control patterns and strong component framing.
 
-## 3) Color Direction
+4. **#5 AI Chat Interface (Dribbble)**
+   - Link: https://dribbble.com/shots/26883616-AI-Chat-Interface
+   - Local capture: `docs/design-references/kept-online/05-dribbble-ai-chat-interface.png`
+   - Why: strong chat surface composition and balanced spacing.
 
-- Primary color family:
-- Accent color family:
-- Neutral background preference:
-- Avoid colors:
-- Contrast preference (soft, medium, high):
+5. **#4 AI Chat Interface in Light Theme (Dribbble)**
+   - Link: https://dribbble.com/shots/24101037-AI-Chat-Interface-in-Light-Theme
+   - Local capture: `docs/design-references/kept-online/04-dribbble-light-theme-ai-chat.png`
+   - Why: good structure and interaction affordances.
+   - Caveat: color palette not preferred.
 
-## 4) Typography Direction
+6. **#3 ChatGPT Desktop**
+   - Link: https://openai.com/chatgpt/desktop/
+   - Local capture: `docs/design-references/kept-online/03-openai-chatgpt-desktop.png`
+   - Note: automated screenshot is blocked by Cloudflare challenge; use link as reference source.
 
-- Heading style:
-- Body style:
-- Code font style:
-- Desired feel (academic, modern, playful, enterprise):
+7. **#1 Raycast AI Chat Changelog**
+   - Link: https://www.raycast.com/changelog/macos/1-69-0
+   - Local capture: `docs/design-references/kept-online/01-raycast-new-ai-chat.png`
+   - Why: refined dark UI, tight utility-first composition, high information density.
 
-## 5) Motion Direction
+### Rejected
 
-- Motion intensity:
-  - [ ] Minimal
-  - [ ] Moderate
-  - [ ] High
-- Preferred motion examples:
-- Motion to avoid:
+1. **#6 AI Chat popup window (Dribbble)**
+   - Link: https://dribbble.com/shots/25974089-AI-Chat-popup-window-for-agents-with-3-suggestions
+   - Reason: style feels cheap.
 
-## 6) Explicit Do / Don’t
+2. **#2 Raycast Chat Branching Changelog**
+   - Link: https://www.raycast.com/changelog/1-101-0
+   - Reason: references branching functionality that does not exist yet in product scope.
 
-Do:
-- 
-- 
+## Existing User References (Local)
 
-Don’t:
-- 
-- 
+1. `docs/design-references/Reference 1.png`
+2. `docs/design-references/Reference 2.png`
+3. `docs/design-references/Reference 3.png`
 
-## 7) Priority Screens
+## Extracted Design Rules (Current Working Set)
 
-Order these from most important to least:
+1. Keep the visual language quiet and premium: neutral backgrounds, restrained accents, high text clarity.
+2. Favor strong component boundaries: cards/panels/composer should feel intentionally modular.
+3. Sidebar must prioritize speed: easy scan, obvious active state, lightweight metadata.
+4. Motion should feel polished but restrained; no playful over-animation.
+5. Avoid decorative-only styling that hurts functional clarity.
 
-1. Sidebar
-2. Header + controls
-3. Messages
-4. Composer
-5. Empty state
-6. Hardware/benchmark overlays
+## Candidate Pack: Round 2 (Pending Your Decision)
 
-## 8) Final Rating Check
+1. **R2-01 Linear new UI changelog**
+   - Link: https://linear.app/changelog/2024-03-20-new-linear-ui
+   - Local capture: `docs/design-references/round-2-candidates/r2-01-linear-new-ui-changelog.png`
+   - Why it might fit: concrete before/after notes for hierarchy and density.
 
-Rate current UI from 1-10 on:
+2. **R2-02 Linear redesign deep dive**
+   - Link: https://linear.app/now/how-we-redesigned-the-linear-ui
+   - Local capture: `docs/design-references/round-2-candidates/r2-02-linear-redesign-deep-dive.png`
+   - Why it might fit: practical rules for contrast and visual simplification.
 
-- Visual polish:
-- Readability:
-- Navigation speed:
-- Message usability:
-- Overall personality:
+3. **R2-03 Notion 2.39 (sidebar basics)**
+   - Link: https://www.notion.com/releases/2024-04-30
+   - Local capture: `docs/design-references/round-2-candidates/r2-03-notion-239-sidebar-basics.png`
+   - Why it might fit: functional sidebar patterns for information architecture.
+
+4. **R2-04 Notion 2.40 (organization)**
+   - Link: https://www.notion.com/en-gb/releases/2024-06-11
+   - Local capture: `docs/design-references/round-2-candidates/r2-04-notion-240-sidebar-organize.png`
+   - Why it might fit: compact controls and organization affordances.
+
+5. **R2-05 GitHub Copilot Chat GA**
+   - Link: https://github.blog/changelog/2025-07-09-new-copilot-chat-features-now-generally-available-on-github
+   - Local capture: `docs/design-references/round-2-candidates/r2-05-github-copilot-chat-ga.png`
+   - Why it might fit: practical chat ergonomics and action framing in a developer tool context.
+
+6. **R2-06 Behance: Sidebar for AI chats**
+   - Link: https://www.behance.net/gallery/243521617/Sidebar-for-AI-chats
+   - Local capture: `docs/design-references/round-2-candidates/r2-06-behance-sidebar-for-ai-chats.png`
+   - Why it might fit: direct sidebar concept exploration for AI workflow navigation.
+
+## Next Reply Format
+
+Use this format and I will immediately update docs/folder state:
+
+- Keep: R2-#, R2-#, ...
+- Reject: R2-# (reason), R2-# (reason), ...
+
