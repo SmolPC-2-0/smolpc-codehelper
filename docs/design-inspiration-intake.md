@@ -72,42 +72,45 @@ Last Updated: 2026-02-10
 4. Motion should feel polished but restrained; no playful over-animation.
 5. Avoid decorative-only styling that hurts functional clarity.
 
-## Candidate Pack: Round 2 (Pending Your Decision)
+## Round 2 Decisions (User-Approved)
 
-1. **R2-01 Linear new UI changelog**
-   - Link: https://linear.app/changelog/2024-03-20-new-linear-ui
-   - Local capture: `docs/design-references/round-2-candidates/r2-01-linear-new-ui-changelog.png`
-   - Why it might fit: concrete before/after notes for hierarchy and density.
+### Kept
 
-2. **R2-02 Linear redesign deep dive**
-   - Link: https://linear.app/now/how-we-redesigned-the-linear-ui
-   - Local capture: `docs/design-references/round-2-candidates/r2-02-linear-redesign-deep-dive.png`
-   - Why it might fit: practical rules for contrast and visual simplification.
-
-3. **R2-03 Notion 2.39 (sidebar basics)**
-   - Link: https://www.notion.com/releases/2024-04-30
-   - Local capture: `docs/design-references/round-2-candidates/r2-03-notion-239-sidebar-basics.png`
-   - Why it might fit: functional sidebar patterns for information architecture.
-
-4. **R2-04 Notion 2.40 (organization)**
-   - Link: https://www.notion.com/en-gb/releases/2024-06-11
-   - Local capture: `docs/design-references/round-2-candidates/r2-04-notion-240-sidebar-organize.png`
-   - Why it might fit: compact controls and organization affordances.
-
-5. **R2-05 GitHub Copilot Chat GA**
-   - Link: https://github.blog/changelog/2025-07-09-new-copilot-chat-features-now-generally-available-on-github
-   - Local capture: `docs/design-references/round-2-candidates/r2-05-github-copilot-chat-ga.png`
-   - Why it might fit: practical chat ergonomics and action framing in a developer tool context.
-
-6. **R2-06 Behance: Sidebar for AI chats**
+1. **R2-06 Behance: Sidebar for AI chats**
    - Link: https://www.behance.net/gallery/243521617/Sidebar-for-AI-chats
    - Local capture: `docs/design-references/round-2-candidates/r2-06-behance-sidebar-for-ai-chats.png`
-   - Why it might fit: direct sidebar concept exploration for AI workflow navigation.
+   - Signal: sidebar composition and widget framing.
 
-## Next Reply Format
+2. **R2-05 GitHub Copilot Chat GA**
+   - Link: https://github.blog/changelog/2025-07-09-new-copilot-chat-features-now-generally-available-on-github
+   - Local capture: `docs/design-references/round-2-candidates/r2-05-github-copilot-chat-ga.png`
+   - Signal: button and widget styling patterns.
 
-Use this format and I will immediately update docs/folder state:
+3. **R2-02 Linear redesign deep dive**
+   - Link: https://linear.app/now/how-we-redesigned-the-linear-ui
+   - Local capture: `docs/design-references/round-2-candidates/r2-02-linear-redesign-deep-dive.png`
+   - Signal: best-practice baseline for hierarchy and premium restraint.
 
-- Keep: R2-#, R2-#, ...
-- Reject: R2-# (reason), R2-# (reason), ...
+4. **R2-01 Linear new UI changelog**
+   - Link: https://linear.app/changelog/2024-03-20-new-linear-ui
+   - Local capture: `docs/design-references/round-2-candidates/r2-01-linear-new-ui-changelog.png`
+   - Signal: practical UI simplification and density balance.
 
+### Rejected
+
+1. **R2-04 Notion 2.40**
+   - Link: https://www.notion.com/en-gb/releases/2024-06-11
+   - Reason: feels boring despite functional value.
+
+2. **R2-03 Notion 2.39**
+   - Link: https://www.notion.com/releases/2024-04-30
+   - Reason: feels boring despite functional value.
+
+## Working Baseline For Implementation
+
+1. **Primary baseline**: Linear (R2-01 + R2-02) for global structure and spacing.
+2. **Secondary influence**: R2-05 + R2-06 for button/widget treatment.
+3. **Design intent for next iteration**:
+   - Reduce color saturation.
+   - Keep strong hierarchy and utilitarian clarity.
+   - Preserve modular/floating composer feel without flashy gradients.

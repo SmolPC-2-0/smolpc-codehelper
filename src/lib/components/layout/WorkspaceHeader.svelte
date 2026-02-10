@@ -93,11 +93,11 @@
 		background:
 			linear-gradient(
 				120deg,
-				color-mix(in srgb, var(--color-primary) 16%, transparent),
-				transparent 42%,
-				color-mix(in srgb, var(--color-accent) 12%, transparent)
+				color-mix(in srgb, var(--color-primary) 8%, transparent),
+				color-mix(in srgb, var(--color-card) 94%, transparent) 42%,
+				color-mix(in srgb, var(--color-card) 88%, transparent)
 			),
-			color-mix(in srgb, var(--color-card) 86%, transparent);
+			var(--surface-subtle);
 		backdrop-filter: blur(10px);
 	}
 
@@ -110,7 +110,7 @@
 		background: linear-gradient(
 			90deg,
 			transparent,
-			color-mix(in srgb, var(--color-primary) 60%, transparent),
+			color-mix(in srgb, var(--color-primary) 34%, transparent),
 			transparent
 		);
 	}
@@ -141,8 +141,9 @@
 
 	:global(.workspace-header__menu) {
 		flex-shrink: 0;
-		border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
-		background: color-mix(in srgb, var(--color-card) 90%, transparent);
+		border: 1px solid color-mix(in srgb, var(--color-border) 84%, transparent);
+		background: color-mix(in srgb, var(--color-card) 92%, transparent);
+		box-shadow: var(--shadow-soft);
 	}
 
 	.workspace-header__badge {
@@ -155,12 +156,9 @@
 		font-weight: 700;
 		text-transform: uppercase;
 		letter-spacing: 0.07em;
-		color: var(--color-primary-foreground);
-		background: linear-gradient(
-			120deg,
-			var(--color-primary),
-			color-mix(in srgb, var(--color-primary) 62%, var(--color-accent))
-		);
+		color: color-mix(in srgb, var(--color-primary) 82%, var(--color-foreground));
+		border: 1px solid color-mix(in srgb, var(--color-primary) 26%, transparent);
+		background: color-mix(in srgb, var(--color-primary) 12%, transparent);
 	}
 
 	.workspace-header__actions {
@@ -170,8 +168,9 @@
 	}
 
 	:global(.workspace-header__icon-button) {
-		border: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent);
-		background: color-mix(in srgb, var(--color-card) 90%, transparent);
+		border: 1px solid color-mix(in srgb, var(--color-border) 84%, transparent);
+		background: color-mix(in srgb, var(--color-card) 94%, transparent);
+		box-shadow: var(--shadow-soft);
 	}
 
 	:global(.workspace-header__icon-button--active) {

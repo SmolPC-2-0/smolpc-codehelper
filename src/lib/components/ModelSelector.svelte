@@ -53,8 +53,9 @@
 		min-width: 17rem;
 		padding: 0.45rem 0.68rem;
 		border-radius: var(--radius-xl);
-		border: 1px solid var(--color-border);
-		background: color-mix(in srgb, var(--color-card) 92%, transparent);
+		border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
+		background: color-mix(in srgb, var(--color-card) 96%, transparent);
+		box-shadow: var(--shadow-soft);
 	}
 
 	:global(.model-selector__icon) {

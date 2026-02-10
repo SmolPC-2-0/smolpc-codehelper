@@ -31,10 +31,11 @@
 		gap: 0.45rem;
 		padding: 0.45rem 0.68rem;
 		border-radius: var(--radius-xl);
-		border: 1px solid var(--color-border);
+		border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
 		font-size: 0.81rem;
 		font-weight: 650;
 		cursor: pointer;
+		box-shadow: var(--shadow-soft);
 		transition:
 			transform var(--motion-fast),
 			border-color var(--motion-fast),
@@ -53,6 +54,6 @@
 
 	.context-toggle--disabled {
 		color: var(--color-muted-foreground);
-		background: color-mix(in srgb, var(--color-card) 92%, transparent);
+		background: color-mix(in srgb, var(--color-card) 96%, transparent);
 	}
 </style>

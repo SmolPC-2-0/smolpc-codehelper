@@ -130,8 +130,8 @@
 		gap: 0.35rem;
 		padding: 0.45rem 0.65rem;
 		border-radius: var(--radius-lg);
-		border: 1px solid color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
-		background: color-mix(in srgb, var(--color-card) 96%, transparent);
+		border: 1px solid color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+		background: color-mix(in srgb, var(--color-card) 98%, transparent);
 		color: var(--color-foreground);
 		font-size: 0.72rem;
 		font-weight: 700;
@@ -141,7 +141,7 @@
 	}
 
 	.conversation-view__jump-latest:hover {
-		background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+		background: color-mix(in srgb, var(--color-primary) 10%, transparent);
 	}
 
 	@media (max-width: 768px) {

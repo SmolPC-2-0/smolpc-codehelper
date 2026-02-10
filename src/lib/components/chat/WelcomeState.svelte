@@ -63,9 +63,9 @@
 		font-weight: 700;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: color-mix(in srgb, var(--color-primary) 80%, var(--color-foreground));
-		border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
-		background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+		color: color-mix(in srgb, var(--color-primary) 72%, var(--color-foreground));
+		border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
+		background: color-mix(in srgb, var(--color-primary) 10%, transparent);
 	}
 
 	.welcome-state__hero h2 {

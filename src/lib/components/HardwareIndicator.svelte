@@ -38,14 +38,15 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.45rem;
-		border: 1px solid var(--color-border);
+		border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
 		border-radius: var(--radius-lg);
 		padding: 0.45rem 0.7rem;
-		background: color-mix(in srgb, var(--color-card) 90%, transparent);
+		background: color-mix(in srgb, var(--color-card) 96%, transparent);
 		font-size: 0.78rem;
 		font-weight: 650;
 		color: var(--color-foreground);
 		cursor: pointer;
+		box-shadow: var(--shadow-soft);
 		transition:
 			background var(--motion-fast),
 			border-color var(--motion-fast),
@@ -54,8 +55,8 @@
 
 	.hardware-indicator:hover {
 		transform: translateY(-1px);
-		border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
-		background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+		border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
+		background: color-mix(in srgb, var(--color-primary) 8%, transparent);
 	}
 
 	.hardware-indicator--active {

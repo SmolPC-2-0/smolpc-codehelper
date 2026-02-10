@@ -48,9 +48,13 @@
 		padding: 0.9rem 1rem 1rem;
 		border-top: 1px solid var(--color-border);
 		background:
-			linear-gradient(180deg, color-mix(in srgb, var(--color-card) 88%, transparent), var(--color-card)),
-			var(--color-card);
-		backdrop-filter: blur(12px);
+			linear-gradient(
+				180deg,
+				color-mix(in srgb, var(--color-card) 96%, transparent),
+				color-mix(in srgb, var(--color-card) 92%, transparent)
+			),
+			var(--surface-subtle);
+		backdrop-filter: blur(10px);
 	}
 
 	.composer-shell__inner {
@@ -67,7 +71,8 @@
 	:global(.composer-shell__cancel) {
 		border-color: color-mix(in srgb, var(--color-destructive) 55%, var(--color-border));
 		color: var(--color-destructive);
-		background: color-mix(in srgb, var(--color-destructive) 8%, transparent);
+		background: color-mix(in srgb, var(--color-destructive) 9%, transparent);
+		box-shadow: var(--shadow-soft);
 	}
 
 	:global(.composer-shell__cancel:hover) {
