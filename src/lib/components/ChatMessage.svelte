@@ -161,24 +161,24 @@
 		padding: 0.9rem;
 		border: 1px solid var(--color-border);
 		border-radius: calc(var(--radius-xl) + 2px);
-		background: color-mix(in srgb, var(--color-card) 94%, transparent);
+		background: color-mix(in srgb, var(--color-card) 97%, transparent);
 		box-shadow: var(--shadow-soft);
 		animation: message-in var(--motion-medium);
 	}
 
 	.chat-message--user {
-		border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+		border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
 		background:
 			linear-gradient(
 				140deg,
-				color-mix(in srgb, var(--color-primary) 8%, transparent),
-				color-mix(in srgb, var(--color-card) 92%, transparent)
+				color-mix(in srgb, var(--color-primary) 10%, transparent),
+				color-mix(in srgb, var(--color-card) 96%, transparent)
 			),
-			var(--color-card);
+			var(--surface-elevated);
 	}
 
 	.chat-message--assistant {
-		border-color: color-mix(in srgb, var(--color-accent) 20%, var(--color-border));
+		border-color: color-mix(in srgb, var(--color-border) 90%, var(--color-accent));
 	}
 
 	.chat-message__avatar {
@@ -189,20 +189,13 @@
 		justify-content: center;
 		flex-shrink: 0;
 		border-radius: 999px;
-		background: linear-gradient(
-			130deg,
-			color-mix(in srgb, var(--color-primary) 82%, transparent),
-			color-mix(in srgb, var(--color-accent) 62%, transparent)
-		);
+		background: color-mix(in srgb, var(--color-primary) 88%, var(--color-foreground));
 		color: var(--color-primary-foreground);
 	}
 
 	.chat-message--assistant .chat-message__avatar {
-		background: linear-gradient(
-			130deg,
-			color-mix(in srgb, var(--color-accent) 76%, transparent),
-			color-mix(in srgb, var(--color-primary) 36%, transparent)
-		);
+		background: color-mix(in srgb, var(--color-muted) 84%, var(--color-card));
+		color: var(--color-muted-foreground);
 	}
 
 	.chat-message__body {
@@ -263,7 +256,7 @@
 		padding: 0.35rem 0.6rem;
 		border-radius: var(--radius-md);
 		border: 1px solid var(--color-border);
-		background: color-mix(in srgb, var(--color-card) 95%, transparent);
+		background: color-mix(in srgb, var(--color-card) 97%, transparent);
 		font-size: 0.7rem;
 		font-weight: 650;
 		color: var(--color-muted-foreground);
@@ -271,13 +264,15 @@
 		transition:
 			color var(--motion-fast),
 			background var(--motion-fast),
-			border-color var(--motion-fast);
+			border-color var(--motion-fast),
+			transform var(--motion-fast);
 	}
 
 	.chat-message__action:hover {
 		color: var(--color-foreground);
-		border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
-		background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+		border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
+		background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+		transform: translateY(-1px);
 	}
 
 	.chat-message__action-icon--success,

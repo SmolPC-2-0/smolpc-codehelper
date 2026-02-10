@@ -59,10 +59,10 @@
 		background:
 			linear-gradient(
 				145deg,
-				color-mix(in srgb, var(--color-primary) 9%, transparent),
-				color-mix(in srgb, var(--color-card) 92%, transparent)
+				color-mix(in srgb, var(--color-primary) 7%, transparent),
+				color-mix(in srgb, var(--color-card) 96%, transparent)
 			),
-			var(--color-card);
+			var(--surface-subtle);
 		box-shadow: var(--shadow-soft);
 	}
 
@@ -78,7 +78,7 @@
 		display: flex;
 		align-items: flex-start;
 		gap: 0.55rem;
-		color: color-mix(in srgb, var(--color-warning) 80%, var(--color-foreground));
+		color: color-mix(in srgb, var(--color-primary) 70%, var(--color-foreground));
 	}
 
 	.quick-examples__title h3 {
@@ -104,7 +104,7 @@
 	.quick-examples__close:hover {
 		color: var(--color-foreground);
 		border-color: var(--color-border);
-		background: color-mix(in srgb, var(--color-accent) 32%, transparent);
+		background: color-mix(in srgb, var(--color-accent) 44%, transparent);
 	}
 
 	.quick-examples__grid {
@@ -120,7 +120,7 @@
 		text-align: left;
 		border-radius: var(--radius-lg);
 		border: 1px solid var(--color-border);
-		background: color-mix(in srgb, var(--color-card) 92%, transparent);
+		background: color-mix(in srgb, var(--color-card) 97%, transparent);
 		color: inherit;
 		cursor: pointer;
 		transition:
@@ -131,7 +131,7 @@
 
 	.quick-examples__item:hover {
 		transform: translateY(-1px);
-		border-color: color-mix(in srgb, var(--color-primary) 60%, transparent);
+		border-color: color-mix(in srgb, var(--color-primary) 42%, transparent);
 		background: color-mix(in srgb, var(--color-primary) 8%, transparent);
 	}
 

@@ -39,11 +39,12 @@
 	.control-pill {
 		display: inline-flex;
 		gap: 0.375rem;
-		border: 1px solid var(--color-border);
+		border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
 		border-radius: var(--radius-xl);
 		padding: 0.25rem;
-		background: color-mix(in srgb, var(--color-card) 84%, transparent);
+		background: color-mix(in srgb, var(--color-card) 96%, transparent);
 		backdrop-filter: blur(8px);
+		box-shadow: var(--shadow-soft);
 	}
 
 	.theme-chip {
@@ -67,7 +68,7 @@
 
 	.theme-chip:hover {
 		color: var(--color-foreground);
-		background: color-mix(in srgb, var(--color-accent) 36%, transparent);
+		background: color-mix(in srgb, var(--color-accent) 44%, transparent);
 		transform: translateY(-1px);
 	}
 

@@ -23,7 +23,13 @@
 		gap: 0.75rem;
 		padding: 0.8rem 1rem;
 		border-bottom: 1px solid var(--color-border);
-		background: color-mix(in srgb, var(--color-card) 90%, transparent);
+		background:
+			linear-gradient(
+				180deg,
+				color-mix(in srgb, var(--color-card) 95%, transparent),
+				color-mix(in srgb, var(--color-card) 90%, transparent)
+			),
+			var(--surface-subtle);
 		backdrop-filter: blur(8px);
 	}
 

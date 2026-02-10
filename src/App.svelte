@@ -450,12 +450,12 @@
 		background:
 			radial-gradient(
 				60rem 30rem at 10% 0%,
-				color-mix(in srgb, var(--color-primary) 14%, transparent),
+				color-mix(in srgb, var(--color-primary) 10%, transparent),
 				transparent
 			),
 			radial-gradient(
 				48rem 26rem at 100% 100%,
-				color-mix(in srgb, var(--color-accent) 10%, transparent),
+				color-mix(in srgb, var(--color-primary) 6%, transparent),
 				transparent
 			);
 	}
@@ -468,7 +468,7 @@
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
-		background: color-mix(in srgb, var(--color-card) 82%, transparent);
-		backdrop-filter: blur(10px);
+		background: color-mix(in srgb, var(--color-card) 88%, transparent);
+		backdrop-filter: blur(8px);
 	}
 </style>

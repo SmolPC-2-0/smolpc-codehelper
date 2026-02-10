@@ -39,31 +39,37 @@ Last Updated: 2026-02-10
    - Link: https://linear.app/
    - Capture: `docs/design-references/kept-online/09-linear-homepage.png`
 
-## Round 2 Candidate Set (Pending)
+## Round 2 Candidate Set (Decided)
 
 1. R2-01 Linear new UI changelog
    - Link: https://linear.app/changelog/2024-03-20-new-linear-ui
    - Capture: `docs/design-references/round-2-candidates/r2-01-linear-new-ui-changelog.png`
+   - Decision: kept
 
 2. R2-02 Linear redesign deep dive
    - Link: https://linear.app/now/how-we-redesigned-the-linear-ui
    - Capture: `docs/design-references/round-2-candidates/r2-02-linear-redesign-deep-dive.png`
+   - Decision: kept
 
 3. R2-03 Notion 2.39
    - Link: https://www.notion.com/releases/2024-04-30
    - Capture: `docs/design-references/round-2-candidates/r2-03-notion-239-sidebar-basics.png`
+   - Decision: rejected (boring despite good functionality)
 
 4. R2-04 Notion 2.40
    - Link: https://www.notion.com/en-gb/releases/2024-06-11
    - Capture: `docs/design-references/round-2-candidates/r2-04-notion-240-sidebar-organize.png`
+   - Decision: rejected (boring despite good functionality)
 
 5. R2-05 GitHub Copilot Chat GA
    - Link: https://github.blog/changelog/2025-07-09-new-copilot-chat-features-now-generally-available-on-github
    - Capture: `docs/design-references/round-2-candidates/r2-05-github-copilot-chat-ga.png`
+   - Decision: kept (button/widget style)
 
 6. R2-06 Behance: Sidebar for AI chats
    - Link: https://www.behance.net/gallery/243521617/Sidebar-for-AI-chats
    - Capture: `docs/design-references/round-2-candidates/r2-06-behance-sidebar-for-ai-chats.png`
+   - Decision: kept
 
 ## Archived Exploratory Candidates (Lower Fit)
 

@@ -458,10 +458,10 @@
 		background:
 			linear-gradient(
 				180deg,
-				color-mix(in srgb, var(--color-primary) 10%, transparent),
-				color-mix(in srgb, var(--color-card) 96%, transparent) 32%
+				color-mix(in srgb, var(--color-primary) 7%, transparent),
+				color-mix(in srgb, var(--color-card) 94%, transparent) 32%
 			),
-			var(--color-card);
+			var(--surface-subtle);
 	}
 
 	.sidebar__header {
@@ -489,8 +489,9 @@
 
 	:global(.sidebar__collapse) {
 		flex-shrink: 0;
-		border: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent);
-		background: color-mix(in srgb, var(--color-card) 92%, transparent);
+		border: 1px solid color-mix(in srgb, var(--color-border) 85%, transparent);
+		background: color-mix(in srgb, var(--color-card) 94%, transparent);
+		box-shadow: var(--shadow-soft);
 	}
 
 	.sidebar__action {
@@ -503,11 +504,8 @@
 		width: 100%;
 		height: 2.35rem;
 		border-radius: var(--radius-lg);
-		background: linear-gradient(
-			135deg,
-			var(--color-primary),
-			color-mix(in srgb, var(--color-primary) 60%, var(--color-accent))
-		);
+		background: var(--color-primary);
+		box-shadow: var(--shadow-soft);
 	}
 
 	.sidebar__search-wrap {
@@ -529,9 +527,13 @@
 		border: 1px solid var(--color-border);
 		padding: 0.45rem 0.55rem 0.45rem 1.9rem;
 		font-size: 0.76rem;
-		background: color-mix(in srgb, var(--color-card) 94%, transparent);
+		background: color-mix(in srgb, var(--color-card) 96%, transparent);
 		color: var(--color-foreground);
 		outline: none;
+		transition:
+			border-color var(--motion-fast),
+			box-shadow var(--motion-fast),
+			background var(--motion-fast);
 	}
 
 	.sidebar__search-input:focus {
@@ -567,21 +569,36 @@
 		padding: 0.2rem;
 		margin-bottom: 0.14rem;
 		border: 1px solid transparent;
+		transition:
+			border-color var(--motion-fast),
+			background var(--motion-fast);
 	}
 
 	.sidebar__chat-row:hover {
-		background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+		background: color-mix(in srgb, var(--color-accent) 42%, transparent);
 	}
 
 	.sidebar__chat-row--active {
-		border-color: color-mix(in srgb, var(--color-primary) 50%, transparent);
+		border-color: color-mix(in srgb, var(--color-primary) 46%, transparent);
 		background:
 			linear-gradient(
 				140deg,
-				color-mix(in srgb, var(--color-primary) 14%, transparent),
-				color-mix(in srgb, var(--color-card) 92%, transparent)
+				color-mix(in srgb, var(--color-primary) 10%, transparent),
+				color-mix(in srgb, var(--color-card) 94%, transparent)
 			),
-			var(--color-card);
+			var(--surface-elevated);
+		box-shadow: var(--shadow-soft);
+	}
+
+	.sidebar__chat-row--active::before {
+		content: '';
+		position: absolute;
+		left: 0.18rem;
+		top: 0.42rem;
+		bottom: 0.42rem;
+		width: 2px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--color-primary) 84%, white);
 	}
 
 	.sidebar__chat-row--archived {
@@ -595,7 +612,7 @@
 		gap: 0.12rem;
 		border: 0;
 		background: transparent;
-		padding: 0.38rem 0.45rem;
+		padding: 0.4rem 0.5rem;
 		text-align: left;
 		border-radius: var(--radius-md);
 		color: inherit;
@@ -642,12 +659,14 @@
 		cursor: pointer;
 		transition:
 			background var(--motion-fast),
-			color var(--motion-fast);
+			color var(--motion-fast),
+			transform var(--motion-fast);
 	}
 
 	.sidebar__icon-btn:hover {
-		background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+		background: color-mix(in srgb, var(--color-accent) 42%, transparent);
 		color: var(--color-foreground);
+		transform: translateY(-1px);
 	}
 
 	.sidebar__menu {
@@ -658,7 +677,7 @@
 		z-index: 10;
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-lg);
-		background: color-mix(in srgb, var(--color-card) 98%, transparent);
+		background: color-mix(in srgb, var(--color-card) 99%, transparent);
 		box-shadow: var(--shadow-soft);
 		padding: 0.28rem;
 		display: grid;
@@ -681,7 +700,7 @@
 	}
 
 	.sidebar__menu button:hover {
-		background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+		background: color-mix(in srgb, var(--color-accent) 38%, transparent);
 	}
 
 	.sidebar__menu-danger {
@@ -749,9 +768,9 @@
 		align-items: center;
 		gap: 0.55rem;
 		padding: 0.5rem 0.6rem;
-		border: 1px solid color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+		border: 1px solid color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
 		border-radius: var(--radius-lg);
-		background: color-mix(in srgb, var(--color-card) 94%, transparent);
+		background: color-mix(in srgb, var(--color-card) 97%, transparent);
 		box-shadow: var(--shadow-soft);
 	}
 
