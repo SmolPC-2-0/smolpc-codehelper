@@ -65,7 +65,7 @@
 		text-transform: uppercase;
 		color: color-mix(in srgb, var(--color-primary) 72%, var(--color-foreground));
 		border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
-		background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+		background: var(--brand-soft);
 	}
 
 	.welcome-state__hero h2 {

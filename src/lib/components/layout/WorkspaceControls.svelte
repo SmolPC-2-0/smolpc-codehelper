@@ -26,8 +26,8 @@
 		background:
 			linear-gradient(
 				180deg,
-				color-mix(in srgb, var(--color-card) 95%, transparent),
-				color-mix(in srgb, var(--color-card) 90%, transparent)
+				var(--surface-widget),
+				var(--surface-subtle)
 			),
 			var(--surface-subtle);
 		backdrop-filter: blur(8px);

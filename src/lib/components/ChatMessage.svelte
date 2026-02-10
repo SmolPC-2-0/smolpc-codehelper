@@ -161,7 +161,7 @@
 		padding: 0.9rem;
 		border: 1px solid var(--color-border);
 		border-radius: calc(var(--radius-xl) + 2px);
-		background: color-mix(in srgb, var(--color-card) 97%, transparent);
+		background: var(--surface-widget);
 		box-shadow: var(--shadow-soft);
 		animation: message-in var(--motion-medium);
 	}
@@ -171,8 +171,8 @@
 		background:
 			linear-gradient(
 				140deg,
-				color-mix(in srgb, var(--color-primary) 10%, transparent),
-				color-mix(in srgb, var(--color-card) 96%, transparent)
+				var(--brand-soft),
+				var(--surface-widget)
 			),
 			var(--surface-elevated);
 	}
@@ -256,7 +256,7 @@
 		padding: 0.35rem 0.6rem;
 		border-radius: var(--radius-md);
 		border: 1px solid var(--color-border);
-		background: color-mix(in srgb, var(--color-card) 97%, transparent);
+		background: var(--surface-widget);
 		font-size: 0.7rem;
 		font-weight: 650;
 		color: var(--color-muted-foreground);
@@ -271,7 +271,7 @@
 	.chat-message__action:hover {
 		color: var(--color-foreground);
 		border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
-		background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+		background: var(--surface-active);
 		transform: translateY(-1px);
 	}
 
@@ -308,7 +308,7 @@
 		overflow: hidden;
 		border-radius: var(--radius-lg);
 		border: 1px solid var(--color-border);
-		background: color-mix(in srgb, var(--color-card) 96%, transparent);
+		background: var(--surface-widget);
 	}
 
 	:global(.code-block-head) {
@@ -317,7 +317,7 @@
 		justify-content: space-between;
 		padding: 0.45rem 0.7rem;
 		border-bottom: 1px solid var(--color-border);
-		background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+		background: var(--surface-hover);
 	}
 
 	:global(.code-block-lang) {
@@ -338,7 +338,7 @@
 	}
 
 	:global(.code-copy-btn-frame:hover) {
-		background: color-mix(in srgb, var(--color-accent) 26%, transparent);
+		background: var(--surface-hover);
 		color: var(--color-foreground);
 	}
 
@@ -356,8 +356,8 @@
 	:global(.inline-code) {
 		padding: 0.12rem 0.3rem;
 		border-radius: var(--radius-sm);
-		background: color-mix(in srgb, var(--color-accent) 20%, transparent);
-		color: color-mix(in srgb, var(--color-primary) 78%, var(--color-foreground));
+		background: var(--surface-hover);
+		color: var(--color-foreground);
 		font-size: 0.78rem;
 	}
 
@@ -374,7 +374,7 @@
 		padding-right: 0.375rem;
 		padding-top: 0.125rem;
 		padding-bottom: 0.125rem;
-		background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+		background: var(--surface-hover);
 		font-family: var(--font-code, 'JetBrains Mono', monospace);
 	}
 

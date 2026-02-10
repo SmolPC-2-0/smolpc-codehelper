@@ -54,7 +54,7 @@
 		padding: 0.45rem 0.68rem;
 		border-radius: var(--radius-xl);
 		border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
-		background: color-mix(in srgb, var(--color-card) 96%, transparent);
+		background: var(--surface-widget);
 		box-shadow: var(--shadow-soft);
 	}
 

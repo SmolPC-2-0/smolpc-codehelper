@@ -114,3 +114,36 @@ Last Updated: 2026-02-10
    - Reduce color saturation.
    - Keep strong hierarchy and utilitarian clarity.
    - Preserve modular/floating composer feel without flashy gradients.
+
+## Color Pass Snapshot (Implemented)
+
+Date: 2026-02-10
+
+1. **Palette direction applied**
+   - Neutral-first surfaces in light/dark.
+   - Lower saturation brand purple for accent/interactive cues.
+   - Reduced warning/success intensity to avoid visual noise.
+
+2. **Key token updates**
+   - `--primary`: reduced chroma for calmer brand color.
+   - Added semantic UI tokens in `src/app.css`:
+     - `--surface-widget`
+     - `--surface-hover`
+     - `--surface-active`
+     - `--brand-soft`
+     - `--brand-soft-strong`
+     - `--focus-ring`
+
+3. **Component pass completed**
+   - Sidebar, header, controls, composer, chat message cards, quick examples, and status widgets now use shared semantic surface tokens.
+   - Primary gradients replaced with flatter premium surfaces where possible.
+   - Hover/active/focus behavior is now more consistent across controls.
+
+4. **Validation**
+   - `npm run check`: pass
+   - `npm run build`: pass
+
+5. **Next visual review targets**
+   - Evaluate if primary color should be slightly warmer or cooler.
+   - Confirm dark-mode contrast on message actions and chips.
+   - Decide if active state stripe in sidebar should be subtler.

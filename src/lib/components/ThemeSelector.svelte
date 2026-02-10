@@ -42,7 +42,7 @@
 		border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
 		border-radius: var(--radius-xl);
 		padding: 0.25rem;
-		background: color-mix(in srgb, var(--color-card) 96%, transparent);
+		background: var(--surface-widget);
 		backdrop-filter: blur(8px);
 		box-shadow: var(--shadow-soft);
 	}
@@ -51,7 +51,7 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.375rem;
-		border: 0;
+		border: 1px solid transparent;
 		border-radius: calc(var(--radius-lg) - 2px);
 		padding: 0.35rem 0.6rem;
 		color: var(--color-muted-foreground);
@@ -68,12 +68,13 @@
 
 	.theme-chip:hover {
 		color: var(--color-foreground);
-		background: color-mix(in srgb, var(--color-accent) 44%, transparent);
+		background: var(--surface-hover);
 		transform: translateY(-1px);
 	}
 
 	.theme-chip--active {
-		background: var(--color-primary);
-		color: var(--color-primary-foreground);
+		border-color: color-mix(in srgb, var(--color-primary) 42%, var(--color-border));
+		background: var(--surface-active);
+		color: var(--color-foreground);
 	}
 </style>

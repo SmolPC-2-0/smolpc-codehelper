@@ -59,8 +59,8 @@
 		background:
 			linear-gradient(
 				145deg,
-				color-mix(in srgb, var(--color-primary) 7%, transparent),
-				color-mix(in srgb, var(--color-card) 96%, transparent)
+				var(--brand-soft),
+				var(--surface-widget)
 			),
 			var(--surface-subtle);
 		box-shadow: var(--shadow-soft);
@@ -104,7 +104,7 @@
 	.quick-examples__close:hover {
 		color: var(--color-foreground);
 		border-color: var(--color-border);
-		background: color-mix(in srgb, var(--color-accent) 44%, transparent);
+		background: var(--surface-hover);
 	}
 
 	.quick-examples__grid {
@@ -120,7 +120,7 @@
 		text-align: left;
 		border-radius: var(--radius-lg);
 		border: 1px solid var(--color-border);
-		background: color-mix(in srgb, var(--color-card) 97%, transparent);
+		background: var(--surface-widget);
 		color: inherit;
 		cursor: pointer;
 		transition:
@@ -132,7 +132,7 @@
 	.quick-examples__item:hover {
 		transform: translateY(-1px);
 		border-color: color-mix(in srgb, var(--color-primary) 42%, transparent);
-		background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+		background: var(--surface-active);
 	}
 
 	.quick-examples__item-head {

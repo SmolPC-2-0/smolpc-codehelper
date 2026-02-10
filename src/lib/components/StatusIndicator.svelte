@@ -34,7 +34,7 @@
 		padding: 0.45rem 0.7rem;
 		font-size: 0.8rem;
 		line-height: 1;
-		background: color-mix(in srgb, var(--color-card) 96%, transparent);
+		background: var(--surface-widget);
 		max-width: min(19rem, 48vw);
 		box-shadow: var(--shadow-soft);
 	}

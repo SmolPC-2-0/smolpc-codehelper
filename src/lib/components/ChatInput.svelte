@@ -70,7 +70,7 @@
 		padding: 0.45rem;
 		border-radius: calc(var(--radius-xl) + 8px);
 		border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
-		background: color-mix(in srgb, var(--color-card) 97%, transparent);
+		background: var(--surface-elevated);
 		box-shadow: var(--shadow-soft);
 	}
 
@@ -85,7 +85,7 @@
 		padding: 0.78rem 0.95rem 1.85rem;
 		border-radius: calc(var(--radius-xl) + 1px);
 		border: 1px solid var(--color-border);
-		background: color-mix(in srgb, var(--color-card) 99%, transparent);
+		background: var(--surface-widget);
 		color: var(--color-foreground);
 		font-size: 0.9rem;
 		line-height: 1.45;
@@ -102,7 +102,7 @@
 
 	.chat-input__textarea:focus {
 		border-color: color-mix(in srgb, var(--color-primary) 66%, transparent);
-		box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 16%, transparent);
+		box-shadow: 0 0 0 4px var(--focus-ring);
 	}
 
 	.chat-input__textarea:disabled {

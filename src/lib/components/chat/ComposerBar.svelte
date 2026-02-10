@@ -50,8 +50,8 @@
 		background:
 			linear-gradient(
 				180deg,
-				color-mix(in srgb, var(--color-card) 96%, transparent),
-				color-mix(in srgb, var(--color-card) 92%, transparent)
+				var(--surface-widget),
+				var(--surface-subtle)
 			),
 			var(--surface-subtle);
 		backdrop-filter: blur(10px);
@@ -76,7 +76,7 @@
 	}
 
 	:global(.composer-shell__cancel:hover) {
-		background: color-mix(in srgb, var(--color-destructive) 14%, transparent);
+		background: color-mix(in srgb, var(--color-destructive) 12%, transparent);
 	}
 
 	@media (max-width: 768px) {
