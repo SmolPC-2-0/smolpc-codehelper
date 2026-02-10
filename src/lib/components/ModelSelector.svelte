@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { inferenceStore } from '$lib/stores/inference.svelte';
-	import { Brain, Loader2 } from '@lucide/svelte';
+	import { BrainCircuit, Loader2 } from '@lucide/svelte';
 
 	let isLoading = $state(false);
 
@@ -20,17 +20,18 @@
 	}
 </script>
 
-<div class="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+<div class="model-selector">
 	{#if isLoading}
-		<Loader2 class="h-4 w-4 animate-spin text-gray-600 dark:text-gray-400" />
+		<Loader2 class="model-selector__icon model-selector__icon--loading" />
 	{:else}
-		<Brain class="h-4 w-4 text-gray-600 dark:text-gray-400" />
+		<BrainCircuit class="model-selector__icon" />
 	{/if}
 	<select
 		value={inferenceStore.currentModel ?? ''}
 		onchange={handleModelChange}
 		disabled={isLoading || inferenceStore.isGenerating}
-		class="flex-1 bg-transparent text-sm text-gray-700 outline-none disabled:opacity-50 dark:text-gray-300"
+		class="model-selector__control"
+		aria-label="Select inference model"
 	>
 		{#if inferenceStore.availableModels.length > 0}
 			{#each inferenceStore.availableModels as model}
@@ -43,3 +44,56 @@
 		{/if}
 	</select>
 </div>
+
+<style>
+	.model-selector {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-width: 17rem;
+		padding: 0.45rem 0.68rem;
+		border-radius: var(--radius-xl);
+		border: 1px solid var(--color-border);
+		background: color-mix(in srgb, var(--color-card) 92%, transparent);
+	}
+
+	:global(.model-selector__icon) {
+		width: 0.95rem;
+		height: 0.95rem;
+		color: var(--color-muted-foreground);
+		flex-shrink: 0;
+	}
+
+	:global(.model-selector__icon--loading) {
+		animation: spin 1s linear infinite;
+	}
+
+	.model-selector__control {
+		flex: 1;
+		font-size: 0.82rem;
+		background: transparent;
+		color: var(--color-foreground);
+		outline: none;
+		border: none;
+		appearance: none;
+		padding-right: 0.4rem;
+	}
+
+	.model-selector__control:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	@media (max-width: 768px) {
+		.model-selector {
+			min-width: 14.5rem;
+			width: 100%;
+		}
+	}
+</style>

@@ -6,9 +6,10 @@
 
 	interface Props {
 		visible: boolean;
+		onClose?: () => void;
 	}
 
-	let { visible = $bindable() }: Props = $props();
+	let { visible, onClose }: Props = $props();
 
 	onMount(() => {
 		// Load cached hardware info on mount
@@ -29,7 +30,7 @@
 	});
 
 	function closePanel() {
-		visible = false;
+		onClose?.();
 	}
 
 	async function refreshHardware() {

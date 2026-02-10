@@ -28,7 +28,7 @@ The `generateStream()` method in `src/lib/stores/inference.svelte.ts` has a race
 
 ## Solution: Promise-Wrapper Pattern
 
-Adopt the pattern from `src/main.js` (lines 362-477):
+Adopt the legacy Promise-wrapper pattern (previously prototyped in the old static frontend):
 
 1. Set up ALL listeners FIRST
 2. Create a Promise that resolves on `inference_done` / rejects on `inference_error`

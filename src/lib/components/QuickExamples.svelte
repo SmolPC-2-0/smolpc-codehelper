@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { QUICK_EXAMPLES } from '$lib/types/examples';
-	import { Lightbulb, X } from '@lucide/svelte';
+	import { Lightbulb, Rocket, X } from '@lucide/svelte';
 
 	interface Props {
 		onSelectExample: (prompt: string) => void;
@@ -15,36 +15,143 @@
 	}
 </script>
 
-<div class="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
-	<div class="mb-3 flex items-center justify-between">
-		<div class="flex items-center gap-2">
-			<Lightbulb class="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
-			<h3 class="text-sm font-semibold text-gray-900 dark:text-white">Quick Examples</h3>
+<div class="quick-examples">
+	<div class="quick-examples__header">
+		<div class="quick-examples__title">
+			<Lightbulb class="h-5 w-5" />
+			<div>
+				<h3>Prompt Starters</h3>
+				<p>Pick one and adapt it to your assignment.</p>
+			</div>
 		</div>
 		{#if onClose}
 			<button
 				onclick={onClose}
-				class="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-800"
+				class="quick-examples__close"
 				aria-label="Close examples"
 			>
-				<X class="h-4 w-4 text-gray-600 dark:text-gray-400" />
+				<X class="h-4 w-4" />
 			</button>
 		{/if}
 	</div>
 
-	<div class="grid gap-2 sm:grid-cols-2">
+	<div class="quick-examples__grid">
 		{#each QUICK_EXAMPLES as example (example.id)}
 			<button
 				onclick={() => handleSelect(example.prompt)}
-				class="group rounded-lg border border-gray-200 p-3 text-left transition-all hover:border-blue-600 hover:bg-blue-50 dark:border-gray-700 dark:hover:border-blue-600 dark:hover:bg-blue-950/20"
+				class="quick-examples__item"
 			>
-				<div class="mb-1 text-sm font-semibold text-gray-900 dark:text-white">
-					{example.title}
+				<div class="quick-examples__item-head">
+					<span>{example.title}</span>
+					<Rocket class="h-3.5 w-3.5" />
 				</div>
-				<div class="line-clamp-2 text-xs text-gray-600 dark:text-gray-400">
-					{example.prompt}
-				</div>
+				<p>{example.prompt}</p>
 			</button>
 		{/each}
 	</div>
 </div>
+
+<style>
+	.quick-examples {
+		border-radius: var(--radius-xl);
+		border: 1px solid var(--color-border);
+		padding: 1rem;
+		background:
+			linear-gradient(
+				145deg,
+				color-mix(in srgb, var(--color-primary) 9%, transparent),
+				color-mix(in srgb, var(--color-card) 92%, transparent)
+			),
+			var(--color-card);
+		box-shadow: var(--shadow-soft);
+	}
+
+	.quick-examples__header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.7rem;
+		margin-bottom: 0.85rem;
+	}
+
+	.quick-examples__title {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.55rem;
+		color: color-mix(in srgb, var(--color-warning) 80%, var(--color-foreground));
+	}
+
+	.quick-examples__title h3 {
+		font-size: 0.92rem;
+		font-weight: 700;
+		color: var(--color-foreground);
+	}
+
+	.quick-examples__title p {
+		font-size: 0.75rem;
+		color: var(--color-muted-foreground);
+	}
+
+	.quick-examples__close {
+		padding: 0.28rem;
+		border-radius: var(--radius-md);
+		border: 1px solid transparent;
+		color: var(--color-muted-foreground);
+		background: transparent;
+		cursor: pointer;
+	}
+
+	.quick-examples__close:hover {
+		color: var(--color-foreground);
+		border-color: var(--color-border);
+		background: color-mix(in srgb, var(--color-accent) 32%, transparent);
+	}
+
+	.quick-examples__grid {
+		display: grid;
+		gap: 0.55rem;
+		grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+	}
+
+	.quick-examples__item {
+		display: grid;
+		gap: 0.4rem;
+		padding: 0.75rem 0.8rem;
+		text-align: left;
+		border-radius: var(--radius-lg);
+		border: 1px solid var(--color-border);
+		background: color-mix(in srgb, var(--color-card) 92%, transparent);
+		color: inherit;
+		cursor: pointer;
+		transition:
+			transform var(--motion-fast),
+			border-color var(--motion-fast),
+			background var(--motion-fast);
+	}
+
+	.quick-examples__item:hover {
+		transform: translateY(-1px);
+		border-color: color-mix(in srgb, var(--color-primary) 60%, transparent);
+		background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+	}
+
+	.quick-examples__item-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.4rem;
+		font-size: 0.81rem;
+		font-weight: 700;
+	}
+
+	.quick-examples__item p {
+		font-size: 0.74rem;
+		color: var(--color-muted-foreground);
+		line-height: 1.35;
+		display: -webkit-box;
+		line-clamp: 2;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+</style>

@@ -21,6 +21,12 @@ const sortedChats = $derived<Chat[]>(
 	[...chats].sort((a, b) => b.updatedAt - a.updatedAt)
 );
 
+export interface DeletedChatSnapshot {
+	chat: Chat;
+	index: number;
+	wasCurrent: boolean;
+}
+
 // Store object with methods
 export const chatsStore = {
 	// Getters
@@ -45,7 +51,9 @@ export const chatsStore = {
 			messages: [],
 			createdAt: Date.now(),
 			updatedAt: Date.now(),
-			model
+			model,
+			pinned: false,
+			archived: false
 		};
 		chats = [...chats, newChat];
 		currentChatId = newChat.id;
@@ -87,16 +95,40 @@ export const chatsStore = {
 		}
 	},
 
-	deleteChat(id: string) {
+	deleteChat(id: string): DeletedChatSnapshot | null {
 		const index = chats.findIndex((chat) => chat.id === id);
 		if (index !== -1) {
+			const chatToDelete = chats[index];
+			const snapshot: DeletedChatSnapshot = {
+				chat: structuredClone(chatToDelete),
+				index,
+				wasCurrent: currentChatId === id
+			};
+
 			chats = chats.filter((chat) => chat.id !== id);
+
 			if (currentChatId === id) {
 				currentChatId = chats.length > 0 ? chats[0].id : null;
 				saveToStorage(CURRENT_CHAT_KEY, currentChatId);
 			}
+
 			this.persist();
+			return snapshot;
 		}
+
+		return null;
+	},
+
+	restoreDeletedChat(snapshot: DeletedChatSnapshot) {
+		const safeIndex = Math.max(0, Math.min(snapshot.index, chats.length));
+		chats = [...chats.slice(0, safeIndex), snapshot.chat, ...chats.slice(safeIndex)];
+
+		if (snapshot.wasCurrent || !currentChatId || !chats.some((chat) => chat.id === currentChatId)) {
+			currentChatId = snapshot.chat.id;
+		}
+
+		saveToStorage(CURRENT_CHAT_KEY, currentChatId);
+		this.persist();
 	},
 
 	updateChatTitle(id: string, title: string) {
@@ -106,6 +138,58 @@ export const chatsStore = {
 			chat.updatedAt = Date.now();
 			this.persist();
 		}
+	},
+
+	togglePinned(id: string) {
+		const chat = chats.find((c) => c.id === id);
+		if (!chat) return;
+
+		chat.pinned = !chat.pinned;
+		chat.updatedAt = Date.now();
+		this.persist();
+	},
+
+	toggleArchived(id: string) {
+		const chat = chats.find((c) => c.id === id);
+		if (!chat) return;
+
+		chat.archived = !chat.archived;
+		chat.pinned = chat.archived ? false : chat.pinned;
+		chat.updatedAt = Date.now();
+
+		if (chat.archived && currentChatId === id) {
+			const nextChat = chats.find((candidate) => candidate.id !== id && !candidate.archived) ?? null;
+			currentChatId = nextChat?.id ?? null;
+			saveToStorage(CURRENT_CHAT_KEY, currentChatId);
+		}
+
+		this.persist();
+	},
+
+	duplicateChat(id: string): Chat | null {
+		const source = chats.find((chat) => chat.id === id);
+		if (!source) return null;
+
+		const duplicate: Chat = {
+			...structuredClone(source),
+			id: crypto.randomUUID(),
+			title: `${source.title} (Copy)`,
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			pinned: false,
+			archived: false,
+			messages: source.messages.map((message) => ({
+				...message,
+				id: crypto.randomUUID(),
+				isStreaming: false
+			}))
+		};
+
+		chats = [...chats, duplicate];
+		currentChatId = duplicate.id;
+		saveToStorage(CURRENT_CHAT_KEY, currentChatId);
+		this.persist();
+		return duplicate;
 	},
 
 	clearAllChats() {
