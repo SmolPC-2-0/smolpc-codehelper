@@ -460,12 +460,12 @@
 		background:
 			radial-gradient(
 				60rem 30rem at 10% 0%,
-				color-mix(in srgb, var(--color-primary) 10%, transparent),
+				color-mix(in srgb, var(--color-primary) 7%, transparent),
 				transparent
 			),
 			radial-gradient(
 				48rem 26rem at 100% 100%,
-				color-mix(in srgb, var(--color-primary) 6%, transparent),
+				color-mix(in srgb, var(--color-primary) 5%, transparent),
 				transparent
 			);
 	}

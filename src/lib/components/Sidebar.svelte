@@ -458,7 +458,7 @@
 		background:
 			linear-gradient(
 				180deg,
-				color-mix(in srgb, var(--color-primary) 7%, transparent),
+				var(--brand-soft),
 				color-mix(in srgb, var(--color-card) 94%, transparent) 32%
 			),
 			var(--surface-subtle);
@@ -490,7 +490,7 @@
 	:global(.sidebar__collapse) {
 		flex-shrink: 0;
 		border: 1px solid color-mix(in srgb, var(--color-border) 85%, transparent);
-		background: color-mix(in srgb, var(--color-card) 94%, transparent);
+		background: var(--surface-widget);
 		box-shadow: var(--shadow-soft);
 	}
 
@@ -506,6 +506,10 @@
 		border-radius: var(--radius-lg);
 		background: var(--color-primary);
 		box-shadow: var(--shadow-soft);
+	}
+
+	:global(.sidebar__new-chat:hover) {
+		filter: brightness(1.04);
 	}
 
 	.sidebar__search-wrap {
@@ -527,7 +531,7 @@
 		border: 1px solid var(--color-border);
 		padding: 0.45rem 0.55rem 0.45rem 1.9rem;
 		font-size: 0.76rem;
-		background: color-mix(in srgb, var(--color-card) 96%, transparent);
+		background: var(--surface-widget);
 		color: var(--color-foreground);
 		outline: none;
 		transition:
@@ -538,7 +542,7 @@
 
 	.sidebar__search-input:focus {
 		border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
-		box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 17%, transparent);
+		box-shadow: 0 0 0 3px var(--focus-ring);
 	}
 
 	.sidebar__scroll {
@@ -575,16 +579,16 @@
 	}
 
 	.sidebar__chat-row:hover {
-		background: color-mix(in srgb, var(--color-accent) 42%, transparent);
+		background: var(--surface-hover);
 	}
 
 	.sidebar__chat-row--active {
-		border-color: color-mix(in srgb, var(--color-primary) 46%, transparent);
+		border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
 		background:
 			linear-gradient(
 				140deg,
-				color-mix(in srgb, var(--color-primary) 10%, transparent),
-				color-mix(in srgb, var(--color-card) 94%, transparent)
+				var(--brand-soft),
+				var(--surface-elevated)
 			),
 			var(--surface-elevated);
 		box-shadow: var(--shadow-soft);
@@ -598,7 +602,7 @@
 		bottom: 0.42rem;
 		width: 2px;
 		border-radius: 999px;
-		background: color-mix(in srgb, var(--color-primary) 84%, white);
+		background: var(--color-primary);
 	}
 
 	.sidebar__chat-row--archived {
@@ -639,7 +643,7 @@
 		padding: 0.35rem 0.45rem;
 		font-size: 0.77rem;
 		outline: none;
-		background: color-mix(in srgb, var(--color-card) 96%, transparent);
+		background: var(--surface-widget);
 	}
 
 	.sidebar__row-actions {
@@ -664,7 +668,7 @@
 	}
 
 	.sidebar__icon-btn:hover {
-		background: color-mix(in srgb, var(--color-accent) 42%, transparent);
+		background: var(--surface-hover);
 		color: var(--color-foreground);
 		transform: translateY(-1px);
 	}
@@ -677,7 +681,7 @@
 		z-index: 10;
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-lg);
-		background: color-mix(in srgb, var(--color-card) 99%, transparent);
+		background: var(--surface-widget);
 		box-shadow: var(--shadow-soft);
 		padding: 0.28rem;
 		display: grid;
@@ -700,7 +704,7 @@
 	}
 
 	.sidebar__menu button:hover {
-		background: color-mix(in srgb, var(--color-accent) 38%, transparent);
+		background: var(--surface-hover);
 	}
 
 	.sidebar__menu-danger {
@@ -770,7 +774,7 @@
 		padding: 0.5rem 0.6rem;
 		border: 1px solid color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
 		border-radius: var(--radius-lg);
-		background: color-mix(in srgb, var(--color-card) 97%, transparent);
+		background: var(--surface-widget);
 		box-shadow: var(--shadow-soft);
 	}
 
@@ -809,7 +813,7 @@
 		width: min(92vw, 25rem);
 		border-radius: var(--radius-xl);
 		border: 1px solid var(--color-border);
-		background: var(--color-card);
+		background: var(--surface-widget);
 		padding: 1rem;
 		box-shadow: var(--shadow-strong);
 	}

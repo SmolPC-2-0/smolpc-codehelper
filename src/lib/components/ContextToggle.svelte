@@ -54,6 +54,6 @@
 
 	.context-toggle--disabled {
 		color: var(--color-muted-foreground);
-		background: color-mix(in srgb, var(--color-card) 96%, transparent);
+		background: var(--surface-widget);
 	}
 </style>

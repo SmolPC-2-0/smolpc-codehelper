@@ -41,7 +41,7 @@
 		border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
 		border-radius: var(--radius-lg);
 		padding: 0.45rem 0.7rem;
-		background: color-mix(in srgb, var(--color-card) 96%, transparent);
+		background: var(--surface-widget);
 		font-size: 0.78rem;
 		font-weight: 650;
 		color: var(--color-foreground);
@@ -56,12 +56,12 @@
 	.hardware-indicator:hover {
 		transform: translateY(-1px);
 		border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
-		background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+		background: var(--surface-active);
 	}
 
 	.hardware-indicator--active {
 		border-color: color-mix(in srgb, var(--color-primary) 70%, transparent);
-		background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+		background: var(--brand-soft-strong);
 	}
 
 	.hardware-indicator__label {
