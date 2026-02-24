@@ -27,6 +27,13 @@ export interface DeletedChatSnapshot {
 	wasCurrent: boolean;
 }
 
+function cloneChat(chat: Chat): Chat {
+	return {
+		...chat,
+		messages: chat.messages.map((message) => ({ ...message }))
+	};
+}
+
 // Store object with methods
 export const chatsStore = {
 	// Getters
@@ -100,7 +107,7 @@ export const chatsStore = {
 		if (index !== -1) {
 			const chatToDelete = chats[index];
 			const snapshot: DeletedChatSnapshot = {
-				chat: structuredClone(chatToDelete),
+				chat: cloneChat(chatToDelete),
 				index,
 				wasCurrent: currentChatId === id
 			};
@@ -171,7 +178,7 @@ export const chatsStore = {
 		if (!source) return null;
 
 		const duplicate: Chat = {
-			...structuredClone(source),
+			...cloneChat(source),
 			id: crypto.randomUUID(),
 			title: `${source.title} (Copy)`,
 			createdAt: Date.now(),

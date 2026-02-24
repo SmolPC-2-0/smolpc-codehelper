@@ -22,15 +22,15 @@
 		justify-content: space-between;
 		gap: 0.75rem;
 		padding: 0.8rem 1rem;
-		border-bottom: 1px solid var(--color-border);
+		border-bottom: 1px solid var(--outline-soft);
 		background:
 			linear-gradient(
 				180deg,
-				var(--surface-widget),
+				color-mix(in srgb, var(--surface-widget) 98%, black),
 				var(--surface-subtle)
 			),
 			var(--surface-subtle);
-		backdrop-filter: blur(8px);
+		backdrop-filter: blur(10px);
 	}
 
 	.workspace-controls__row {

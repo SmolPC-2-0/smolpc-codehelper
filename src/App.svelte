@@ -383,9 +383,9 @@
 </script>
 
 <div class="app-shell">
-	{#if uiStore.isSidebarOpen}
-		<Sidebar isOpen={uiStore.isSidebarOpen} onClose={() => uiStore.setSidebarOpen(false)} />
-	{/if}
+	<div class={`sidebar-stage ${uiStore.isSidebarOpen ? 'sidebar-stage--open' : 'sidebar-stage--closed'}`}>
+		<Sidebar onClose={() => uiStore.setSidebarOpen(false)} />
+	</div>
 
 	<div class="workspace-shell">
 		<WorkspaceHeader
@@ -438,7 +438,9 @@
 		display: flex;
 		height: 100vh;
 		overflow: hidden;
-		background: var(--color-background);
+		padding: 0.72rem;
+		gap: 0.72rem;
+		background: var(--surface-canvas);
 		position: relative;
 	}
 
@@ -449,15 +451,32 @@
 		pointer-events: none;
 		background:
 			radial-gradient(
-				60rem 30rem at 10% 0%,
-				color-mix(in srgb, var(--color-primary) 7%, transparent),
-				transparent
+				75rem 38rem at 8% -10%,
+				color-mix(in srgb, var(--color-primary) 10%, transparent),
+				transparent 66%
 			),
 			radial-gradient(
-				48rem 26rem at 100% 100%,
-				color-mix(in srgb, var(--color-primary) 5%, transparent),
-				transparent
+				52rem 30rem at 100% 100%,
+				color-mix(in srgb, var(--color-primary) 6%, transparent),
+				transparent 72%
 			);
+		mix-blend-mode: screen;
+	}
+
+	.app-shell::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		background:
+			linear-gradient(
+				180deg,
+				rgb(255 255 255 / 6%),
+				transparent 12%,
+				transparent 88%,
+				rgb(0 0 0 / 20%)
+			);
+		opacity: 0.35;
 	}
 
 	.workspace-shell {
@@ -468,7 +487,77 @@
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
-		background: color-mix(in srgb, var(--color-card) 88%, transparent);
-		backdrop-filter: blur(8px);
+		border-radius: calc(var(--radius-xl) + 8px);
+		border: 1px solid var(--outline-soft);
+		background:
+			linear-gradient(
+				180deg,
+				color-mix(in srgb, var(--surface-elevated) 94%, black),
+				var(--surface-subtle) 42%,
+				color-mix(in srgb, var(--surface-subtle) 92%, black)
+			),
+			var(--surface-subtle);
+		box-shadow: var(--shadow-strong);
+	}
+
+	.sidebar-stage {
+		display: flex;
+		height: 100%;
+		width: 17.75rem;
+		min-width: 0;
+		overflow: hidden;
+		transition: width 145ms cubic-bezier(0.2, 0.86, 0.34, 1);
+		will-change: width;
+	}
+
+	.sidebar-stage :global(.sidebar) {
+		height: 100%;
+		transition:
+			transform 145ms cubic-bezier(0.2, 0.86, 0.34, 1),
+			opacity 120ms ease;
+		will-change: transform, opacity;
+	}
+
+	.sidebar-stage--closed {
+		width: 0;
+	}
+
+	.sidebar-stage--closed :global(.sidebar) {
+		transform: translateX(-16px);
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	.sidebar-stage--open :global(.sidebar) {
+		transform: translateX(0);
+		opacity: 1;
+		pointer-events: auto;
+	}
+
+	.workspace-shell::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		background: linear-gradient(
+			180deg,
+			rgb(255 255 255 / 4%),
+			transparent 30%
+		);
+	}
+
+	@media (max-width: 900px) {
+		.app-shell {
+			padding: 0.35rem;
+			gap: 0.35rem;
+		}
+
+		.workspace-shell {
+			border-radius: calc(var(--radius-xl) + 4px);
+		}
+
+		.sidebar-stage {
+			width: min(17.5rem, 86vw);
+		}
 	}
 </style>

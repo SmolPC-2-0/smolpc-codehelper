@@ -53,9 +53,9 @@
 		min-width: 17rem;
 		padding: 0.45rem 0.68rem;
 		border-radius: var(--radius-xl);
-		border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
-		background: var(--surface-widget);
-		box-shadow: var(--shadow-soft);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-widget) 95%, black);
+		box-shadow: var(--glow-subtle);
 	}
 
 	:global(.model-selector__icon) {
@@ -71,7 +71,7 @@
 
 	.model-selector__control {
 		flex: 1;
-		font-size: 0.82rem;
+		font-size: 0.78rem;
 		background: transparent;
 		color: var(--color-foreground);
 		outline: none;

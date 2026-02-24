@@ -158,27 +158,33 @@
 	.chat-message {
 		display: flex;
 		gap: 0.8rem;
-		padding: 0.9rem;
-		border: 1px solid var(--color-border);
-		border-radius: calc(var(--radius-xl) + 2px);
-		background: var(--surface-widget);
-		box-shadow: var(--shadow-soft);
+		padding: 0.85rem 0.85rem 0.8rem;
+		border: 1px solid var(--outline-soft);
+		border-radius: calc(var(--radius-xl) + 1px);
+		background:
+			linear-gradient(
+				180deg,
+				color-mix(in srgb, var(--surface-widget) 97%, black),
+				color-mix(in srgb, var(--surface-subtle) 97%, black)
+			),
+			var(--surface-widget);
+		box-shadow: var(--glow-subtle);
 		animation: message-in var(--motion-medium);
 	}
 
 	.chat-message--user {
-		border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
+		border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
 		background:
 			linear-gradient(
 				140deg,
-				var(--brand-soft),
+				color-mix(in srgb, var(--brand-soft) 72%, transparent),
 				var(--surface-widget)
 			),
 			var(--surface-elevated);
 	}
 
 	.chat-message--assistant {
-		border-color: color-mix(in srgb, var(--color-border) 90%, var(--color-accent));
+		border-color: var(--outline-soft);
 	}
 
 	.chat-message__avatar {
@@ -189,13 +195,15 @@
 		justify-content: center;
 		flex-shrink: 0;
 		border-radius: 999px;
-		background: color-mix(in srgb, var(--color-primary) 88%, var(--color-foreground));
+		background: color-mix(in srgb, var(--color-primary) 82%, black);
 		color: var(--color-primary-foreground);
+		border: 1px solid color-mix(in srgb, var(--color-primary) 46%, transparent);
 	}
 
 	.chat-message--assistant .chat-message__avatar {
-		background: color-mix(in srgb, var(--color-muted) 84%, var(--color-card));
+		background: color-mix(in srgb, var(--color-muted) 82%, black);
 		color: var(--color-muted-foreground);
+		border: 1px solid var(--outline-soft);
 	}
 
 	.chat-message__body {
@@ -211,13 +219,13 @@
 	}
 
 	.chat-message__role {
-		font-size: 0.78rem;
-		font-weight: 700;
-		letter-spacing: 0.02em;
+		font-size: 0.75rem;
+		font-weight: 640;
+		letter-spacing: 0.01em;
 	}
 
 	.chat-message__time {
-		font-size: 0.69rem;
+		font-size: 0.66rem;
 		color: var(--color-muted-foreground);
 	}
 
@@ -243,22 +251,22 @@
 	}
 
 	.chat-message__actions {
-		margin-top: 0.8rem;
+		margin-top: 0.72rem;
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.45rem;
+		gap: 0.38rem;
 	}
 
 	.chat-message__action {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.3rem;
-		padding: 0.35rem 0.6rem;
+		padding: 0.32rem 0.56rem;
 		border-radius: var(--radius-md);
-		border: 1px solid var(--color-border);
-		background: var(--surface-widget);
-		font-size: 0.7rem;
-		font-weight: 650;
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-widget) 96%, black);
+		font-size: 0.67rem;
+		font-weight: 620;
 		color: var(--color-muted-foreground);
 		cursor: pointer;
 		transition:
@@ -270,9 +278,9 @@
 
 	.chat-message__action:hover {
 		color: var(--color-foreground);
-		border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
+		border-color: var(--outline-strong);
 		background: var(--surface-active);
-		transform: translateY(-1px);
+		transform: translateY(-0.5px);
 	}
 
 	.chat-message__action-icon--success,
@@ -307,8 +315,8 @@
 		margin-bottom: 0.8rem;
 		overflow: hidden;
 		border-radius: var(--radius-lg);
-		border: 1px solid var(--color-border);
-		background: var(--surface-widget);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-widget) 95%, black);
 	}
 
 	:global(.code-block-head) {
@@ -316,8 +324,8 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 0.45rem 0.7rem;
-		border-bottom: 1px solid var(--color-border);
-		background: var(--surface-hover);
+		border-bottom: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-hover) 70%, black);
 	}
 
 	:global(.code-block-lang) {
@@ -338,7 +346,7 @@
 	}
 
 	:global(.code-copy-btn-frame:hover) {
-		background: var(--surface-hover);
+		background: color-mix(in srgb, var(--surface-hover) 80%, black);
 		color: var(--color-foreground);
 	}
 
@@ -356,7 +364,7 @@
 	:global(.inline-code) {
 		padding: 0.12rem 0.3rem;
 		border-radius: var(--radius-sm);
-		background: var(--surface-hover);
+		background: color-mix(in srgb, var(--surface-hover) 70%, black);
 		color: var(--color-foreground);
 		font-size: 0.78rem;
 	}

@@ -31,11 +31,11 @@
 		gap: 0.45rem;
 		padding: 0.45rem 0.68rem;
 		border-radius: var(--radius-xl);
-		border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
-		font-size: 0.81rem;
-		font-weight: 650;
+		border: 1px solid var(--outline-soft);
+		font-size: 0.76rem;
+		font-weight: 620;
 		cursor: pointer;
-		box-shadow: var(--shadow-soft);
+		box-shadow: var(--glow-subtle);
 		transition:
 			transform var(--motion-fast),
 			border-color var(--motion-fast),
@@ -43,17 +43,17 @@
 	}
 
 	.context-toggle:hover {
-		transform: translateY(-1px);
+		transform: translateY(-0.5px);
 	}
 
 	.context-toggle--enabled {
 		color: color-mix(in srgb, var(--color-success) 85%, var(--color-foreground));
-		border-color: color-mix(in srgb, var(--color-success) 58%, var(--color-border));
+		border-color: color-mix(in srgb, var(--color-success) 45%, var(--color-border));
 		background: color-mix(in srgb, var(--color-success) 11%, transparent);
 	}
 
 	.context-toggle--disabled {
 		color: var(--color-muted-foreground);
-		background: var(--surface-widget);
+		background: color-mix(in srgb, var(--surface-widget) 95%, black);
 	}
 </style>

@@ -37,27 +37,27 @@
 }
 
 :root {
-	--radius: 0.86rem;
-	--background: oklch(0.982 0.004 264);
-	--foreground: oklch(0.255 0.018 258);
-	--card: oklch(0.992 0.004 264);
-	--card-foreground: oklch(0.24 0.018 258);
-	--popover: oklch(0.998 0.003 264);
-	--popover-foreground: oklch(0.24 0.018 258);
-	--primary: oklch(0.56 0.098 272);
-	--primary-foreground: oklch(0.985 0.003 264);
-	--secondary: oklch(0.952 0.006 260);
-	--secondary-foreground: oklch(0.32 0.02 258);
-	--muted: oklch(0.956 0.005 262);
-	--muted-foreground: oklch(0.5 0.016 258);
-	--accent: oklch(0.934 0.006 258);
-	--accent-foreground: oklch(0.305 0.018 258);
-	--destructive: oklch(0.62 0.21 30);
-	--border: oklch(0.885 0.008 256);
-	--input: oklch(0.9 0.008 256);
-	--ring: oklch(0.64 0.09 272);
-	--sidebar: oklch(0.974 0.006 262);
-	--sidebar-foreground: oklch(0.245 0.018 258);
+	--radius: 0.72rem;
+	--background: oklch(0.986 0.003 255);
+	--foreground: oklch(0.255 0.01 260);
+	--card: oklch(0.992 0.003 255);
+	--card-foreground: oklch(0.255 0.01 260);
+	--popover: oklch(0.994 0.003 255);
+	--popover-foreground: oklch(0.255 0.01 260);
+	--primary: oklch(0.54 0.07 240);
+	--primary-foreground: oklch(0.986 0.003 255);
+	--secondary: oklch(0.952 0.004 255);
+	--secondary-foreground: oklch(0.35 0.01 260);
+	--muted: oklch(0.955 0.003 255);
+	--muted-foreground: oklch(0.53 0.01 260);
+	--accent: oklch(0.948 0.004 255);
+	--accent-foreground: oklch(0.335 0.01 260);
+	--destructive: oklch(0.64 0.18 26);
+	--border: oklch(0.89 0.006 255);
+	--input: oklch(0.89 0.006 255);
+	--ring: oklch(0.56 0.07 240);
+	--sidebar: oklch(0.975 0.004 255);
+	--sidebar-foreground: oklch(0.255 0.01 260);
 	--sidebar-primary: var(--primary);
 	--sidebar-primary-foreground: var(--primary-foreground);
 	--sidebar-accent: var(--accent);
@@ -70,63 +70,73 @@
 	--chart-4: oklch(0.68 0.16 40);
 	--chart-5: oklch(0.62 0.18 170);
 
-	--color-success: oklch(0.68 0.11 154);
-	--color-warning: oklch(0.79 0.09 88);
-	--surface-subtle: color-mix(in srgb, var(--color-card) 96%, var(--color-accent));
-	--surface-elevated: color-mix(in srgb, var(--color-card) 90%, white);
+	--color-success: oklch(0.71 0.11 153);
+	--color-warning: oklch(0.83 0.12 86);
+	--surface-canvas: color-mix(in srgb, var(--color-background) 94%, black);
+	--surface-subtle: color-mix(in srgb, var(--color-card) 95%, var(--color-accent));
+	--surface-elevated: color-mix(in srgb, var(--color-card) 98%, white);
 	--surface-widget: color-mix(in srgb, var(--color-card) 97%, white);
-	--surface-hover: color-mix(in srgb, var(--color-accent) 50%, transparent);
-	--surface-active: color-mix(in srgb, var(--color-primary) 8%, transparent);
-	--brand-soft: color-mix(in srgb, var(--color-primary) 10%, transparent);
+	--surface-floating: color-mix(in srgb, var(--color-card) 92%, white);
+	--surface-hover: color-mix(in srgb, var(--color-accent) 58%, transparent);
+	--surface-active: color-mix(in srgb, var(--color-primary) 10%, transparent);
+	--brand-soft: color-mix(in srgb, var(--color-primary) 11%, transparent);
 	--brand-soft-strong: color-mix(in srgb, var(--color-primary) 16%, transparent);
-	--focus-ring: color-mix(in srgb, var(--color-primary) 18%, transparent);
-	--font-display: 'Space Grotesk', 'Avenir Next', 'Segoe UI', sans-serif;
+	--outline-soft: color-mix(in srgb, var(--color-border) 88%, transparent);
+	--outline-strong: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+	--focus-ring: color-mix(in srgb, var(--color-primary) 24%, transparent);
+	--font-display: 'Inter', 'SF Pro Text', 'Avenir Next', 'Segoe UI', sans-serif;
 	--font-code: 'JetBrains Mono', 'IBM Plex Mono', monospace;
-	--shadow-soft: 0 8px 26px -20px rgb(10 18 38 / 28%);
-	--shadow-strong: 0 22px 46px -28px rgb(10 18 38 / 40%);
+	--shadow-soft: 0 10px 24px -18px rgb(13 18 34 / 30%);
+	--shadow-strong: 0 24px 60px -30px rgb(13 18 34 / 46%);
+	--glow-subtle: 0 0 0 1px rgb(255 255 255 / 2%), 0 12px 30px -24px rgb(15 22 42 / 50%);
 	--motion-fast: 160ms cubic-bezier(0.16, 1, 0.3, 1);
 	--motion-medium: 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .dark {
-	--background: oklch(0.178 0.01 258);
-	--foreground: oklch(0.94 0.01 265);
-	--card: oklch(0.222 0.012 258);
-	--card-foreground: oklch(0.94 0.01 265);
-	--popover: oklch(0.218 0.012 258);
-	--popover-foreground: oklch(0.94 0.01 265);
-	--primary: oklch(0.72 0.085 272);
-	--primary-foreground: oklch(0.2 0.01 258);
-	--secondary: oklch(0.284 0.014 258);
-	--secondary-foreground: oklch(0.9 0.01 265);
-	--muted: oklch(0.268 0.01 258);
-	--muted-foreground: oklch(0.74 0.01 260);
-	--accent: oklch(0.306 0.01 258);
-	--accent-foreground: oklch(0.9 0.01 265);
-	--destructive: oklch(0.72 0.17 28);
-	--border: oklch(0.362 0.011 258 / 72%);
-	--input: oklch(0.37 0.011 258 / 76%);
-	--ring: oklch(0.7 0.08 272);
-	--sidebar: oklch(0.205 0.011 258);
-	--sidebar-foreground: oklch(0.93 0.01 265);
+	--background: oklch(0.17 0.006 262);
+	--foreground: oklch(0.955 0.006 260);
+	--card: oklch(0.205 0.008 262);
+	--card-foreground: oklch(0.955 0.006 260);
+	--popover: oklch(0.21 0.008 262);
+	--popover-foreground: oklch(0.955 0.006 260);
+	--primary: oklch(0.72 0.08 240);
+	--primary-foreground: oklch(0.16 0.006 262);
+	--secondary: oklch(0.266 0.008 262);
+	--secondary-foreground: oklch(0.905 0.006 260);
+	--muted: oklch(0.254 0.008 262);
+	--muted-foreground: oklch(0.785 0.007 260);
+	--accent: oklch(0.278 0.008 262);
+	--accent-foreground: oklch(0.92 0.006 260);
+	--destructive: oklch(0.73 0.17 26);
+	--border: oklch(0.39 0.009 262 / 82%);
+	--input: oklch(0.39 0.009 262 / 86%);
+	--ring: oklch(0.7 0.08 240);
+	--sidebar: oklch(0.182 0.007 262);
+	--sidebar-foreground: oklch(0.93 0.006 260);
 	--sidebar-primary: var(--primary);
 	--sidebar-primary-foreground: var(--primary-foreground);
 	--sidebar-accent: var(--accent);
 	--sidebar-accent-foreground: var(--accent-foreground);
 	--sidebar-border: var(--border);
 	--sidebar-ring: var(--ring);
-	--color-success: oklch(0.75 0.1 152);
-	--color-warning: oklch(0.8 0.08 86);
-	--surface-subtle: color-mix(in srgb, var(--color-card) 94%, var(--color-accent));
-	--surface-elevated: color-mix(in srgb, var(--color-card) 94%, black);
-	--surface-widget: color-mix(in srgb, var(--color-card) 96%, black);
-	--surface-hover: color-mix(in srgb, var(--color-accent) 58%, transparent);
+	--color-success: oklch(0.76 0.1 152);
+	--color-warning: oklch(0.86 0.11 86);
+	--surface-canvas: oklch(0.165 0.006 262);
+	--surface-subtle: color-mix(in srgb, var(--color-card) 97%, black);
+	--surface-elevated: color-mix(in srgb, var(--color-card) 98%, black);
+	--surface-widget: color-mix(in srgb, var(--color-card) 98%, black);
+	--surface-floating: color-mix(in srgb, var(--color-card) 95%, black);
+	--surface-hover: color-mix(in srgb, var(--color-accent) 64%, transparent);
 	--surface-active: color-mix(in srgb, var(--color-primary) 14%, transparent);
-	--brand-soft: color-mix(in srgb, var(--color-primary) 13%, transparent);
-	--brand-soft-strong: color-mix(in srgb, var(--color-primary) 20%, transparent);
-	--focus-ring: color-mix(in srgb, var(--color-primary) 24%, transparent);
-	--shadow-soft: 0 10px 24px -16px rgb(2 8 23 / 62%);
-	--shadow-strong: 0 30px 58px -34px rgb(2 8 23 / 78%);
+	--brand-soft: color-mix(in srgb, var(--color-primary) 12%, transparent);
+	--brand-soft-strong: color-mix(in srgb, var(--color-primary) 18%, transparent);
+	--outline-soft: color-mix(in srgb, var(--color-border) 86%, transparent);
+	--outline-strong: color-mix(in srgb, var(--color-primary) 44%, var(--color-border));
+	--focus-ring: color-mix(in srgb, var(--color-primary) 28%, transparent);
+	--shadow-soft: 0 10px 24px -18px rgb(0 0 0 / 72%);
+	--shadow-strong: 0 34px 70px -38px rgb(0 0 0 / 85%);
+	--glow-subtle: 0 0 0 1px rgb(255 255 255 / 3%), 0 20px 48px -36px rgb(30 41 59 / 58%);
 }
 
 @theme inline {
@@ -191,16 +201,32 @@
 		-moz-osx-font-smoothing: grayscale;
 		@apply bg-background text-foreground;
 		background-image:
-			radial-gradient(
-				circle at 0% 0%,
-				color-mix(in srgb, var(--color-primary) 11%, transparent),
-				transparent 40%
+			linear-gradient(
+				90deg,
+				rgb(255 255 255 / 1.5%) 0,
+				transparent 18%,
+				transparent 82%,
+				rgb(255 255 255 / 1.5%) 100%
 			),
 			radial-gradient(
-				circle at 100% 100%,
+				64rem 38rem at 14% -6%,
+				color-mix(in srgb, var(--color-primary) 12%, transparent),
+				transparent 62%
+			),
+			radial-gradient(
+				58rem 30rem at 100% 100%,
 				color-mix(in srgb, var(--color-primary) 8%, transparent),
-				transparent 54%
+				transparent 65%
+			),
+			repeating-linear-gradient(
+				180deg,
+				rgb(255 255 255 / 0.95%) 0,
+				rgb(255 255 255 / 0.95%) 1px,
+				transparent 1px,
+				transparent 8px
 			);
+		background-size: auto, auto, auto, 100% 8px;
+		background-blend-mode: normal, screen, normal, soft-light;
 	}
 
 	button,
@@ -218,6 +244,28 @@
 	::selection {
 		background: color-mix(in srgb, var(--color-primary) 28%, transparent);
 		color: var(--color-foreground);
+	}
+
+	::-webkit-scrollbar {
+		width: 9px;
+		height: 9px;
+	}
+
+	::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
+	::-webkit-scrollbar-thumb {
+		background: color-mix(in srgb, var(--color-muted-foreground) 42%, transparent);
+		border-radius: 999px;
+		border: 2px solid transparent;
+		background-clip: content-box;
+	}
+
+	::-webkit-scrollbar-thumb:hover {
+		background: color-mix(in srgb, var(--color-muted-foreground) 66%, transparent);
+		border: 2px solid transparent;
+		background-clip: content-box;
 	}
 }
 

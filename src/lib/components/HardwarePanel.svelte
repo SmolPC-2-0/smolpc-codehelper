@@ -55,9 +55,7 @@
 </script>
 
 {#if visible}
-	<div
-		class="fixed bottom-4 right-4 z-50 w-[450px] max-h-[80vh] overflow-y-auto rounded-lg border border-border bg-background p-4 shadow-lg"
-	>
+	<div class="hardware-panel">
 		<div class="mb-4 flex items-center justify-between">
 			<h3 class="text-lg font-semibold flex items-center gap-2">
 				<Cpu class="h-5 w-5" />
@@ -318,3 +316,36 @@
 		{/if}
 	</div>
 {/if}
+
+<style>
+	.hardware-panel {
+		position: fixed;
+		right: 1rem;
+		bottom: 1rem;
+		z-index: 50;
+		width: min(28rem, calc(100vw - 1.6rem));
+		max-height: min(80vh, 44rem);
+		overflow-y: auto;
+		border-radius: calc(var(--radius-xl) + 6px);
+		border: 1px solid var(--outline-soft);
+		padding: 1rem;
+		background:
+			linear-gradient(
+				180deg,
+				color-mix(in srgb, var(--surface-floating) 95%, black),
+				color-mix(in srgb, var(--surface-subtle) 96%, black)
+			),
+			var(--surface-floating);
+		box-shadow: var(--shadow-strong);
+		backdrop-filter: blur(14px);
+	}
+
+	@media (max-width: 920px) {
+		.hardware-panel {
+			right: 0.8rem;
+			left: 0.8rem;
+			bottom: 0.8rem;
+			width: auto;
+		}
+	}
+</style>

@@ -3,7 +3,7 @@
 	import HardwareIndicator from '$lib/components/HardwareIndicator.svelte';
 	import StatusIndicator from '$lib/components/StatusIndicator.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { Cpu, Download, Keyboard, Menu } from '@lucide/svelte';
+	import { Download, Keyboard, Menu } from '@lucide/svelte';
 
 	interface Props {
 		title: string;
@@ -46,10 +46,6 @@
 					<Menu class="h-5 w-5" />
 				</Button>
 			{/if}
-			<div class="workspace-header__badge">
-				<Cpu class="h-4 w-4" />
-				<span>Workbench</span>
-			</div>
 			<h1>{title}</h1>
 		</div>
 	</div>
@@ -89,16 +85,15 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 1rem 1rem 0.8rem;
-		border-bottom: 1px solid var(--color-border);
+		border-bottom: 1px solid var(--outline-soft);
 		background:
 			linear-gradient(
-				120deg,
-				var(--brand-soft),
-				var(--surface-widget) 42%,
-				var(--surface-subtle)
+				180deg,
+				color-mix(in srgb, var(--surface-elevated) 98%, black),
+				var(--surface-subtle) 72%
 			),
 			var(--surface-subtle);
-		backdrop-filter: blur(10px);
+		backdrop-filter: blur(12px);
 	}
 
 	.workspace-header::after {
@@ -110,7 +105,7 @@
 		background: linear-gradient(
 			90deg,
 			transparent,
-			color-mix(in srgb, var(--color-primary) 34%, transparent),
+			color-mix(in srgb, var(--color-primary) 22%, transparent),
 			transparent
 		);
 	}
@@ -130,8 +125,8 @@
 	}
 
 	.workspace-header__identity h1 {
-		font-size: clamp(1rem, 2vw, 1.18rem);
-		font-weight: 700;
+		font-size: clamp(0.97rem, 2vw, 1.12rem);
+		font-weight: 640;
 		letter-spacing: 0.01em;
 		color: var(--color-foreground);
 		text-overflow: ellipsis;
@@ -141,24 +136,9 @@
 
 	:global(.workspace-header__menu) {
 		flex-shrink: 0;
-		border: 1px solid color-mix(in srgb, var(--color-border) 84%, transparent);
-		background: var(--surface-widget);
-		box-shadow: var(--shadow-soft);
-	}
-
-	.workspace-header__badge {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.35rem;
-		padding: 0.25rem 0.55rem;
-		border-radius: var(--radius-lg);
-		font-size: 0.69rem;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.07em;
-		color: color-mix(in srgb, var(--color-primary) 82%, var(--color-foreground));
-		border: 1px solid color-mix(in srgb, var(--color-primary) 26%, transparent);
-		background: var(--brand-soft-strong);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-widget) 95%, black);
+		box-shadow: var(--glow-subtle);
 	}
 
 	.workspace-header__actions {
@@ -168,13 +148,13 @@
 	}
 
 	:global(.workspace-header__icon-button) {
-		border: 1px solid color-mix(in srgb, var(--color-border) 84%, transparent);
-		background: var(--surface-widget);
-		box-shadow: var(--shadow-soft);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-widget) 95%, black);
+		box-shadow: var(--glow-subtle);
 	}
 
 	:global(.workspace-header__icon-button--active) {
-		border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+		border-color: var(--outline-strong);
 		background: var(--surface-active);
 	}
 
