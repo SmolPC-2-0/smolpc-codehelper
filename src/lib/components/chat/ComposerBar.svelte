@@ -46,15 +46,15 @@
 		position: sticky;
 		z-index: 12;
 		padding: 0.9rem 1rem 1rem;
-		border-top: 1px solid var(--color-border);
+		border-top: 1px solid var(--outline-soft);
 		background:
 			linear-gradient(
 				180deg,
-				var(--surface-widget),
+				color-mix(in srgb, var(--surface-widget) 98%, black),
 				var(--surface-subtle)
 			),
 			var(--surface-subtle);
-		backdrop-filter: blur(10px);
+		backdrop-filter: blur(12px);
 	}
 
 	.composer-shell__inner {
@@ -69,10 +69,10 @@
 	}
 
 	:global(.composer-shell__cancel) {
-		border-color: color-mix(in srgb, var(--color-destructive) 55%, var(--color-border));
+		border-color: color-mix(in srgb, var(--color-destructive) 40%, var(--color-border));
 		color: var(--color-destructive);
-		background: color-mix(in srgb, var(--color-destructive) 9%, transparent);
-		box-shadow: var(--shadow-soft);
+		background: color-mix(in srgb, var(--color-destructive) 10%, transparent);
+		box-shadow: var(--glow-subtle);
 	}
 
 	:global(.composer-shell__cancel:hover) {

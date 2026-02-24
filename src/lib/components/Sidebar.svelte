@@ -12,7 +12,6 @@
 		ChevronRight,
 		Copy,
 		Ellipsis,
-		MessageSquarePlus,
 		PanelLeftClose,
 		Pin,
 		PinOff,
@@ -24,11 +23,10 @@
 	import { Button } from '$lib/components/ui/button';
 
 	interface Props {
-		isOpen: boolean;
 		onClose?: () => void;
 	}
 
-	let { isOpen = true, onClose }: Props = $props();
+	let { onClose }: Props = $props();
 
 	let searchQuery = $state('');
 	let showArchived = $state(false);
@@ -181,7 +179,7 @@
 	});
 </script>
 
-<aside class="sidebar" class:hidden={!isOpen}>
+<aside class="sidebar">
 	<div class="sidebar__header">
 		<div class="sidebar__header-row">
 			<div>
@@ -205,12 +203,13 @@
 
 	<div class="sidebar__action">
 		<Button onclick={handleNewChat} class="sidebar__new-chat">
-			<MessageSquarePlus class="mr-2 h-4 w-4" />
 			New Chat
 		</Button>
 
 		<div class="sidebar__search-wrap">
-			<Search class="sidebar__search-icon h-3.5 w-3.5" />
+			<span class="sidebar__search-icon" aria-hidden="true">
+				<Search class="h-3.5 w-3.5" />
+			</span>
 			<input
 				type="search"
 				bind:value={searchQuery}
@@ -450,23 +449,40 @@
 
 <style>
 	.sidebar {
-		width: 18.25rem;
+		width: 17.75rem;
 		display: flex;
 		flex-direction: column;
 		flex-shrink: 0;
-		border-right: 1px solid var(--color-border);
+		border: 1px solid var(--outline-soft);
+		border-radius: calc(var(--radius-xl) + 8px);
 		background:
 			linear-gradient(
 				180deg,
-				var(--brand-soft),
-				color-mix(in srgb, var(--color-card) 94%, transparent) 32%
+				color-mix(in srgb, var(--brand-soft) 55%, var(--surface-subtle)),
+				color-mix(in srgb, var(--surface-subtle) 98%, black) 36%
 			),
 			var(--surface-subtle);
+		box-shadow: var(--shadow-strong);
+		overflow: hidden;
+		position: relative;
+	}
+
+	.sidebar::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		background:
+			radial-gradient(
+				38rem 20rem at -20% -10%,
+				color-mix(in srgb, var(--color-primary) 8%, transparent),
+				transparent 72%
+			);
 	}
 
 	.sidebar__header {
 		padding: 1rem;
-		border-bottom: 1px solid var(--color-border);
+		border-bottom: 1px solid var(--outline-soft);
 	}
 
 	.sidebar__header-row {
@@ -477,21 +493,22 @@
 	}
 
 	.sidebar__header h1 {
-		font-size: 1.06rem;
-		font-weight: 700;
+		font-size: 0.97rem;
+		font-weight: 650;
+		letter-spacing: 0.01em;
 	}
 
 	.sidebar__header p {
 		margin-top: 0.3rem;
-		font-size: 0.77rem;
+		font-size: 0.72rem;
 		color: var(--color-muted-foreground);
 	}
 
 	:global(.sidebar__collapse) {
 		flex-shrink: 0;
-		border: 1px solid color-mix(in srgb, var(--color-border) 85%, transparent);
-		background: var(--surface-widget);
-		box-shadow: var(--shadow-soft);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-widget) 95%, black);
+		box-shadow: var(--glow-subtle);
 	}
 
 	.sidebar__action {
@@ -502,36 +519,45 @@
 
 	:global(.sidebar__new-chat) {
 		width: 100%;
-		height: 2.35rem;
+		height: 2.22rem;
 		border-radius: var(--radius-lg);
-		background: var(--color-primary);
-		box-shadow: var(--shadow-soft);
+		background: color-mix(in srgb, var(--color-primary) 78%, black);
+		box-shadow: var(--glow-subtle);
+		font-weight: 650;
+		letter-spacing: 0.01em;
 	}
 
 	:global(.sidebar__new-chat:hover) {
-		filter: brightness(1.04);
+		filter: brightness(1.06);
 	}
 
 	.sidebar__search-wrap {
 		position: relative;
+		display: flex;
+		align-items: center;
 	}
 
 	.sidebar__search-icon {
 		position: absolute;
-		left: 0.6rem;
-		top: 50%;
-		transform: translateY(-50%);
+		left: 0.72rem;
+		top: 0;
+		bottom: 0;
+		margin-block: auto;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		color: var(--color-muted-foreground);
+		pointer-events: none;
 	}
 
 	.sidebar__search-input {
 		width: 100%;
 		height: 2.1rem;
 		border-radius: var(--radius-lg);
-		border: 1px solid var(--color-border);
+		border: 1px solid var(--outline-soft);
 		padding: 0.45rem 0.55rem 0.45rem 1.9rem;
-		font-size: 0.76rem;
-		background: var(--surface-widget);
+		font-size: 0.74rem;
+		background: color-mix(in srgb, var(--surface-widget) 94%, black);
 		color: var(--color-foreground);
 		outline: none;
 		transition:
@@ -541,7 +567,7 @@
 	}
 
 	.sidebar__search-input:focus {
-		border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
+		border-color: var(--outline-strong);
 		box-shadow: 0 0 0 3px var(--focus-ring);
 	}
 
@@ -557,9 +583,9 @@
 
 	.sidebar__group-title {
 		padding: 0.3rem 0.55rem;
-		font-size: 0.64rem;
+		font-size: 0.61rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: 0.1em;
 		font-weight: 700;
 		color: var(--color-muted-foreground);
 	}
@@ -569,9 +595,9 @@
 		align-items: stretch;
 		gap: 0.3rem;
 		position: relative;
-		border-radius: var(--radius-lg);
+		border-radius: calc(var(--radius-lg) - 1px);
 		padding: 0.2rem;
-		margin-bottom: 0.14rem;
+		margin-bottom: 0.12rem;
 		border: 1px solid transparent;
 		transition:
 			border-color var(--motion-fast),
@@ -583,15 +609,15 @@
 	}
 
 	.sidebar__chat-row--active {
-		border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+		border-color: var(--outline-strong);
 		background:
 			linear-gradient(
 				140deg,
-				var(--brand-soft),
+				color-mix(in srgb, var(--brand-soft) 65%, transparent),
 				var(--surface-elevated)
 			),
 			var(--surface-elevated);
-		box-shadow: var(--shadow-soft);
+		box-shadow: var(--glow-subtle);
 	}
 
 	.sidebar__chat-row--active::before {
@@ -602,7 +628,7 @@
 		bottom: 0.42rem;
 		width: 2px;
 		border-radius: 999px;
-		background: var(--color-primary);
+		background: color-mix(in srgb, var(--color-warning) 86%, var(--color-primary));
 	}
 
 	.sidebar__chat-row--archived {
@@ -624,26 +650,26 @@
 	}
 
 	.sidebar__chat-title {
-		font-size: 0.79rem;
-		font-weight: 600;
+		font-size: 0.76rem;
+		font-weight: 560;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
 
 	.sidebar__chat-meta {
-		font-size: 0.66rem;
+		font-size: 0.64rem;
 		color: var(--color-muted-foreground);
 	}
 
 	.sidebar__rename-input {
 		flex: 1;
-		border: 1px solid color-mix(in srgb, var(--color-primary) 50%, var(--color-border));
+		border: 1px solid var(--outline-strong);
 		border-radius: var(--radius-md);
 		padding: 0.35rem 0.45rem;
 		font-size: 0.77rem;
 		outline: none;
-		background: var(--surface-widget);
+		background: color-mix(in srgb, var(--surface-widget) 96%, black);
 	}
 
 	.sidebar__row-actions {
@@ -657,7 +683,7 @@
 		width: 1.62rem;
 		height: 1.62rem;
 		border: 0;
-		border-radius: var(--radius-md);
+		border-radius: calc(var(--radius-md) - 1px);
 		color: var(--color-muted-foreground);
 		background: transparent;
 		cursor: pointer;
@@ -670,7 +696,7 @@
 	.sidebar__icon-btn:hover {
 		background: var(--surface-hover);
 		color: var(--color-foreground);
-		transform: translateY(-1px);
+		transform: translateY(-0.5px);
 	}
 
 	.sidebar__menu {
@@ -679,13 +705,14 @@
 		right: 0;
 		min-width: 9.5rem;
 		z-index: 10;
-		border: 1px solid var(--color-border);
+		border: 1px solid var(--outline-soft);
 		border-radius: var(--radius-lg);
-		background: var(--surface-widget);
-		box-shadow: var(--shadow-soft);
+		background: color-mix(in srgb, var(--surface-floating) 94%, black);
+		box-shadow: var(--shadow-strong);
 		padding: 0.28rem;
 		display: grid;
 		gap: 0.12rem;
+		backdrop-filter: blur(14px);
 	}
 
 	.sidebar__menu button {
@@ -722,7 +749,7 @@
 		padding: 0.25rem 0.55rem;
 		border: 0;
 		background: transparent;
-		font-size: 0.68rem;
+		font-size: 0.65rem;
 		font-weight: 700;
 		color: var(--color-muted-foreground);
 		cursor: pointer;
@@ -748,7 +775,7 @@
 	.sidebar__empty {
 		padding: 1.2rem;
 		text-align: center;
-		font-size: 0.8rem;
+		font-size: 0.76rem;
 		color: var(--color-muted-foreground);
 		display: grid;
 		gap: 0.2rem;
@@ -772,10 +799,11 @@
 		align-items: center;
 		gap: 0.55rem;
 		padding: 0.5rem 0.6rem;
-		border: 1px solid color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
+		border: 1px solid var(--outline-strong);
 		border-radius: var(--radius-lg);
-		background: var(--surface-widget);
-		box-shadow: var(--shadow-soft);
+		background: color-mix(in srgb, var(--surface-widget) 95%, black);
+		box-shadow: var(--shadow-strong);
+		backdrop-filter: blur(12px);
 	}
 
 	.sidebar-undo__text {
@@ -804,7 +832,8 @@
 	.sidebar-modal__backdrop {
 		position: absolute;
 		inset: 0;
-		background: rgb(2 8 23 / 42%);
+		background: rgb(4 8 18 / 58%);
+		backdrop-filter: blur(3px);
 	}
 
 	.sidebar-modal__card {
@@ -812,8 +841,8 @@
 		z-index: 1;
 		width: min(92vw, 25rem);
 		border-radius: var(--radius-xl);
-		border: 1px solid var(--color-border);
-		background: var(--surface-widget);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-floating) 95%, black);
 		padding: 1rem;
 		box-shadow: var(--shadow-strong);
 	}
@@ -838,7 +867,7 @@
 
 	@media (max-width: 900px) {
 		.sidebar {
-			width: min(18rem, 86vw);
+			width: min(17.5rem, 86vw);
 		}
 
 		.sidebar-undo {

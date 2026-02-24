@@ -29,14 +29,14 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.5rem;
-		border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
+		border: 1px solid var(--outline-soft);
 		border-radius: var(--radius-lg);
 		padding: 0.45rem 0.7rem;
-		font-size: 0.8rem;
+		font-size: 0.76rem;
 		line-height: 1;
-		background: var(--surface-widget);
+		background: color-mix(in srgb, var(--surface-widget) 95%, black);
 		max-width: min(19rem, 48vw);
-		box-shadow: var(--shadow-soft);
+		box-shadow: var(--glow-subtle);
 	}
 
 	.status-indicator__dot {
@@ -47,8 +47,8 @@
 	}
 
 	.status-indicator__text {
-		font-size: 0.78rem;
-		font-weight: 650;
+		font-size: 0.74rem;
+		font-weight: 620;
 		white-space: nowrap;
 		text-overflow: ellipsis;
 		overflow: hidden;

@@ -106,19 +106,27 @@
 	.conversation-view {
 		flex: 1;
 		overflow-y: auto;
-		padding: 1rem;
+		padding: 1rem 1rem 0.9rem;
 		scroll-padding-bottom: 2rem;
 		position: relative;
+		background:
+			linear-gradient(
+				90deg,
+				rgb(255 255 255 / 1.2%) 0,
+				transparent 24%,
+				transparent 76%,
+				rgb(255 255 255 / 1.2%) 100%
+			);
 	}
 
 	.conversation-view__inner {
-		max-width: 66rem;
+		max-width: 68rem;
 		margin: 0 auto;
 	}
 
 	.conversation-view__messages {
 		display: grid;
-		gap: 0.95rem;
+		gap: 0.78rem;
 	}
 
 	.conversation-view__jump-latest {
@@ -130,18 +138,19 @@
 		gap: 0.35rem;
 		padding: 0.45rem 0.65rem;
 		border-radius: var(--radius-lg);
-		border: 1px solid color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
-		background: var(--surface-widget);
+		border: 1px solid var(--outline-strong);
+		background: color-mix(in srgb, var(--surface-widget) 94%, black);
 		color: var(--color-foreground);
-		font-size: 0.72rem;
-		font-weight: 700;
-		box-shadow: var(--shadow-soft);
+		font-size: 0.69rem;
+		font-weight: 650;
+		box-shadow: var(--glow-subtle);
 		cursor: pointer;
 		z-index: 2;
+		backdrop-filter: blur(10px);
 	}
 
 	.conversation-view__jump-latest:hover {
-		background: var(--surface-active);
+		background: color-mix(in srgb, var(--surface-active) 90%, black);
 	}
 
 	@media (max-width: 768px) {

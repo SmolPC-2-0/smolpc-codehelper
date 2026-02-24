@@ -67,8 +67,8 @@
 	.shortcuts-overlay__backdrop {
 		position: absolute;
 		inset: 0;
-		background: rgb(2 8 23 / 48%);
-		backdrop-filter: blur(3px);
+		background: rgb(3 7 16 / 64%);
+		backdrop-filter: blur(4px);
 	}
 
 	.shortcuts-overlay__panel {
@@ -76,10 +76,11 @@
 		z-index: 1;
 		width: min(34rem, 100%);
 		border-radius: var(--radius-xl);
-		border: 1px solid var(--color-border);
-		background: color-mix(in srgb, var(--color-card) 96%, transparent);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-floating) 96%, black);
 		box-shadow: var(--shadow-strong);
 		overflow: hidden;
+		backdrop-filter: blur(12px);
 	}
 
 	.shortcuts-overlay__header {
@@ -87,7 +88,7 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 0.8rem 0.9rem;
-		border-bottom: 1px solid var(--color-border);
+		border-bottom: 1px solid var(--outline-soft);
 	}
 
 	.shortcuts-overlay__title {
@@ -112,10 +113,10 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.7rem;
-		border: 1px solid var(--color-border);
+		border: 1px solid var(--outline-soft);
 		border-radius: var(--radius-lg);
 		padding: 0.55rem 0.6rem;
-		background: color-mix(in srgb, var(--color-card) 92%, transparent);
+		background: color-mix(in srgb, var(--surface-widget) 96%, black);
 	}
 
 	.shortcuts-overlay__keys {
@@ -129,9 +130,9 @@
 		font-family: var(--font-code, 'JetBrains Mono', monospace);
 		font-size: 0.68rem;
 		padding: 0.2rem 0.34rem;
-		border: 1px solid var(--color-border);
+		border: 1px solid var(--outline-soft);
 		border-radius: var(--radius-sm);
-		background: color-mix(in srgb, var(--color-accent) 20%, transparent);
+		background: color-mix(in srgb, var(--surface-hover) 72%, black);
 	}
 
 	.shortcuts-overlay__item p {

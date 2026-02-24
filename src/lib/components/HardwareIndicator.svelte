@@ -38,15 +38,15 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.45rem;
-		border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
+		border: 1px solid var(--outline-soft);
 		border-radius: var(--radius-lg);
 		padding: 0.45rem 0.7rem;
-		background: var(--surface-widget);
-		font-size: 0.78rem;
-		font-weight: 650;
+		background: color-mix(in srgb, var(--surface-widget) 95%, black);
+		font-size: 0.74rem;
+		font-weight: 620;
 		color: var(--color-foreground);
 		cursor: pointer;
-		box-shadow: var(--shadow-soft);
+		box-shadow: var(--glow-subtle);
 		transition:
 			background var(--motion-fast),
 			border-color var(--motion-fast),
@@ -54,13 +54,13 @@
 	}
 
 	.hardware-indicator:hover {
-		transform: translateY(-1px);
-		border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
+		transform: translateY(-0.5px);
+		border-color: var(--outline-strong);
 		background: var(--surface-active);
 	}
 
 	.hardware-indicator--active {
-		border-color: color-mix(in srgb, var(--color-primary) 70%, transparent);
+		border-color: var(--outline-strong);
 		background: var(--brand-soft-strong);
 	}
 

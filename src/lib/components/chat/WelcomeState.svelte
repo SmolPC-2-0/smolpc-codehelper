@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { Sparkles, Wand2 } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import QuickExamples from '$lib/components/QuickExamples.svelte';
 
@@ -15,7 +14,6 @@
 <div class="welcome-state">
 	<div class="welcome-state__hero">
 		<div class="welcome-state__chip">
-			<Sparkles class="h-4 w-4" />
 			<span>Offline AI Coding Lab</span>
 		</div>
 		<h2>Build, debug, and learn in one focused workspace.</h2>
@@ -30,7 +28,6 @@
 			<QuickExamples onSelectExample={onSelectExample} onClose={() => onToggleExamples(false)} />
 		{:else}
 			<Button variant="outline" onclick={() => onToggleExamples(true)}>
-				<Wand2 class="mr-2 h-4 w-4" />
 				Open Prompt Starters
 			</Button>
 		{/if}
@@ -59,20 +56,20 @@
 		justify-self: start;
 		padding: 0.35rem 0.6rem;
 		border-radius: var(--radius-lg);
-		font-size: 0.72rem;
+		font-size: 0.67rem;
 		font-weight: 700;
-		letter-spacing: 0.06em;
+		letter-spacing: 0.1em;
 		text-transform: uppercase;
-		color: color-mix(in srgb, var(--color-primary) 72%, var(--color-foreground));
-		border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
-		background: var(--brand-soft);
+		color: color-mix(in srgb, var(--color-primary) 58%, var(--color-foreground));
+		border: 1px solid color-mix(in srgb, var(--color-primary) 16%, transparent);
+		background: color-mix(in srgb, var(--brand-soft) 65%, transparent);
 	}
 
 	.welcome-state__hero h2 {
 		font-size: clamp(1.5rem, 4vw, 2.3rem);
 		line-height: 1.2;
-		letter-spacing: -0.02em;
-		font-weight: 700;
+		letter-spacing: -0.01em;
+		font-weight: 620;
 		max-width: 36rem;
 	}
 

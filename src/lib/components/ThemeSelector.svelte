@@ -39,12 +39,12 @@
 	.control-pill {
 		display: inline-flex;
 		gap: 0.375rem;
-		border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
+		border: 1px solid var(--outline-soft);
 		border-radius: var(--radius-xl);
 		padding: 0.25rem;
-		background: var(--surface-widget);
+		background: color-mix(in srgb, var(--surface-widget) 95%, black);
 		backdrop-filter: blur(8px);
-		box-shadow: var(--shadow-soft);
+		box-shadow: var(--glow-subtle);
 	}
 
 	.theme-chip {
@@ -56,8 +56,8 @@
 		padding: 0.35rem 0.6rem;
 		color: var(--color-muted-foreground);
 		background: transparent;
-		font-size: 0.74rem;
-		font-weight: 600;
+		font-size: 0.71rem;
+		font-weight: 590;
 		letter-spacing: 0.01em;
 		cursor: pointer;
 		transition:
@@ -69,11 +69,11 @@
 	.theme-chip:hover {
 		color: var(--color-foreground);
 		background: var(--surface-hover);
-		transform: translateY(-1px);
+		transform: translateY(-0.5px);
 	}
 
 	.theme-chip--active {
-		border-color: color-mix(in srgb, var(--color-primary) 42%, var(--color-border));
+		border-color: var(--outline-strong);
 		background: var(--surface-active);
 		color: var(--color-foreground);
 	}

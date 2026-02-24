@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { QUICK_EXAMPLES } from '$lib/types/examples';
-	import { Lightbulb, Rocket, X } from '@lucide/svelte';
+	import { X } from '@lucide/svelte';
 
 	interface Props {
 		onSelectExample: (prompt: string) => void;
@@ -18,7 +18,6 @@
 <div class="quick-examples">
 	<div class="quick-examples__header">
 		<div class="quick-examples__title">
-			<Lightbulb class="h-5 w-5" />
 			<div>
 				<h3>Prompt Starters</h3>
 				<p>Pick one and adapt it to your assignment.</p>
@@ -37,16 +36,15 @@
 
 	<div class="quick-examples__grid">
 		{#each QUICK_EXAMPLES as example (example.id)}
-			<button
-				onclick={() => handleSelect(example.prompt)}
-				class="quick-examples__item"
-			>
-				<div class="quick-examples__item-head">
-					<span>{example.title}</span>
-					<Rocket class="h-3.5 w-3.5" />
-				</div>
-				<p>{example.prompt}</p>
-			</button>
+				<button
+					onclick={() => handleSelect(example.prompt)}
+					class="quick-examples__item"
+				>
+					<div class="quick-examples__item-head">
+						<span>{example.title}</span>
+					</div>
+					<p>{example.prompt}</p>
+				</button>
 		{/each}
 	</div>
 </div>
@@ -54,16 +52,16 @@
 <style>
 	.quick-examples {
 		border-radius: var(--radius-xl);
-		border: 1px solid var(--color-border);
+		border: 1px solid var(--outline-soft);
 		padding: 1rem;
 		background:
 			linear-gradient(
 				145deg,
-				var(--brand-soft),
-				var(--surface-widget)
+				color-mix(in srgb, var(--brand-soft) 65%, transparent),
+				color-mix(in srgb, var(--surface-widget) 96%, black)
 			),
 			var(--surface-subtle);
-		box-shadow: var(--shadow-soft);
+		box-shadow: var(--glow-subtle);
 	}
 
 	.quick-examples__header {
@@ -75,10 +73,8 @@
 	}
 
 	.quick-examples__title {
-		display: flex;
-		align-items: flex-start;
-		gap: 0.55rem;
-		color: color-mix(in srgb, var(--color-primary) 70%, var(--color-foreground));
+		display: block;
+		color: color-mix(in srgb, var(--color-primary) 55%, var(--color-foreground));
 	}
 
 	.quick-examples__title h3 {
@@ -103,7 +99,7 @@
 
 	.quick-examples__close:hover {
 		color: var(--color-foreground);
-		border-color: var(--color-border);
+		border-color: var(--outline-soft);
 		background: var(--surface-hover);
 	}
 
@@ -119,8 +115,8 @@
 		padding: 0.75rem 0.8rem;
 		text-align: left;
 		border-radius: var(--radius-lg);
-		border: 1px solid var(--color-border);
-		background: var(--surface-widget);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-widget) 96%, black);
 		color: inherit;
 		cursor: pointer;
 		transition:
@@ -130,16 +126,13 @@
 	}
 
 	.quick-examples__item:hover {
-		transform: translateY(-1px);
-		border-color: color-mix(in srgb, var(--color-primary) 42%, transparent);
+		transform: translateY(-0.5px);
+		border-color: var(--outline-strong);
 		background: var(--surface-active);
 	}
 
 	.quick-examples__item-head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.4rem;
+		display: block;
 		font-size: 0.81rem;
 		font-weight: 700;
 	}
