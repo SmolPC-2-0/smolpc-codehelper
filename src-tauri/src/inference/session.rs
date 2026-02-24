@@ -4,6 +4,9 @@
 /// Handles execution provider configuration and session options.
 
 use super::types::ModelInfo;
+use super::InferenceBackend;
+#[cfg(target_os = "windows")]
+use ort::ep;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use std::path::Path;
@@ -30,18 +33,50 @@ impl InferenceSession {
     /// Phase 3: Add Intel OpenVINO EP (Core Ultra NPU)
     /// Phase 4: Add Qualcomm QNN EP (Snapdragon X Elite NPU)
     pub fn new<P: AsRef<Path>>(model_path: P) -> Result<Self, String> {
+        Self::new_with_backend(model_path, InferenceBackend::Cpu)
+    }
+
+    /// Load an ONNX model with an explicit backend selection.
+    pub fn new_with_backend<P: AsRef<Path>>(
+        model_path: P,
+        backend: InferenceBackend,
+    ) -> Result<Self, String> {
         let model_path = model_path.as_ref();
 
-        log::info!("Loading ONNX model: {}", model_path.display());
+        log::info!(
+            "Loading ONNX model: {} (backend: {})",
+            model_path.display(),
+            backend.as_str()
+        );
 
-        // Create session with CPU execution provider
-        // Note: ort will automatically find onnxruntime.dll in system PATH
-        let session = Session::builder()
+        let mut builder = Session::builder()
             .map_err(|e| format!("Failed to create session builder: {e}"))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| format!("Failed to set optimization level: {e}"))?
-            .with_intra_threads(4)
-            .map_err(|e| format!("Failed to set thread count: {e}"))?
+            .map_err(|e| format!("Failed to set optimization level: {e}"))?;
+
+        builder = match backend {
+            InferenceBackend::Cpu => builder
+                .with_intra_threads(4)
+                .map_err(|e| format!("Failed to set CPU thread count: {e}"))?,
+            InferenceBackend::DirectML => {
+                #[cfg(target_os = "windows")]
+                {
+                    builder
+                        .with_execution_providers([ep::DirectML::default().build().error_on_failure()])
+                        .map_err(|e| format!("Failed to register DirectML EP: {e}"))?
+                        .with_parallel_execution(false)
+                        .map_err(|e| format!("Failed to set DirectML execution mode: {e}"))?
+                        .with_memory_pattern(false)
+                        .map_err(|e| format!("Failed to disable memory pattern for DirectML: {e}"))?
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    return Err("DirectML backend is only supported on Windows".to_string());
+                }
+            }
+        };
+
+        let session = builder
             .commit_from_file(model_path)
             .map_err(|e| format!("Failed to load model from file: {e}"))?;
 
@@ -51,8 +86,11 @@ impl InferenceSession {
             .unwrap_or("unknown")
             .to_string();
 
-        log::info!("Model loaded successfully: {}", model_name);
-        log::info!("Available execution providers: CPU (Phase 0)");
+        log::info!(
+            "Model loaded successfully: {} (backend: {})",
+            model_name,
+            backend.as_str()
+        );
 
         Ok(Self {
             session,
@@ -84,6 +122,7 @@ impl InferenceSession {
     pub fn name(&self) -> &str {
         &self.model_name
     }
+
 }
 
 #[cfg(test)]

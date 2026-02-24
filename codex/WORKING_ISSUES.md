@@ -32,7 +32,12 @@ Notes:
 - Mirrored optional fields in `src/lib/types/hardware.ts`
 
 4. Milestone 4 - Session Builder + Fallback
-Status: Pending
+Status: Completed
+Notes:
+- `src-tauri/src/inference/session.rs` now supports explicit backend creation (`Cpu` / `DirectML`)
+- DirectML session options use ORT EP registration with `error_on_failure`, sequential execution, disabled memory pattern, and Level3 optimization
+- `src-tauri/src/inference/mod.rs` now preloads `DirectML.dll` on Windows before ORT init
+- `src-tauri/src/commands/inference.rs` now contains same-request fallback helper for DirectML init failure -> CPU session
 
 5. Milestone 5 - Selector + Benchmark Gate + Demotion
 Status: Pending

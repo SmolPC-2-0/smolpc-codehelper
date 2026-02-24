@@ -48,6 +48,9 @@ pub fn init_onnx_runtime(resource_dir: Option<&Path>) -> Result<(), String> {
             let dylib_path = find_onnxruntime_dylib(resource_dir);
             log::info!("Initializing ONNX Runtime from: {}", dylib_path.display());
 
+            #[cfg(target_os = "windows")]
+            preload_directml_dll(resource_dir, &dylib_path);
+
             match ort::init_from(dylib_path.to_string_lossy().to_string()) {
                 Ok(builder) => {
                     if builder.commit() {
@@ -110,4 +113,51 @@ fn find_onnxruntime_dylib(resource_dir: Option<&Path>) -> PathBuf {
 
     // 5. Bare name — rely on system PATH / DYLD_LIBRARY_PATH
     PathBuf::from(dylib_name)
+}
+
+#[cfg(target_os = "windows")]
+fn preload_directml_dll(resource_dir: Option<&Path>, ort_dylib_path: &Path) {
+    let mut candidates = Vec::new();
+
+    if let Some(res_dir) = resource_dir {
+        candidates.push(res_dir.join("libs").join("DirectML.dll"));
+    }
+
+    if let Some(parent) = ort_dylib_path.parent() {
+        candidates.push(parent.join("DirectML.dll"));
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("DirectML.dll"));
+        }
+    }
+
+    candidates.push(PathBuf::from("libs").join("DirectML.dll"));
+    candidates.push(PathBuf::from("DirectML.dll"));
+
+    let mut seen = std::collections::HashSet::new();
+    for candidate in candidates {
+        let key = candidate.to_string_lossy().to_string();
+        if !seen.insert(key) {
+            continue;
+        }
+        if candidate != PathBuf::from("DirectML.dll") && !candidate.exists() {
+            continue;
+        }
+
+        // Keep the library loaded for process lifetime; ORT/DirectML expects it to stay resident.
+        match unsafe { libloading::Library::new(&candidate) } {
+            Ok(lib) => {
+                std::mem::forget(lib);
+                log::info!("Preloaded DirectML.dll from {}", candidate.display());
+                return;
+            }
+            Err(e) => {
+                log::debug!("Failed to preload DirectML.dll from {}: {}", candidate.display(), e);
+            }
+        }
+    }
+
+    log::warn!("DirectML.dll preload failed; DirectML backend may be unavailable");
 }

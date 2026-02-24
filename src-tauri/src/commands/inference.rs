@@ -2,8 +2,9 @@ use crate::inference::types::{GenerationConfig, GenerationMetrics, GenerationRes
 /// Tauri commands for ONNX Runtime inference
 ///
 /// Provides IPC interface between frontend and inference engine.
-use crate::inference::{Generator, InferenceSession, TokenizerWrapper};
+use crate::inference::{Generator, InferenceBackend, InferenceSession, TokenizerWrapper};
 use crate::models::{ModelLoader, ModelRegistry};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use tauri::ipc::Channel;
@@ -48,6 +49,9 @@ pub struct InferenceState {
 
     /// Whether generation is currently in progress (explicit flag, no TOCTOU race)
     generating: Arc<AtomicBool>,
+
+    /// Backend used by currently loaded model (if any)
+    active_backend: Arc<Mutex<Option<InferenceBackend>>>,
 }
 
 impl Default for InferenceState {
@@ -57,6 +61,7 @@ impl Default for InferenceState {
             current_model: Arc::new(Mutex::new(None)),
             active_cancel: Arc::new(StdMutex::new(None)),
             generating: Arc::new(AtomicBool::new(false)),
+            active_backend: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -103,6 +108,29 @@ impl InferenceState {
     }
 }
 
+fn load_session_with_fallback(
+    model_path: &Path,
+    preferred_backend: InferenceBackend,
+) -> Result<(InferenceSession, InferenceBackend, Option<String>), String> {
+    match preferred_backend {
+        InferenceBackend::Cpu => InferenceSession::new_with_backend(model_path, InferenceBackend::Cpu)
+            .map(|session| (session, InferenceBackend::Cpu, None)),
+        InferenceBackend::DirectML => {
+            match InferenceSession::new_with_backend(model_path, InferenceBackend::DirectML) {
+                Ok(session) => Ok((session, InferenceBackend::DirectML, None)),
+                Err(dml_error) => {
+                    log::warn!(
+                        "DirectML session initialization failed (falling back to CPU): {}",
+                        dml_error
+                    );
+                    let cpu_session = InferenceSession::new_with_backend(model_path, InferenceBackend::Cpu)?;
+                    Ok((cpu_session, InferenceBackend::Cpu, Some(dml_error)))
+                }
+            }
+        }
+    }
+}
+
 /// Load a model and initialize the inference engine
 ///
 /// # Arguments
@@ -142,12 +170,18 @@ pub async fn load_model(
     log::info!("Model path: {}", model_path.display());
     log::info!("Tokenizer path: {}", tokenizer_path.display());
 
-    // Load ONNX session
-    let session = InferenceSession::new(&model_path)?;
+    // Session fallback plumbing is wired here; backend selection logic will be layered above this flow.
+    let (session, active_backend, fallback_reason) =
+        load_session_with_fallback(&model_path, InferenceBackend::Cpu)?;
     let session_info = session.info();
+
+    if let Some(reason) = fallback_reason {
+        log::warn!("Model loaded with CPU fallback after DirectML failure: {reason}");
+    }
 
     log::info!("Session loaded - Inputs: {:?}", session_info.inputs);
     log::info!("Session loaded - Outputs: {:?}", session_info.outputs);
+    log::info!("Session backend active: {}", active_backend.as_str());
 
     // Load tokenizer
     let tokenizer =
@@ -163,6 +197,9 @@ pub async fn load_model(
 
     let mut current_model = state.current_model.lock().await;
     *current_model = Some(model_id.clone());
+
+    let mut backend_state = state.active_backend.lock().await;
+    *backend_state = Some(active_backend);
 
     log::info!("Model loaded successfully: {}", model_id);
 
@@ -184,6 +221,9 @@ pub async fn unload_model(state: State<'_, InferenceState>) -> Result<String, St
 
     let mut current_model = state.current_model.lock().await;
     *current_model = None;
+
+    let mut backend_state = state.active_backend.lock().await;
+    *backend_state = None;
 
     log::info!("Model unloaded");
     Ok("Model unloaded successfully".to_string())

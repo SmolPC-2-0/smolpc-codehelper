@@ -4,6 +4,42 @@ This file tracks progress across Claude Code sessions for SmolPC Code Helper.
 
 ---
 
+## 2026-02-24 (Session 9) - Backend-Aware Session Builder + Fallback (Milestone 4)
+
+**Focus**: Implement Milestone 4 from DirectML integration plan
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- Refactored `src-tauri/src/inference/session.rs`:
+  - Added `InferenceSession::new_with_backend(model_path, backend)`
+  - Added backend-specific config for `DirectML` and `Cpu`
+  - Kept `InferenceSession::new()` as CPU wrapper for compatibility
+- Added DirectML session option policy:
+  - `with_execution_providers([ep::DirectML::default().build().error_on_failure()])`
+  - `with_parallel_execution(false)`
+  - `with_memory_pattern(false)`
+  - `with_optimization_level(Level3)`
+- Updated ORT init in `src-tauri/src/inference/mod.rs`:
+  - Preloads `DirectML.dll` on Windows before calling `ort::init_from(...)`
+  - Searches bundled resource locations, executable directory, and fallback paths
+- Added fallback load helper in `src-tauri/src/commands/inference.rs`:
+  - If DirectML session init fails, load immediately retries CPU in same command flow
+  - Backend used by loaded model is now tracked in `InferenceState`
+
+**Quality Gates**:
+- `cargo check` (Rust 1.88 toolchain): ✅ pass
+- Targeted tests:
+  - `cargo test commands::inference --lib`: ✅ pass
+  - `cargo test session --lib`: ✅ pass
+
+**Next Session / Next Commit Target**:
+1. Milestone 5: selector, benchmark gate, persistence, forced override, and demotion wiring
+2. Milestone 6: backend diagnostics command + structured selection/fallback/demotion logs
+
+**Last Known Good Commit**: `4f688ad` (Milestone 3)
+**Resume From Step**: Milestone 5
+
 ## 2026-02-24 (Session 8) - Hardware Identity Enrichment (Milestone 3)
 
 **Focus**: Implement Milestone 3 from DirectML integration plan
