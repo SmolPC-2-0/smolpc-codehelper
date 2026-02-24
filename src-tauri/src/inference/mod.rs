@@ -45,9 +45,13 @@ pub fn init_onnx_runtime(resource_dir: Option<&Path>) -> Result<(), String> {
             let dylib_path = find_onnxruntime_dylib(resource_dir);
             log::info!("Initializing ONNX Runtime from: {}", dylib_path.display());
 
-            match ort::init_from(dylib_path.to_string_lossy().to_string()).commit() {
-                Ok(_) => {
-                    log::info!("ONNX Runtime initialized successfully");
+            match ort::init_from(dylib_path.to_string_lossy().to_string()) {
+                Ok(builder) => {
+                    if builder.commit() {
+                        log::info!("ONNX Runtime initialized successfully");
+                    } else {
+                        log::info!("ONNX Runtime already initialized");
+                    }
                     Ok(())
                 }
                 Err(e) => Err(format!("Failed to initialize ONNX Runtime: {}", e)),

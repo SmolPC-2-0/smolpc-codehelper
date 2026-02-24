@@ -4,6 +4,39 @@ This file tracks progress across Claude Code sessions for SmolPC Code Helper.
 
 ---
 
+## 2026-02-24 (Session 6) - DirectML Plan Implementation Start (Milestone 1)
+
+**Focus**: Execute Milestone 1 (toolchain + runtime packaging) from DirectML integration plan
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- Bumped Rust MSRV in `src-tauri/Cargo.toml` to `1.88`
+- Upgraded ONNX wrapper from `ort = 2.0.0-rc.10` to `ort = 2.0.0-rc.11`
+- Added repo-level `rust-toolchain.toml` pinned to `1.88.0`
+- Rewrote `scripts/setup-libs.sh`:
+  - Windows now installs DirectML-capable runtime from NuGet
+  - Bundles `onnxruntime.dll`, `onnxruntime_providers_shared.dll`, `DirectML.dll`
+  - Adds SHA256 verification for all runtime package/archive downloads
+  - Supports `windows-x64`, `windows-arm64`, `macos-arm64`, `macos-x64`, `linux-x64`, `linux-arm64`
+- Updated `src-tauri/libs/README.md` with bundled runtime file expectations
+- Applied ORT rc.11 compatibility fixes:
+  - Session metadata access now uses `inputs()/outputs()` and `name()`
+  - ORT init now handles `init_from(...)->EnvironmentBuilder` before `commit()`
+  - Aligned local `ndarray` crate to `0.17` for `Value::from_array` compatibility
+- Compile gate passed with Rust 1.88 toolchain (`cargo check`)
+
+**Key Discoveries**:
+- Local workstation default Cargo/Rustc path still points to Homebrew Rust `1.87.0`
+- Explicit `RUSTC` override to Rustup 1.88 toolchain is currently required for local checks
+
+**Next Session / Next Commit Target**:
+1. Milestone 2: add backend domain model (`inference/backend.rs`)
+2. Milestone 2: add persistent backend decision store (`inference/backend_store.rs`)
+3. Wire minimum status surface for backend state needed by upcoming selector flow
+
+**Blockers**: None for implementation; local toolchain path quirk is documented in `codex/WORKING_ISSUES.md`
+
 ## 2026-02-09 (Session 5) - Stop Token Fix + ChatML + Repetition Penalty
 
 **Focus**: Fix runaway generation (model producing self-Q&A training data patterns)

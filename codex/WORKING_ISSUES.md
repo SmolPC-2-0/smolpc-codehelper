@@ -1,7 +1,47 @@
 # Codex Working Issues
 
-Last updated: 2026-02-09
-Base branch for stacked work: `fix/stop-token-chatml`
+Last updated: 2026-02-24
+Base branch for stacked work: `codex/directml-inferencing`
+
+## DirectML Execution Tracker
+
+1. Milestone 1 - Toolchain + Runtime Packaging
+Status: Completed
+Notes:
+- Rust MSRV moved to 1.88, ORT upgraded to `2.0.0-rc.11`
+- `scripts/setup-libs.sh` now downloads checksum-verified DirectML runtime bundles
+- Windows runtime bundle now includes `onnxruntime_providers_shared.dll` and `DirectML.dll`
+- ORT rc.11 compatibility updates applied in inference init/session metadata accessors
+
+2. Milestone 2 - Backend Domain + Persistence
+Status: Pending
+Planned deliverables:
+- `src-tauri/src/inference/backend.rs`
+- `src-tauri/src/inference/backend_store.rs`
+
+3. Milestone 3 - Hardware Identity Enrichment
+Status: Pending
+Planned deliverables:
+- Add `driver_version` + `pci_device_id` to GPU IPC types
+
+4. Milestone 4 - Session Builder + Fallback
+Status: Pending
+
+5. Milestone 5 - Selector + Benchmark Gate + Demotion
+Status: Pending
+
+6. Milestone 6 - Diagnostics Command + Structured Logs
+Status: Pending
+
+## Active Risks / Notes
+
+1. Toolchain invocation quirk on this workstation
+Status: Open
+Impact:
+- `cargo check` may still invoke Homebrew Rust 1.87 by default
+Mitigation:
+- Use explicit Rust 1.88 toolchain binaries with `RUSTC=$HOME/.rustup/toolchains/1.88.0-aarch64-apple-darwin/bin/rustc`
+- Keep `rust-toolchain.toml` committed so CI/other workstations are deterministic
 
 ## Scope
 - Backend focus: `src-tauri/src/inference`, `src-tauri/src/models`

@@ -66,15 +66,15 @@ impl InferenceSession {
             name: self.model_name.clone(),
             inputs: self
                 .session
-                .inputs
+                .inputs()
                 .iter()
-                .map(|input| input.name.clone())
+                .map(|input| input.name().to_string())
                 .collect(),
             outputs: self
                 .session
-                .outputs
+                .outputs()
                 .iter()
-                .map(|output| output.name.clone())
+                .map(|output| output.name().to_string())
                 .collect(),
         }
     }

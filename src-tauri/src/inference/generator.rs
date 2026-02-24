@@ -186,9 +186,9 @@ impl Generator {
         Self::validate_runtime_spec_compatibility(runtime_spec)?;
         let model_input_names = session
             .session
-            .inputs
+            .inputs()
             .iter()
-            .map(|input| input.name.clone())
+            .map(|input| input.name().to_string())
             .collect();
 
         Ok(Self {
