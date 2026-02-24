@@ -4,6 +4,34 @@ This file tracks progress across Claude Code sessions for SmolPC Code Helper.
 
 ---
 
+## 2026-02-24 (Session 8) - Hardware Identity Enrichment (Milestone 3)
+
+**Focus**: Implement Milestone 3 from DirectML integration plan
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- Extended Rust GPU IPC type in `src-tauri/src/hardware/types.rs`:
+  - Added `driver_version: Option<String>`
+  - Added `pci_device_id: Option<String>`
+- Updated GPU conversion in `src-tauri/src/hardware/detector.rs`:
+  - Populates new fields from `hardware-query` GPU metadata
+  - Normalizes empty strings to `None`
+- Synced frontend type in `src/lib/types/hardware.ts`:
+  - Added optional `driver_version` + `pci_device_id` fields in `GpuInfo`
+
+**Quality Gates**:
+- `cargo check` (Rust 1.88 toolchain): ✅ pass
+- Targeted tests (`cargo test hardware --lib`): ✅ pass (0 filtered tests, compile gate clean)
+
+**Next Session / Next Commit Target**:
+1. Milestone 4: backend-aware session builder (`Cpu` + `DirectML`) and same-flow fallback
+2. Milestone 5: first-load benchmark selector, persistence key wiring, forced override env, demotion after 3 failures
+3. Milestone 6: structured backend diagnostics logs + `get_inference_backend_status` command
+
+**Last Known Good Commit**: `b7a8f1f` (Milestone 2)
+**Resume From Step**: Milestone 4
+
 ## 2026-02-24 (Session 7) - DirectML Backend Domain + Persistence (Milestone 2)
 
 **Focus**: Implement Milestone 2 from DirectML integration plan

@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-02-24
 **Branch:** `codex/directml-inferencing`
-**Phase:** 2.0 In Progress (DirectML + CPU fallback) - Milestones 1-2 complete
+**Phase:** 2.0 In Progress (DirectML + CPU fallback) - Milestones 1-3 complete
 
 ---
 
@@ -18,7 +18,7 @@ Phase 1.5 is complete. The ONNX Runtime inference is now integrated with the cha
 - Repetition penalty (sign-aware, configurable window)
 - Ollama dependency removed from chat flow (still available as fallback)
 
-Phase 2 DirectML integration has started with Milestones 1-2 completed:
+Phase 2 DirectML integration has started with Milestones 1-3 completed:
 - Rust MSRV bumped to 1.88 and toolchain pinned via `rust-toolchain.toml`
 - ORT stack upgraded to `ort = 2.0.0-rc.11` (ORT 1.23)
 - Runtime setup script rewritten for checksum-verified DirectML bundling on Windows
@@ -29,6 +29,10 @@ Phase 2 DirectML integration has started with Milestones 1-2 completed:
 - Added versioned persistent backend decision store (`src/inference/backend_store.rs`) with:
   - Atomic JSON writes, key fingerprinting, and stale decision invalidation for model key changes
 - Added focused unit tests for backend gate logic, demotion threshold, persistence round-trip, and invalid JSON recovery
+- Added hardware identity enrichment in GPU IPC:
+  - Rust GPU type now includes `driver_version` and `pci_device_id`
+  - Hardware detector now populates both fields from `hardware-query`
+  - TypeScript GPU IPC type mirrors both fields as optional properties
 
 ---
 

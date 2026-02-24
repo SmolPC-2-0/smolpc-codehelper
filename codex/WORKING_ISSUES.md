@@ -25,9 +25,11 @@ Notes:
   - invalid JSON recovery
 
 3. Milestone 3 - Hardware Identity Enrichment
-Status: Pending
-Planned deliverables:
-- Add `driver_version` + `pci_device_id` to GPU IPC types
+Status: Completed
+Notes:
+- Added `driver_version` + `pci_device_id` to `src-tauri/src/hardware/types.rs::GpuInfo`
+- Populated fields in `src-tauri/src/hardware/detector.rs`
+- Mirrored optional fields in `src/lib/types/hardware.ts`
 
 4. Milestone 4 - Session Builder + Fallback
 Status: Pending

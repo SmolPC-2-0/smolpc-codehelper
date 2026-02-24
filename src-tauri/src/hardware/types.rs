@@ -36,6 +36,8 @@ pub struct GpuInfo {
     pub vendor: GpuVendor,
     pub backend: String,
     pub device_type: String,
+    pub driver_version: Option<String>,
+    pub pci_device_id: Option<String>,
     pub vram_mb: Option<u64>,
     pub temperature_c: Option<u32>,
     pub utilization_percent: Option<u32>,
