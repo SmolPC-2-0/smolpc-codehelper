@@ -8,8 +8,9 @@ use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_
 use commands::default::{read, save_code, write};
 use commands::hardware::{detect_hardware, get_cached_hardware, HardwareCache};
 use commands::inference::{
-    check_model_exists, generate_text, get_current_model, inference_cancel, inference_generate,
-    is_generating, list_models, load_model, unload_model, InferenceState,
+    check_model_exists, generate_text, get_current_model, get_inference_backend_status,
+    inference_cancel, inference_generate, is_generating, list_models, load_model, unload_model,
+    InferenceState,
 };
 use commands::ollama::{
     cancel_generation, check_ollama, generate_stream, get_ollama_models, HttpClient,
@@ -73,7 +74,8 @@ pub fn run() {
             is_generating,
             list_models,
             get_current_model,
-            check_model_exists
+            check_model_exists,
+            get_inference_backend_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

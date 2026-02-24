@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-02-24
 **Branch:** `codex/directml-inferencing`
-**Phase:** 2.0 In Progress (DirectML + CPU fallback) - Milestones 1-4 complete
+**Phase:** 2.0 In Progress (DirectML + CPU fallback) - Milestones 1-6 complete
 
 ---
 
@@ -18,7 +18,7 @@ Phase 1.5 is complete. The ONNX Runtime inference is now integrated with the cha
 - Repetition penalty (sign-aware, configurable window)
 - Ollama dependency removed from chat flow (still available as fallback)
 
-Phase 2 DirectML integration has started with Milestones 1-4 completed:
+Phase 2 DirectML integration has started with Milestones 1-6 completed:
 - Rust MSRV bumped to 1.88 and toolchain pinned via `rust-toolchain.toml`
 - ORT stack upgraded to `ort = 2.0.0-rc.11` (ORT 1.23)
 - Runtime setup script rewritten for checksum-verified DirectML bundling on Windows
@@ -42,6 +42,24 @@ Phase 2 DirectML integration has started with Milestones 1-4 completed:
     - `GraphOptimizationLevel::Level3`
   - ONNX init now preloads `DirectML.dll` on Windows before ORT initialization
   - Load flow now includes same-request fallback helper (DirectML init failure -> CPU)
+- Added backend selector + benchmark gate + persistence:
+  - Selection order:
+    - optional override via `SMOLPC_FORCE_EP=cpu|dml`
+    - persisted decision for current key
+    - first-load A/B benchmark (2s budget) for CPU vs DirectML
+    - CPU safe default
+  - Gate policy:
+    - DirectML requires `>= 1.30x` decode tok/s speedup
+    - DirectML TTFT regression must be `<= 1.15x` vs CPU
+  - Decision key persisted as:
+    - model + adapter identity + driver version + app version + ORT version
+  - Versioned JSON store now persists backend decision + failure counters with atomic writes
+- Added DirectML failure handling + demotion:
+  - Init failures and runtime failures counted in persistent counters
+  - DirectML auto-demotes to CPU after 3 consecutive failures
+  - Runtime demotion reloads the currently loaded model onto CPU for subsequent requests
+- Added backend diagnostics command:
+  - `get_inference_backend_status()` now returns backend status + decision metadata + counters (log-only visibility for now)
 
 ---
 

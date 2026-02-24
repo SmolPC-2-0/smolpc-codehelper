@@ -40,10 +40,24 @@ Notes:
 - `src-tauri/src/commands/inference.rs` now contains same-request fallback helper for DirectML init failure -> CPU session
 
 5. Milestone 5 - Selector + Benchmark Gate + Demotion
-Status: Pending
+Status: Completed
+Notes:
+- Added backend selection flow to `src-tauri/src/commands/inference.rs`
+- Added first-load micro-benchmark under 2s timeout budget (CPU vs DirectML)
+- Added benchmark gate policy:
+  - DirectML needs `>= 1.30x` decode tok/s
+  - DirectML TTFT must stay within `<= 1.15x` CPU TTFT
+- Added hidden backend override via `SMOLPC_FORCE_EP=cpu|dml`
+- Added persistent decision application with key-based invalidation and stale-record cleanup
+- Added DirectML failure counter updates and demotion to CPU after 3 consecutive failures
+- Added runtime demotion reload path so subsequent requests run on CPU
 
 6. Milestone 6 - Diagnostics Command + Structured Logs
-Status: Pending
+Status: Completed
+Notes:
+- Added structured backend selection/fallback/demotion logs in `load_model` and generation error flows
+- Added `get_inference_backend_status` Tauri command
+- Registered diagnostics command in `src-tauri/src/lib.rs`
 
 ## Active Risks / Notes
 
@@ -54,6 +68,13 @@ Impact:
 Mitigation:
 - Use explicit Rust 1.88 toolchain binaries with `RUSTC=$HOME/.rustup/toolchains/1.88.0-aarch64-apple-darwin/bin/rustc`
 - Keep `rust-toolchain.toml` committed so CI/other workstations are deterministic
+
+2. Windows-only runtime path still needs end-to-end manual validation
+Status: Open
+Impact:
+- DirectML preload/session creation and benchmark gate behavior are implemented but not yet exercised on target Windows matrix in this session
+Mitigation:
+- Run manual validation matrix on Windows 10 20H1+ and Windows 11 hardware before rollout
 
 ## Scope
 - Backend focus: `src-tauri/src/inference`, `src-tauri/src/models`

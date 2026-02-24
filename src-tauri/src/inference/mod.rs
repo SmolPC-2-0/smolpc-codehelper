@@ -24,9 +24,8 @@ pub mod types;
 pub mod benchmark;
 
 // Re-export commonly used types
-pub use backend::{BackendStatus, InferenceBackend};
+pub use backend::InferenceBackend;
 pub use generator::Generator;
-pub use kv_cache::KVCache;
 pub use session::InferenceSession;
 pub use tokenizer::TokenizerWrapper;
 

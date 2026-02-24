@@ -4,6 +4,54 @@ This file tracks progress across Claude Code sessions for SmolPC Code Helper.
 
 ---
 
+## 2026-02-24 (Session 10) - Selector + Demotion + Diagnostics (Milestones 5-6)
+
+**Focus**: Implement Milestones 5 and 6 from DirectML integration plan
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- Backend selector + persistence wiring in `src-tauri/src/commands/inference.rs`:
+  - Added load-time backend decision context using:
+    - model id
+    - adapter identity
+    - driver version
+    - app version
+    - ORT version
+  - Added persisted decision reuse via `BackendStore`
+  - Added stale decision invalidation for same-model key changes
+  - Added hidden override `SMOLPC_FORCE_EP=cpu|dml`
+- First-load benchmark gate:
+  - Added bounded 2s benchmark (`timeout`) for CPU vs DirectML
+  - Added decode speedup and TTFT ratio gating:
+    - DirectML requires `>= 1.30x` decode tok/s
+    - TTFT regression must be `<= 1.15x`
+- Failure accounting + demotion:
+  - Init/runtime failures now update persistent `FailureCounters`
+  - DirectML auto-demotes to CPU after 3 consecutive failures
+  - Runtime demotion triggers CPU model reload for subsequent requests
+- Diagnostics:
+  - Added `get_inference_backend_status` command returning `BackendStatus`
+  - Registered command in `src-tauri/src/lib.rs`
+  - Added structured logs for candidate ranking, benchmark outcome, fallback cause, and demotion events
+- Test additions:
+  - Added selector unit tests for force override, persisted preference, and benchmark gate behavior
+
+**Quality Gates**:
+- `cargo check` (Rust 1.88 toolchain): ✅ pass
+- Targeted tests:
+  - `cargo test commands::inference --lib`: ✅ 8 passed
+  - `cargo test backend --lib`: ✅ 9 passed (includes backend and store tests)
+
+**Manual Validation Still Required**:
+1. Windows 10 20H1+ DirectML-capable adapter path
+2. Windows 11 DirectML-capable adapter path
+3. Forced failure/demotion scenario (3 consecutive init/runtime failures)
+4. Benchmark budget enforcement under slow model-load conditions
+
+**Last Known Good Commit**: `f8111a5` (Milestone 4)
+**Resume From Step**: Windows matrix validation + tuning thresholds/logging based on observed runs
+
 ## 2026-02-24 (Session 9) - Backend-Aware Session Builder + Fallback (Milestone 4)
 
 **Focus**: Implement Milestone 4 from DirectML integration plan
