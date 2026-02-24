@@ -14,10 +14,15 @@ Notes:
 - ORT rc.11 compatibility updates applied in inference init/session metadata accessors
 
 2. Milestone 2 - Backend Domain + Persistence
-Status: Pending
-Planned deliverables:
-- `src-tauri/src/inference/backend.rs`
-- `src-tauri/src/inference/backend_store.rs`
+Status: Completed
+Notes:
+- Added `src-tauri/src/inference/backend.rs` with backend decision + benchmark gate + failure counter domain types
+- Added `src-tauri/src/inference/backend_store.rs` with versioned JSON persistence and atomic writes
+- Added tests for:
+  - key/fingerprint mutation on driver changes
+  - demotion threshold behavior at 3 consecutive DirectML failures
+  - persistence round-trip + invalidation on key changes
+  - invalid JSON recovery
 
 3. Milestone 3 - Hardware Identity Enrichment
 Status: Pending

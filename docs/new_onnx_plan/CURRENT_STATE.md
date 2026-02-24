@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-02-24
 **Branch:** `codex/directml-inferencing`
-**Phase:** 2.0 In Progress (DirectML + CPU fallback) - Milestone 1 complete
+**Phase:** 2.0 In Progress (DirectML + CPU fallback) - Milestones 1-2 complete
 
 ---
 
@@ -18,12 +18,17 @@ Phase 1.5 is complete. The ONNX Runtime inference is now integrated with the cha
 - Repetition penalty (sign-aware, configurable window)
 - Ollama dependency removed from chat flow (still available as fallback)
 
-Phase 2 DirectML integration has started with Milestone 1 completed:
+Phase 2 DirectML integration has started with Milestones 1-2 completed:
 - Rust MSRV bumped to 1.88 and toolchain pinned via `rust-toolchain.toml`
 - ORT stack upgraded to `ort = 2.0.0-rc.11` (ORT 1.23)
 - Runtime setup script rewritten for checksum-verified DirectML bundling on Windows
 - `setup-libs.sh` now installs `onnxruntime.dll`, `onnxruntime_providers_shared.dll`, and `DirectML.dll` on Windows
 - Build compatibility fixes applied for ORT rc.11 API changes (`inputs()/outputs()`, init builder semantics, ndarray alignment)
+- Added backend domain model (`src/inference/backend.rs`) for:
+  - `InferenceBackend`, `BackendDecision`, `DecisionReason`, benchmark gate policy, and demotion counters
+- Added versioned persistent backend decision store (`src/inference/backend_store.rs`) with:
+  - Atomic JSON writes, key fingerprinting, and stale decision invalidation for model key changes
+- Added focused unit tests for backend gate logic, demotion threshold, persistence round-trip, and invalid JSON recovery
 
 ---
 

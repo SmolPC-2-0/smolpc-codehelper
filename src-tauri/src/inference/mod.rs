@@ -12,6 +12,8 @@
 /// - `types`: Shared type definitions
 
 pub mod generator;
+pub mod backend;
+pub mod backend_store;
 pub mod input_builder;
 pub mod kv_cache;
 pub mod session;
@@ -22,6 +24,7 @@ pub mod types;
 pub mod benchmark;
 
 // Re-export commonly used types
+pub use backend::{BackendStatus, InferenceBackend};
 pub use generator::Generator;
 pub use kv_cache::KVCache;
 pub use session::InferenceSession;

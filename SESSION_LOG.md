@@ -4,6 +4,36 @@ This file tracks progress across Claude Code sessions for SmolPC Code Helper.
 
 ---
 
+## 2026-02-24 (Session 7) - DirectML Backend Domain + Persistence (Milestone 2)
+
+**Focus**: Implement Milestone 2 from DirectML integration plan
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- Added `src-tauri/src/inference/backend.rs`:
+  - Backend enums (`InferenceBackend`), decision metadata (`BackendDecision`, `DecisionReason`)
+  - Benchmark policy constants (`+30%` decode speedup, `+15%` TTFT regression cap, 2s budget)
+  - Failure counter model with demotion threshold handling (`3` consecutive DirectML failures)
+- Added `src-tauri/src/inference/backend_store.rs`:
+  - Versioned backend decision store schema (`backend_decisions.v1.json`)
+  - Key fingerprint persistence on `model + adapter + driver + app version + ORT version`
+  - Atomic write path (`tmp` file + replace) and stale-record invalidation for key changes
+- Exported backend domain types via `src-tauri/src/inference/mod.rs`
+- Added unit tests for backend gate logic, demotion threshold, store round-trip, stale-key invalidation, and invalid JSON recovery
+
+**Quality Gates**:
+- `cargo check` (Rust 1.88 toolchain): ✅ pass
+- Targeted tests (`cargo test backend --lib`): ✅ 6 passed
+
+**Next Session / Next Commit Target**:
+1. Milestone 3: hardware identity enrichment (`driver_version`, `pci_device_id`) across Rust + TS IPC types
+2. Milestone 4: backend-aware session builder with DirectML + CPU fallback in same load flow
+3. Milestone 5: first-load benchmark-gated selector + persistent decision application + 3-failure demotion wiring
+
+**Last Known Good Commit**: `5f8cf76` (Milestone 1)
+**Resume From Step**: Milestone 3
+
 ## 2026-02-24 (Session 6) - DirectML Plan Implementation Start (Milestone 1)
 
 **Focus**: Execute Milestone 1 (toolchain + runtime packaging) from DirectML integration plan
