@@ -4,6 +4,23 @@ This file tracks progress across Claude Code sessions for SmolPC Code Helper.
 
 ---
 
+## 2026-02-24 (Session 11) - Planning Doc Preservation + PR Consolidation
+
+**Focus**: Preserve canonical DirectML execution plan doc and consolidate open PR path
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- Added canonical plan doc used for this implementation session:
+  - `docs/new_onnx_plan/DIRECTML_CPU_FALLBACK_INTEGRATION_PLAN.md`
+- Linked canonical plan doc from:
+  - `docs/new_onnx_plan/CURRENT_STATE.md`
+- Prepared branch for consolidated PR flow (`codex/directml-inferencing` -> `main`) so frontend + DirectML work is reviewed together.
+
+**Next Session / Next Action**:
+1. Run Windows validation matrix on this branch.
+2. Keep superseded legacy PRs closed in favor of consolidated branch PR.
+
 ## 2026-02-24 (Session 10) - Selector + Demotion + Diagnostics (Milestones 5-6)
 
 **Focus**: Implement Milestones 5 and 6 from DirectML integration plan

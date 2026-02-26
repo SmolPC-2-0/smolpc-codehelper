@@ -8,6 +8,9 @@
 
 ## Summary
 
+Canonical DirectML execution plan for this implementation track:
+- `docs/new_onnx_plan/DIRECTML_CPU_FALLBACK_INTEGRATION_PLAN.md`
+
 Phase 1.5 is complete. The ONNX Runtime inference is now integrated with the chat UI:
 - Model loads and runs via chat interface
 - Streaming tokens display in real-time in chat messages
