@@ -4,6 +4,45 @@ This file tracks progress across Claude Code sessions for SmolPC Code Helper.
 
 ---
 
+## 2026-02-27 (Session 12) - DirectML GenAI Runtime Finalization + Cleanup + Handoff Refresh
+
+**Focus**: finalize DirectML inferencing implementation path, clean warning/dead-code surface, and update handoff artifacts for merge readiness
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- DirectML runtime path finalized on ONNX Runtime GenAI C-FFI:
+  - Added runtime adapter split (`ort_cpu` vs `genai_dml`)
+  - Added GenAI DirectML loader and streaming generation bridge
+  - Added DML gating and forced-backend behavior (`SMOLPC_ENABLE_DML_GENAI`, `SMOLPC_FORCE_EP`, `SMOLPC_DML_DEVICE_ID`)
+  - Added DML export/run helper scripts and runtime dependency setup updates
+- Dead-code/warning cleanup pass completed:
+  - Removed deprecated/unused code paths in benchmark/inference/model modules
+  - `cargo check --all-targets` is warning-clean
+- Added technical handoff doc:
+  - `docs/DML_plans/DIRECTML_GENAI_FULL_RUNDOWN.md`
+  - Includes full architecture explanation + sequence diagrams for load and generation flow
+- Repository hygiene:
+  - Added ignore rules for local artifacts (`cache_dir/`, `scripts/src-tauri/`)
+
+**Validation**:
+- `cargo check --all-targets`: pass
+- `cargo test --lib -- --nocapture`: pass (`79 passed, 0 failed, 9 ignored`)
+- `npm run check`: pass (existing non-blocking frontend a11y warning remains)
+
+**Key commits**:
+- `0b38f67` - DirectML GenAI runtime path + export tooling
+- `477ca60` - dead-code and warning-surface cleanup
+- `7460015` - DML full rundown doc + local artifact ignore rules
+
+**Next Session / Next Action**:
+1. Push branch and finalize PR review.
+2. Run clean-machine Windows installer validation.
+3. Decide and scope OpenVINO acceleration track (ORT EP first vs GenAI build-from-source path).
+
+**Last Known Good Commit**: `7460015`
+**Resume From Step**: PR merge + packaging validation matrix
+
 ## 2026-02-24 (Session 11) - Planning Doc Preservation + PR Consolidation
 
 **Focus**: Preserve canonical DirectML execution plan doc and consolidate open PR path

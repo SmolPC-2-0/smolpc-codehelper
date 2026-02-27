@@ -1,419 +1,136 @@
 # ONNX Migration - Current State
 
-**Last Updated:** 2026-02-24
-**Branch:** `codex/directml-inferencing`
-**Phase:** 2.0 In Progress (DirectML + CPU fallback) - Milestones 1-6 complete
+Last updated: 2026-02-27
+Branch: `codex/directml-inferencing`
+Phase: 2A DirectML acceleration (GenAI C-FFI path) completed and validated
 
 ---
 
-## Summary
+## Executive Status
 
-Canonical DirectML execution plan for this implementation track:
-- `docs/new_onnx_plan/DIRECTML_CPU_FALLBACK_INTEGRATION_PLAN.md`
+DirectML inferencing is now operational through ONNX Runtime GenAI C-FFI on Windows, with:
 
-Phase 1.5 is complete. The ONNX Runtime inference is now integrated with the chat UI:
-- Model loads and runs via chat interface
-- Streaming tokens display in real-time in chat messages
-- KV Cache with Attention Sinks for efficient long-context inference
-- ~8 tok/s performance on CPU
-- ChatML prompt template (system + multi-turn history + assistant opener)
-- Multi-stop-token detection (`<|endoftext|>` + `<|im_end|>`)
-- Repetition penalty (sign-aware, configurable window)
-- Ollama dependency removed from chat flow (still available as fallback)
+- Explicit gate control (`SMOLPC_ENABLE_DML_GENAI`)
+- Forced backend override (`SMOLPC_FORCE_EP=dml|cpu`)
+- Device override (`SMOLPC_DML_DEVICE_ID`)
+- Preflight probing and finite-logit validation
+- Persistent backend decisioning and CPU fallback/demotion safety
 
-Phase 2 DirectML integration has started with Milestones 1-6 completed:
-- Rust MSRV bumped to 1.88 and toolchain pinned via `rust-toolchain.toml`
-- ORT stack upgraded to `ort = 2.0.0-rc.11` (ORT 1.23)
-- Runtime setup script rewritten for checksum-verified DirectML bundling on Windows
-- `setup-libs.sh` now installs `onnxruntime.dll`, `onnxruntime_providers_shared.dll`, and `DirectML.dll` on Windows
-- Build compatibility fixes applied for ORT rc.11 API changes (`inputs()/outputs()`, init builder semantics, ndarray alignment)
-- Added backend domain model (`src/inference/backend.rs`) for:
-  - `InferenceBackend`, `BackendDecision`, `DecisionReason`, benchmark gate policy, and demotion counters
-- Added versioned persistent backend decision store (`src/inference/backend_store.rs`) with:
-  - Atomic JSON writes, key fingerprinting, and stale decision invalidation for model key changes
-- Added focused unit tests for backend gate logic, demotion threshold, persistence round-trip, and invalid JSON recovery
-- Added hardware identity enrichment in GPU IPC:
-  - Rust GPU type now includes `driver_version` and `pci_device_id`
-  - Hardware detector now populates both fields from `hardware-query`
-  - TypeScript GPU IPC type mirrors both fields as optional properties
-- Added backend-aware session construction + fallback plumbing:
-  - `InferenceSession::new_with_backend()` now supports `Cpu` and `DirectML`
-  - DirectML session options include:
-    - `with_execution_providers([ep::DirectML::default().build().error_on_failure()])`
-    - `with_parallel_execution(false)`
-    - `with_memory_pattern(false)`
-    - `GraphOptimizationLevel::Level3`
-  - ONNX init now preloads `DirectML.dll` on Windows before ORT initialization
-  - Load flow now includes same-request fallback helper (DirectML init failure -> CPU)
-- Added backend selector + benchmark gate + persistence:
-  - Selection order:
-    - optional override via `SMOLPC_FORCE_EP=cpu|dml`
-    - persisted decision for current key
-    - first-load A/B benchmark (2s budget) for CPU vs DirectML
-    - CPU safe default
-  - Gate policy:
-    - DirectML requires `>= 1.30x` decode tok/s speedup
-    - DirectML TTFT regression must be `<= 1.15x` vs CPU
-  - Decision key persisted as:
-    - model + adapter identity + driver version + app version + ORT version
-  - Versioned JSON store now persists backend decision + failure counters with atomic writes
-- Added DirectML failure handling + demotion:
-  - Init failures and runtime failures counted in persistent counters
-  - DirectML auto-demotes to CPU after 3 consecutive failures
-  - Runtime demotion reloads the currently loaded model onto CPU for subsequent requests
-- Added backend diagnostics command:
-  - `get_inference_backend_status()` now returns backend status + decision metadata + counters (log-only visibility for now)
+CPU inferencing remains on the ORT generator path.
 
 ---
 
-## What's Working
+## Key Commits (Merge-Critical)
 
-### Backend (Rust)
+1. `0b38f67` - `feat(inference): add DirectML GenAI runtime path and DML export tooling`
+2. `477ca60` - `refactor(inference): remove dead code and clean warning surface`
+3. `7460015` - `docs(dml): add full GenAI DirectML rundown and ignore local artifacts`
 
-| Component | File | Status |
-|-----------|------|--------|
-| ONNX Runtime init | `src/inference/mod.rs` | ✅ `init_onnx_runtime()` with OnceLock + 5-location dylib search |
-| Session wrapper | `src/inference/session.rs` | ✅ `InferenceSession` wraps `ort::Session` |
-| Tokenizer | `src/inference/tokenizer.rs` | ✅ `TokenizerWrapper` with encode/decode + multi-stop-token detection |
-| Generator | `src/inference/generator.rs` | ✅ Autoregressive loop with KV cache, sampling, and repetition penalty |
-| KV Cache | `src/inference/kv_cache.rs` | ✅ Pre-allocated buffer with Attention Sinks |
-| Types | `src/inference/types.rs` | ✅ `GenerationResult`, `GenerationConfig`, etc. |
-| Model registry | `src/models/registry.rs` | ✅ Hardcoded model definitions |
-| Model loader | `src/models/loader.rs` | ✅ Path utilities for model files |
-| Tauri commands | `src/commands/inference.rs` | ✅ `load_model`, `unload_model`, `generate_text`, `inference_generate` (Channel streaming), `inference_cancel`, `is_generating` (AtomicBool), `list_models`, `get_current_model`, `check_model_exists` |
-| Setup script | `scripts/setup-libs.sh` | ✅ Cross-platform ONNX Runtime download |
-| Bundle config | `tauri.conf.json` | ✅ `resources: ["libs/*"]` bundles dylib |
+---
 
-### Frontend (TypeScript/Svelte)
+## Implemented Runtime Architecture
 
-| Component | File | Status |
-|-----------|------|--------|
-| Types | `src/lib/types/inference.ts` | ✅ Matches Rust types |
-| Store | `src/lib/stores/inference.svelte.ts` | ✅ Full store with streaming, cancel, model loading |
-| Chat Integration | `src/App.svelte` | ✅ Uses ONNX inference with ChatML prompt template |
-| Model Selector | `src/lib/components/ModelSelector.svelte` | ✅ Lists/loads ONNX models |
-| Status Indicator | `src/lib/components/StatusIndicator.svelte` | ✅ Shows model load status |
+### Backend/runtime split
 
-### Model Files
+- `ort_cpu`:
+  - `InferenceSession` + `Generator` (existing ORT path)
+- `genai_dml`:
+  - `GenAiDirectMlGenerator` via C-FFI to `onnxruntime-genai.dll`
+  - provider setup: clear providers -> append `dml` -> optional hardware device id
 
-| File | Location | Status |
-|------|----------|--------|
-| model.onnx | `src-tauri/models/qwen2.5-coder-1.5b/` | ✅ Present |
-| tokenizer.json | `src-tauri/models/qwen2.5-coder-1.5b/` | ✅ Present |
-| onnxruntime.dll | `src-tauri/libs/` (new) or `ort-extracted/.../lib/` (legacy) | ✅ v1.22.1 (Windows), v1.22.0 (macOS/Linux) |
+### Adapter layer
 
-### Tests Passing
+- `src-tauri/src/inference/runtime_adapter.rs` now dispatches:
+  - `InferenceRuntimeAdapter::Ort`
+  - `InferenceRuntimeAdapter::GenAiDirectMl` (Windows)
 
-```bash
-cargo test test_load_model -- --ignored        # ✅ Model loads
-cargo test test_tokenizer_encode_decode -- --ignored  # ✅ Tokenizer works
-cargo test test_generate_simple -- --ignored   # ✅ Generation works
+### Model artifact layout
+
+Required:
+
+```text
+src-tauri/models/<model_id>/
+  cpu/model.onnx
+  dml/model.onnx
+  tokenizer.json
 ```
 
----
-
-## What's NOT Working / Missing
-
-### ✅ Priority 1: COMPLETED
-
-#### ✅ 1. Streaming Generation - DONE (Migrated to Channels)
-**Implementation:**
-- Added `generate_stream` method to Generator with callback parameter
-- Added `inference_generate` Tauri command using `Channel<String>` for token streaming
-- Frontend store has `generateStream()` method using `new Channel<string>()`
-- `invoke()` returns `GenerationMetrics` directly when generation completes
-
-**Pattern (Tauri 2 Channels — replaces Events):**
-- Rust: `on_token: Channel<String>` param, `on_token.send(token)` per token
-- TS: `new Channel<string>()`, set `onmessage`, pass to `invoke()`
-- No manual listener cleanup needed (Channel is command-scoped)
-
-#### ✅ 2. Cancellation Support - DONE
-**Implementation:**
-- Added `cancelled: Arc<AtomicBool>` to `InferenceState`
-- Generator checks cancellation flag in generation loop
-- Added `inference_cancel` Tauri command
-- Frontend store has `cancel()` method
-
-#### ✅ 3. Sampling Methods (Temperature/Top-k/Top-p) - DONE
-**Implementation:**
-- Added `sample()` method to Generator supporting:
-  - Temperature scaling
-  - Top-k filtering
-  - Top-p (nucleus) sampling
-  - Fallback to greedy for temperature=0 or top_k=1
-- Uses `rand` crate for random sampling
-
-### ✅ Priority 2: COMPLETED
-
-#### ✅ 4. KV Cache Reuse - DONE
-**Implementation:**
-- Created `src/inference/kv_cache.rs` with pre-allocated buffer management
-- Implemented Attention Sinks (StreamingLLM) for efficient long-context handling:
-  - Preserves first `sink_size` tokens (default: 4) as attention anchors
-  - Uses sliding window for remaining context
-  - Enables infinite-length generation without OOM
-- Generator rewritten with prefill/decode separation:
-  - `run_prefill()`: Processes entire prompt, builds initial cache
-  - `run_decode()`: Processes single token using cached KV
-- Memory efficient: ~224 MB for 4096 context (28 layers × 2 KV heads × 128 dim)
-
-**Architecture:**
-```rust
-pub struct KVCache {
-    key_caches: Vec<LayerCache>,    // 28 layers
-    value_caches: Vec<LayerCache>,  // 28 layers
-    position: usize,                // Grows indefinitely
-    sink_size: usize,               // Attention sink tokens
-    max_context: usize,             // Physical buffer size
-}
-
-pub struct LayerCache {
-    data: Vec<f32>,                 // Pre-allocated [heads, max_seq, head_dim]
-    current_length: usize,          // Valid tokens in buffer
-}
-```
-
-**Tests passing:** 11 KV cache unit tests covering basic operations, attention sinks, position tracking, and bulk copies
-
-### Priority 3: Cleanup
-
-#### 5. Remove Ollama Code
-**Current:** Ollama commands still in codebase
-**Needed:** Remove when ONNX inference is production-ready
-
-**Files to remove/modify:**
-- `src/commands/ollama.rs` - Remove entirely
-- `src/commands/mod.rs` - Remove ollama module
-- `src/lib.rs` - Remove ollama imports and handlers
-- `src/lib/stores/` - Remove ollama-related stores
-
-#### 6. Memory Management
-**Current:** No automatic model unloading
-**Needed:** Unload after inactivity timeout, RAM monitoring
-
-**Files to create:**
-- `src/inference/memory.rs` - Watchdog for auto-unload
+CPU keeps legacy fallback to `<model_id>/model.onnx`; DML does not.
 
 ---
 
-## Architecture Notes
+## DML Runtime Dependencies
 
-### Current Structure (Embedded)
-```
-src-tauri/src/
-├── inference/
-│   ├── mod.rs          # ONNX init, exports
-│   ├── generator.rs    # Generation loop with prefill/decode
-│   ├── kv_cache.rs     # KV cache with Attention Sinks
-│   ├── session.rs      # Session wrapper
-│   ├── tokenizer.rs    # Tokenizer wrapper
-│   └── types.rs        # Shared types
-├── models/
-│   ├── mod.rs
-│   ├── loader.rs       # Path utilities
-│   └── registry.rs     # Model definitions
-└── commands/
-    └── inference.rs    # Tauri commands
-```
+`scripts/setup-libs.sh` installs (Windows):
 
-### Planned Structure (Separate Crate) - Future
-```
-smolpc-engine/          # Separate crate
-├── src/
-│   ├── lib.rs
-│   ├── engine.rs       # Main Engine struct
-│   ├── inference/
-│   ├── sampling/
-│   └── memory/
-```
+- `onnxruntime.dll`
+- `onnxruntime_providers_shared.dll`
+- `DirectML.dll`
+- `onnxruntime-genai.dll`
 
-**Decision:** Stay embedded for Phase 1. Refactor to separate crate in Phase 2+ if needed.
+`tauri.conf.json` bundles `libs/*` into app resources.
 
 ---
 
-## Model Architecture Constants
+## Validation Snapshot
 
-Hardcoded in `kv_cache.rs` for Qwen2.5-Coder-1.5B:
+Latest local validation on this branch:
 
-```rust
-const NUM_LAYERS: usize = 28;
-const NUM_KV_HEADS: usize = 2;  // GQA (Grouped Query Attention)
-const HEAD_DIM: usize = 128;
-```
-
-Default cache settings in `Generator`:
-```rust
-max_context: 4096,   // Physical buffer size
-sink_size: 4,        // Attention sink tokens
-```
-
-These should be read from model config in future phases.
+- `cargo check --all-targets`: pass (warning-clean)
+- `cargo test --lib -- --nocapture`: pass (`79 passed, 0 failed, 9 ignored`)
+- `npm run check`: pass (1 existing frontend accessibility warning, unrelated)
 
 ---
 
-## Development Commands
+## Current Gates and Runtime Controls
 
-```bash
-# Run all inference tests
-cd src-tauri
-cargo test -- --ignored --nocapture
-
-# Check compilation
-cargo check
-
-# Run the app
-cd ..
-npm run tauri dev
-```
+- Enable DML GenAI path:
+  - `SMOLPC_ENABLE_DML_GENAI=1`
+- Force backend:
+  - `SMOLPC_FORCE_EP=dml`
+  - `SMOLPC_FORCE_EP=cpu`
+- Optional device pin:
+  - `SMOLPC_DML_DEVICE_ID=<non-negative int>`
 
 ---
 
-## Performance Benchmarks
+## What Is Complete
 
-### Phase 0 (Without KV Cache)
-
-| Metric | Value | Target |
-|--------|-------|--------|
-| TTFT (warm) | 423ms | < 3s ✅ |
-| Tokens/sec | 2.44 | > 2 ✅ |
-| Model load | ~4s | < 30s ✅ |
-
-### Phase 1 (With KV Cache) - VERIFIED ✅
-
-| Metric | Value | Target | Status |
-|--------|-------|--------|--------|
-| TTFT (warm) | ~420ms | < 3s | ✅ Met |
-| Tokens/sec | **8.0** | > 2 | ✅ **4x target!** |
-| Decode ms/tok | ~125ms | - | - |
-| Memory (cache) | ~112 MB | < 224 MB | ✅ Efficient |
-
-**Improvement achieved: 3.3x speedup** (from 2.44 to 8.0 tok/s)
-
-See `docs/new_onnx_plan/KV_CACHE_BENCHMARK.md` for detailed analysis.
+- DirectML runtime integration through GenAI C-FFI
+- Load-time DML init + preflight probe
+- Runtime failure tracking and demotion behavior
+- Backend status surface fields:
+  - `runtime_engine`
+  - `dml_gate_state`
+  - `dml_gate_reason`
+- DML export and run helper scripts
+- Dead-code cleanup in touched modules
+- Meeting handoff documentation for DML path internals
 
 ---
 
-## Next Session Checklist
+## Remaining Work (Not Blocking Current DML PR)
 
-### Phase 1 - COMPLETE
-1. [x] Implement streaming generation with Tauri events ✅
-2. [x] Add cancellation support ✅
-3. [x] Implement temperature/top-k/top-p sampling ✅
-4. [x] Implement KV cache with Attention Sinks ✅
-5. [x] Run end-to-end performance benchmarks with KV cache ✅ (8 tok/s achieved!)
-
-### Phase 1.5 - Frontend Integration - COMPLETE
-6. [x] Integrate streaming with existing chat UI ✅
-7. [ ] Remove Ollama code when ONNX inference is fully validated (kept as fallback)
-8. [ ] Add memory management (model unload timeout) (deferred to Phase 2)
-
-### Phase 2 - GPU/NPU Acceleration
-9. [ ] Test on Mac to ensure cross-platform works
-10. [ ] Begin GPU/NPU acceleration (see PHASE-2.MD)
-11. [ ] Implement ring buffer cache for long-context optimization
-12. [ ] Add IoBinding for zero-copy inference
+1. Packaging hardening for production model path:
+   - current model default path logic is dev-oriented (`CARGO_MANIFEST_DIR/models`)
+   - move to runtime app data model directory + first-run copy/sync strategy
+2. Frontend surfacing of backend diagnostics:
+   - consume `get_inference_backend_status` in UI
+3. OpenVINO acceleration design/implementation:
+   - choose ORT EP-first path vs GenAI OpenVINO build-from-source path
+4. Windows clean-machine installer validation:
+   - verify all bundled runtime binaries and model artifacts on a fresh environment
 
 ---
 
-## Files Changed (Session 1 - Phase 0)
+## Reference Docs
 
-### New Files
-- `src-tauri/src/inference/mod.rs`
-- `src-tauri/src/inference/generator.rs`
-- `src-tauri/src/inference/session.rs`
-- `src-tauri/src/inference/tokenizer.rs`
-- `src-tauri/src/inference/types.rs`
-- `src-tauri/src/models/mod.rs`
-- `src-tauri/src/models/loader.rs`
-- `src-tauri/src/models/registry.rs`
-- `src-tauri/src/commands/inference.rs`
-- `src/lib/types/inference.ts`
-- `src/lib/stores/inference.svelte.ts`
+- Canonical integration plan:
+  - `docs/new_onnx_plan/DIRECTML_CPU_FALLBACK_INTEGRATION_PLAN.md`
+- DML export/layout contract:
+  - `docs/DML_plans/DML_EXPORT_AND_LAYOUT.md`
+- Detailed technical rundown (for stakeholder meetings):
+  - `docs/DML_plans/DIRECTML_GENAI_FULL_RUNDOWN.md`
+- Historical audit context:
+  - `docs/new_onnx_plan/PR37_DIRECTML_CODE_AUDIT.md`
 
-### Modified Files
-- `src-tauri/src/lib.rs` - Added inference module, init call, commands
-- `src-tauri/src/commands/mod.rs` - Added inference module
-- `src-tauri/Cargo.toml` - Added ort, tokenizers, ndarray dependencies
-- `.gitignore` - Added ONNX/model exclusions
-
----
-
-## Files Changed (Session 2 - Phase 1 Streaming)
-
-### Modified Files
-- `src-tauri/src/inference/generator.rs` - Added `generate_stream()` method, `sample()` with temperature/top-k/top-p
-- `src-tauri/src/commands/inference.rs` - Added `inference_generate`, `inference_cancel`, `is_generating` commands
-- `src-tauri/src/lib.rs` - Registered new commands
-- `src/lib/stores/inference.svelte.ts` - Added `generateStream()`, `cancel()`, event listeners
-- `src/lib/types/inference.ts` - Added `GenerationConfig` type
-
----
-
-## Files Changed (Session 3 - Phase 1 KV Cache)
-
-### New Files
-- `src-tauri/src/inference/kv_cache.rs` - KV cache with Attention Sinks implementation
-
-### Modified Files
-- `src-tauri/src/inference/generator.rs` - Complete rewrite with prefill/decode separation, KV cache integration
-- `src-tauri/src/inference/mod.rs` - Added `kv_cache` module export
-
-### Key Implementation Details
-- **LayerCache**: Pre-allocated buffer for single layer K or V values
-- **KVCache**: Manages all 28 layers with Attention Sinks support
-- **Prefill phase**: Processes entire prompt, populates cache from `present.*` outputs
-- **Decode phase**: Processes single token, appends to cache with shift-and-sink logic
-- **Memory layout**: `[heads, seq_len, head_dim]` flattened contiguously
-- **Bulk copies**: Uses `extend_from_slice()` for efficient array generation
-
----
-
----
-
-## Files Changed (Session 4 - KV Cache Benchmarks)
-
-### New Files
-- `src-tauri/src/inference/benchmark.rs` - Comprehensive benchmark suite for KV cache performance
-- `docs/new_onnx_plan/KV_CACHE_BENCHMARK.md` - Benchmark results and analysis
-
-### Modified Files
-- `src-tauri/src/inference/mod.rs` - Added benchmark module (test-only)
-- `src-tauri/src/inference/generator.rs` - Added tokenizer() getter for tests
-- `docs/new_onnx_plan/CURRENT_STATE.md` - Updated with benchmark results
-
----
-
----
-
-## Files Changed (Session 5 - Phase 1.5 Frontend Integration)
-
-### Modified Files
-- `src/App.svelte` - Replaced Ollama with ONNX inference:
-  - Removed `ollamaStore` import, added `inferenceStore`
-  - Changed event listeners from `ollama_*` to `inference_*`
-  - Updated `handleSendMessage()` to use `inferenceStore.generateStream()`
-  - Updated `handleCancelGeneration()` to use `inferenceStore.cancel()`
-  - Changed status checks from `ollamaStore.isConnected` to `inferenceStore.isLoaded`
-  - Added auto-load on mount for first available model
-- `src/lib/components/ModelSelector.svelte` - ONNX model selection:
-  - Shows available ONNX models from `inferenceStore`
-  - Loads model on selection
-  - Shows loading spinner during model load
-- `src/lib/components/StatusIndicator.svelte` - ONNX status display:
-  - Changed from `OllamaStatus` to `InferenceStatus` type
-  - Shows model load state (loaded/loading/not loaded)
-  - Shows current model name when loaded
-
-### Key Implementation Details
-- **Auto-load on startup**: First available model loads automatically via `initInference()`
-- **Streaming callback pattern**: `inferenceStore.generateStream()` takes callback for token updates
-- **Context building**: Conversation history formatted as `User: ... / Assistant: ...` prompt
-- **Generation config**: Uses temperature from settings store
-
----
-
-### Not Committed (in .gitignore)
-- `ort-extracted/` - ONNX Runtime DLLs
-- `src-tauri/models/` - Model files (~900MB)
-- `onnxruntime-win-x64-1.22.1.zip` - Downloaded archive

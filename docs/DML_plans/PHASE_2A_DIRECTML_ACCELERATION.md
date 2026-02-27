@@ -1,5 +1,17 @@
 # Phase 2A: DirectML Acceleration
 
+## Status Update (2026-02-27)
+
+Implementation status: completed on `codex/directml-inferencing`, with one architectural adjustment:
+
+- DirectML inferencing is implemented through ONNX Runtime GenAI C-FFI runtime adapter (not solely through the earlier ORT manual generation path).
+
+This document remains useful as design rationale and historical plan context.
+For the implemented flow and current operational state, use:
+
+- `docs/new_onnx_plan/CURRENT_STATE.md`
+- `docs/DML_plans/DIRECTML_GENAI_FULL_RUNDOWN.md`
+
 ## Goal
 
 Add GPU acceleration via DirectML to the existing CPU-only ONNX inference pipeline. DML requires a **separately exported model** with a different input schema — this is not a drop-in EP swap.

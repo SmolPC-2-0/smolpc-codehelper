@@ -1,125 +1,78 @@
 # Codex Working Issues
 
-Last updated: 2026-02-24
-Base branch for stacked work: `codex/directml-inferencing`
+Last updated: 2026-02-27
+Base branch: `codex/directml-inferencing`
+Last known good commit: `7460015`
 
-## DirectML Execution Tracker
+---
 
-1. Milestone 1 - Toolchain + Runtime Packaging
-Status: Completed
-Notes:
-- Rust MSRV moved to 1.88, ORT upgraded to `2.0.0-rc.11`
-- `scripts/setup-libs.sh` now downloads checksum-verified DirectML runtime bundles
-- Windows runtime bundle now includes `onnxruntime_providers_shared.dll` and `DirectML.dll`
-- ORT rc.11 compatibility updates applied in inference init/session metadata accessors
+## Current Risk Register
 
-2. Milestone 2 - Backend Domain + Persistence
-Status: Completed
-Notes:
-- Added `src-tauri/src/inference/backend.rs` with backend decision + benchmark gate + failure counter domain types
-- Added `src-tauri/src/inference/backend_store.rs` with versioned JSON persistence and atomic writes
-- Added tests for:
-  - key/fingerprint mutation on driver changes
-  - demotion threshold behavior at 3 consecutive DirectML failures
-  - persistence round-trip + invalidation on key changes
-  - invalid JSON recovery
+### 1) Production model-path resolution for packaged app
 
-3. Milestone 3 - Hardware Identity Enrichment
-Status: Completed
-Notes:
-- Added `driver_version` + `pci_device_id` to `src-tauri/src/hardware/types.rs::GpuInfo`
-- Populated fields in `src-tauri/src/hardware/detector.rs`
-- Mirrored optional fields in `src/lib/types/hardware.ts`
+- Status: Open
+- Severity: High (shipping readiness)
+- Introduced in: historical model-loader defaults (pre-existing)
+- Context:
+  - `ModelLoader` default path is still dev-oriented (`CARGO_MANIFEST_DIR/models`) unless overridden.
+  - Packaged executable should resolve model storage under runtime app data paths.
+- Mitigation:
+  - Move default model root to app data directory.
+  - Add first-run copy/sync flow from bundled assets (if bundling starter model).
+  - Validate model load/generation on clean installed build.
 
-4. Milestone 4 - Session Builder + Fallback
-Status: Completed
-Notes:
-- `src-tauri/src/inference/session.rs` now supports explicit backend creation (`Cpu` / `DirectML`)
-- DirectML session options use ORT EP registration with `error_on_failure`, sequential execution, disabled memory pattern, and Level3 optimization
-- `src-tauri/src/inference/mod.rs` now preloads `DirectML.dll` on Windows before ORT init
-- `src-tauri/src/commands/inference.rs` now contains same-request fallback helper for DirectML init failure -> CPU session
+### 2) Windows installer/runtime validation matrix incomplete
 
-5. Milestone 5 - Selector + Benchmark Gate + Demotion
-Status: Completed
-Notes:
-- Added backend selection flow to `src-tauri/src/commands/inference.rs`
-- Added first-load micro-benchmark under 2s timeout budget (CPU vs DirectML)
-- Added benchmark gate policy:
-  - DirectML needs `>= 1.30x` decode tok/s
-  - DirectML TTFT must stay within `<= 1.15x` CPU TTFT
-- Added hidden backend override via `SMOLPC_FORCE_EP=cpu|dml`
-- Added persistent decision application with key-based invalidation and stale-record cleanup
-- Added DirectML failure counter updates and demotion to CPU after 3 consecutive failures
-- Added runtime demotion reload path so subsequent requests run on CPU
+- Status: Open
+- Severity: High (release confidence)
+- Introduced in: N/A (validation gap)
+- Context:
+  - DirectML GenAI runtime path is implemented and locally validated in dev.
+  - Need clean-machine verification for bundled DLLs and runtime behavior.
+- Mitigation:
+  - Run matrix:
+    - Windows 10 20H1+
+    - Windows 11
+    - iGPU-only and hybrid GPU systems
+  - Verify:
+    - `SMOLPC_ENABLE_DML_GENAI=1` path
+    - forced DML behavior
+    - fallback/demotion behavior
 
-6. Milestone 6 - Diagnostics Command + Structured Logs
-Status: Completed
-Notes:
-- Added structured backend selection/fallback/demotion logs in `load_model` and generation error flows
-- Added `get_inference_backend_status` Tauri command
-- Registered diagnostics command in `src-tauri/src/lib.rs`
+### 3) Backend diagnostics not yet surfaced in frontend
 
-## Active Risks / Notes
+- Status: Open
+- Severity: Medium
+- Introduced in: directml backend diagnostics phase
+- Context:
+  - Backend exposes `get_inference_backend_status` with runtime engine/gate/probe/failure info.
+  - UI does not yet display this status.
+- Mitigation:
+  - Add TypeScript status model and store integration.
+  - Show active runtime (`genai_dml` vs `ort_cpu`) and fallback reason in UI.
 
-1. Toolchain invocation quirk on this workstation
-Status: Open
-Impact:
-- `cargo check` may still invoke Homebrew Rust 1.87 by default
-Mitigation:
-- Use explicit Rust 1.88 toolchain binaries with `RUSTC=$HOME/.rustup/toolchains/1.88.0-aarch64-apple-darwin/bin/rustc`
-- Keep `rust-toolchain.toml` committed so CI/other workstations are deterministic
+### 4) OpenVINO acceleration path decision pending
 
-2. Windows-only runtime path still needs end-to-end manual validation
-Status: Open
-Impact:
-- DirectML preload/session creation and benchmark gate behavior are implemented but not yet exercised on target Windows matrix in this session
-Mitigation:
-- Run manual validation matrix on Windows 10 20H1+ and Windows 11 hardware before rollout
+- Status: Open
+- Severity: Medium
+- Introduced in: post-DML planning
+- Context:
+  - DML path is GenAI C-FFI.
+  - OpenVINO can be added via ORT EP or via GenAI (likely build-from-source/runtime packaging complexity).
+- Mitigation:
+  - Choose implementation track:
+    1. ORT OpenVINO EP first (faster delivery)
+    2. GenAI OpenVINO path (heavier integration/build work)
+  - Define artifact/runtime packaging contract before coding.
 
-## Scope
-- Backend focus: `src-tauri/src/inference`, `src-tauri/src/models`
-- Goal: fix runtime safety and modular model support issues incrementally using child branches
+---
 
-## Issue Tracking
+## Completed in This Branch
 
-1. Issue: ONNX output access and tensor shape safety in inference generator
-Status: Completed in child branch
-Branch: `fix/inference-safe-output-shapes`
-PR: https://github.com/SmolPC-2-0/smolpc-codehelper/pull/26
-Notes:
-- Replaced panic-prone output indexing with required-output checks
-- Added strict rank/dimension/data-length validation
-- Added focused unit tests for validation helpers
+- DirectML inferencing operational via ONNX Runtime GenAI C-FFI
+- CPU fallback and demotion safeguards preserved
+- Runtime adapter abstraction in place
+- DML export/tooling scripts added
+- Dead-code cleanup completed (`cargo check --all-targets` warning-clean)
+- Handoff docs refreshed (`CURRENT_STATE`, session log, DML rundown)
 
-2. Issue: Model runtime spec and architecture contract (1.5B-first)
-Status: Completed in child branch
-Branch: `fix/inference-runtime-spec-per-model`
-PR: https://github.com/SmolPC-2-0/smolpc-codehelper/pull/27
-Notes:
-- Added runtime spec abstraction (`ModelRuntimeSpec`) for model architecture + I/O naming + stop tokens
-- Integrated runtime spec validation into model load path
-- Updated generator/input builder to be runtime-spec-driven
-- Removed 7B from visible model list until supported
-- Added guardrail tests for 1.5B-only registry/runtime mapping
-
-3. Issue: Single-flight generation and cancellation scoping
-Status: Pending
-Planned branch: `fix/inference-single-flight-cancel-scope`
-
-4. Issue: Deterministic model path resolution (remove CWD dependency)
-Status: Pending
-Planned branch: `fix/models-path-resolution`
-
-5. Issue: InputBuilder allocation and key handling improvements
-Status: Pending
-Planned branch: `fix/inference-inputbuilder-allocs`
-
-## Implementation Rules
-- Keep each issue isolated in its own child branch and PR
-- Base each child PR on `fix/stop-token-chatml`
-- Exclude unrelated local changes:
-  - `.claude/settings.local.json`
-  - `package-lock.json`
-- Run at least:
-  - `cargo check`
-  - targeted tests for touched modules

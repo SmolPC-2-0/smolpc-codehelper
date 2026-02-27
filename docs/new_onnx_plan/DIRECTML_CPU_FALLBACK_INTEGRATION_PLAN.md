@@ -1,7 +1,29 @@
 # DirectML + CPU Fallback Integration Plan (with Execution Discipline)
 
 Last updated: 2026-02-24
-Status: Baseline plan implemented on `codex/directml-inferencing`
+Status: Implemented on `codex/directml-inferencing` (updated runtime path: GenAI C-FFI for DirectML)
+
+## Implementation Update (2026-02-27)
+
+The original plan was ORT DirectML-EP-centric. Final implementation moved DirectML generation to ONNX Runtime GenAI C API for runtime correctness and stability, while retaining CPU ORT path and fallback/demotion orchestration.
+
+Current runtime split:
+
+- CPU: ORT session + Rust generator
+- DirectML: GenAI C-FFI runtime adapter (`onnxruntime-genai.dll`)
+
+Plan milestone status:
+
+1. Milestone 1 - Completed
+2. Milestone 2 - Completed
+3. Milestone 3 - Completed
+4. Milestone 4 - Completed
+5. Milestone 5 - Completed (with GenAI-aware selection behavior)
+6. Milestone 6 - Completed
+
+Authoritative current-state reference:
+- `docs/new_onnx_plan/CURRENT_STATE.md`
+- `docs/DML_plans/DIRECTML_GENAI_FULL_RUNDOWN.md`
 
 ## Summary
 Integrate DirectML acceleration on Windows (10 20H1+ / 11) with automatic CPU fallback, benchmark-gated selection, persistent backend decisions, and auto-demotion after 3 failures. Upgrade ORT stack to `ort = 2.0.0-rc.11`, bundle required runtime binaries, and keep UI unchanged (log-only visibility for now).

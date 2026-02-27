@@ -4,6 +4,42 @@ Date: 2026-02-26
 Reviewer: Codex (GPT-5)
 PR scope audited: `origin/main...0c998fb` (commits `5f8cf76` -> `0c998fb`)
 
+---
+
+## Status Update (2026-02-27)
+
+This audit captured the pre-GenAI DirectML implementation risks. The branch has since moved to a GenAI C-FFI DirectML runtime path and resolved most critical blockers.
+
+Resolution snapshot against top findings:
+
+1. Benchmark timeout sticky-CPU behavior
+   - Status: Mitigated in current path
+   - Notes: benchmark path is disabled when GenAI DML gate is enabled; DML selection no longer depends on the old ORT-only benchmark flow in that mode.
+
+2. DirectML prefill `GroupQueryAttention` runtime failure
+   - Status: Resolved by architecture change
+   - Notes: DirectML generation now uses ONNX Runtime GenAI C API (`onnxruntime-genai.dll`) instead of the previous ORT manual generation path.
+
+3. No adapter/device selection
+   - Status: Resolved
+   - Notes: `SMOLPC_DML_DEVICE_ID` override supported and device id is carried through runtime selection metadata.
+
+4. Sticky CPU after transient DML init failure
+   - Status: Partially mitigated
+   - Notes: forced mode reports hard failure; non-forced mode falls back to CPU with tracked failure counters and demotion logic.
+
+5. Backend-store atomicity risk
+   - Status: Resolved
+   - Notes: backend store uses atomic replace semantics (platform-specific implementation).
+
+6. Hardware detector string gating risk
+   - Status: Reduced
+   - Notes: DML candidate path additionally requires explicit gate + DML artifact availability; remaining detector coupling is no longer the sole deciding factor.
+
+Current authoritative state and sequence flow are documented in:
+- `docs/new_onnx_plan/CURRENT_STATE.md`
+- `docs/DML_plans/DIRECTML_GENAI_FULL_RUNDOWN.md`
+
 ## Scope and Method
 
 ### Code scope reviewed
