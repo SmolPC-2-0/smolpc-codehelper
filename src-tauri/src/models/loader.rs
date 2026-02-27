@@ -129,11 +129,6 @@ impl ModelLoader {
         (model_exists, tokenizer_exists)
     }
 
-    /// Validate model directory structure
-    pub fn validate_model(model_name: &str) -> Result<(), String> {
-        Self::validate_model_for_backend(model_name, ModelArtifactBackend::Cpu).map(|_| ())
-    }
-
     /// Validate model directory structure for a specific backend and return resolved model path.
     pub fn validate_model_for_backend(
         model_name: &str,

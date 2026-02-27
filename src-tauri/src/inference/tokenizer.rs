@@ -2,7 +2,6 @@
 ///
 /// Wraps Hugging Face tokenizers library to provide encoding/decoding
 /// for Qwen2.5-Coder models.
-
 use std::path::Path;
 use tokenizers::Tokenizer;
 
@@ -22,6 +21,7 @@ impl TokenizerWrapper {
     /// - 151643: `<|endoftext|>` — raw completion EOS
     /// - 151644: `<|im_start|>` — ChatML turn start
     /// - 151645: `<|im_end|>` — ChatML turn end
+    #[cfg(test)]
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         // Default stop tokens for Qwen2.5-Coder
         Self::from_file_with_stop_tokens(path, &[151643, 151645])
@@ -32,8 +32,8 @@ impl TokenizerWrapper {
         path: P,
         stop_token_ids: &[u32],
     ) -> Result<Self, String> {
-        let tokenizer = Tokenizer::from_file(path)
-            .map_err(|e| format!("Failed to load tokenizer: {e}"))?;
+        let tokenizer =
+            Tokenizer::from_file(path).map_err(|e| format!("Failed to load tokenizer: {e}"))?;
         let stop_token_ids = stop_token_ids.to_vec();
 
         log::info!("Tokenizer loaded successfully");
@@ -82,6 +82,7 @@ impl TokenizerWrapper {
     }
 
     /// Get vocabulary size
+    #[cfg(test)]
     pub fn vocab_size(&self) -> usize {
         self.tokenizer.get_vocab_size(false)
     }
@@ -99,8 +100,8 @@ mod tests {
 
         let tokenizer_path = "models/qwen2.5-coder-1.5b/tokenizer.json";
 
-        let tokenizer = TokenizerWrapper::from_file(tokenizer_path)
-            .expect("Failed to load tokenizer");
+        let tokenizer =
+            TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
         // Test encoding
         let text = "def hello_world():";
@@ -121,14 +122,20 @@ mod tests {
     #[ignore]
     fn test_special_tokens() {
         let tokenizer_path = "models/qwen2.5-coder-1.5b/tokenizer.json";
-        let tokenizer = TokenizerWrapper::from_file(tokenizer_path)
-            .expect("Failed to load tokenizer");
+        let tokenizer =
+            TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
-        println!("Is 151643 a stop token: {}", tokenizer.is_stop_token(151643));
-        println!("Is 151645 a stop token: {}", tokenizer.is_stop_token(151645));
+        println!(
+            "Is 151643 a stop token: {}",
+            tokenizer.is_stop_token(151643)
+        );
+        println!(
+            "Is 151645 a stop token: {}",
+            tokenizer.is_stop_token(151645)
+        );
         assert!(tokenizer.is_stop_token(151643)); // <|endoftext|>
         assert!(tokenizer.is_stop_token(151645)); // <|im_end|>
-        assert!(!tokenizer.is_stop_token(0));      // regular token
+        assert!(!tokenizer.is_stop_token(0)); // regular token
 
         // Test with special tokens
         let text = "print('hello')";

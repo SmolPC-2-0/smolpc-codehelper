@@ -129,6 +129,7 @@ impl LayerCache {
     }
 
     /// Clear the cache (reset to empty)
+    #[cfg(test)]
     pub fn clear(&mut self) {
         self.current_length = 0;
         // Note: We don't zero the buffer for performance; it will be overwritten
@@ -142,12 +143,14 @@ impl LayerCache {
 
     /// Check if cache is empty
     #[inline]
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.current_length == 0
     }
 
     /// Check if cache is at capacity
     #[inline]
+    #[cfg(test)]
     pub fn is_full(&self) -> bool {
         self.current_length >= self.max_context
     }
@@ -233,11 +236,6 @@ impl KVCache {
             sink_size,
             logical_length: 0,
         }
-    }
-
-    /// Create a new KV cache with default sink size (4)
-    pub fn with_max_context(max_context: usize) -> Self {
-        Self::new(max_context, 4)
     }
 
     /// Append a single token's KV embeddings to all layers
@@ -358,7 +356,7 @@ impl KVCache {
     /// - During prefill (cache empty): [0, 1, 2, ..., num_new_tokens - 1]
     /// - During decode (cache has data): [logical_length] (single position)
     /// - With Attention Sinks (cache full): continues logical counting
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn get_position_ids(&self, num_new_tokens: usize) -> Vec<i64> {
         if self.logical_length == 0 {
             // Prefill: positions are 0..num_new_tokens
@@ -368,24 +366,6 @@ impl KVCache {
             (self.logical_length as i64..self.logical_length as i64 + num_new_tokens as i64)
                 .collect()
         }
-    }
-
-    /// Get attention mask for current cache state.
-    ///
-    /// NOTE: Intentionally unused in production inference. The generator builds
-    /// attention masks inline from `physical_length()`. Kept for testing and
-    /// debugging purposes.
-    ///
-    /// # Arguments
-    /// * `num_new_tokens` - Number of new tokens being processed
-    ///
-    /// # Returns
-    /// Attention mask with shape [1, past_length + num_new_tokens]
-    /// All 1s (attend to all positions)
-    #[allow(dead_code)]
-    pub fn get_attention_mask(&self, num_new_tokens: usize) -> Vec<i64> {
-        let total_length = self.physical_length() + num_new_tokens;
-        vec![1i64; total_length]
     }
 
     /// Get key cache for a specific layer as ONNX-compatible array
@@ -414,23 +394,27 @@ impl KVCache {
 
     /// Get the logical length (total tokens ever seen)
     #[inline]
+    #[cfg(test)]
     pub fn logical_length(&self) -> usize {
         self.logical_length
     }
 
     /// Check if the cache has any data
     #[inline]
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.physical_length() == 0
     }
 
     /// Check if the cache is at maximum capacity
     #[inline]
+    #[cfg(test)]
     pub fn is_full(&self) -> bool {
         self.physical_length() >= self.max_context
     }
 
     /// Clear the cache, resetting all state
+    #[cfg(test)]
     pub fn clear(&mut self) {
         for cache in &mut self.key_caches {
             cache.clear();
@@ -449,11 +433,13 @@ impl KVCache {
 
     /// Get the sink size
     #[inline]
+    #[cfg(test)]
     pub fn sink_size(&self) -> usize {
         self.sink_size
     }
 
     /// Estimate memory usage in bytes
+    #[cfg(test)]
     pub fn memory_usage_bytes(&self) -> usize {
         let per_layer = 2 * NUM_KV_HEADS * self.max_context * HEAD_DIM * std::mem::size_of::<f32>();
         NUM_LAYERS * per_layer
@@ -554,6 +540,7 @@ impl DmlKvCache {
     }
 
     /// Marks one newly generated token as valid after a decode step completes.
+    #[cfg(test)]
     pub fn complete_decode_step(&mut self) -> Result<(), String> {
         if self.valid_length >= self.max_sequence_length {
             return Err(format!(
@@ -607,15 +594,6 @@ impl DmlKvCache {
         &mut self.value_caches[layer]
     }
 
-    pub fn clear(&mut self) {
-        self.valid_length = 0;
-    }
-}
-
-/// Convenience function to create empty KV cache inputs for first inference pass
-pub fn create_empty_kv_inputs() -> Vec<Array4<f32>> {
-    let empty = Array4::<f32>::zeros((1, NUM_KV_HEADS, 0, HEAD_DIM));
-    vec![empty; NUM_LAYERS * 2] // K and V for each layer
 }
 
 #[cfg(test)]

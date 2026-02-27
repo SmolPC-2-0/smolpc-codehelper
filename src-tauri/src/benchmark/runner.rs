@@ -3,9 +3,14 @@
 //! Runs inference tests against Ollama and collects timing/resource metrics.
 //! Uses Ollama's native nanosecond-precision timing data when available.
 
-use super::metrics::{BenchmarkMetrics, BenchmarkResults, TimingSource, calculate_summary, get_timestamp};
-use super::process::{HardwareSnapshot, warmup_and_find_process};
-use super::sampling::{SamplingState, collect_sampling_results, spawn_resource_sampler, calculate_average, calculate_median};
+use super::metrics::{
+    calculate_summary, get_timestamp, BenchmarkMetrics, BenchmarkResults, TimingSource,
+};
+use super::process::{warmup_and_find_process, HardwareSnapshot};
+use super::sampling::{
+    calculate_average, calculate_median, collect_sampling_results, spawn_resource_sampler,
+    SamplingState,
+};
 use super::test_suite::{get_test_suite, get_total_test_count, PromptCategory, SHORT_PROMPTS};
 use crate::commands::ollama::{OllamaConfig, OllamaMessage, OllamaRequest, OllamaResponse};
 use serde::{Deserialize, Serialize};
@@ -73,7 +78,8 @@ fn calculate_timing_metrics(response: &OllamaResponse, client_elapsed_ms: f64) -
         response.total_duration,
     ) {
         let eval_duration_ms = (eval_duration_ns as f64) / 1_000_000.0;
-        let prompt_eval_ms = response.prompt_eval_duration
+        let prompt_eval_ms = response
+            .prompt_eval_duration
             .map_or(0.0, |ns| (ns as f64) / 1_000_000.0);
         let total_duration_ms = (total_duration_ns as f64) / 1_000_000.0;
 
@@ -115,7 +121,11 @@ fn calculate_timing_metrics(response: &OllamaResponse, client_elapsed_ms: f64) -
         first_token_latency_ms: 0.0,
         total_response_time_ms: client_elapsed_ms,
         tokens_per_second,
-        avg_token_latency_ms: if estimated_tokens > 0 { client_elapsed_ms / estimated_tokens as f64 } else { 0.0 },
+        avg_token_latency_ms: if estimated_tokens > 0 {
+            client_elapsed_ms / estimated_tokens as f64
+        } else {
+            0.0
+        },
         response_tokens: estimated_tokens,
         timing_source: TimingSource::Client,
     }
@@ -144,11 +154,20 @@ fn build_request_messages(prompt: &str, context: Option<Vec<OllamaMessage>>) -> 
 }
 
 fn build_followup_context(previous_response: &str) -> Vec<OllamaMessage> {
-    let base_prompt = SHORT_PROMPTS.first().copied().unwrap_or("What is a variable in Python?");
+    let base_prompt = SHORT_PROMPTS
+        .first()
+        .copied()
+        .unwrap_or("What is a variable in Python?");
 
     vec![
-        OllamaMessage { role: "user".to_string(), content: base_prompt.to_string() },
-        OllamaMessage { role: "assistant".to_string(), content: previous_response.to_string() },
+        OllamaMessage {
+            role: "user".to_string(),
+            content: base_prompt.to_string(),
+        },
+        OllamaMessage {
+            role: "assistant".to_string(),
+            content: previous_response.to_string(),
+        },
     ]
 }
 
@@ -209,7 +228,10 @@ async fn run_single_test(
         return Err(format!(
             "Ollama returned error status {}: {}",
             response.status(),
-            response.status().canonical_reason().unwrap_or("Unknown error")
+            response
+                .status()
+                .canonical_reason()
+                .unwrap_or("Unknown error")
         ));
     }
 
@@ -221,11 +243,13 @@ async fn run_single_test(
     let client_elapsed_ms = request_start.elapsed().as_secs_f64() * 1000.0;
 
     // Collect sampling results
-    let sampling_results = collect_sampling_results(sampling_state, sampling_done, ollama_pid).await?;
+    let sampling_results =
+        collect_sampling_results(sampling_state, sampling_done, ollama_pid).await?;
 
     let timing = calculate_timing_metrics(&ollama_response, client_elapsed_ms);
 
-    let response_content = ollama_response.message
+    let response_content = ollama_response
+        .message
         .as_ref()
         .map(|m| m.content.clone())
         .unwrap_or_default();
@@ -243,7 +267,6 @@ async fn run_single_test(
     let avg_cpu_system = calculate_average(&sampling_results.cpu_system_samples);
     let median_memory_during = calculate_median(&sampling_results.memory_samples);
 
-    #[allow(deprecated)]
     Ok((
         BenchmarkMetrics {
             first_token_latency_ms: timing.first_token_latency_ms,
@@ -329,7 +352,8 @@ pub async fn run_benchmark_suite(
                 config,
                 ollama_pid,
                 &hardware,
-            ).await?;
+            )
+            .await?;
 
             // Store first short test response for follow-up context
             if test.category == PromptCategory::Short && test.id == CONTEXT_SOURCE_TEST_ID {

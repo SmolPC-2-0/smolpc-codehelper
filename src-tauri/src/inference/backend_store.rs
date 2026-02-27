@@ -1,5 +1,5 @@
 use super::backend::{
-    BackendDecision, BackendDecisionKey, DecisionReason, FailureCounters, InferenceBackend,
+    BackendDecision, BackendDecisionKey, FailureCounters,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -22,23 +22,6 @@ pub struct BackendDecisionRecord {
     pub decision: BackendDecision,
     pub failure_counters: FailureCounters,
     pub updated_at: String,
-}
-
-impl BackendDecisionRecord {
-    pub fn new(
-        key: BackendDecisionKey,
-        backend: InferenceBackend,
-        reason: DecisionReason,
-        benchmark: Option<super::backend::BackendBenchmarkComparison>,
-        failure_counters: FailureCounters,
-    ) -> Self {
-        Self {
-            key,
-            decision: BackendDecision::new(backend, reason, benchmark),
-            failure_counters,
-            updated_at: Utc::now().to_rfc3339(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -88,10 +71,6 @@ impl BackendStore {
         };
 
         Ok(Self { path, file })
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
     }
 
     pub fn get(&self, key: &BackendDecisionKey) -> Option<&BackendDecisionRecord> {
@@ -194,19 +173,19 @@ pub fn backend_store_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inference::backend::{DecisionReason, InferenceBackend};
     use tempfile::tempdir;
 
     fn decision_record(
         key: BackendDecisionKey,
         backend: InferenceBackend,
     ) -> BackendDecisionRecord {
-        BackendDecisionRecord::new(
+        BackendDecisionRecord {
             key,
-            backend,
-            DecisionReason::DefaultCpu,
-            None,
-            FailureCounters::default(),
-        )
+            decision: BackendDecision::new(backend, DecisionReason::DefaultCpu, None),
+            failure_counters: FailureCounters::default(),
+            updated_at: Utc::now().to_rfc3339(),
+        }
     }
 
     #[test]

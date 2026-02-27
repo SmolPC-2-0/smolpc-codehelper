@@ -63,26 +63,6 @@ impl ModelRegistry {
             .find(|m| m.id == model_id)
     }
 
-    /// Recommend model based on available RAM
-    #[allow(dead_code)]
-    pub fn recommend_model(available_ram_gb: f32) -> Option<ModelDefinition> {
-        Self::available_models()
-            .into_iter()
-            .filter(|m| m.min_ram_gb <= available_ram_gb)
-            .max_by(|a, b| {
-                a.min_ram_gb
-                    .partial_cmp(&b.min_ram_gb)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-    }
-
-    /// Runtime inference spec for a model.
-    ///
-    /// Only models with implemented runtime specs are considered supported for ONNX inference.
-    pub fn runtime_spec(model_id: &str) -> Option<ModelRuntimeSpec> {
-        Self::runtime_spec_for_backend(model_id, RuntimeBackendTarget::Cpu)
-    }
-
     /// Runtime inference spec for a model/backend pair.
     pub fn runtime_spec_for_backend(
         model_id: &str,
@@ -92,8 +72,10 @@ impl ModelRegistry {
             RuntimeBackendTarget::Cpu => KvInputSchema::AttentionMask {
                 attention_mask: "attention_mask",
             },
-            RuntimeBackendTarget::DirectML => KvInputSchema::AttentionMask {
-                attention_mask: "attention_mask",
+            RuntimeBackendTarget::DirectML => KvInputSchema::SeqlensK {
+                seqlens_k: "seqlens_k",
+                total_sequence_length: "total_sequence_length",
+                max_sequence_length: 2048,
             },
         };
 
@@ -144,9 +126,17 @@ mod tests {
 
     #[test]
     fn runtime_spec_only_defined_for_1_5b() {
-        assert!(ModelRegistry::runtime_spec("qwen2.5-coder-1.5b").is_some());
-        assert!(ModelRegistry::runtime_spec("qwen2.5-coder-7b").is_none());
-        assert!(ModelRegistry::runtime_spec("unknown").is_none());
+        assert!(
+            ModelRegistry::runtime_spec_for_backend("qwen2.5-coder-1.5b", RuntimeBackendTarget::Cpu)
+                .is_some()
+        );
+        assert!(
+            ModelRegistry::runtime_spec_for_backend("qwen2.5-coder-7b", RuntimeBackendTarget::Cpu)
+                .is_none()
+        );
+        assert!(
+            ModelRegistry::runtime_spec_for_backend("unknown", RuntimeBackendTarget::Cpu).is_none()
+        );
     }
 
     #[test]

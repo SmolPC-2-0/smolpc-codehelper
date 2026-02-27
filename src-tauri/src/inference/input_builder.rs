@@ -119,6 +119,7 @@ impl InputBuilder {
     }
 
     /// Create an InputBuilder with explicit input/cache tensor names and model input order.
+    #[cfg(test)]
     pub fn with_names_and_input_order(
         input_ids_key: impl Into<String>,
         attention_mask_key: impl Into<String>,
@@ -476,14 +477,8 @@ impl InputBuilder {
         Ok(self.ordered_inputs.as_slice())
     }
 
-    /// Get a reference to the inputs (for inspection/debugging)
-    #[allow(dead_code)]
-    pub fn inputs(&self) -> &[Option<SessionInputValue<'static>>] {
-        self.input_slots.as_slice()
-    }
-
     /// Get the number of currently populated inputs
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.input_slots
             .iter()
@@ -492,7 +487,7 @@ impl InputBuilder {
     }
 
     /// Check if no inputs are set
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

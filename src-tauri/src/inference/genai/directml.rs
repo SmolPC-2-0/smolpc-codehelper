@@ -20,6 +20,7 @@ type OgaTensor = c_void;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // Values are written by the GenAI C API through FFI, not constructed in Rust.
 enum OgaElementType {
     Undefined = 0,
     Float32 = 1,

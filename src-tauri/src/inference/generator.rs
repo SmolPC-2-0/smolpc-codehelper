@@ -20,7 +20,7 @@ use super::input_builder::InputBuilder;
 use super::kv_cache::{DmlKvCache, KVCache, HEAD_DIM, NUM_KV_HEADS, NUM_LAYERS};
 use super::session::InferenceSession;
 use super::tokenizer::TokenizerWrapper;
-use super::types::{GenerationConfig, GenerationMetrics, GenerationResult};
+use super::types::{GenerationConfig, GenerationMetrics};
 use crate::models::{KvInputSchema, ModelRuntimeSpec, RuntimeBackendTarget};
 use half::f16;
 use ndarray::{Array0, Array1, Array2, ArrayView1};
@@ -291,29 +291,6 @@ impl Generator {
             config: GenerationConfig::default(),
             max_context,
             sink_size,
-        })
-    }
-
-    /// Generate text from prompt (non-streaming, for backward compatibility)
-    ///
-    /// # Arguments
-    /// * `prompt` - Input text prompt
-    ///
-    /// # Returns
-    /// Generated text and performance metrics
-    pub async fn generate(&self, prompt: &str) -> Result<GenerationResult, String> {
-        let mut generated_text = String::new();
-        let cancelled = Arc::new(AtomicBool::new(false));
-
-        let metrics = self
-            .generate_stream(prompt, None, cancelled, |token| {
-                generated_text.push_str(&token);
-            })
-            .await?;
-
-        Ok(GenerationResult {
-            text: generated_text,
-            metrics,
         })
     }
 
@@ -1495,30 +1472,6 @@ impl Generator {
         Ok(max_idx as u32)
     }
 
-    /// Update generation configuration
-    #[allow(dead_code)]
-    pub fn set_config(&mut self, config: GenerationConfig) {
-        self.config = config;
-    }
-
-    /// Get current configuration
-    #[allow(dead_code)]
-    pub fn config(&self) -> &GenerationConfig {
-        &self.config
-    }
-
-    /// Set maximum context window
-    #[allow(dead_code)]
-    pub fn set_max_context(&mut self, max_context: usize) {
-        self.max_context = max_context;
-    }
-
-    /// Set number of sink tokens
-    #[allow(dead_code)]
-    pub fn set_sink_size(&mut self, sink_size: usize) {
-        self.sink_size = sink_size;
-    }
-
     /// Get reference to tokenizer (for benchmarking/testing)
     #[cfg(test)]
     pub fn tokenizer(&self) -> &TokenizerWrapper {
@@ -1534,7 +1487,10 @@ mod tests {
     use ort::tensor::Shape;
 
     fn runtime_spec() -> crate::models::ModelRuntimeSpec {
-        ModelRegistry::runtime_spec("qwen2.5-coder-1.5b")
+        ModelRegistry::runtime_spec_for_backend(
+            "qwen2.5-coder-1.5b",
+            crate::models::RuntimeBackendTarget::Cpu,
+        )
             .expect("Missing runtime spec for qwen2.5-coder-1.5b")
     }
 
@@ -1595,32 +1551,31 @@ mod tests {
             TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
         // Create generator with reduced max_length for testing
-        let mut generator =
+        let generator =
             Generator::new(session, tokenizer, runtime_spec()).expect("Failed to create generator");
-        generator.set_config(GenerationConfig {
-            max_length: 10, // Just generate a few tokens for testing
-            ..Default::default()
-        });
 
         // Generate
         let prompt = "def hello";
         println!("Prompt: {}", prompt);
 
-        let result = generator.generate(prompt).await;
-        match result {
-            Ok(res) => {
-                println!("Generated: {}", res.text);
-                println!("Metrics: {:?}", res.metrics);
-                assert!(
-                    res.metrics.total_tokens > 0
-                        || res.text.is_empty() == false
-                        || res.text.is_empty()
-                );
-            }
-            Err(e) => {
-                panic!("Generation failed: {}", e);
-            }
-        }
+        let mut generated_text = String::new();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let metrics = generator
+            .generate_stream(
+                prompt,
+                Some(GenerationConfig {
+                    max_length: 10,
+                    ..Default::default()
+                }),
+                cancelled,
+                |token| generated_text.push_str(&token),
+            )
+            .await
+            .expect("Generation failed");
+
+        println!("Generated: {}", generated_text);
+        println!("Metrics: {:?}", metrics);
+        assert!(metrics.total_tokens > 0 || !generated_text.is_empty());
     }
 
     #[tokio::test]

@@ -36,6 +36,7 @@ impl InferenceSession {
     /// Phase 2: Add GPU EP selection (CUDA, DirectML)
     /// Phase 3: Add Intel OpenVINO EP (Core Ultra NPU)
     /// Phase 4: Add Qualcomm QNN EP (Snapdragon X Elite NPU)
+    #[cfg(test)]
     pub fn new<P: AsRef<Path>>(model_path: P) -> Result<Self, String> {
         Self::new_with_backend(model_path, InferenceBackend::Cpu)
     }
@@ -139,11 +140,6 @@ impl InferenceSession {
         }
     }
 
-    /// Get model name
-    #[allow(dead_code)]
-    pub fn name(&self) -> &str {
-        &self.model_name
-    }
 }
 
 #[cfg(test)]
