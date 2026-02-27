@@ -1,0 +1,28 @@
+[package]
+name = "smolpc-engine-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+hardware-query = { workspace = true }
+ort = { workspace = true }
+tokenizers = { workspace = true }
+ndarray = { workspace = true }
+half = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+libloading = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.13"
