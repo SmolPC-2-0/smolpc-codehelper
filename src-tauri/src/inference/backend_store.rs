@@ -1,6 +1,4 @@
-use super::backend::{
-    BackendDecision, BackendDecisionKey, FailureCounters,
-};
+use super::backend::{BackendDecision, BackendDecisionKey, FailureCounters};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -121,7 +119,13 @@ impl BackendStore {
             .map_err(|e| format!("Failed to write temporary backend decision store file: {e}"))?;
 
         replace_file_atomic(&tmp_path, &self.path).map_err(|e| {
-            let _ = fs::remove_file(&tmp_path);
+            if let Err(cleanup_err) = fs::remove_file(&tmp_path) {
+                log::warn!(
+                    "Failed to clean up temporary backend decision store file {}: {}",
+                    tmp_path.display(),
+                    cleanup_err
+                );
+            }
             format!("Failed to atomically replace backend decision store file: {e}")
         })?;
 

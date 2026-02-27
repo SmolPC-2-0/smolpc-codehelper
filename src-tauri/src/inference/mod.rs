@@ -1,5 +1,6 @@
 pub mod backend;
 pub mod backend_store;
+pub mod genai;
 /// ONNX Runtime inference engine module
 ///
 /// This module provides the core inference functionality for running LLMs via ONNX Runtime.
@@ -13,7 +14,6 @@ pub mod backend_store;
 /// - `sampler`: Token sampling strategies (greedy, temperature, top-k, top-p)
 /// - `types`: Shared type definitions
 pub mod generator;
-pub mod genai;
 pub mod input_builder;
 pub mod kv_cache;
 pub mod runtime_adapter;
@@ -26,9 +26,9 @@ pub mod benchmark;
 
 // Re-export commonly used types
 pub use backend::InferenceBackend;
-pub use generator::Generator;
 #[cfg(target_os = "windows")]
 pub use genai::GenAiDirectMlGenerator;
+pub use generator::Generator;
 pub use runtime_adapter::InferenceRuntimeAdapter;
 pub use session::InferenceSession;
 pub use tokenizer::TokenizerWrapper;
@@ -155,6 +155,8 @@ fn preload_directml_dll(resource_dir: Option<&Path>, ort_dylib_path: &Path) {
         // Keep the library loaded for process lifetime; ORT/DirectML expects it to stay resident.
         match unsafe { libloading::Library::new(&candidate) } {
             Ok(lib) => {
+                // SAFETY: DirectML/ORT expect this module to remain loaded for the process
+                // lifetime. We intentionally leak this handle so the DLL stays resident.
                 std::mem::forget(lib);
                 log::info!("Preloaded DirectML.dll from {}", candidate.display());
                 return;

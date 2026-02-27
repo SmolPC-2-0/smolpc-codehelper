@@ -12,9 +12,9 @@ use crate::inference::backend::{
 use crate::inference::backend_store::{backend_store_path, BackendDecisionRecord, BackendStore};
 use crate::inference::session::SessionBackendOptions;
 use crate::inference::types::{GenerationConfig, GenerationMetrics, GenerationResult};
-use crate::inference::{Generator, InferenceRuntimeAdapter, InferenceSession, TokenizerWrapper};
 #[cfg(target_os = "windows")]
 use crate::inference::GenAiDirectMlGenerator;
+use crate::inference::{Generator, InferenceRuntimeAdapter, InferenceSession, TokenizerWrapper};
 use crate::models::{
     ModelArtifactBackend, ModelLoader, ModelRegistry, ModelRuntimeSpec, RuntimeBackendTarget,
 };
@@ -37,7 +37,6 @@ const BENCHMARK_MAX_NEW_TOKENS: usize = 8;
 const ENABLE_SELECTION_BENCHMARK_ENV: &str = "SMOLPC_ENABLE_BACKEND_BENCHMARK";
 const ENABLE_DML_GENAI_ENV: &str = "SMOLPC_ENABLE_DML_GENAI";
 const DIRECTML_PREFLIGHT_PROMPT: &str = "fn add(a: i32, b: i32) -> i32 {";
-const DIRECTML_PREFLIGHT_MAX_NEW_TOKENS: usize = 1;
 
 fn generation_cancelled_error() -> String {
     format!("{ERR_CODE_GENERATION_CANCELLED}: {ERR_GENERATION_CANCELLED}")
@@ -215,7 +214,7 @@ fn pick_adapter_identity(
     };
 
     if let Some(hw) = hardware {
-        if let Some(dml_gpu) = hw.gpus.iter().find(|gpu| {
+        if let Some((gpu_idx, dml_gpu)) = hw.gpus.iter().enumerate().find(|(_, gpu)| {
             gpu.backend.eq_ignore_ascii_case("DirectX 12")
                 || gpu.backend.eq_ignore_ascii_case("DirectML")
         }) {
@@ -227,19 +226,19 @@ fn pick_adapter_identity(
                     .pci_device_id
                     .clone()
                     .unwrap_or_else(|| "unknown-pci".to_string()),
-                dml_gpu.adapter_index
+                gpu_idx
             );
             selection.driver_version = dml_gpu
                 .driver_version
                 .clone()
                 .unwrap_or_else(|| "unknown-driver".to_string());
             if selection.directml_device_id.is_none() {
-                selection.directml_device_id = adapter_index_to_device_id(dml_gpu.adapter_index);
+                selection.directml_device_id = adapter_index_to_device_id(gpu_idx);
             }
             return selection;
         }
 
-        if let Some(first_gpu) = hw.gpus.first() {
+        if let Some((gpu_idx, first_gpu)) = hw.gpus.iter().enumerate().next() {
             selection.adapter_identity = format!(
                 "{:?}:{}:{}:idx{}",
                 first_gpu.vendor,
@@ -248,14 +247,14 @@ fn pick_adapter_identity(
                     .pci_device_id
                     .clone()
                     .unwrap_or_else(|| "unknown-pci".to_string()),
-                first_gpu.adapter_index
+                gpu_idx
             );
             selection.driver_version = first_gpu
                 .driver_version
                 .clone()
                 .unwrap_or_else(|| "unknown-driver".to_string());
             if selection.directml_device_id.is_none() {
-                selection.directml_device_id = adapter_index_to_device_id(first_gpu.adapter_index);
+                selection.directml_device_id = adapter_index_to_device_id(gpu_idx);
             }
             return selection;
         }
@@ -351,7 +350,6 @@ async fn run_selection_benchmark(
     dml_model_path: &Path,
     tokenizer_path: &Path,
     cpu_runtime_spec: ModelRuntimeSpec,
-    dml_runtime_spec: ModelRuntimeSpec,
     directml_device_id: Option<i32>,
 ) -> Result<BackendBenchmarkComparison, String> {
     let started = std::time::Instant::now();
@@ -363,14 +361,7 @@ async fn run_selection_benchmark(
         directml_device_id,
     )
     .await?;
-    let directml = run_backend_benchmark(
-        dml_model_path,
-        tokenizer_path,
-        dml_runtime_spec,
-        InferenceBackend::DirectML,
-        directml_device_id,
-    )
-    .await?;
+    let directml = run_directml_genai_benchmark(dml_model_path, directml_device_id).await?;
 
     Ok(BackendBenchmarkComparison {
         cpu,
@@ -378,6 +369,51 @@ async fn run_selection_benchmark(
         elapsed_ms: started.elapsed().as_millis() as u64,
         budget_ms: BENCHMARK_SELECTION_BUDGET_MS,
     })
+}
+
+#[cfg(target_os = "windows")]
+async fn run_directml_genai_benchmark(
+    dml_model_path: &Path,
+    directml_device_id: Option<i32>,
+) -> Result<BackendBenchmark, String> {
+    let runtime_adapter = build_directml_runtime_adapter(dml_model_path, directml_device_id)?;
+    let config = GenerationConfig {
+        max_length: BENCHMARK_MAX_NEW_TOKENS,
+        temperature: 0.0,
+        top_k: Some(1),
+        top_p: None,
+        ..Default::default()
+    };
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let metrics = runtime_adapter
+        .generate_stream(BENCHMARK_PROMPT, Some(config), cancelled, |_token| {})
+        .await?;
+    let ttft_ms = metrics
+        .time_to_first_token_ms
+        .unwrap_or(metrics.total_time_ms);
+    let decode_tokens_per_second = if metrics.total_tokens <= 1 || metrics.total_time_ms <= ttft_ms
+    {
+        0.0
+    } else {
+        (metrics.total_tokens - 1) as f64 / ((metrics.total_time_ms - ttft_ms) as f64 / 1_000.0)
+    };
+
+    Ok(BackendBenchmark {
+        backend: InferenceBackend::DirectML,
+        sample_tokens: metrics.total_tokens,
+        total_time_ms: metrics.total_time_ms,
+        time_to_first_token_ms: ttft_ms,
+        overall_tokens_per_second: metrics.tokens_per_second,
+        decode_tokens_per_second,
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn run_directml_genai_benchmark(
+    _dml_model_path: &Path,
+    _directml_device_id: Option<i32>,
+) -> Result<BackendBenchmark, String> {
+    Err("DirectML benchmark is only supported on Windows".to_string())
 }
 
 fn select_backend(
@@ -558,25 +594,19 @@ async fn record_directml_runtime_failure(state: &InferenceState, error_message: 
     }
 }
 
-async fn run_directml_preflight_probe(runtime_adapter: &InferenceRuntimeAdapter) -> Result<(), String> {
-    let config = GenerationConfig {
-        max_length: DIRECTML_PREFLIGHT_MAX_NEW_TOKENS,
-        temperature: 0.0,
-        top_k: Some(1),
-        top_p: None,
-        ..Default::default()
-    };
-    let cancelled = Arc::new(AtomicBool::new(false));
-    runtime_adapter
-        .generate_stream(
-            DIRECTML_PREFLIGHT_PROMPT,
-            Some(config),
-            cancelled,
-            |_token| {},
-        )
-        .await
-        .map(|_| ())
-        .map_err(|e| format!("DirectML preflight probe failed: {e}"))
+#[cfg(target_os = "windows")]
+fn run_directml_preflight_probe(runtime_adapter: &InferenceRuntimeAdapter) -> Result<(), String> {
+    match runtime_adapter {
+        InferenceRuntimeAdapter::GenAiDirectMl { generator } => generator
+            .run_preflight(DIRECTML_PREFLIGHT_PROMPT)
+            .map_err(|e| format!("DirectML preflight probe failed: {e}")),
+        _ => Err("DirectML preflight probe requires a GenAI DirectML runtime adapter".to_string()),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_directml_preflight_probe(_runtime_adapter: &InferenceRuntimeAdapter) -> Result<(), String> {
+    Err("DirectML GenAI backend is only supported on Windows".to_string())
 }
 
 fn build_cpu_runtime_adapter(
@@ -604,9 +634,6 @@ fn build_directml_runtime_adapter(
         )
     })?;
     let generator = GenAiDirectMlGenerator::new(model_dir, directml_device_id)?;
-    generator
-        .run_preflight(DIRECTML_PREFLIGHT_PROMPT)
-        .map_err(|e| format!("DirectML preflight probe failed: {e}"))?;
     Ok(InferenceRuntimeAdapter::genai_directml(generator))
 }
 
@@ -650,20 +677,9 @@ pub async fn load_model(
                 )
             },
         )?;
-    let dml_runtime_spec =
-        ModelRegistry::runtime_spec_for_backend(&model_id, RuntimeBackendTarget::DirectML)
-            .ok_or_else(|| {
-                format!(
-                    "DirectML runtime spec not implemented for model ID: {}",
-                    model_id
-                )
-            })?;
     cpu_runtime_spec
         .validate()
         .map_err(|e| format!("Invalid CPU runtime spec for '{}': {}", model_id, e))?;
-    dml_runtime_spec
-        .validate()
-        .map_err(|e| format!("Invalid DirectML runtime spec for '{}': {}", model_id, e))?;
 
     log::info!("Model definition: {} ({})", model_def.name, model_def.size);
 
@@ -716,6 +732,22 @@ pub async fn load_model(
     let directml_candidate_available = dml_genai_gate_enabled
         && adapter_selection.directml_candidate_available
         && dml_model_path.is_some();
+
+    #[cfg(target_os = "windows")]
+    if directml_candidate_available {
+        let dml_runtime_spec =
+            ModelRegistry::runtime_spec_for_backend(&model_id, RuntimeBackendTarget::DirectML)
+                .ok_or_else(|| {
+                    format!(
+                        "DirectML runtime spec not implemented for model ID: {}",
+                        model_id
+                    )
+                })?;
+        dml_runtime_spec
+            .validate()
+            .map_err(|e| format!("Invalid DirectML runtime spec for '{}': {}", model_id, e))?;
+    }
+
     let directml_device_id = adapter_selection.directml_device_id;
     let decision_key = make_decision_key(&model_id, &app_handle, &adapter_selection);
     let store_path = backend_store_path(&app_handle)?;
@@ -737,11 +769,9 @@ pub async fn load_model(
         .map(|record| record.failure_counters.clone())
         .unwrap_or_default();
 
-    let benchmark_enabled = benchmark_selection_enabled() && !dml_genai_gate_enabled;
-    if !benchmark_enabled && benchmark_selection_enabled() && dml_genai_gate_enabled {
-        log::info!(
-            "Backend benchmark disabled while GenAI DirectML path is active (current benchmark harness is ORT-only)."
-        );
+    let benchmark_enabled = benchmark_selection_enabled();
+    if benchmark_enabled && dml_genai_gate_enabled {
+        log::info!("Backend selection benchmark enabled (CPU ORT vs GenAI DirectML).");
     } else if !benchmark_enabled {
         log::info!(
             "Backend selection benchmark disabled (set {}=1 to enable).",
@@ -749,7 +779,7 @@ pub async fn load_model(
         );
     }
 
-    let (benchmark_result, benchmark_timed_out) = if benchmark_enabled
+    let (benchmark_result, benchmark_timed_out, benchmark_failed) = if benchmark_enabled
         && force_override.is_none()
         && persisted_record.is_none()
         && directml_candidate_available
@@ -765,7 +795,6 @@ pub async fn load_model(
                 dml_model_path,
                 &tokenizer_path,
                 cpu_runtime_spec,
-                dml_runtime_spec,
                 directml_device_id,
             ),
         )
@@ -782,22 +811,22 @@ pub async fn load_model(
                     comparison.directml_ttft_ratio(),
                     comparison.elapsed_ms
                 );
-                (Some(comparison), false)
+                (Some(comparison), false, false)
             }
             Ok(Err(e)) => {
                 log::warn!("Backend benchmark failed; defaulting to CPU: {e}");
-                (None, false)
+                (None, false, true)
             }
             Err(_) => {
                 log::warn!(
                     "Backend benchmark exceeded {}ms budget; defaulting to CPU",
                     BENCHMARK_SELECTION_BUDGET_MS
                 );
-                (None, true)
+                (None, true, false)
             }
         }
     } else {
-        (None, false)
+        (None, false, false)
     };
 
     let (preferred_backend, base_reason) = if benchmark_timed_out {
@@ -805,6 +834,8 @@ pub async fn load_model(
             InferenceBackend::Cpu,
             DecisionReason::BenchmarkBudgetExceeded,
         )
+    } else if benchmark_failed {
+        (InferenceBackend::Cpu, DecisionReason::DefaultCpu)
     } else {
         select_backend(
             force_override,
@@ -826,14 +857,14 @@ pub async fn load_model(
         base_reason
     );
 
-    let should_persist_decision =
-        !(benchmark_timed_out && force_override.is_none() && persisted_record.is_none());
     let forced_directml = force_override == Some(InferenceBackend::DirectML);
     let initial_decision =
         BackendDecision::new(preferred_backend, base_reason, benchmark_result.clone());
     let mut active_backend = preferred_backend;
     let mut active_model_path = if preferred_backend == InferenceBackend::DirectML {
-        dml_model_path.clone().unwrap_or_else(|| cpu_model_path.clone())
+        dml_model_path
+            .clone()
+            .unwrap_or_else(|| cpu_model_path.clone())
     } else {
         cpu_model_path.clone()
     };
@@ -852,9 +883,6 @@ pub async fn load_model(
             Ok(adapter) => {
                 runtime_engine = "genai_dml".to_string();
                 active_model_path = dml_path.to_path_buf();
-                directml_probe_passed = Some(true);
-                directml_probe_at = Some(Utc::now().to_rfc3339());
-                failure_counters.record_directml_success();
                 adapter
             }
             Err(dml_error) => {
@@ -887,7 +915,7 @@ pub async fn load_model(
     };
 
     if active_backend == InferenceBackend::DirectML {
-        if let Err(preflight_error) = run_directml_preflight_probe(&runtime_adapter).await {
+        if let Err(preflight_error) = run_directml_preflight_probe(&runtime_adapter) {
             directml_probe_passed = Some(false);
             directml_probe_error = Some(preflight_error.clone());
             directml_probe_at = Some(Utc::now().to_rfc3339());
@@ -937,20 +965,13 @@ pub async fn load_model(
 
     let final_decision = BackendDecision::new(active_backend, final_reason, benchmark_result);
 
-    if should_persist_decision {
-        store.upsert(BackendDecisionRecord {
-            key: decision_key.clone(),
-            decision: final_decision.clone(),
-            failure_counters: failure_counters.clone(),
-            updated_at: Utc::now().to_rfc3339(),
-        });
-        store.persist()?;
-    } else {
-        log::info!(
-            "Skipping backend decision persistence for retryable benchmark timeout: model={}",
-            model_id
-        );
-    }
+    store.upsert(BackendDecisionRecord {
+        key: decision_key.clone(),
+        decision: final_decision.clone(),
+        failure_counters: failure_counters.clone(),
+        updated_at: Utc::now().to_rfc3339(),
+    });
+    store.persist()?;
 
     if let Some(info) = &session_info {
         log::info!("Session loaded - Inputs: {:?}", info.inputs);
@@ -1233,6 +1254,9 @@ pub async fn is_generating(state: State<'_, InferenceState>) -> Result<bool, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hardware::types::{
+        CpuInfo, GpuInfo, GpuVendor, HardwareInfo, MemoryInfo, StorageInfo,
+    };
     use crate::inference::backend::{BackendBenchmark, FailureCounters};
 
     fn benchmark(backend: InferenceBackend, decode_tps: f64, ttft_ms: u64) -> BackendBenchmark {
@@ -1243,6 +1267,36 @@ mod tests {
             time_to_first_token_ms: ttft_ms,
             overall_tokens_per_second: decode_tps,
             decode_tokens_per_second: decode_tps,
+        }
+    }
+
+    fn mock_hardware_with_gpus(gpus: Vec<GpuInfo>) -> HardwareInfo {
+        HardwareInfo {
+            cpu: CpuInfo {
+                vendor: "Intel".to_string(),
+                brand: "test".to_string(),
+                architecture: "x86_64".to_string(),
+                cores_physical: 4,
+                cores_logical: 8,
+                frequency_mhz: Some(3200),
+                features: Vec::new(),
+                cache_l1_kb: Some(256),
+                cache_l2_kb: Some(1024),
+                cache_l3_kb: Some(8192),
+            },
+            gpus,
+            npu: None,
+            memory: MemoryInfo {
+                total_gb: 16.0,
+                available_gb: 12.0,
+            },
+            storage: StorageInfo {
+                total_gb: 512.0,
+                available_gb: 256.0,
+                is_ssd: true,
+                device_name: "test-disk".to_string(),
+            },
+            detected_at: Utc::now().to_rfc3339(),
         }
     }
 
@@ -1369,5 +1423,40 @@ mod tests {
         let (backend, reason) = select_backend(None, None, true, None);
         assert_eq!(backend, InferenceBackend::DirectML);
         assert_eq!(reason, DecisionReason::DefaultDirectMLCandidate);
+    }
+
+    #[test]
+    fn pick_adapter_identity_uses_enumerated_gpu_index_for_device_id() {
+        let gpus = vec![
+            GpuInfo {
+                name: "Integrated".to_string(),
+                vendor: GpuVendor::Intel,
+                backend: "Vulkan".to_string(),
+                device_type: "Integrated".to_string(),
+                driver_version: Some("1.0".to_string()),
+                pci_device_id: Some("0001".to_string()),
+                vram_mb: Some(1024),
+                temperature_c: None,
+                utilization_percent: None,
+                cuda_compute_capability: None,
+            },
+            GpuInfo {
+                name: "DirectML".to_string(),
+                vendor: GpuVendor::Amd,
+                backend: "DirectX 12".to_string(),
+                device_type: "Discrete".to_string(),
+                driver_version: Some("2.0".to_string()),
+                pci_device_id: Some("0002".to_string()),
+                vram_mb: Some(4096),
+                temperature_c: None,
+                utilization_percent: None,
+                cuda_compute_capability: None,
+            },
+        ];
+        let hardware = mock_hardware_with_gpus(gpus);
+
+        let selection = pick_adapter_identity(Some(&hardware), None);
+        assert_eq!(selection.directml_device_id, Some(1));
+        assert!(selection.adapter_identity.contains("idx1"));
     }
 }

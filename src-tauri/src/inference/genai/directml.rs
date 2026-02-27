@@ -5,8 +5,9 @@ use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 type OgaResult = c_void;
 type OgaConfig = c_void;
@@ -61,15 +62,26 @@ struct GenAiApi {
     create_tokenizer:
         unsafe extern "system" fn(*const OgaModel, *mut *mut OgaTokenizer) -> *mut OgaResult,
     destroy_tokenizer: unsafe extern "system" fn(*mut OgaTokenizer),
-    tokenizer_get_eos_token_ids:
-        unsafe extern "system" fn(*const OgaTokenizer, *mut *const i32, *mut usize) -> *mut OgaResult,
-    tokenizer_encode:
-        unsafe extern "system" fn(*const OgaTokenizer, *const c_char, *mut OgaSequences) -> *mut OgaResult,
-    create_tokenizer_stream:
-        unsafe extern "system" fn(*const OgaTokenizer, *mut *mut OgaTokenizerStream) -> *mut OgaResult,
+    tokenizer_get_eos_token_ids: unsafe extern "system" fn(
+        *const OgaTokenizer,
+        *mut *const i32,
+        *mut usize,
+    ) -> *mut OgaResult,
+    tokenizer_encode: unsafe extern "system" fn(
+        *const OgaTokenizer,
+        *const c_char,
+        *mut OgaSequences,
+    ) -> *mut OgaResult,
+    create_tokenizer_stream: unsafe extern "system" fn(
+        *const OgaTokenizer,
+        *mut *mut OgaTokenizerStream,
+    ) -> *mut OgaResult,
     destroy_tokenizer_stream: unsafe extern "system" fn(*mut OgaTokenizerStream),
-    tokenizer_stream_decode:
-        unsafe extern "system" fn(*mut OgaTokenizerStream, i32, *mut *const c_char) -> *mut OgaResult,
+    tokenizer_stream_decode: unsafe extern "system" fn(
+        *mut OgaTokenizerStream,
+        i32,
+        *mut *const c_char,
+    ) -> *mut OgaResult,
 
     create_sequences: unsafe extern "system" fn(*mut *mut OgaSequences) -> *mut OgaResult,
     destroy_sequences: unsafe extern "system" fn(*mut OgaSequences),
@@ -102,7 +114,8 @@ struct GenAiApi {
         unsafe extern "system" fn(*mut OgaGenerator, *mut *mut OgaTensor) -> *mut OgaResult,
 
     destroy_tensor: unsafe extern "system" fn(*mut OgaTensor),
-    tensor_get_type: unsafe extern "system" fn(*mut OgaTensor, *mut OgaElementType) -> *mut OgaResult,
+    tensor_get_type:
+        unsafe extern "system" fn(*mut OgaTensor, *mut OgaElementType) -> *mut OgaResult,
     tensor_get_shape_rank: unsafe extern "system" fn(*mut OgaTensor, *mut usize) -> *mut OgaResult,
     tensor_get_shape: unsafe extern "system" fn(*mut OgaTensor, *mut i64, usize) -> *mut OgaResult,
     tensor_get_data: unsafe extern "system" fn(*mut OgaTensor, *mut *mut c_void) -> *mut OgaResult,
@@ -210,7 +223,12 @@ fn find_genai_dll() -> Option<PathBuf> {
         }
     }
 
-    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("libs").join("onnxruntime-genai.dll"));
+    #[cfg(debug_assertions)]
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("libs")
+            .join("onnxruntime-genai.dll"),
+    );
     candidates.push(PathBuf::from("libs").join("onnxruntime-genai.dll"));
 
     candidates.into_iter().find(|path| path.exists())
@@ -221,9 +239,12 @@ fn cstring(value: &str, field: &str) -> Result<CString, String> {
 }
 
 fn path_to_cstring(path: &Path) -> Result<CString, String> {
-    let utf8 = path
-        .to_str()
-        .ok_or_else(|| format!("Non-UTF8 path is unsupported for GenAI: {}", path.display()))?;
+    let utf8 = path.to_str().ok_or_else(|| {
+        format!(
+            "Non-UTF8 path is unsupported for GenAI: {}. Move the model to an ASCII-only path.",
+            path.display()
+        )
+    })?;
     cstring(utf8, "path")
 }
 
@@ -263,13 +284,13 @@ impl<T> OgaOwned<T> {
 
 impl<T> Drop for OgaOwned<T> {
     fn drop(&mut self) {
-        if self.ptr.is_null() {
+        let ptr = std::mem::replace(&mut self.ptr, ptr::null_mut());
+        if ptr.is_null() {
             return;
         }
         let destroy = self.destroy;
-        unsafe { destroy(self.ptr) };
+        unsafe { destroy(ptr) };
         let _ = &self.api;
-        self.ptr = ptr::null_mut();
     }
 }
 
@@ -382,16 +403,27 @@ impl GenAiDirectMlGenerator {
             unsafe { (guard.api.create_sequences)(&mut sequences_ptr) },
             "OgaCreateSequences",
         )?;
-        let sequences = OgaOwned::new(Arc::clone(&guard.api), sequences_ptr, guard.api.destroy_sequences);
+        let sequences = OgaOwned::new(
+            Arc::clone(&guard.api),
+            sequences_ptr,
+            guard.api.destroy_sequences,
+        );
 
         let prompt_cstr = cstring(prompt, "prompt")?;
         check_oga(
             &guard.api,
-            unsafe { (guard.api.tokenizer_encode)(guard.tokenizer, prompt_cstr.as_ptr(), sequences.as_ptr()) },
+            unsafe {
+                (guard.api.tokenizer_encode)(
+                    guard.tokenizer,
+                    prompt_cstr.as_ptr(),
+                    sequences.as_ptr(),
+                )
+            },
             "OgaTokenizerEncode",
         )?;
 
-        let prompt_tokens = unsafe { (guard.api.sequences_get_sequence_count)(sequences.as_ptr(), 0) };
+        let prompt_tokens =
+            unsafe { (guard.api.sequences_get_sequence_count)(sequences.as_ptr(), 0) };
         let max_length = prompt_tokens.saturating_add(1);
 
         let params = create_generator_params(&guard, max_length as f64, 0.0, Some(1), None, 1.0)?;
@@ -416,147 +448,176 @@ impl GenAiDirectMlGenerator {
     where
         F: FnMut(String),
     {
-        let guard = self
-            .inner
-            .lock()
-            .map_err(|_| "GenAI DirectML state mutex poisoned".to_string())?;
-
         let gen_config = config.unwrap_or_default();
-        let start = Instant::now();
+        let prompt_owned = prompt.to_string();
+        let inner = Arc::clone(&self.inner);
+        let cancelled_worker = Arc::clone(&cancelled);
+        let (token_tx, mut token_rx) = unbounded_channel();
+        let worker = tokio::task::spawn_blocking(move || {
+            generate_stream_blocking(inner, prompt_owned, gen_config, cancelled_worker, token_tx)
+        });
 
-        let mut sequences_ptr: *mut OgaSequences = ptr::null_mut();
+        while let Some(piece) = token_rx.recv().await {
+            on_token(piece);
+        }
+
+        worker
+            .await
+            .map_err(|e| format!("DirectML generation worker join error: {e}"))?
+    }
+}
+
+fn generate_stream_blocking(
+    inner: Arc<Mutex<GenAiDirectMlInner>>,
+    prompt: String,
+    gen_config: GenerationConfig,
+    cancelled: Arc<AtomicBool>,
+    token_tx: UnboundedSender<String>,
+) -> Result<GenerationMetrics, String> {
+    let guard = inner
+        .lock()
+        .map_err(|_| "GenAI DirectML state mutex poisoned".to_string())?;
+    let start = Instant::now();
+
+    let mut sequences_ptr: *mut OgaSequences = ptr::null_mut();
+    check_oga(
+        &guard.api,
+        unsafe { (guard.api.create_sequences)(&mut sequences_ptr) },
+        "OgaCreateSequences",
+    )?;
+    let sequences = OgaOwned::new(
+        Arc::clone(&guard.api),
+        sequences_ptr,
+        guard.api.destroy_sequences,
+    );
+
+    let prompt_cstr = cstring(&prompt, "prompt")?;
+    check_oga(
+        &guard.api,
+        unsafe {
+            (guard.api.tokenizer_encode)(guard.tokenizer, prompt_cstr.as_ptr(), sequences.as_ptr())
+        },
+        "OgaTokenizerEncode",
+    )?;
+
+    let prompt_tokens = unsafe { (guard.api.sequences_get_sequence_count)(sequences.as_ptr(), 0) };
+    let max_length = prompt_tokens.saturating_add(gen_config.max_length);
+
+    let params = create_generator_params(
+        &guard,
+        max_length as f64,
+        gen_config.temperature,
+        gen_config.top_k,
+        gen_config.top_p,
+        gen_config.repetition_penalty,
+    )?;
+    let generator = create_generator(&guard, params.as_ptr(), sequences.as_ptr())?;
+
+    let mut stream_ptr: *mut OgaTokenizerStream = ptr::null_mut();
+    check_oga(
+        &guard.api,
+        unsafe { (guard.api.create_tokenizer_stream)(guard.tokenizer, &mut stream_ptr) },
+        "OgaCreateTokenizerStream",
+    )?;
+    let stream = OgaOwned::new(
+        Arc::clone(&guard.api),
+        stream_ptr,
+        guard.api.destroy_tokenizer_stream,
+    );
+
+    let mut total_tokens = 0usize;
+    let mut first_token_time_ms: Option<u64> = None;
+
+    while total_tokens < gen_config.max_length {
+        if cancelled.load(Ordering::SeqCst) {
+            break;
+        }
+        let done = unsafe { (guard.api.generator_is_done)(generator.as_ptr()) };
+        if done {
+            break;
+        }
+
         check_oga(
             &guard.api,
-            unsafe { (guard.api.create_sequences)(&mut sequences_ptr) },
-            "OgaCreateSequences",
+            unsafe { (guard.api.generator_generate_next_token)(generator.as_ptr()) },
+            "OgaGenerator_GenerateNextToken",
         )?;
-        let sequences = OgaOwned::new(Arc::clone(&guard.api), sequences_ptr, guard.api.destroy_sequences);
 
-        let prompt_cstr = cstring(prompt, "prompt")?;
+        let mut next_tokens_ptr: *const i32 = ptr::null();
+        let mut next_tokens_count = 0usize;
         check_oga(
             &guard.api,
-            unsafe { (guard.api.tokenizer_encode)(guard.tokenizer, prompt_cstr.as_ptr(), sequences.as_ptr()) },
-            "OgaTokenizerEncode",
+            unsafe {
+                (guard.api.generator_get_next_tokens)(
+                    generator.as_ptr(),
+                    &mut next_tokens_ptr,
+                    &mut next_tokens_count,
+                )
+            },
+            "OgaGenerator_GetNextTokens",
         )?;
 
-        let prompt_tokens = unsafe { (guard.api.sequences_get_sequence_count)(sequences.as_ptr(), 0) };
-        let max_length = prompt_tokens.saturating_add(gen_config.max_length);
+        if next_tokens_count == 0 || next_tokens_ptr.is_null() {
+            break;
+        }
 
-        let params = create_generator_params(
-            &guard,
-            max_length as f64,
-            gen_config.temperature,
-            gen_config.top_k,
-            gen_config.top_p,
-            gen_config.repetition_penalty,
-        )?;
-        let generator = create_generator(&guard, params.as_ptr(), sequences.as_ptr())?;
+        let next_tokens = unsafe { std::slice::from_raw_parts(next_tokens_ptr, next_tokens_count) };
+        let mut should_stop = false;
 
-        let mut stream_ptr: *mut OgaTokenizerStream = ptr::null_mut();
-        check_oga(
-            &guard.api,
-            unsafe { (guard.api.create_tokenizer_stream)(guard.tokenizer, &mut stream_ptr) },
-            "OgaCreateTokenizerStream",
-        )?;
-        let stream = OgaOwned::new(
-            Arc::clone(&guard.api),
-            stream_ptr,
-            guard.api.destroy_tokenizer_stream,
-        );
-
-        let mut total_tokens = 0usize;
-        let mut first_token_time_ms: Option<u64> = None;
-
-        while total_tokens < gen_config.max_length {
-            if cancelled.load(Ordering::SeqCst) {
+        for &token in next_tokens {
+            if guard.eos_token_ids.contains(&token) {
+                should_stop = true;
                 break;
             }
-            let done = unsafe { (guard.api.generator_is_done)(generator.as_ptr()) };
-            if done {
-                break;
+
+            if first_token_time_ms.is_none() {
+                first_token_time_ms = Some(start.elapsed().as_millis() as u64);
             }
 
-            check_oga(
-                &guard.api,
-                unsafe { (guard.api.generator_generate_next_token)(generator.as_ptr()) },
-                "OgaGenerator_GenerateNextToken",
-            )?;
-
-            let mut next_tokens_ptr: *const i32 = ptr::null();
-            let mut next_tokens_count = 0usize;
+            let mut decoded_ptr: *const c_char = ptr::null();
             check_oga(
                 &guard.api,
                 unsafe {
-                    (guard.api.generator_get_next_tokens)(
-                        generator.as_ptr(),
-                        &mut next_tokens_ptr,
-                        &mut next_tokens_count,
-                    )
+                    (guard.api.tokenizer_stream_decode)(stream.as_ptr(), token, &mut decoded_ptr)
                 },
-                "OgaGenerator_GetNextTokens",
+                "OgaTokenizerStreamDecode",
             )?;
 
-            if next_tokens_count == 0 || next_tokens_ptr.is_null() {
-                break;
-            }
-
-            let next_tokens = unsafe { std::slice::from_raw_parts(next_tokens_ptr, next_tokens_count) };
-            let mut should_stop = false;
-
-            for &token in next_tokens {
-                if guard.eos_token_ids.contains(&token) {
-                    should_stop = true;
-                    break;
-                }
-
-                if first_token_time_ms.is_none() {
-                    first_token_time_ms = Some(start.elapsed().as_millis() as u64);
-                }
-
-                let mut decoded_ptr: *const c_char = ptr::null();
-                check_oga(
-                    &guard.api,
-                    unsafe {
-                        (guard.api.tokenizer_stream_decode)(stream.as_ptr(), token, &mut decoded_ptr)
-                    },
-                    "OgaTokenizerStreamDecode",
-                )?;
-
-                if !decoded_ptr.is_null() {
-                    let piece = unsafe { CStr::from_ptr(decoded_ptr) }
-                        .to_string_lossy()
-                        .into_owned();
-                    if !piece.is_empty() {
-                        on_token(piece);
-                    }
-                }
-
-                total_tokens += 1;
-                if total_tokens >= gen_config.max_length {
+            if !decoded_ptr.is_null() {
+                let piece = unsafe { CStr::from_ptr(decoded_ptr) }
+                    .to_string_lossy()
+                    .into_owned();
+                if !piece.is_empty() && token_tx.send(piece).is_err() {
                     should_stop = true;
                     break;
                 }
             }
 
-            if should_stop {
+            total_tokens += 1;
+            if total_tokens >= gen_config.max_length {
+                should_stop = true;
                 break;
             }
         }
 
-        let total_time_ms = start.elapsed().as_millis() as u64;
-        let tokens_per_second = if total_time_ms == 0 {
-            0.0
-        } else {
-            total_tokens as f64 / (total_time_ms as f64 / 1_000.0)
-        };
-
-        Ok(GenerationMetrics {
-            total_tokens,
-            time_to_first_token_ms: first_token_time_ms,
-            tokens_per_second,
-            total_time_ms,
-        })
+        if should_stop {
+            break;
+        }
     }
+
+    let total_time_ms = start.elapsed().as_millis() as u64;
+    let tokens_per_second = if total_time_ms == 0 {
+        0.0
+    } else {
+        total_tokens as f64 / (total_time_ms as f64 / 1_000.0)
+    };
+
+    Ok(GenerationMetrics {
+        total_tokens,
+        time_to_first_token_ms: first_token_time_ms,
+        tokens_per_second,
+        total_time_ms,
+    })
 }
 
 fn create_generator_params(
@@ -585,7 +646,12 @@ fn create_generator_params(
     set_search_bool(&guard.api, params.as_ptr(), "do_sample", do_sample)?;
 
     if do_sample {
-        set_search_number(&guard.api, params.as_ptr(), "temperature", temperature as f64)?;
+        set_search_number(
+            &guard.api,
+            params.as_ptr(),
+            "temperature",
+            temperature as f64,
+        )?;
     }
 
     if let Some(top_k) = top_k {
@@ -698,13 +764,7 @@ fn ensure_finite_logits(
         )?;
     }
 
-    let num_elements = dims.iter().try_fold(1usize, |acc, &dim| {
-        if dim < 0 {
-            return Err(format!("Negative tensor dim in logits: {dim}"));
-        }
-        acc.checked_mul(dim as usize)
-            .ok_or_else(|| "Overflow while calculating logits element count".to_string())
-    })?;
+    let (last_row_start, last_row_end) = last_logits_row_bounds(&dims)?;
 
     let mut data_ptr: *mut c_void = ptr::null_mut();
     check_oga(
@@ -719,17 +779,51 @@ fn ensure_finite_logits(
 
     match dtype {
         OgaElementType::Float32 => {
-            let data = unsafe { std::slice::from_raw_parts(data_ptr as *const f32, num_elements) };
-            validate_finite_slice_f32(data, context)
+            let data = unsafe { std::slice::from_raw_parts(data_ptr as *const f32, last_row_end) };
+            validate_finite_slice_f32(&data[last_row_start..last_row_end], context)
         }
         OgaElementType::Float16 => {
-            let raw = unsafe { std::slice::from_raw_parts(data_ptr as *const u16, num_elements) };
-            validate_finite_slice_f16(raw, context)
+            let raw = unsafe { std::slice::from_raw_parts(data_ptr as *const u16, last_row_end) };
+            validate_finite_slice_f16(&raw[last_row_start..last_row_end], context)
         }
         other => Err(format!(
             "{context}: unsupported logits tensor element type {other:?}"
         )),
     }
+}
+
+fn last_logits_row_bounds(dims: &[i64]) -> Result<(usize, usize), String> {
+    if dims.is_empty() {
+        return Err("Logits tensor rank must be at least 1".to_string());
+    }
+
+    let mut dims_usize = Vec::with_capacity(dims.len());
+    for &dim in dims {
+        if dim <= 0 {
+            return Err(format!("Non-positive tensor dim in logits: {dim}"));
+        }
+        dims_usize.push(dim as usize);
+    }
+
+    let row_width = *dims_usize
+        .last()
+        .ok_or_else(|| "Logits tensor missing final dimension".to_string())?;
+    let row_count = dims_usize[..dims_usize.len().saturating_sub(1)]
+        .iter()
+        .try_fold(1usize, |acc, &dim| {
+            acc.checked_mul(dim)
+                .ok_or_else(|| "Overflow while calculating logits row count".to_string())
+        })?;
+    let last_row_index = row_count
+        .checked_sub(1)
+        .ok_or_else(|| "Logits tensor has zero rows".to_string())?;
+    let start = last_row_index
+        .checked_mul(row_width)
+        .ok_or_else(|| "Overflow while calculating logits last-row offset".to_string())?;
+    let end = row_count
+        .checked_mul(row_width)
+        .ok_or_else(|| "Overflow while calculating logits element count".to_string())?;
+    Ok((start, end))
 }
 
 fn validate_finite_slice_f32(data: &[f32], context: &str) -> Result<(), String> {
@@ -786,11 +880,53 @@ fn read_eos_token_ids(api: &GenAiApi, tokenizer: *mut OgaTokenizer) -> Result<Ve
     Ok(eos.to_vec())
 }
 
-static GENAI_API: OnceLock<Result<Arc<GenAiApi>, String>> = OnceLock::new();
+static GENAI_API: Mutex<Option<Arc<GenAiApi>>> = Mutex::new(None);
 
 fn genai_api() -> Result<Arc<GenAiApi>, String> {
-    match GENAI_API.get_or_init(GenAiApi::load) {
-        Ok(api) => Ok(Arc::clone(api)),
-        Err(e) => Err(e.clone()),
+    let mut guard = match GENAI_API.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::warn!("Recovering from poisoned GenAI API cache mutex");
+            poisoned.into_inner()
+        }
+    };
+
+    if let Some(api) = guard.as_ref() {
+        return Ok(Arc::clone(api));
+    }
+
+    let api = GenAiApi::load()?;
+    *guard = Some(Arc::clone(&api));
+    Ok(api)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::last_logits_row_bounds;
+
+    #[test]
+    fn last_logits_row_bounds_rank1_tensor() {
+        let (start, end) = last_logits_row_bounds(&[8]).expect("rank-1 logits bounds");
+        assert_eq!(start, 0);
+        assert_eq!(end, 8);
+    }
+
+    #[test]
+    fn last_logits_row_bounds_rank3_tensor() {
+        let (start, end) = last_logits_row_bounds(&[1, 3, 5]).expect("rank-3 logits bounds");
+        assert_eq!(start, 10);
+        assert_eq!(end, 15);
+    }
+
+    #[test]
+    fn last_logits_row_bounds_rejects_non_positive_dims() {
+        let err = last_logits_row_bounds(&[2, 0, 4]).expect_err("non-positive dim should fail");
+        assert!(err.contains("Non-positive"));
+    }
+
+    #[test]
+    fn last_logits_row_bounds_rejects_empty_dims() {
+        let err = last_logits_row_bounds(&[]).expect_err("empty dims should fail");
+        assert!(err.contains("rank"));
     }
 }
