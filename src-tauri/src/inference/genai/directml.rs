@@ -280,6 +280,10 @@ impl<T> OgaOwned<T> {
     fn as_ptr(&self) -> *mut T {
         self.ptr
     }
+
+    fn into_raw(mut self) -> *mut T {
+        std::mem::replace(&mut self.ptr, ptr::null_mut())
+    }
 }
 
 impl<T> Drop for OgaOwned<T> {
@@ -371,15 +375,19 @@ impl GenAiDirectMlGenerator {
             unsafe { (api.create_model_from_config)(config.as_ptr(), &mut model_ptr) },
             "OgaCreateModelFromConfig",
         )?;
+        let model = OgaOwned::new(Arc::clone(&api), model_ptr, api.destroy_model);
 
         let mut tokenizer_ptr: *mut OgaTokenizer = ptr::null_mut();
         check_oga(
             &api,
-            unsafe { (api.create_tokenizer)(model_ptr, &mut tokenizer_ptr) },
+            unsafe { (api.create_tokenizer)(model.as_ptr(), &mut tokenizer_ptr) },
             "OgaCreateTokenizer",
         )?;
+        let tokenizer = OgaOwned::new(Arc::clone(&api), tokenizer_ptr, api.destroy_tokenizer);
 
-        let eos_token_ids = read_eos_token_ids(&api, tokenizer_ptr)?;
+        let eos_token_ids = read_eos_token_ids(&api, tokenizer.as_ptr())?;
+        let model_ptr = model.into_raw();
+        let tokenizer_ptr = tokenizer.into_raw();
 
         Ok(Self {
             inner: Arc::new(Mutex::new(GenAiDirectMlInner {
