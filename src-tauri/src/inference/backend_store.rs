@@ -5,7 +5,13 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::{
+    MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+};
 
 const BACKEND_STORE_VERSION: u32 = 1;
 const BACKEND_STORE_FILENAME: &str = "backend_decisions.v1.json";
@@ -113,10 +119,12 @@ impl BackendStore {
     }
 
     pub fn persist(&self) -> Result<(), String> {
-        let parent = self
-            .path
-            .parent()
-            .ok_or_else(|| format!("Invalid backend decision store path: {}", self.path.display()))?;
+        let parent = self.path.parent().ok_or_else(|| {
+            format!(
+                "Invalid backend decision store path: {}",
+                self.path.display()
+            )
+        })?;
         if !parent.exists() {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create backend decision store dir: {e}"))?;
@@ -133,15 +141,39 @@ impl BackendStore {
         fs::write(&tmp_path, json)
             .map_err(|e| format!("Failed to write temporary backend decision store file: {e}"))?;
 
-        if self.path.exists() {
-            fs::remove_file(&self.path)
-                .map_err(|e| format!("Failed to replace backend decision store file: {e}"))?;
-        }
-        fs::rename(&tmp_path, &self.path)
-            .map_err(|e| format!("Failed to atomically move backend decision store file: {e}"))?;
+        replace_file_atomic(&tmp_path, &self.path).map_err(|e| {
+            let _ = fs::remove_file(&tmp_path);
+            format!("Failed to atomically replace backend decision store file: {e}")
+        })?;
 
         Ok(())
     }
+}
+
+#[cfg(windows)]
+fn to_wide_os(path: &Path) -> Vec<u16> {
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(windows)]
+fn replace_file_atomic(from: &Path, to: &Path) -> Result<(), String> {
+    let from_wide = to_wide_os(from);
+    let to_wide = to_wide_os(to);
+    let flags = MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH;
+
+    let result = unsafe { MoveFileExW(from_wide.as_ptr(), to_wide.as_ptr(), flags) };
+    if result == 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn replace_file_atomic(from: &Path, to: &Path) -> Result<(), String> {
+    fs::rename(from, to).map_err(|e| e.to_string())
 }
 
 pub fn backend_store_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -164,7 +196,10 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    fn decision_record(key: BackendDecisionKey, backend: InferenceBackend) -> BackendDecisionRecord {
+    fn decision_record(
+        key: BackendDecisionKey,
+        backend: InferenceBackend,
+    ) -> BackendDecisionRecord {
         BackendDecisionRecord::new(
             key,
             backend,
@@ -186,6 +221,7 @@ mod tests {
             driver_version: "31.0.101.5522".to_string(),
             app_version: "2.2.0".to_string(),
             ort_version: "1.23".to_string(),
+            directml_device_id: None,
         };
         store.upsert(decision_record(key.clone(), InferenceBackend::Cpu));
         store.persist().expect("persist");
@@ -207,6 +243,7 @@ mod tests {
             driver_version: "31.0.101.5522".to_string(),
             app_version: "2.2.0".to_string(),
             ort_version: "1.23".to_string(),
+            directml_device_id: None,
         };
         let mut key_b = key_a.clone();
         key_b.driver_version = "31.0.101.5590".to_string();
@@ -233,6 +270,7 @@ mod tests {
             driver_version: "31.0.101.5522".to_string(),
             app_version: "2.2.0".to_string(),
             ort_version: "1.23".to_string(),
+            directml_device_id: None,
         };
         assert!(store.get(&key).is_none());
     }

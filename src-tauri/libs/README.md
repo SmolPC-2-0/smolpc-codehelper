@@ -6,6 +6,7 @@ Windows bundle files:
 - `onnxruntime.dll`
 - `onnxruntime_providers_shared.dll`
 - `DirectML.dll`
+- `onnxruntime-genai.dll`
 
 macOS/Linux bundle files:
 - `libonnxruntime.dylib` (macOS)

@@ -27,6 +27,7 @@ impl InferenceBackend {
 #[serde(rename_all = "snake_case")]
 pub enum DecisionReason {
     DefaultCpu,
+    DefaultDirectMLCandidate,
     ForcedOverride,
     PersistedDecision,
     BenchmarkPassed,
@@ -35,6 +36,7 @@ pub enum DecisionReason {
     BenchmarkBudgetExceeded,
     NoDirectMLCandidate,
     DirectMLInitializationFailed,
+    DirectMLPreflightFailed,
     RuntimeFailureFallback,
     DemotedAfterFailures,
 }
@@ -46,17 +48,24 @@ pub struct BackendDecisionKey {
     pub driver_version: String,
     pub app_version: String,
     pub ort_version: String,
+    #[serde(default)]
+    pub directml_device_id: Option<i32>,
 }
 
 impl BackendDecisionKey {
     pub fn fingerprint(&self) -> String {
+        let directml_device_id = self
+            .directml_device_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "auto".to_string());
         format!(
-            "{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}",
             self.model_id,
             self.adapter_identity,
             self.driver_version,
             self.app_version,
-            self.ort_version
+            self.ort_version,
+            directml_device_id
         )
         .to_ascii_lowercase()
     }
@@ -91,7 +100,11 @@ impl BackendBenchmarkComparison {
 
     pub fn directml_ttft_ratio(&self) -> f64 {
         if self.cpu.time_to_first_token_ms == 0 {
-            1.0
+            if self.directml.time_to_first_token_ms == 0 {
+                1.0
+            } else {
+                f64::INFINITY
+            }
         } else {
             self.directml.time_to_first_token_ms as f64 / self.cpu.time_to_first_token_ms as f64
         }
@@ -178,8 +191,16 @@ impl BackendDecision {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct BackendStatus {
     pub active_backend: Option<InferenceBackend>,
+    pub active_model_path: Option<String>,
+    pub active_artifact_backend: Option<InferenceBackend>,
+    pub runtime_engine: Option<String>,
+    pub dml_gate_state: Option<String>,
+    pub dml_gate_reason: Option<String>,
     pub decision_key: Option<BackendDecisionKey>,
     pub last_decision: Option<BackendDecision>,
+    pub directml_probe_passed: Option<bool>,
+    pub directml_probe_error: Option<String>,
+    pub directml_probe_at: Option<String>,
     pub failure_counters: FailureCounters,
     pub force_override: Option<InferenceBackend>,
     pub store_path: Option<String>,
@@ -213,6 +234,7 @@ mod tests {
             driver_version: "31.0.101.5522".to_string(),
             app_version: "2.2.0".to_string(),
             ort_version: "1.23".to_string(),
+            directml_device_id: None,
         };
         let mut key_b = key_a.clone();
         key_b.driver_version = "31.0.101.5590".to_string();
@@ -257,5 +279,30 @@ mod tests {
 
         counters.record_directml_failure(DirectMLFailureStage::Init, "init error");
         assert!(counters.should_demote_directml());
+    }
+
+    #[test]
+    fn ttft_ratio_is_infinite_when_cpu_ttft_is_zero_and_directml_non_zero() {
+        let comparison = BackendBenchmarkComparison {
+            cpu: benchmark(InferenceBackend::Cpu, 10.0, 0, 900),
+            directml: benchmark(InferenceBackend::DirectML, 13.5, 8, 800),
+            elapsed_ms: 1_000,
+            budget_ms: BENCHMARK_SELECTION_BUDGET_MS,
+        };
+
+        assert_eq!(comparison.directml_ttft_ratio(), f64::INFINITY);
+        assert!(!comparison.directml_passes_gate());
+    }
+
+    #[test]
+    fn ttft_ratio_is_one_when_both_ttft_values_are_zero() {
+        let comparison = BackendBenchmarkComparison {
+            cpu: benchmark(InferenceBackend::Cpu, 10.0, 0, 900),
+            directml: benchmark(InferenceBackend::DirectML, 13.5, 0, 800),
+            elapsed_ms: 1_000,
+            budget_ms: BENCHMARK_SELECTION_BUDGET_MS,
+        };
+
+        assert_eq!(comparison.directml_ttft_ratio(), 1.0);
     }
 }

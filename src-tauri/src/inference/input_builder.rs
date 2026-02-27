@@ -26,6 +26,7 @@
 //! ```
 
 use super::kv_cache::NUM_LAYERS;
+use crate::models::KvInputSchema;
 use ort::session::SessionInputValue;
 use std::collections::{HashMap, HashSet};
 
@@ -39,7 +40,10 @@ pub struct InputBuilder {
 
     // Pre-computed indices into model input order
     input_ids_index: usize,
-    attention_mask_index: usize,
+    position_ids_index: Option<usize>,
+    attention_mask_index: Option<usize>,
+    seqlens_k_index: Option<usize>,
+    total_sequence_length_index: Option<usize>,
     past_key_indices: Vec<usize>,
     past_value_indices: Vec<usize>,
 
@@ -48,6 +52,17 @@ pub struct InputBuilder {
 
     // Reusable ordered values for session.run(&[...])
     ordered_inputs: Vec<SessionInputValue<'static>>,
+}
+
+#[derive(Debug, Clone)]
+enum BuilderKvInputSchema {
+    AttentionMask {
+        attention_mask: String,
+    },
+    SeqlensK {
+        seqlens_k: String,
+        total_sequence_length: String,
+    },
 }
 
 impl InputBuilder {
@@ -91,9 +106,12 @@ impl InputBuilder {
         model_input_names.extend(past_key_names.iter().cloned());
         model_input_names.extend(past_value_names.iter().cloned());
 
-        Self::with_names_and_input_order(
+        Self::with_schema_and_input_order(
             input_ids_key,
-            attention_mask_key,
+            None,
+            BuilderKvInputSchema::AttentionMask {
+                attention_mask: attention_mask_key,
+            },
             past_key_names,
             past_value_names,
             model_input_names,
@@ -108,14 +126,65 @@ impl InputBuilder {
         past_value_names: Vec<String>,
         model_input_names: Vec<String>,
     ) -> Result<Self, String> {
+        Self::with_schema_and_input_order(
+            input_ids_key,
+            None,
+            BuilderKvInputSchema::AttentionMask {
+                attention_mask: attention_mask_key.into(),
+            },
+            past_key_names,
+            past_value_names,
+            model_input_names,
+        )
+    }
+
+    /// Create an InputBuilder with explicit KV input schema and model input order.
+    pub fn with_kv_schema_and_input_order(
+        input_ids_key: impl Into<String>,
+        position_ids_key: Option<String>,
+        kv_input_schema: KvInputSchema,
+        past_key_names: Vec<String>,
+        past_value_names: Vec<String>,
+        model_input_names: Vec<String>,
+    ) -> Result<Self, String> {
+        let schema = match kv_input_schema {
+            KvInputSchema::AttentionMask { attention_mask } => {
+                BuilderKvInputSchema::AttentionMask {
+                    attention_mask: attention_mask.to_string(),
+                }
+            }
+            KvInputSchema::SeqlensK {
+                seqlens_k,
+                total_sequence_length,
+                ..
+            } => BuilderKvInputSchema::SeqlensK {
+                seqlens_k: seqlens_k.to_string(),
+                total_sequence_length: total_sequence_length.to_string(),
+            },
+        };
+
+        Self::with_schema_and_input_order(
+            input_ids_key,
+            position_ids_key,
+            schema,
+            past_key_names,
+            past_value_names,
+            model_input_names,
+        )
+    }
+
+    fn with_schema_and_input_order(
+        input_ids_key: impl Into<String>,
+        position_ids_key: Option<String>,
+        kv_schema: BuilderKvInputSchema,
+        past_key_names: Vec<String>,
+        past_value_names: Vec<String>,
+        model_input_names: Vec<String>,
+    ) -> Result<Self, String> {
         let input_ids_key = input_ids_key.into();
-        let attention_mask_key = attention_mask_key.into();
 
         if input_ids_key.trim().is_empty() {
             return Err("InputBuilder requires a non-empty input_ids tensor name".to_string());
-        }
-        if attention_mask_key.trim().is_empty() {
-            return Err("InputBuilder requires a non-empty attention_mask tensor name".to_string());
         }
         if past_key_names.is_empty() || past_value_names.is_empty() {
             return Err("InputBuilder requires at least one KV cache tensor name".to_string());
@@ -131,9 +200,48 @@ impl InputBuilder {
             return Err("InputBuilder requires at least one model input name".to_string());
         }
 
-        let mut required_names = Vec::with_capacity(2 + past_key_names.len() * 2);
+        let mut required_names = Vec::with_capacity(3 + past_key_names.len() * 2);
         required_names.push(input_ids_key.clone());
-        required_names.push(attention_mask_key.clone());
+        if let Some(position_ids_name) = position_ids_key.as_ref() {
+            if position_ids_name.trim().is_empty() {
+                return Err(
+                    "InputBuilder requires a non-empty position_ids tensor name".to_string()
+                );
+            }
+            required_names.push(position_ids_name.clone());
+        }
+
+        let (attention_mask_name, seqlens_k_name, total_sequence_length_name) = match kv_schema {
+            BuilderKvInputSchema::AttentionMask { attention_mask } => {
+                if attention_mask.trim().is_empty() {
+                    return Err(
+                        "InputBuilder requires a non-empty attention_mask tensor name".to_string(),
+                    );
+                }
+                required_names.push(attention_mask.clone());
+                (Some(attention_mask), None, None)
+            }
+            BuilderKvInputSchema::SeqlensK {
+                seqlens_k,
+                total_sequence_length,
+            } => {
+                if seqlens_k.trim().is_empty() {
+                    return Err(
+                        "InputBuilder requires a non-empty seqlens_k tensor name".to_string()
+                    );
+                }
+                if total_sequence_length.trim().is_empty() {
+                    return Err(
+                        "InputBuilder requires a non-empty total_sequence_length tensor name"
+                            .to_string(),
+                    );
+                }
+                required_names.push(seqlens_k.clone());
+                required_names.push(total_sequence_length.clone());
+                (None, Some(seqlens_k), Some(total_sequence_length))
+            }
+        };
+
         required_names.extend(past_key_names.iter().cloned());
         required_names.extend(past_value_names.iter().cloned());
 
@@ -179,14 +287,42 @@ impl InputBuilder {
         let input_ids_index = *model_index_by_name
             .get(input_ids_key.as_str())
             .ok_or_else(|| format!("Model is missing required input tensor '{}'", input_ids_key))?;
-        let attention_mask_index = *model_index_by_name
-            .get(attention_mask_key.as_str())
-            .ok_or_else(|| {
-                format!(
-                    "Model is missing required input tensor '{}'",
-                    attention_mask_key
-                )
-            })?;
+        let position_ids_index = position_ids_key
+            .as_deref()
+            .map(|name| {
+                model_index_by_name
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| format!("Model is missing required input tensor '{name}'"))
+            })
+            .transpose()?;
+        let attention_mask_index = attention_mask_name
+            .as_deref()
+            .map(|name| {
+                model_index_by_name
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| format!("Model is missing required input tensor '{name}'"))
+            })
+            .transpose()?;
+        let seqlens_k_index = seqlens_k_name
+            .as_deref()
+            .map(|name| {
+                model_index_by_name
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| format!("Model is missing required input tensor '{name}'"))
+            })
+            .transpose()?;
+        let total_sequence_length_index = total_sequence_length_name
+            .as_deref()
+            .map(|name| {
+                model_index_by_name
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| format!("Model is missing required input tensor '{name}'"))
+            })
+            .transpose()?;
 
         let past_key_indices = past_key_names
             .iter()
@@ -213,7 +349,10 @@ impl InputBuilder {
         Ok(Self {
             model_input_names,
             input_ids_index,
+            position_ids_index,
             attention_mask_index,
+            seqlens_k_index,
+            total_sequence_length_index,
             past_key_indices,
             past_value_indices,
             input_slots: (0..capacity).map(|_| None).collect(),
@@ -251,10 +390,47 @@ impl InputBuilder {
         self.input_slots[self.input_ids_index] = Some(value);
     }
 
+    /// Set the position_ids tensor
+    #[inline]
+    pub fn set_position_ids(&mut self, value: SessionInputValue<'static>) -> Result<(), String> {
+        let index = self
+            .position_ids_index
+            .ok_or_else(|| "InputBuilder schema does not include position_ids input".to_string())?;
+        self.input_slots[index] = Some(value);
+        Ok(())
+    }
+
     /// Set the attention_mask tensor
     #[inline]
-    pub fn set_attention_mask(&mut self, value: SessionInputValue<'static>) {
-        self.input_slots[self.attention_mask_index] = Some(value);
+    pub fn set_attention_mask(&mut self, value: SessionInputValue<'static>) -> Result<(), String> {
+        let index = self.attention_mask_index.ok_or_else(|| {
+            "InputBuilder schema does not include attention_mask input".to_string()
+        })?;
+        self.input_slots[index] = Some(value);
+        Ok(())
+    }
+
+    /// Set the seqlens_k tensor
+    #[inline]
+    pub fn set_seqlens_k(&mut self, value: SessionInputValue<'static>) -> Result<(), String> {
+        let index = self
+            .seqlens_k_index
+            .ok_or_else(|| "InputBuilder schema does not include seqlens_k input".to_string())?;
+        self.input_slots[index] = Some(value);
+        Ok(())
+    }
+
+    /// Set the total_sequence_length tensor
+    #[inline]
+    pub fn set_total_sequence_length(
+        &mut self,
+        value: SessionInputValue<'static>,
+    ) -> Result<(), String> {
+        let index = self.total_sequence_length_index.ok_or_else(|| {
+            "InputBuilder schema does not include total_sequence_length input".to_string()
+        })?;
+        self.input_slots[index] = Some(value);
+        Ok(())
     }
 
     /// Set the past key cache for a specific layer
@@ -429,7 +605,9 @@ mod tests {
         .expect("reordered model input names should be accepted");
 
         assert_eq!(builder.input_ids_index, 1);
-        assert_eq!(builder.attention_mask_index, 3);
+        assert_eq!(builder.attention_mask_index, Some(3));
+        assert_eq!(builder.seqlens_k_index, None);
+        assert_eq!(builder.total_sequence_length_index, None);
         assert_eq!(builder.past_key_indices, vec![2]);
         assert_eq!(builder.past_value_indices, vec![0]);
         assert_eq!(builder.input_slots.len(), 4);
@@ -461,5 +639,34 @@ mod tests {
             .err()
             .expect("out-of-bounds layer should return an error");
         assert!(err.contains("Invalid past_key layer index"));
+    }
+
+    #[test]
+    fn test_with_kv_schema_and_input_order_accepts_dml_schema() {
+        let builder = InputBuilder::with_kv_schema_and_input_order(
+            "input_ids",
+            None,
+            KvInputSchema::SeqlensK {
+                seqlens_k: "seqlens_k",
+                total_sequence_length: "total_sequence_length",
+                max_sequence_length: 2048,
+            },
+            vec!["past_key_values.0.key".to_string()],
+            vec!["past_key_values.0.value".to_string()],
+            vec![
+                "input_ids".to_string(),
+                "seqlens_k".to_string(),
+                "total_sequence_length".to_string(),
+                "past_key_values.0.key".to_string(),
+                "past_key_values.0.value".to_string(),
+            ],
+        )
+        .expect("DML schema input order should be accepted");
+
+        assert_eq!(builder.input_ids_index, 0);
+        assert_eq!(builder.position_ids_index, None);
+        assert_eq!(builder.attention_mask_index, None);
+        assert_eq!(builder.seqlens_k_index, Some(1));
+        assert_eq!(builder.total_sequence_length_index, Some(2));
     }
 }

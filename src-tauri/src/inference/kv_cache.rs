@@ -219,8 +219,12 @@ impl KVCache {
         );
         assert!(max_context > 0, "max_context must be positive");
 
-        let key_caches = (0..NUM_LAYERS).map(|_| LayerCache::new(max_context)).collect();
-        let value_caches = (0..NUM_LAYERS).map(|_| LayerCache::new(max_context)).collect();
+        let key_caches = (0..NUM_LAYERS)
+            .map(|_| LayerCache::new(max_context))
+            .collect();
+        let value_caches = (0..NUM_LAYERS)
+            .map(|_| LayerCache::new(max_context))
+            .collect();
 
         Self {
             key_caches,
@@ -451,9 +455,160 @@ impl KVCache {
 
     /// Estimate memory usage in bytes
     pub fn memory_usage_bytes(&self) -> usize {
-        let per_layer =
-            2 * NUM_KV_HEADS * self.max_context * HEAD_DIM * std::mem::size_of::<f32>();
+        let per_layer = 2 * NUM_KV_HEADS * self.max_context * HEAD_DIM * std::mem::size_of::<f32>();
         NUM_LAYERS * per_layer
+    }
+}
+
+/// Fixed-window KV cache for DirectML exported models.
+///
+/// This cache keeps full-size layer tensors resident at
+/// `[1, NUM_KV_HEADS, max_sequence_length, HEAD_DIM]` and only mutates
+/// `valid_length` plus in-place shifts when the window is full.
+#[derive(Debug)]
+pub struct DmlKvCache {
+    key_caches: Vec<Array4<f32>>,
+    value_caches: Vec<Array4<f32>>,
+    max_sequence_length: usize,
+    sink_size: usize,
+    valid_length: usize,
+}
+
+impl DmlKvCache {
+    pub fn new(max_sequence_length: usize, sink_size: usize) -> Self {
+        assert!(
+            max_sequence_length > 0,
+            "max_sequence_length must be positive"
+        );
+        assert!(
+            sink_size < max_sequence_length,
+            "sink_size must be less than max_sequence_length"
+        );
+
+        let key_caches = (0..NUM_LAYERS)
+            .map(|_| Array4::<f32>::zeros((1, NUM_KV_HEADS, max_sequence_length, HEAD_DIM)))
+            .collect();
+        let value_caches = (0..NUM_LAYERS)
+            .map(|_| Array4::<f32>::zeros((1, NUM_KV_HEADS, max_sequence_length, HEAD_DIM)))
+            .collect();
+
+        Self {
+            key_caches,
+            value_caches,
+            max_sequence_length,
+            sink_size,
+            valid_length: 0,
+        }
+    }
+
+    fn shift_single_layer_left(
+        layer: &mut Array4<f32>,
+        current_length: usize,
+        sink_size: usize,
+        max_sequence_length: usize,
+    ) {
+        if current_length <= sink_size + 1 {
+            return;
+        }
+
+        let Some(data) = layer.as_slice_mut() else {
+            return;
+        };
+
+        for head in 0..NUM_KV_HEADS {
+            let head_stride = max_sequence_length * HEAD_DIM;
+            let src_start = head * head_stride + (sink_size + 1) * HEAD_DIM;
+            let src_end = head * head_stride + current_length * HEAD_DIM;
+            let dst_start = head * head_stride + sink_size * HEAD_DIM;
+            data.copy_within(src_start..src_end, dst_start);
+        }
+    }
+
+    fn shift_all_layers_left(&mut self) {
+        let current_length = self.valid_length;
+        for layer in 0..NUM_LAYERS {
+            Self::shift_single_layer_left(
+                &mut self.key_caches[layer],
+                current_length,
+                self.sink_size,
+                self.max_sequence_length,
+            );
+            Self::shift_single_layer_left(
+                &mut self.value_caches[layer],
+                current_length,
+                self.sink_size,
+                self.max_sequence_length,
+            );
+        }
+        self.valid_length = self.valid_length.saturating_sub(1);
+    }
+
+    /// Prepares the cache for a decode step.
+    ///
+    /// If the buffer is full, shifts the non-sink window left by one so the next token
+    /// has space to be written by the DirectML model.
+    pub fn prepare_decode_step(&mut self) {
+        if self.valid_length >= self.max_sequence_length {
+            self.shift_all_layers_left();
+        }
+    }
+
+    /// Marks one newly generated token as valid after a decode step completes.
+    pub fn complete_decode_step(&mut self) -> Result<(), String> {
+        if self.valid_length >= self.max_sequence_length {
+            return Err(format!(
+                "DML KV cache overflow: valid_length={} max_sequence_length={}",
+                self.valid_length, self.max_sequence_length
+            ));
+        }
+        self.valid_length += 1;
+        Ok(())
+    }
+
+    /// Marks prefill completion for `prompt_length` tokens.
+    pub fn complete_prefill(&mut self, prompt_length: usize) -> Result<(), String> {
+        if prompt_length > self.max_sequence_length {
+            return Err(format!(
+                "Prompt length {} exceeds DirectML max_sequence_length {}",
+                prompt_length, self.max_sequence_length
+            ));
+        }
+        self.valid_length = prompt_length;
+        Ok(())
+    }
+
+    #[inline]
+    pub fn valid_length(&self) -> usize {
+        self.valid_length
+    }
+
+    #[inline]
+    pub fn max_sequence_length(&self) -> usize {
+        self.max_sequence_length
+    }
+
+    #[inline]
+    pub fn key_array(&self, layer: usize) -> &Array4<f32> {
+        &self.key_caches[layer]
+    }
+
+    #[inline]
+    pub fn key_array_mut(&mut self, layer: usize) -> &mut Array4<f32> {
+        &mut self.key_caches[layer]
+    }
+
+    #[inline]
+    pub fn value_array(&self, layer: usize) -> &Array4<f32> {
+        &self.value_caches[layer]
+    }
+
+    #[inline]
+    pub fn value_array_mut(&mut self, layer: usize) -> &mut Array4<f32> {
+        &mut self.value_caches[layer]
+    }
+
+    pub fn clear(&mut self) {
+        self.valid_length = 0;
     }
 }
 
@@ -653,5 +808,48 @@ mod tests {
 
         let arr = cache.get_key_array(0);
         assert_eq!(arr.shape(), &[1, NUM_KV_HEADS, 5, HEAD_DIM]);
+    }
+
+    #[test]
+    fn test_dml_kv_cache_prefill_and_decode_lengths() {
+        let mut cache = DmlKvCache::new(8, 2);
+        cache.complete_prefill(5).expect("prefill should fit");
+        assert_eq!(cache.valid_length(), 5);
+
+        cache.prepare_decode_step();
+        cache.complete_decode_step().expect("decode should fit");
+        assert_eq!(cache.valid_length(), 6);
+
+        let overflow = cache
+            .complete_prefill(9)
+            .expect_err("prefill overflow should fail");
+        assert!(overflow.contains("exceeds"));
+    }
+
+    #[test]
+    fn test_dml_kv_cache_shift_preserves_sink_tokens() {
+        let mut cache = DmlKvCache::new(6, 2);
+
+        // Fill one layer/head with position markers in dim 0.
+        for pos in 0..6 {
+            cache.key_caches[0][[0, 0, pos, 0]] = pos as f32;
+            cache.value_caches[0][[0, 0, pos, 0]] = (100 + pos) as f32;
+        }
+        cache.complete_prefill(6).expect("prefill should fit");
+
+        cache.prepare_decode_step();
+
+        // Sink tokens remain at positions 0..sink_size-1.
+        assert_eq!(cache.key_caches[0][[0, 0, 0, 0]], 0.0);
+        assert_eq!(cache.key_caches[0][[0, 0, 1, 0]], 1.0);
+        // Sliding window shifted left by one: old pos 3 -> new pos 2.
+        assert_eq!(cache.key_caches[0][[0, 0, 2, 0]], 3.0);
+        assert_eq!(cache.value_caches[0][[0, 0, 2, 0]], 103.0);
+        assert_eq!(cache.valid_length(), 5);
+
+        cache
+            .complete_decode_step()
+            .expect("decode completion should restore full length");
+        assert_eq!(cache.valid_length(), 6);
     }
 }

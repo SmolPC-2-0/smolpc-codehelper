@@ -2,7 +2,6 @@
 ///
 /// Wraps `ort::Session` to provide a cleaner API for model loading and inference.
 /// Handles execution provider configuration and session options.
-
 use super::types::ModelInfo;
 use super::InferenceBackend;
 #[cfg(target_os = "windows")]
@@ -10,6 +9,11 @@ use ort::ep;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use std::path::Path;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SessionBackendOptions {
+    pub directml_device_id: Option<i32>,
+}
 
 /// Wrapper around ONNX Runtime session
 pub struct InferenceSession {
@@ -41,12 +45,23 @@ impl InferenceSession {
         model_path: P,
         backend: InferenceBackend,
     ) -> Result<Self, String> {
+        Self::new_with_backend_options(model_path, backend, SessionBackendOptions::default())
+    }
+
+    /// Load an ONNX model with an explicit backend selection and backend-specific options.
+    pub fn new_with_backend_options<P: AsRef<Path>>(
+        model_path: P,
+        backend: InferenceBackend,
+        options: SessionBackendOptions,
+    ) -> Result<Self, String> {
         let model_path = model_path.as_ref();
 
+        let directml_device_id = options.directml_device_id;
         log::info!(
-            "Loading ONNX model: {} (backend: {})",
+            "Loading ONNX model: {} (backend: {}, directml_device_id={:?})",
             model_path.display(),
-            backend.as_str()
+            backend.as_str(),
+            directml_device_id
         );
 
         let mut builder = Session::builder()
@@ -61,13 +76,20 @@ impl InferenceSession {
             InferenceBackend::DirectML => {
                 #[cfg(target_os = "windows")]
                 {
+                    let mut directml = ep::DirectML::default();
+                    if let Some(device_id) = directml_device_id {
+                        directml = directml.with_device_id(device_id);
+                    }
+
                     builder
-                        .with_execution_providers([ep::DirectML::default().build().error_on_failure()])
+                        .with_execution_providers([directml.build().error_on_failure()])
                         .map_err(|e| format!("Failed to register DirectML EP: {e}"))?
                         .with_parallel_execution(false)
                         .map_err(|e| format!("Failed to set DirectML execution mode: {e}"))?
                         .with_memory_pattern(false)
-                        .map_err(|e| format!("Failed to disable memory pattern for DirectML: {e}"))?
+                        .map_err(|e| {
+                            format!("Failed to disable memory pattern for DirectML: {e}")
+                        })?
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
@@ -122,7 +144,6 @@ impl InferenceSession {
     pub fn name(&self) -> &str {
         &self.model_name
     }
-
 }
 
 #[cfg(test)]

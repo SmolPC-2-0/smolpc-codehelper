@@ -46,6 +46,31 @@ PR scope audited: `origin/main...0c998fb` (commits `5f8cf76` -> `0c998fb`)
 
 ---
 
+### [P1] DirectML prefill fails at `GroupQueryAttention` on real hardware (forced-DML repro)
+**Where**
+- `src-tauri/src/inference/generator.rs:403-472`
+- `src-tauri/src/inference/session.rs:52-81`
+- Runtime repro on Windows (2026-02-26) with `SMOLPC_FORCE_EP=dml`
+
+**Issue**
+- DirectML session initialization and model load succeed.
+- The first prefill inference run fails at runtime with:
+  - `GroupQueryAttention` node failure
+  - `0x80070057` (`The parameter is incorrect`)
+  - surfaced as `Prefill inference failed: ...`
+
+**Impact**
+- Backend appears healthy at load time, but generation fails immediately on actual inference.
+- On affected machines, DirectML is not practically usable even when selection is forced.
+- User-visible behavior becomes: successful model load followed by generation failure.
+
+**Recommendation**
+- Add a DirectML preflight inference probe (minimal prompt) immediately after session creation.
+- Log DirectML prefill input tensor shapes/dtypes (`input_ids`, `attention_mask`, first KV tensors) to diagnose operator constraints.
+- Treat this specific DirectML runtime failure as immediate same-request CPU fallback with explicit diagnostic reason.
+
+---
+
 ### [P1] No adapter/device selection: DirectML defaults to GPU 0, which may be the wrong GPU
 **Where**
 - `src-tauri/src/inference/session.rs:65`

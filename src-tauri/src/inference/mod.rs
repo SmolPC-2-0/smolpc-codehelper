@@ -1,3 +1,5 @@
+pub mod backend;
+pub mod backend_store;
 /// ONNX Runtime inference engine module
 ///
 /// This module provides the core inference functionality for running LLMs via ONNX Runtime.
@@ -10,12 +12,11 @@
 /// - `generator`: Autoregressive generation loop with KV cache management
 /// - `sampler`: Token sampling strategies (greedy, temperature, top-k, top-p)
 /// - `types`: Shared type definitions
-
 pub mod generator;
-pub mod backend;
-pub mod backend_store;
+pub mod genai;
 pub mod input_builder;
 pub mod kv_cache;
+pub mod runtime_adapter;
 pub mod session;
 pub mod tokenizer;
 pub mod types;
@@ -26,6 +27,9 @@ pub mod benchmark;
 // Re-export commonly used types
 pub use backend::InferenceBackend;
 pub use generator::Generator;
+#[cfg(target_os = "windows")]
+pub use genai::GenAiDirectMlGenerator;
+pub use runtime_adapter::InferenceRuntimeAdapter;
 pub use session::InferenceSession;
 pub use tokenizer::TokenizerWrapper;
 
@@ -133,7 +137,10 @@ fn preload_directml_dll(resource_dir: Option<&Path>, ort_dylib_path: &Path) {
     }
 
     candidates.push(PathBuf::from("libs").join("DirectML.dll"));
-    candidates.push(PathBuf::from("DirectML.dll"));
+    let attempted_paths: Vec<String> = candidates
+        .iter()
+        .map(|candidate| candidate.display().to_string())
+        .collect();
 
     let mut seen = std::collections::HashSet::new();
     for candidate in candidates {
@@ -141,7 +148,7 @@ fn preload_directml_dll(resource_dir: Option<&Path>, ort_dylib_path: &Path) {
         if !seen.insert(key) {
             continue;
         }
-        if candidate != PathBuf::from("DirectML.dll") && !candidate.exists() {
+        if !candidate.exists() {
             continue;
         }
 
@@ -153,10 +160,17 @@ fn preload_directml_dll(resource_dir: Option<&Path>, ort_dylib_path: &Path) {
                 return;
             }
             Err(e) => {
-                log::debug!("Failed to preload DirectML.dll from {}: {}", candidate.display(), e);
+                log::debug!(
+                    "Failed to preload DirectML.dll from {}: {}",
+                    candidate.display(),
+                    e
+                );
             }
         }
     }
 
-    log::warn!("DirectML.dll preload failed; DirectML backend may be unavailable");
+    log::warn!(
+        "DirectML.dll preload failed from deterministic paths; DirectML backend may be unavailable. attempted_paths={:?}",
+        attempted_paths
+    );
 }

@@ -5,6 +5,7 @@
 # - onnxruntime.dll
 # - onnxruntime_providers_shared.dll
 # - DirectML.dll
+# - onnxruntime-genai.dll
 #
 # macOS/Linux use official ONNX Runtime release archives and bundle:
 # - libonnxruntime.dylib / libonnxruntime.so
@@ -24,11 +25,13 @@ set -euo pipefail
 ORT_VERSION="1.23.0"
 DML_ORT_PACKAGE_VERSION="1.23.0"
 DML_PACKAGE_VERSION="1.15.4"
+GENAI_DML_PACKAGE_VERSION="0.12.1"
 LIBS_DIR="src-tauri/libs"
 
 # SHA256 checksums
 SHA_DML_ORT_NUPKG="a33ec2382b3c440bab74042a135733bb6e5085f293b908d3997688a58fe307e7"
 SHA_DML_NUPKG="4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9"
+SHA_GENAI_DML_NUPKG="dcc2adff3a0e7e3adb4e4d4cccce71d21a2acc86a78b20dadd60255cc7043b77"
 SHA_ORT_MACOS_ARM64="8182db0ebb5caa21036a3c78178f17fabb98a7916bdab454467c8f4cf34bcfdf"
 SHA_ORT_MACOS_X64="a8e43edcaa349cbfc51578a7fc61ea2b88793ccf077b4bc65aca58999d20cf0f"
 SHA_ORT_LINUX_X64="b6deea7f2e22c10c043019f294a0ea4d2a6c0ae52a009c34847640db75ec5580"
@@ -137,10 +140,10 @@ mkdir -p "$LIBS_DIR"
 required_files=()
 case "$PLATFORM" in
     windows-x64)
-        required_files=("onnxruntime.dll" "onnxruntime_providers_shared.dll" "DirectML.dll")
+        required_files=("onnxruntime.dll" "onnxruntime_providers_shared.dll" "DirectML.dll" "onnxruntime-genai.dll")
         ;;
     windows-arm64)
-        required_files=("onnxruntime.dll" "onnxruntime_providers_shared.dll" "DirectML.dll")
+        required_files=("onnxruntime.dll" "onnxruntime_providers_shared.dll" "DirectML.dll" "onnxruntime-genai.dll")
         ;;
     macos-arm64|macos-x64)
         required_files=("libonnxruntime.dylib")
@@ -187,6 +190,8 @@ install_windows() {
     local ort_pkg_url="https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/${DML_ORT_PACKAGE_VERSION}/${ort_pkg_name}"
     local dml_pkg_name="microsoft.ai.directml.${DML_PACKAGE_VERSION}.nupkg"
     local dml_pkg_url="https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/${DML_PACKAGE_VERSION}/${dml_pkg_name}"
+    local genai_pkg_name="microsoft.ml.onnxruntimegenai.directml.${GENAI_DML_PACKAGE_VERSION}.nupkg"
+    local genai_pkg_url="https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntimegenai.directml/${GENAI_DML_PACKAGE_VERSION}/${genai_pkg_name}"
 
     download_with_checksum "$ort_pkg_url" "$tmp_dir/$ort_pkg_name" "$SHA_DML_ORT_NUPKG"
     unzip -q -o "$tmp_dir/$ort_pkg_name" -d "$tmp_dir/ort-pkg"
@@ -198,6 +203,11 @@ install_windows() {
     unzip -q -o "$tmp_dir/$dml_pkg_name" -d "$tmp_dir/dml-pkg"
 
     copy_required_file "$tmp_dir/dml-pkg/bin/${dml_arch}/DirectML.dll" "$LIBS_DIR/DirectML.dll"
+
+    download_with_checksum "$genai_pkg_url" "$tmp_dir/$genai_pkg_name" "$SHA_GENAI_DML_NUPKG"
+    unzip -q -o "$tmp_dir/$genai_pkg_name" -d "$tmp_dir/genai-pkg"
+
+    copy_required_file "$tmp_dir/genai-pkg/runtimes/${runtime_arch}/native/onnxruntime-genai.dll" "$LIBS_DIR/onnxruntime-genai.dll"
 }
 
 install_ort_archive() {

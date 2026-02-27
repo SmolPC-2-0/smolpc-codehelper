@@ -10,7 +10,6 @@
 /// - Automatic downloads from Hugging Face Hub
 /// - Model variant selection based on hardware
 /// - Storage management
-
 pub mod loader;
 pub mod registry;
 pub mod runtime_spec;
@@ -18,6 +17,6 @@ pub mod runtime_spec;
 // Phase 5: Download manager
 // pub mod downloader;
 
-pub use loader::ModelLoader;
+pub use loader::{ModelArtifactBackend, ModelLoader};
 pub use registry::ModelRegistry;
-pub use runtime_spec::ModelRuntimeSpec;
+pub use runtime_spec::{KvInputSchema, ModelRuntimeSpec, RuntimeBackendTarget};
