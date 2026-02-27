@@ -8,9 +8,10 @@
 
 	interface Props {
 		visible: boolean;
+		onClose?: () => void;
 	}
 
-	let { visible = $bindable() }: Props = $props();
+	let { visible, onClose }: Props = $props();
 
 	let benchmarksDir = $state<string>('');
 	let selectedIterations = $state<number>(1); // Default to 1 for faster testing
@@ -106,14 +107,12 @@
 	}
 
 	function closePanel() {
-		visible = false;
+		onClose?.();
 	}
 </script>
 
 {#if visible}
-	<div
-		class="border-border bg-background fixed right-4 bottom-4 z-50 w-96 rounded-lg border p-4 shadow-lg"
-	>
+	<div class="benchmark-panel">
 		<div class="mb-4 flex items-center justify-between">
 			<h3 class="text-lg font-semibold">Benchmark Suite</h3>
 			<button
@@ -191,8 +190,10 @@
 
 			<!-- Iterations Selector -->
 			<div class="space-y-2">
-				<label class="text-muted-foreground text-xs">Iterations (12 prompts each)</label>
-				<div class="flex gap-2">
+				<p id="benchmark-iterations-label" class="text-muted-foreground text-xs">
+					Iterations (12 prompts each)
+				</p>
+				<div class="flex gap-2" role="group" aria-labelledby="benchmark-iterations-label">
 					<button
 						onclick={() => (selectedIterations = 1)}
 						class={`flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
@@ -272,3 +273,36 @@
 		</div>
 	</div>
 {/if}
+
+<style>
+	.benchmark-panel {
+		position: fixed;
+		right: 1rem;
+		bottom: 1rem;
+		z-index: 50;
+		width: min(24rem, calc(100vw - 1.6rem));
+		max-height: min(80vh, 42rem);
+		overflow-y: auto;
+		border-radius: calc(var(--radius-xl) + 6px);
+		border: 1px solid var(--outline-soft);
+		padding: 1rem;
+		background:
+			linear-gradient(
+				180deg,
+				color-mix(in srgb, var(--surface-floating) 95%, black),
+				color-mix(in srgb, var(--surface-subtle) 96%, black)
+			),
+			var(--surface-floating);
+		box-shadow: var(--shadow-strong);
+		backdrop-filter: blur(14px);
+	}
+
+	@media (max-width: 820px) {
+		.benchmark-panel {
+			right: 0.8rem;
+			left: 0.8rem;
+			bottom: 0.8rem;
+			width: auto;
+		}
+	}
+</style>

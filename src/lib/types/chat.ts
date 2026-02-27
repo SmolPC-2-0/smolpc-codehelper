@@ -13,6 +13,8 @@ export interface Chat {
 	createdAt: number;
 	updatedAt: number;
 	model: string;
+	pinned?: boolean;
+	archived?: boolean;
 }
 
 export interface ChatGroup {

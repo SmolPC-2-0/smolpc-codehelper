@@ -10,11 +10,30 @@ pub struct ModelArchitecture {
     pub head_dim: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeBackendTarget {
+    Cpu,
+    DirectML,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KvInputSchema {
+    /// CPU path: dynamic cache length and explicit attention mask.
+    AttentionMask { attention_mask: &'static str },
+    /// DirectML path: fixed KV cache window with explicit sequence length counters.
+    SeqlensK {
+        seqlens_k: &'static str,
+        total_sequence_length: &'static str,
+        max_sequence_length: usize,
+    },
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ModelIoSpec {
     pub input_ids: &'static str,
-    pub attention_mask: &'static str,
+    pub position_ids: Option<&'static str>,
     pub logits: &'static str,
+    pub kv_input_schema: KvInputSchema,
     pub past_key_template: &'static str,
     pub past_value_template: &'static str,
     pub present_key_template: &'static str,
@@ -24,6 +43,7 @@ pub struct ModelIoSpec {
 #[derive(Debug, Clone, Copy)]
 pub struct ModelRuntimeSpec {
     pub model_id: &'static str,
+    pub backend_target: RuntimeBackendTarget,
     pub architecture: ModelArchitecture,
     pub io: ModelIoSpec,
     pub stop_token_ids: &'static [u32],
@@ -81,11 +101,48 @@ impl ModelRuntimeSpec {
         if self.io.input_ids.trim().is_empty() {
             return Err("Runtime spec must define a non-empty input_ids tensor name".to_string());
         }
-        if self.io.attention_mask.trim().is_empty() {
-            return Err("Runtime spec must define a non-empty attention_mask tensor name".to_string());
+        if let Some(position_ids) = self.io.position_ids {
+            if position_ids.trim().is_empty() {
+                return Err(
+                    "Runtime spec must define a non-empty position_ids tensor name".to_string(),
+                );
+            }
         }
         if self.io.logits.trim().is_empty() {
             return Err("Runtime spec must define a non-empty logits tensor name".to_string());
+        }
+        match self.io.kv_input_schema {
+            KvInputSchema::AttentionMask { attention_mask } => {
+                if attention_mask.trim().is_empty() {
+                    return Err(
+                        "Runtime spec must define a non-empty attention_mask tensor name"
+                            .to_string(),
+                    );
+                }
+            }
+            KvInputSchema::SeqlensK {
+                seqlens_k,
+                total_sequence_length,
+                max_sequence_length,
+            } => {
+                if seqlens_k.trim().is_empty() {
+                    return Err(
+                        "Runtime spec must define a non-empty seqlens_k tensor name".to_string()
+                    );
+                }
+                if total_sequence_length.trim().is_empty() {
+                    return Err(
+                        "Runtime spec must define a non-empty total_sequence_length tensor name"
+                            .to_string(),
+                    );
+                }
+                if max_sequence_length == 0 {
+                    return Err(
+                        "Runtime spec for SeqlensK schema must define a positive max_sequence_length"
+                            .to_string(),
+                    );
+                }
+            }
         }
 
         for (label, template) in [
@@ -112,6 +169,7 @@ mod tests {
     fn make_spec() -> ModelRuntimeSpec {
         ModelRuntimeSpec {
             model_id: "test-model",
+            backend_target: RuntimeBackendTarget::Cpu,
             architecture: ModelArchitecture {
                 num_layers: 2,
                 num_kv_heads: 2,
@@ -119,8 +177,11 @@ mod tests {
             },
             io: ModelIoSpec {
                 input_ids: "input_ids",
-                attention_mask: "attention_mask",
+                position_ids: None,
                 logits: "logits",
+                kv_input_schema: KvInputSchema::AttentionMask {
+                    attention_mask: "attention_mask",
+                },
                 past_key_template: "past_key_values.{layer}.key",
                 past_value_template: "past_key_values.{layer}.value",
                 present_key_template: "present.{layer}.key",
@@ -149,7 +210,9 @@ mod tests {
     fn test_validate_rejects_empty_model_id() {
         let mut spec = make_spec();
         spec.model_id = "";
-        let err = spec.validate().expect_err("empty model_id should fail validation");
+        let err = spec
+            .validate()
+            .expect_err("empty model_id should fail validation");
         assert!(err.contains("model_id"));
     }
 
@@ -157,7 +220,24 @@ mod tests {
     fn test_validate_rejects_empty_logits_name() {
         let mut spec = make_spec();
         spec.io.logits = "  ";
-        let err = spec.validate().expect_err("empty logits tensor name should fail validation");
+        let err = spec
+            .validate()
+            .expect_err("empty logits tensor name should fail validation");
         assert!(err.contains("logits"));
+    }
+
+    #[test]
+    fn test_validate_rejects_zero_dml_max_sequence_length() {
+        let mut spec = make_spec();
+        spec.backend_target = RuntimeBackendTarget::DirectML;
+        spec.io.kv_input_schema = KvInputSchema::SeqlensK {
+            seqlens_k: "seqlens_k",
+            total_sequence_length: "total_sequence_length",
+            max_sequence_length: 0,
+        };
+        let err = spec
+            .validate()
+            .expect_err("invalid dml max sequence length");
+        assert!(err.contains("max_sequence_length"));
     }
 }

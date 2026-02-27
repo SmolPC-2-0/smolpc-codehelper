@@ -13,6 +13,13 @@ fn non_zero_u32(val: u32) -> Option<u32> {
     (val > 0).then_some(val)
 }
 
+fn non_empty_string(value: Option<String>) -> Option<String> {
+    value.and_then(|v| {
+        let trimmed = v.trim();
+        (!trimmed.is_empty()).then_some(trimmed.to_string())
+    })
+}
+
 /// Main entry point for hardware detection using hardware-query crate
 /// Detects CPU, GPU, and NPU information offline
 pub async fn detect_all() -> Result<HardwareInfo, HardwareError> {
@@ -141,6 +148,8 @@ fn convert_gpu_info(hw_info: &hardware_query::HardwareInfo) -> Vec<GpuInfo> {
                 vendor,
                 backend: backend.to_string(),
                 device_type,
+                driver_version: non_empty_string(gpu.driver_version.clone()),
+                pci_device_id: non_empty_string(gpu.pci_device_id.clone()),
                 vram_mb,
                 temperature_c: gpu.temperature().map(|t| t as u32),
                 utilization_percent: gpu.usage_percent().map(|u| u as u32),

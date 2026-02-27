@@ -1,14 +1,10 @@
-
-
 use super::metrics::{BenchmarkMetrics, BenchmarkResults};
 use csv::Writer;
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
 
-
 const FLUSH_INTERVAL: usize = 10;
-
 
 /// CSV-specific format for benchmark metrics with proper column names and ordering
 /// This ensures automatic column ordering via serde and prevents manual column mismatches
@@ -69,7 +65,9 @@ impl From<&BenchmarkMetrics> for CsvMetricRow {
 
 /// Get the benchmarks directory path using Tauri's app data directory
 /// This provides a stable, cross-platform location that doesn't depend on CWD
-pub fn get_benchmarks_dir_with_app_handle(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub fn get_benchmarks_dir_with_app_handle(
+    app_handle: &tauri::AppHandle,
+) -> Result<PathBuf, String> {
     use tauri::Manager;
 
     let app_data_dir = app_handle
@@ -78,24 +76,6 @@ pub fn get_benchmarks_dir_with_app_handle(app_handle: &tauri::AppHandle) -> Resu
         .map_err(|e| format!("Failed to get app data directory: {e}"))?;
 
     let benchmarks_dir = app_data_dir.join("benchmarks");
-
-    // Create directory if it doesn't exist
-    if !benchmarks_dir.exists() {
-        fs::create_dir_all(&benchmarks_dir)
-            .map_err(|e| format!("Failed to create benchmarks directory: {e}"))?;
-    }
-
-    Ok(benchmarks_dir)
-}
-
-/// Legacy function for backwards compatibility and tests
-/// Prefer get_benchmarks_dir_with_app_handle in production code
-#[deprecated(note = "Use get_benchmarks_dir_with_app_handle for stable paths")]
-pub fn get_benchmarks_dir() -> Result<PathBuf, String> {
-    let current_dir = std::env::current_dir()
-        .map_err(|e| format!("Failed to get current directory: {e}"))?;
-
-    let benchmarks_dir = current_dir.join("benchmarks");
 
     // Create directory if it doesn't exist
     if !benchmarks_dir.exists() {
@@ -123,8 +103,8 @@ pub fn export_to_csv(
     let filepath = benchmarks_dir.join(&filename);
 
     // Create CSV writer
-    let mut wtr = Writer::from_path(&filepath)
-        .map_err(|e| format!("Failed to create CSV file: {e}"))?;
+    let mut wtr =
+        Writer::from_path(&filepath).map_err(|e| format!("Failed to create CSV file: {e}"))?;
 
     // Write all metrics using serde serialization (automatic headers and column ordering)
     // Flush periodically for crash safety
@@ -232,16 +212,25 @@ mod tests {
     use super::*;
     use crate::benchmark::metrics::{BenchmarkMetrics, TimingSource};
 
-    /// Helper function for tests that uses the deprecated path function
-    /// Tests don't have access to AppHandle, so they use the legacy CWD-based path
-    #[allow(deprecated)]
+    fn test_benchmarks_dir() -> Result<PathBuf, String> {
+        let current_dir =
+            std::env::current_dir().map_err(|e| format!("Failed to get current directory: {e}"))?;
+        let benchmarks_dir = current_dir.join("benchmarks");
+        if !benchmarks_dir.exists() {
+            fs::create_dir_all(&benchmarks_dir)
+                .map_err(|e| format!("Failed to create benchmarks directory: {e}"))?;
+        }
+        Ok(benchmarks_dir)
+    }
+
+    /// Tests don't have access to AppHandle, so they use a local CWD-based helper.
     fn export_to_csv_test(results: &BenchmarkResults, prefix: &str) -> Result<PathBuf, String> {
-        let benchmarks_dir = get_benchmarks_dir()?;
+        let benchmarks_dir = test_benchmarks_dir()?;
         let filename = generate_filename(prefix);
         let filepath = benchmarks_dir.join(&filename);
 
-        let mut wtr = Writer::from_path(&filepath)
-            .map_err(|e| format!("Failed to create CSV file: {e}"))?;
+        let mut wtr =
+            Writer::from_path(&filepath).map_err(|e| format!("Failed to create CSV file: {e}"))?;
 
         for (index, metric) in results.metrics.iter().enumerate() {
             let csv_row = CsvMetricRow::from(metric);
@@ -249,8 +238,9 @@ mod tests {
                 .map_err(|e| format!("Failed to serialize metric row: {e}"))?;
 
             if (index + 1) % FLUSH_INTERVAL == 0 {
-                wtr.flush()
-                    .map_err(|e| format!("Failed to flush CSV writer during periodic flush: {e}"))?;
+                wtr.flush().map_err(|e| {
+                    format!("Failed to flush CSV writer during periodic flush: {e}")
+                })?;
             }
         }
 
@@ -357,7 +347,10 @@ mod tests {
 
         // Should contain timestamp components (year-month-day_hour-minute-second)
         let parts: Vec<&str> = filename.split('-').collect();
-        assert!(parts.len() >= 6, "Filename should contain date/time components");
+        assert!(
+            parts.len() >= 6,
+            "Filename should contain date/time components"
+        );
     }
 
     #[test]
@@ -448,7 +441,7 @@ mod tests {
 
     #[test]
     fn test_get_benchmarks_dir_creates_directory() {
-        let result = get_benchmarks_dir();
+        let result = test_benchmarks_dir();
         assert!(result.is_ok(), "Should create benchmarks directory");
 
         let path = result.unwrap();

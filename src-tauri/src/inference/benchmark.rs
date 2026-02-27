@@ -37,18 +37,45 @@ impl BenchmarkResult {
         println!("\n╔══════════════════════════════════════════════════════════════╗");
         println!("║ BENCHMARK: {:^49} ║", self.name);
         println!("╠══════════════════════════════════════════════════════════════╣");
-        println!("║ Prompt tokens:         {:>8}                              ║", self.prompt_tokens);
-        println!("║ Generated tokens:      {:>8}                              ║", self.generated_tokens);
+        println!(
+            "║ Prompt tokens:         {:>8}                              ║",
+            self.prompt_tokens
+        );
+        println!(
+            "║ Generated tokens:      {:>8}                              ║",
+            self.generated_tokens
+        );
         println!("╠══════════════════════════════════════════════════════════════╣");
-        println!("║ Prefill time:          {:>8.2} ms                          ║", self.prefill_time_ms);
-        println!("║ Decode time:           {:>8.2} ms                          ║", self.decode_time_ms);
-        println!("║ Total time:            {:>8.2} ms                          ║", self.total_time_ms);
+        println!(
+            "║ Prefill time:          {:>8.2} ms                          ║",
+            self.prefill_time_ms
+        );
+        println!(
+            "║ Decode time:           {:>8.2} ms                          ║",
+            self.decode_time_ms
+        );
+        println!(
+            "║ Total time:            {:>8.2} ms                          ║",
+            self.total_time_ms
+        );
         println!("╠══════════════════════════════════════════════════════════════╣");
-        println!("║ Time to first token:   {:>8.2} ms                          ║", self.time_to_first_token_ms);
-        println!("║ Overall tok/s:         {:>8.2}                              ║", self.tokens_per_second);
-        println!("║ Decode tok/s:          {:>8.2} (excludes prefill)          ║", self.decode_tokens_per_second);
+        println!(
+            "║ Time to first token:   {:>8.2} ms                          ║",
+            self.time_to_first_token_ms
+        );
+        println!(
+            "║ Overall tok/s:         {:>8.2}                              ║",
+            self.tokens_per_second
+        );
+        println!(
+            "║ Decode tok/s:          {:>8.2} (excludes prefill)          ║",
+            self.decode_tokens_per_second
+        );
         println!("╠══════════════════════════════════════════════════════════════╣");
-        println!("║ KV Cache memory:       {:>8.2} MB                           ║", self.memory_usage_mb);
+        println!(
+            "║ KV Cache memory:       {:>8.2} MB                           ║",
+            self.memory_usage_mb
+        );
         println!("╚══════════════════════════════════════════════════════════════╝\n");
     }
 }
@@ -130,7 +157,10 @@ mod tests {
     use crate::models::ModelRegistry;
 
     fn runtime_spec() -> crate::models::ModelRuntimeSpec {
-        ModelRegistry::runtime_spec("qwen2.5-coder-1.5b")
+        ModelRegistry::runtime_spec_for_backend(
+            "qwen2.5-coder-1.5b",
+            crate::models::RuntimeBackendTarget::Cpu,
+        )
             .expect("Missing runtime spec for qwen2.5-coder-1.5b")
     }
 
@@ -148,7 +178,10 @@ mod tests {
         println!("\n=== Per-Operation Analysis ===\n");
 
         // Calculate per-op times
-        if let Some((_, append_100)) = results.iter().find(|(n, _)| n.contains("100 appends") && !n.contains("shift")) {
+        if let Some((_, append_100)) = results
+            .iter()
+            .find(|(n, _)| n.contains("100 appends") && !n.contains("shift"))
+        {
             let per_append_us = append_100.as_micros() as f64 / 100.0;
             println!("Single append (no shift):    {:>8.2} µs", per_append_us);
         }
@@ -161,7 +194,10 @@ mod tests {
         if let Some((_, to_array)) = results.iter().find(|(n, _)| n.contains("to_array")) {
             let per_layer_us = to_array.as_micros() as f64 / 56.0;
             println!("Single to_array():           {:>8.2} µs", per_layer_us);
-            println!("56× to_array() total:        {:>8.2} ms", to_array.as_secs_f64() * 1000.0);
+            println!(
+                "56× to_array() total:        {:>8.2} ms",
+                to_array.as_secs_f64() * 1000.0
+            );
         }
     }
 
@@ -191,9 +227,16 @@ mod tests {
             times.push(bench_decode_overhead(&cache));
         }
 
-        let avg_ms = times.iter().map(|d| d.as_secs_f64() * 1000.0).sum::<f64>() / times.len() as f64;
-        let min_ms = times.iter().map(|d| d.as_secs_f64() * 1000.0).fold(f64::INFINITY, f64::min);
-        let max_ms = times.iter().map(|d| d.as_secs_f64() * 1000.0).fold(f64::NEG_INFINITY, f64::max);
+        let avg_ms =
+            times.iter().map(|d| d.as_secs_f64() * 1000.0).sum::<f64>() / times.len() as f64;
+        let min_ms = times
+            .iter()
+            .map(|d| d.as_secs_f64() * 1000.0)
+            .fold(f64::INFINITY, f64::min);
+        let max_ms = times
+            .iter()
+            .map(|d| d.as_secs_f64() * 1000.0)
+            .fold(f64::NEG_INFINITY, f64::max);
 
         println!("Cache size: {} tokens", cache.physical_length());
         println!("Overhead per decode step:");
@@ -216,7 +259,8 @@ mod tests {
         let tokenizer_path = "models/qwen2.5-coder-1.5b/tokenizer.json";
 
         let session = InferenceSession::new(model_path).expect("Failed to load model");
-        let tokenizer = TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
+        let tokenizer =
+            TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
         let generator = Generator::with_context(session, tokenizer, runtime_spec(), 2048, 4)
             .expect("Failed to create generator");
@@ -241,23 +285,24 @@ mod tests {
             let prompt_tokens = generator.tokenizer().encode(prompt, true).unwrap().len();
 
             let mut token_count = 0;
-            let decode_start: Arc<std::sync::Mutex<Option<Instant>>> = Arc::new(std::sync::Mutex::new(None));
+            let decode_start: Arc<std::sync::Mutex<Option<Instant>>> =
+                Arc::new(std::sync::Mutex::new(None));
             let decode_start_clone = decode_start.clone();
 
-            let metrics = generator.generate_stream(
-                prompt,
-                Some(config),
-                cancelled.clone(),
-                |_token| {
+            let metrics = generator
+                .generate_stream(prompt, Some(config), cancelled.clone(), |_token| {
                     if token_count == 0 {
                         let mut ds = decode_start_clone.lock().unwrap();
                         *ds = Some(Instant::now());
                     }
                     token_count += 1;
-                }
-            ).await.expect("Generation failed");
+                })
+                .await
+                .expect("Generation failed");
 
-            let decode_time = decode_start.lock().unwrap()
+            let decode_time = decode_start
+                .lock()
+                .unwrap()
                 .map(|s| Instant::now().duration_since(s))
                 .unwrap_or(Duration::ZERO);
             let prefill_time = metrics.time_to_first_token_ms.unwrap_or(0) as f64;
@@ -276,7 +321,8 @@ mod tests {
                 } else {
                     0.0
                 },
-                memory_usage_mb: (2 * NUM_LAYERS * NUM_KV_HEADS * 2048 * HEAD_DIM * 4) as f64 / (1024.0 * 1024.0),
+                memory_usage_mb: (2 * NUM_LAYERS * NUM_KV_HEADS * 2048 * HEAD_DIM * 4) as f64
+                    / (1024.0 * 1024.0),
             };
 
             result.print_report();
@@ -299,7 +345,8 @@ mod tests {
 
         for ctx_size in context_sizes {
             let session = InferenceSession::new(model_path).expect("Failed to load model");
-            let tokenizer = TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
+            let tokenizer =
+                TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
             let generator =
                 Generator::with_context(session, tokenizer, runtime_spec(), ctx_size, 4)
@@ -314,14 +361,13 @@ mod tests {
                 ..Default::default()
             };
 
-            let metrics = generator.generate_stream(
-                "def factorial(n):",
-                Some(config),
-                cancelled.clone(),
-                |_| {}
-            ).await.expect("Generation failed");
+            let metrics = generator
+                .generate_stream("def factorial(n):", Some(config), cancelled.clone(), |_| {})
+                .await
+                .expect("Generation failed");
 
-            println!("Context size: {:>5} | Tokens: {:>3} | tok/s: {:>6.2} | TTFT: {:>6}ms",
+            println!(
+                "Context size: {:>5} | Tokens: {:>3} | tok/s: {:>6.2} | TTFT: {:>6}ms",
                 ctx_size,
                 metrics.total_tokens,
                 metrics.tokens_per_second,
@@ -343,7 +389,8 @@ mod tests {
         let tokenizer_path = "models/qwen2.5-coder-1.5b/tokenizer.json";
 
         let session = InferenceSession::new(model_path).expect("Failed to load model");
-        let tokenizer = TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
+        let tokenizer =
+            TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
         let generator = Generator::with_context(session, tokenizer, runtime_spec(), 512, 4)
             .expect("Failed to create generator");
@@ -361,16 +408,13 @@ mod tests {
             ..Default::default()
         };
 
-        let _ = generator.generate_stream(
-            "def fibonacci(n):",
-            Some(config),
-            cancelled,
-            |_token| {
+        let _ = generator
+            .generate_stream("def fibonacci(n):", Some(config), cancelled, |_token| {
                 let now = Instant::now();
                 token_times.push(now.duration_since(last_time));
                 last_time = now;
-            }
-        ).await;
+            })
+            .await;
 
         println!("Token-by-token timing (first 20 tokens):");
         println!("{:>5} {:>10}", "Token", "Time (ms)");
@@ -378,18 +422,27 @@ mod tests {
 
         for (i, time) in token_times.iter().take(20).enumerate() {
             let marker = if i == 0 { " (TTFT)" } else { "" };
-            println!("{:>5} {:>10.2}{}", i + 1, time.as_secs_f64() * 1000.0, marker);
+            println!(
+                "{:>5} {:>10.2}{}",
+                i + 1,
+                time.as_secs_f64() * 1000.0,
+                marker
+            );
         }
 
         if token_times.len() > 1 {
             let decode_times: Vec<_> = token_times.iter().skip(1).collect();
-            let avg_decode = decode_times.iter()
+            let avg_decode = decode_times
+                .iter()
                 .map(|d| d.as_secs_f64() * 1000.0)
-                .sum::<f64>() / decode_times.len() as f64;
-            let min_decode = decode_times.iter()
+                .sum::<f64>()
+                / decode_times.len() as f64;
+            let min_decode = decode_times
+                .iter()
                 .map(|d| d.as_secs_f64() * 1000.0)
                 .fold(f64::INFINITY, f64::min);
-            let max_decode = decode_times.iter()
+            let max_decode = decode_times
+                .iter()
                 .map(|d| d.as_secs_f64() * 1000.0)
                 .fold(f64::NEG_INFINITY, f64::max);
 

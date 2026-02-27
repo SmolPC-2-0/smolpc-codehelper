@@ -17,7 +17,8 @@ An offline AI-powered coding assistant for secondary school students (ages 11-18
 - ⚡ **Streaming Responses** - See AI responses as they're generated
 - 🎯 **Context-Aware** - Optional conversation history for follow-up questions
 - 🌐 **Background Generation** - Switch chats while responses are generating
-- 🎨 **Modern UI** - Clean, responsive interface with dark mode support
+- 🎨 **Workbench UI** - Bold, structured workspace layout for sustained coding sessions
+- 🌓 **Theme Modes** - Fully supports `system`, `light`, and `dark` themes
 - 🔄 **Multiple Models** - Switch between different coding models
 - 💾 **Auto-Save** - Chats persist across sessions
 - 🔍 **Hardware Detection** - Automatic CPU, GPU, Memory, Storage, and NPU detection
@@ -371,20 +372,28 @@ Executable size: ~8-12MB (Ollama must still be installed separately)
 ```
 smolpc-codehelper/
 ├── src/                          # Frontend (Svelte 5)
-│   ├── App.svelte               # Main application component
+│   ├── App.svelte               # Orchestration shell
+│   ├── app.css                  # Design tokens, typography, motion system
 │   ├── lib/
 │   │   ├── components/          # UI components
 │   │   │   ├── Sidebar.svelte  # Chat list sidebar
 │   │   │   ├── ChatMessage.svelte
 │   │   │   ├── ChatInput.svelte
+│   │   │   ├── ThemeSelector.svelte
+│   │   │   ├── chat/            # ConversationView, ComposerBar, WelcomeState
+│   │   │   ├── layout/          # WorkspaceHeader, WorkspaceControls
 │   │   │   ├── HardwarePanel.svelte      # Hardware info display
 │   │   │   ├── HardwareIndicator.svelte  # Status bar indicator
 │   │   │   └── ...
 │   │   ├── stores/              # State management
 │   │   │   ├── chats.svelte.ts    # Chat state (Svelte 5 runes)
 │   │   │   ├── settings.svelte.ts
-│   │   │   ├── ollama.svelte.ts
+│   │   │   ├── inference.svelte.ts
+│   │   │   ├── ui.svelte.ts
 │   │   │   └── hardware.svelte.ts # Hardware detection state
+│   │   ├── utils/
+│   │   │   ├── theme.ts         # Runtime theme application (`system`/`light`/`dark`)
+│   │   │   └── ...
 │   │   └── types/               # TypeScript types
 │   │       ├── hardware.ts      # Hardware type definitions
 │   │       └── ...
@@ -695,6 +704,16 @@ If responses aren't helpful:
 ---
 
 ## 🔄 Recent Updates
+
+### Version 2.3.0 (In Progress - February 2026)
+
+**Frontend Revamp (Workbench Bold):**
+- ✅ Deep componentized shell (`WorkspaceHeader`, `WorkspaceControls`, `ConversationView`, `ComposerBar`, `WelcomeState`)
+- ✅ New UI-only store (`ui.svelte.ts`) to separate visual state from business stores
+- ✅ Semantic token refresh in `app.css` (color system, typography, motion, reduced-motion support)
+- ✅ Runtime theme engine (`system`/`light`/`dark`) with startup application and OS sync
+- ✅ Core chat surface redesign (sidebar, message cards, composer, quick examples, status/model/context controls)
+- ✅ Legacy static frontend path removed (`src/index.html`, `src/main.js`, `src/styles.css`)
 
 ### Version 2.2.0 (Current - January 2025)
 

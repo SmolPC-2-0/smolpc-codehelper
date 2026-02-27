@@ -2,11 +2,18 @@
 ///
 /// Wraps `ort::Session` to provide a cleaner API for model loading and inference.
 /// Handles execution provider configuration and session options.
-
 use super::types::ModelInfo;
+use super::InferenceBackend;
+#[cfg(target_os = "windows")]
+use ort::ep;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use std::path::Path;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SessionBackendOptions {
+    pub directml_device_id: Option<i32>,
+}
 
 /// Wrapper around ONNX Runtime session
 pub struct InferenceSession {
@@ -29,19 +36,70 @@ impl InferenceSession {
     /// Phase 2: Add GPU EP selection (CUDA, DirectML)
     /// Phase 3: Add Intel OpenVINO EP (Core Ultra NPU)
     /// Phase 4: Add Qualcomm QNN EP (Snapdragon X Elite NPU)
+    #[cfg(test)]
     pub fn new<P: AsRef<Path>>(model_path: P) -> Result<Self, String> {
+        Self::new_with_backend(model_path, InferenceBackend::Cpu)
+    }
+
+    /// Load an ONNX model with an explicit backend selection.
+    pub fn new_with_backend<P: AsRef<Path>>(
+        model_path: P,
+        backend: InferenceBackend,
+    ) -> Result<Self, String> {
+        Self::new_with_backend_options(model_path, backend, SessionBackendOptions::default())
+    }
+
+    /// Load an ONNX model with an explicit backend selection and backend-specific options.
+    pub fn new_with_backend_options<P: AsRef<Path>>(
+        model_path: P,
+        backend: InferenceBackend,
+        options: SessionBackendOptions,
+    ) -> Result<Self, String> {
         let model_path = model_path.as_ref();
 
-        log::info!("Loading ONNX model: {}", model_path.display());
+        let directml_device_id = options.directml_device_id;
+        log::info!(
+            "Loading ONNX model: {} (backend: {}, directml_device_id={:?})",
+            model_path.display(),
+            backend.as_str(),
+            directml_device_id
+        );
 
-        // Create session with CPU execution provider
-        // Note: ort will automatically find onnxruntime.dll in system PATH
-        let session = Session::builder()
+        let mut builder = Session::builder()
             .map_err(|e| format!("Failed to create session builder: {e}"))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| format!("Failed to set optimization level: {e}"))?
-            .with_intra_threads(4)
-            .map_err(|e| format!("Failed to set thread count: {e}"))?
+            .map_err(|e| format!("Failed to set optimization level: {e}"))?;
+
+        builder = match backend {
+            InferenceBackend::Cpu => builder
+                .with_intra_threads(4)
+                .map_err(|e| format!("Failed to set CPU thread count: {e}"))?,
+            InferenceBackend::DirectML => {
+                #[cfg(target_os = "windows")]
+                {
+                    let mut directml = ep::DirectML::default();
+                    if let Some(device_id) = directml_device_id {
+                        directml = directml.with_device_id(device_id);
+                    }
+
+                    builder
+                        .with_execution_providers([directml.build().error_on_failure()])
+                        .map_err(|e| format!("Failed to register DirectML EP: {e}"))?
+                        .with_parallel_execution(false)
+                        .map_err(|e| format!("Failed to set DirectML execution mode: {e}"))?
+                        .with_memory_pattern(false)
+                        .map_err(|e| {
+                            format!("Failed to disable memory pattern for DirectML: {e}")
+                        })?
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    return Err("DirectML backend is only supported on Windows".to_string());
+                }
+            }
+        };
+
+        let session = builder
             .commit_from_file(model_path)
             .map_err(|e| format!("Failed to load model from file: {e}"))?;
 
@@ -51,8 +109,11 @@ impl InferenceSession {
             .unwrap_or("unknown")
             .to_string();
 
-        log::info!("Model loaded successfully: {}", model_name);
-        log::info!("Available execution providers: CPU (Phase 0)");
+        log::info!(
+            "Model loaded successfully: {} (backend: {})",
+            model_name,
+            backend.as_str()
+        );
 
         Ok(Self {
             session,
@@ -66,24 +127,19 @@ impl InferenceSession {
             name: self.model_name.clone(),
             inputs: self
                 .session
-                .inputs
+                .inputs()
                 .iter()
-                .map(|input| input.name.clone())
+                .map(|input| input.name().to_string())
                 .collect(),
             outputs: self
                 .session
-                .outputs
+                .outputs()
                 .iter()
-                .map(|output| output.name.clone())
+                .map(|output| output.name().to_string())
                 .collect(),
         }
     }
 
-    /// Get model name
-    #[allow(dead_code)]
-    pub fn name(&self) -> &str {
-        &self.model_name
-    }
 }
 
 #[cfg(test)]

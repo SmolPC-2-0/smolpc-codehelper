@@ -5,7 +5,7 @@ description = "An AI-powered coding assistant for students, powered by local Oll
 authors = ["SmolPC Team"]
 license = "MIT"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.88"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -38,16 +38,22 @@ chrono = "0.4"
 hardware-query = "0.2.1"
 
 # ONNX Runtime inference
-ort = { version = "=2.0.0-rc.10", features = ["load-dynamic", "ndarray"] }
+ort = { version = "=2.0.0-rc.11", features = ["load-dynamic", "ndarray", "half", "directml"] }
 
 # Tokenization
 tokenizers = "0.20"
 
 # Tensor operations
-ndarray = "0.16"
+ndarray = "0.17"
+half = "2.4"
 
 # Sampling utilities
 rand = "0.8"
 rand_distr = "0.4"
+libloading = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59.0", features = ["Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 tempfile = "3.13"

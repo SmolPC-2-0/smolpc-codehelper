@@ -17,14 +17,17 @@
 /// # References
 /// - [StreamingLLM Paper](https://arxiv.org/abs/2309.17453)
 use super::input_builder::InputBuilder;
-use super::kv_cache::{KVCache, HEAD_DIM, NUM_KV_HEADS, NUM_LAYERS};
+use super::kv_cache::{DmlKvCache, KVCache, HEAD_DIM, NUM_KV_HEADS, NUM_LAYERS};
 use super::session::InferenceSession;
 use super::tokenizer::TokenizerWrapper;
-use super::types::{GenerationConfig, GenerationMetrics, GenerationResult};
-use crate::models::ModelRuntimeSpec;
-use ndarray::{Array1, Array2, ArrayView1};
+use super::types::{GenerationConfig, GenerationMetrics};
+use crate::models::{KvInputSchema, ModelRuntimeSpec, RuntimeBackendTarget};
+use half::f16;
+use ndarray::{Array0, Array1, Array2, ArrayView1};
 use ort::session::SessionInputValue;
+use ort::tensor::TensorElementType;
 use ort::value::Value;
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -36,12 +39,18 @@ const DEFAULT_MAX_CONTEXT: usize = 2048;
 /// Default number of attention sink tokens
 const DEFAULT_SINK_SIZE: usize = 4;
 
+/// DirectML + attention_mask models can produce non-finite logits during long
+/// one-shot prefill. Keep the initial prefill short, then ingest remaining
+/// prompt tokens through decode steps.
+const DIRECTML_ATTENTION_MASK_SAFE_PREFILL_TOKENS: usize = 3;
+
 /// Text generator using ONNX Runtime with KV Cache
 pub struct Generator {
     session: Arc<Mutex<InferenceSession>>,
     tokenizer: Arc<TokenizerWrapper>,
     runtime_spec: ModelRuntimeSpec,
     model_input_names: Vec<String>,
+    past_tensor_dtype: TensorElementType,
     config: GenerationConfig,
     max_context: usize,
     sink_size: usize,
@@ -150,6 +159,74 @@ impl Generator {
         Ok(())
     }
 
+    fn extract_tensor_f32<'a>(
+        value: &'a ort::value::DynValue,
+        tensor_name: &str,
+    ) -> Result<(&'a ort::tensor::Shape, Cow<'a, [f32]>), String> {
+        match value.try_extract_tensor::<f32>() {
+            Ok((shape, data)) => Ok((shape, Cow::Borrowed(data))),
+            Err(f32_err) => match value.try_extract_tensor::<f16>() {
+                Ok((shape, data)) => {
+                    let converted = data.iter().map(|v| v.to_f32()).collect::<Vec<f32>>();
+                    Ok((shape, Cow::Owned(converted)))
+                }
+                Err(f16_err) => Err(format!(
+                    "Failed to extract tensor '{tensor_name}' as f32 or f16 (f32_error={f32_err}; f16_error={f16_err})"
+                )),
+            },
+        }
+    }
+
+    fn ensure_finite_logits(logits: ArrayView1<f32>, context: &str) -> Result<(), String> {
+        if let Some((idx, value)) = logits
+            .iter()
+            .enumerate()
+            .find(|(_, value)| !value.is_finite())
+        {
+            let non_finite_count = logits.iter().filter(|value| !value.is_finite()).count();
+            return Err(format!(
+                "{context}: Non-finite logits detected (count={non_finite_count}, first_index={idx}, first_value={value})"
+            ));
+        }
+        Ok(())
+    }
+
+    fn kv_array_to_input_value(
+        &self,
+        tensor: ndarray::Array4<f32>,
+        tensor_name: &str,
+    ) -> Result<SessionInputValue<'static>, String> {
+        match self.past_tensor_dtype {
+            TensorElementType::Float32 => Ok(SessionInputValue::Owned(
+                Value::from_array(tensor)
+                    .map_err(|e| format!("Failed to create {tensor_name} tensor: {e}"))?
+                    .into(),
+            )),
+            TensorElementType::Float16 => {
+                let shape = tensor.raw_dim();
+                let (data, offset) = tensor.into_raw_vec_and_offset();
+                // ndarray returns `None` for empty arrays; treat it as a valid zero-offset case.
+                if !data.is_empty() && offset != Some(0) {
+                    return Err(format!(
+                        "Unexpected non-zero array offset for tensor '{tensor_name}': {offset:?}"
+                    ));
+                }
+                let converted: Vec<f16> = data.into_iter().map(f16::from_f32).collect();
+                let converted = ndarray::Array4::from_shape_vec(shape, converted).map_err(|e| {
+                    format!("Failed to reshape float16 tensor '{tensor_name}': {e}")
+                })?;
+                Ok(SessionInputValue::Owned(
+                    Value::from_array(converted)
+                        .map_err(|e| format!("Failed to create {tensor_name} float16 tensor: {e}"))?
+                        .into(),
+                ))
+            }
+            dtype => Err(format!(
+                "Unsupported KV cache tensor dtype for '{tensor_name}': {dtype}. Expected f32 or f16"
+            )),
+        }
+    }
+
     /// Create a new generator
     ///
     /// # Arguments
@@ -184,44 +261,36 @@ impl Generator {
         sink_size: usize,
     ) -> Result<Self, String> {
         Self::validate_runtime_spec_compatibility(runtime_spec)?;
-        let model_input_names = session
-            .session
-            .inputs
+        let session_inputs = session.session.inputs();
+        let model_input_names = session_inputs
             .iter()
-            .map(|input| input.name.clone())
-            .collect();
+            .map(|input| input.name().to_string())
+            .collect::<Vec<_>>();
+        let first_past_key_name = runtime_spec.past_key_name(0);
+        let past_tensor_dtype = session_inputs
+            .iter()
+            .find(|input| input.name() == first_past_key_name)
+            .and_then(|input| input.dtype().tensor_type())
+            .unwrap_or(TensorElementType::Float32);
+
+        if past_tensor_dtype != TensorElementType::Float32
+            && past_tensor_dtype != TensorElementType::Float16
+        {
+            return Err(format!(
+                "Unsupported past KV tensor dtype for '{}': {}. Expected f32 or f16",
+                first_past_key_name, past_tensor_dtype
+            ));
+        }
 
         Ok(Self {
             session: Arc::new(Mutex::new(session)),
             tokenizer: Arc::new(tokenizer),
             runtime_spec,
             model_input_names,
+            past_tensor_dtype,
             config: GenerationConfig::default(),
             max_context,
             sink_size,
-        })
-    }
-
-    /// Generate text from prompt (non-streaming, for backward compatibility)
-    ///
-    /// # Arguments
-    /// * `prompt` - Input text prompt
-    ///
-    /// # Returns
-    /// Generated text and performance metrics
-    pub async fn generate(&self, prompt: &str) -> Result<GenerationResult, String> {
-        let mut generated_text = String::new();
-        let cancelled = Arc::new(AtomicBool::new(false));
-
-        let metrics = self
-            .generate_stream(prompt, None, cancelled, |token| {
-                generated_text.push_str(&token);
-            })
-            .await?;
-
-        Ok(GenerationResult {
-            text: generated_text,
-            metrics,
         })
     }
 
@@ -245,6 +314,17 @@ impl Generator {
     where
         F: FnMut(String),
     {
+        enum InferenceStrategyState {
+            Cpu {
+                kv_cache: KVCache,
+                input_builder: InputBuilder,
+            },
+            DirectML {
+                kv_cache: DmlKvCache,
+                input_builder: InputBuilder,
+            },
+        }
+
         let start = Instant::now();
 
         // Use provided config or default
@@ -266,22 +346,66 @@ impl Generator {
         log::debug!("Prompt tokenized: {} tokens", prompt_length);
 
         // 2. Create KV cache and pre-allocated input builder
-        let mut kv_cache = KVCache::new(self.max_context, self.sink_size);
-        let mut input_builder = InputBuilder::with_names_and_input_order(
-            self.runtime_spec.io.input_ids,
-            self.runtime_spec.io.attention_mask,
-            self.runtime_spec.past_key_names(),
-            self.runtime_spec.past_value_names(),
-            self.model_input_names.clone(),
-        )?;
+        let mut strategy = match self.runtime_spec.io.kv_input_schema {
+            KvInputSchema::AttentionMask { .. } => InferenceStrategyState::Cpu {
+                kv_cache: KVCache::new(self.max_context, self.sink_size),
+                input_builder: InputBuilder::with_kv_schema_and_input_order(
+                    self.runtime_spec.io.input_ids,
+                    self.runtime_spec.io.position_ids.map(str::to_string),
+                    self.runtime_spec.io.kv_input_schema,
+                    self.runtime_spec.past_key_names(),
+                    self.runtime_spec.past_value_names(),
+                    self.model_input_names.clone(),
+                )?,
+            },
+            KvInputSchema::SeqlensK {
+                max_sequence_length,
+                ..
+            } => InferenceStrategyState::DirectML {
+                kv_cache: DmlKvCache::new(max_sequence_length, self.sink_size),
+                input_builder: InputBuilder::with_kv_schema_and_input_order(
+                    self.runtime_spec.io.input_ids,
+                    self.runtime_spec.io.position_ids.map(str::to_string),
+                    self.runtime_spec.io.kv_input_schema,
+                    self.runtime_spec.past_key_names(),
+                    self.runtime_spec.past_value_names(),
+                    self.model_input_names.clone(),
+                )?,
+            },
+        };
 
         // 3. Prefill phase: Process entire prompt, build initial KV cache
         log::debug!("Starting prefill phase...");
         let prefill_start = Instant::now();
 
-        let (first_logits, _) = self
-            .run_prefill(&input_ids, &mut kv_cache, &mut input_builder)
-            .await?;
+        let first_logits = match &mut strategy {
+            InferenceStrategyState::Cpu {
+                kv_cache,
+                input_builder,
+            } => {
+                if self.runtime_spec.backend_target == RuntimeBackendTarget::DirectML
+                    && prompt_length > DIRECTML_ATTENTION_MASK_SAFE_PREFILL_TOKENS
+                {
+                    log::warn!(
+                        "Applying DirectML prefill workaround for attention-mask model (prompt_tokens={}, safe_chunk={})",
+                        prompt_length,
+                        DIRECTML_ATTENTION_MASK_SAFE_PREFILL_TOKENS
+                    );
+                    self.run_prefill_cpu_directml_workaround(&input_ids, kv_cache, input_builder)
+                        .await?
+                } else {
+                    self.run_prefill_cpu(&input_ids, kv_cache, input_builder)
+                        .await?
+                }
+            }
+            InferenceStrategyState::DirectML {
+                kv_cache,
+                input_builder,
+            } => {
+                self.run_prefill_dml(&input_ids, kv_cache, input_builder)
+                    .await?
+            }
+        };
 
         log::debug!(
             "Prefill complete: {} tokens in {:?}",
@@ -332,9 +456,22 @@ impl Generator {
             }
 
             // Run decode step with single token
-            let logits = self
-                .run_decode(next_token, &mut kv_cache, &mut input_builder)
-                .await?;
+            let logits = match &mut strategy {
+                InferenceStrategyState::Cpu {
+                    kv_cache,
+                    input_builder,
+                } => {
+                    self.run_decode_cpu(next_token, kv_cache, input_builder)
+                        .await?
+                }
+                InferenceStrategyState::DirectML {
+                    kv_cache,
+                    input_builder,
+                } => {
+                    self.run_decode_dml(next_token, kv_cache, input_builder)
+                        .await?
+                }
+            };
 
             // Sample next token (pass all generated tokens for repetition penalty)
             next_token =
@@ -362,13 +499,21 @@ impl Generator {
             if step % 50 == 0 {
                 let elapsed = start.elapsed().as_secs_f64();
                 let tps = tokens_generated as f64 / elapsed;
+                let (cache_len, cache_cap) = match &strategy {
+                    InferenceStrategyState::Cpu { kv_cache, .. } => {
+                        (kv_cache.physical_length(), kv_cache.max_context())
+                    }
+                    InferenceStrategyState::DirectML { kv_cache, .. } => {
+                        (kv_cache.valid_length(), kv_cache.max_sequence_length())
+                    }
+                };
                 log::debug!(
                     "Step {}: {} tokens, {:.2} tok/s, cache: {}/{}",
                     step,
                     tokens_generated,
                     tps,
-                    kv_cache.physical_length(),
-                    kv_cache.max_context()
+                    cache_len,
+                    cache_cap
                 );
             }
         }
@@ -396,16 +541,51 @@ impl Generator {
         })
     }
 
-    /// Run prefill phase: process all input tokens and build initial KV cache
-    ///
-    /// # Returns
-    /// Tuple of (logits for last position, updated cache)
-    async fn run_prefill(
+    /// Workaround for DirectML attention-mask exports that emit non-finite logits
+    /// on long one-shot prefill. We prefill only the first small chunk, then feed
+    /// remaining prompt tokens through decode steps so each run has sequence length 1.
+    async fn run_prefill_cpu_directml_workaround(
         &self,
         input_ids: &[u32],
         kv_cache: &mut KVCache,
         input_builder: &mut InputBuilder,
-    ) -> Result<(Array1<f32>, ()), String> {
+    ) -> Result<Array1<f32>, String> {
+        if input_ids.is_empty() {
+            return Err("DirectML prefill requires at least one prompt token".to_string());
+        }
+
+        let initial_chunk = input_ids
+            .len()
+            .min(DIRECTML_ATTENTION_MASK_SAFE_PREFILL_TOKENS);
+        let mut last_logits = self
+            .run_prefill_cpu(&input_ids[..initial_chunk], kv_cache, input_builder)
+            .await?;
+        Self::ensure_finite_logits(
+            last_logits.view(),
+            "DirectML prefill workaround initial chunk",
+        )?;
+
+        for (token_index, token_id) in input_ids.iter().enumerate().skip(initial_chunk) {
+            last_logits = self.run_decode_cpu(*token_id, kv_cache, input_builder).await?;
+            Self::ensure_finite_logits(
+                last_logits.view(),
+                &format!("DirectML prefill workaround decode step (token_index={token_index})"),
+            )?;
+        }
+
+        Ok(last_logits)
+    }
+
+    /// Run prefill phase: process all input tokens and build initial KV cache
+    ///
+    /// # Returns
+    /// Tuple of (logits for last position, updated cache)
+    async fn run_prefill_cpu(
+        &self,
+        input_ids: &[u32],
+        kv_cache: &mut KVCache,
+        input_builder: &mut InputBuilder,
+    ) -> Result<Array1<f32>, String> {
         let seq_length = input_ids.len();
 
         // Clear and reuse input builder
@@ -424,7 +604,20 @@ impl Generator {
                 .into(),
         ));
 
-        // attention_mask: [batch=1, seq_length] (all 1s for prefill)
+        if self.runtime_spec.io.position_ids.is_some() {
+            let position_ids = Array2::from_shape_vec(
+                (1, seq_length),
+                (0..seq_length).map(|idx| idx as i64).collect(),
+            )
+            .map_err(|e| format!("Failed to create position_ids tensor: {e}"))?;
+            input_builder.set_position_ids(SessionInputValue::Owned(
+                Value::from_array(position_ids)
+                    .map_err(|e| format!("Failed to create position_ids value: {e}"))?
+                    .into(),
+            ))?;
+        }
+
+        // attention_mask: [batch=1, total_sequence_length]
         let attention_mask = Array2::from_shape_vec((1, seq_length), vec![1i64; seq_length])
             .map_err(|e| format!("Failed to create attention_mask tensor: {e}"))?;
 
@@ -432,9 +625,9 @@ impl Generator {
             Value::from_array(attention_mask)
                 .map_err(|e| format!("Failed to create attention_mask value: {e}"))?
                 .into(),
-        ));
+        ))?;
 
-        // Empty KV cache for prefill (shape: [1, num_kv_heads, 0, head_dim])
+        // Empty KV cache for prefill.
         for layer in 0..self.runtime_spec.architecture.num_layers {
             let empty_cache = ndarray::Array4::<f32>::zeros((
                 1,
@@ -443,21 +636,15 @@ impl Generator {
                 self.runtime_spec.architecture.head_dim,
             ));
 
+            let key_name = self.runtime_spec.past_key_name(layer);
+            let value_name = self.runtime_spec.past_value_name(layer);
             input_builder.set_past_key(
                 layer,
-                SessionInputValue::Owned(
-                    Value::from_array(empty_cache.clone())
-                        .map_err(|e| format!("Failed to create KV cache tensor: {e}"))?
-                        .into(),
-                ),
+                self.kv_array_to_input_value(empty_cache.clone(), key_name.as_str())?,
             )?;
             input_builder.set_past_value(
                 layer,
-                SessionInputValue::Owned(
-                    Value::from_array(empty_cache)
-                        .map_err(|e| format!("Failed to create KV cache tensor: {e}"))?
-                        .into(),
-                ),
+                self.kv_array_to_input_value(empty_cache, value_name.as_str())?,
             )?;
         }
 
@@ -474,9 +661,7 @@ impl Generator {
         // Extract logits for last position
         let logits_name = self.runtime_spec.io.logits;
         let logits_output = Self::get_required_output(&outputs, logits_name)?;
-        let (logits_shape, logits_data) = logits_output
-            .try_extract_tensor::<f32>()
-            .map_err(|e| format!("Failed to extract logits: {e}"))?;
+        let (logits_shape, logits_data) = Self::extract_tensor_f32(logits_output, logits_name)?;
 
         Self::validate_rank(logits_shape, 3, logits_name)?;
         Self::validate_batch_dim(logits_shape, logits_name, 1)?;
@@ -510,17 +695,119 @@ impl Generator {
 
         // Extract present.*.key/value and populate cache
         // The present outputs have shape [batch, heads, total_seq, head_dim]
-        self.extract_and_populate_cache(&outputs, kv_cache, seq_length)?;
+        self.extract_and_populate_cpu_cache(&outputs, kv_cache, seq_length)?;
 
         // Explicitly drop outputs before releasing session lock
         drop(outputs);
         drop(session);
 
-        Ok((last_logits, ()))
+        Ok(last_logits)
+    }
+
+    /// Run prefill for DirectML exported schema using fixed-size KV buffers.
+    async fn run_prefill_dml(
+        &self,
+        input_ids: &[u32],
+        kv_cache: &mut DmlKvCache,
+        input_builder: &mut InputBuilder,
+    ) -> Result<Array1<f32>, String> {
+        let seq_length = input_ids.len();
+        if seq_length == 0 {
+            return Err("DirectML prefill requires at least one prompt token".to_string());
+        }
+
+        input_builder.clear();
+
+        let input_ids_array = Array2::from_shape_vec(
+            (1, seq_length),
+            input_ids.iter().map(|&id| id as i64).collect(),
+        )
+        .map_err(|e| format!("Failed to create input_ids tensor: {e}"))?;
+        input_builder.set_input_ids(SessionInputValue::Owned(
+            Value::from_array(input_ids_array)
+                .map_err(|e| format!("Failed to create input_ids value: {e}"))?
+                .into(),
+        ));
+
+        let seqlens_k = ndarray::Array1::from_vec(vec![0i32]);
+        input_builder.set_seqlens_k(SessionInputValue::Owned(
+            Value::from_array(seqlens_k)
+                .map_err(|e| format!("Failed to create seqlens_k value: {e}"))?
+                .into(),
+        ))?;
+
+        let total_sequence_length = Array0::from_elem((), seq_length as i32);
+        input_builder.set_total_sequence_length(SessionInputValue::Owned(
+            Value::from_array(total_sequence_length)
+                .map_err(|e| format!("Failed to create total_sequence_length value: {e}"))?
+                .into(),
+        ))?;
+
+        for layer in 0..self.runtime_spec.architecture.num_layers {
+            let key_name = self.runtime_spec.past_key_name(layer);
+            let value_name = self.runtime_spec.past_value_name(layer);
+            input_builder.set_past_key(
+                layer,
+                self.kv_array_to_input_value(kv_cache.key_array(layer).clone(), key_name.as_str())?,
+            )?;
+            input_builder.set_past_value(
+                layer,
+                self.kv_array_to_input_value(
+                    kv_cache.value_array(layer).clone(),
+                    value_name.as_str(),
+                )?,
+            )?;
+        }
+
+        let inputs = input_builder.ordered_inputs()?;
+        let mut session = self.session.lock().await;
+        let outputs = session
+            .session
+            .run(inputs)
+            .map_err(|e| format!("DirectML prefill inference failed: {e}"))?;
+
+        let logits_name = self.runtime_spec.io.logits;
+        let logits_output = Self::get_required_output(&outputs, logits_name)?;
+        let (logits_shape, logits_data) = Self::extract_tensor_f32(logits_output, logits_name)?;
+
+        Self::validate_rank(logits_shape, 3, logits_name)?;
+        Self::validate_batch_dim(logits_shape, logits_name, 1)?;
+        let seq_len = Self::dim_to_usize(logits_shape, 1, logits_name)?;
+        let vocab_size = Self::dim_to_usize(logits_shape, 2, logits_name)?;
+
+        if seq_len == 0 {
+            return Err(format!(
+                "DirectML prefill output '{logits_name}' has empty sequence dimension"
+            ));
+        }
+        if vocab_size == 0 {
+            return Err(format!(
+                "DirectML prefill output '{logits_name}' has empty vocabulary dimension"
+            ));
+        }
+
+        let expected_logits_len =
+            Self::checked_product(&[seq_len, vocab_size], logits_name, "data length")?;
+        Self::validate_tensor_len(expected_logits_len, logits_data.len(), logits_name)?;
+
+        let last_pos_start = (seq_len - 1).checked_mul(vocab_size).ok_or_else(|| {
+            "Overflow while calculating logits offset for last position".to_string()
+        })?;
+        let last_pos_end = last_pos_start
+            .checked_add(vocab_size)
+            .ok_or_else(|| "Overflow while calculating logits slice end".to_string())?;
+        let last_logits = Array1::from_vec(logits_data[last_pos_start..last_pos_end].to_vec());
+
+        self.extract_and_populate_dml_cache(&outputs, kv_cache, seq_length)?;
+
+        drop(outputs);
+        drop(session);
+
+        Ok(last_logits)
     }
 
     /// Run decode phase: process single token using KV cache
-    async fn run_decode(
+    async fn run_decode_cpu(
         &self,
         token_id: u32,
         kv_cache: &mut KVCache,
@@ -539,8 +826,19 @@ impl Generator {
                 .into(),
         ));
 
-        // attention_mask: [batch=1, past_length + 1]
         let past_length = kv_cache.physical_length();
+
+        if self.runtime_spec.io.position_ids.is_some() {
+            let position_ids = Array2::from_shape_vec((1, 1), vec![past_length as i64])
+                    .map_err(|e| format!("Failed to create position_ids tensor: {e}"))?;
+            input_builder.set_position_ids(SessionInputValue::Owned(
+                Value::from_array(position_ids)
+                    .map_err(|e| format!("Failed to create position_ids value: {e}"))?
+                    .into(),
+            ))?;
+        }
+
+        // attention_mask: [batch=1, past_length + 1]
         let attention_mask =
             Array2::from_shape_vec((1, past_length + 1), vec![1i64; past_length + 1])
                 .map_err(|e| format!("Failed to create attention_mask tensor: {e}"))?;
@@ -549,28 +847,22 @@ impl Generator {
             Value::from_array(attention_mask)
                 .map_err(|e| format!("Failed to create attention_mask value: {e}"))?
                 .into(),
-        ));
+        ))?;
 
         // Add KV cache from previous steps using pre-allocated key names
         for layer in 0..self.runtime_spec.architecture.num_layers {
             let key_cache = kv_cache.get_key_array(layer);
             let value_cache = kv_cache.get_value_array(layer);
+            let key_name = self.runtime_spec.past_key_name(layer);
+            let value_name = self.runtime_spec.past_value_name(layer);
 
             input_builder.set_past_key(
                 layer,
-                SessionInputValue::Owned(
-                    Value::from_array(key_cache)
-                        .map_err(|e| format!("Failed to create key cache tensor: {e}"))?
-                        .into(),
-                ),
+                self.kv_array_to_input_value(key_cache, key_name.as_str())?,
             )?;
             input_builder.set_past_value(
                 layer,
-                SessionInputValue::Owned(
-                    Value::from_array(value_cache)
-                        .map_err(|e| format!("Failed to create value cache tensor: {e}"))?
-                        .into(),
-                ),
+                self.kv_array_to_input_value(value_cache, value_name.as_str())?,
             )?;
         }
 
@@ -587,9 +879,7 @@ impl Generator {
         // Extract logits (shape: [1, 1, vocab_size])
         let logits_name = self.runtime_spec.io.logits;
         let logits_output = Self::get_required_output(&outputs, logits_name)?;
-        let (logits_shape, logits_data) = logits_output
-            .try_extract_tensor::<f32>()
-            .map_err(|e| format!("Failed to extract logits: {e}"))?;
+        let (logits_shape, logits_data) = Self::extract_tensor_f32(logits_output, logits_name)?;
 
         Self::validate_rank(logits_shape, 3, logits_name)?;
         Self::validate_batch_dim(logits_shape, logits_name, 1)?;
@@ -621,7 +911,7 @@ impl Generator {
         let logits = Array1::from_vec(logits_data[last_pos_start..last_pos_end].to_vec());
 
         // Extract the new token's KV and append to cache
-        self.extract_and_append_single_token(&outputs, kv_cache)?;
+        self.extract_and_append_cpu_single_token(&outputs, kv_cache)?;
 
         // Explicitly drop outputs before releasing session lock
         drop(outputs);
@@ -630,12 +920,115 @@ impl Generator {
         Ok(logits)
     }
 
+    /// Run decode for DirectML exported schema using fixed-size KV buffers.
+    async fn run_decode_dml(
+        &self,
+        token_id: u32,
+        kv_cache: &mut DmlKvCache,
+        input_builder: &mut InputBuilder,
+    ) -> Result<Array1<f32>, String> {
+        input_builder.clear();
+        kv_cache.prepare_decode_step();
+
+        let past_length = kv_cache.valid_length();
+        if past_length >= kv_cache.max_sequence_length() {
+            return Err(format!(
+                "DirectML decode cannot continue: past_length={} max_sequence_length={}",
+                past_length,
+                kv_cache.max_sequence_length()
+            ));
+        }
+
+        let input_ids_array = Array2::from_shape_vec((1, 1), vec![token_id as i64])
+            .map_err(|e| format!("Failed to create input_ids tensor: {e}"))?;
+        input_builder.set_input_ids(SessionInputValue::Owned(
+            Value::from_array(input_ids_array)
+                .map_err(|e| format!("Failed to create input_ids value: {e}"))?
+                .into(),
+        ));
+
+        let seqlens_k = ndarray::Array1::from_vec(vec![past_length as i32]);
+        input_builder.set_seqlens_k(SessionInputValue::Owned(
+            Value::from_array(seqlens_k)
+                .map_err(|e| format!("Failed to create seqlens_k value: {e}"))?
+                .into(),
+        ))?;
+
+        let total_sequence_length = Array0::from_elem((), (past_length + 1) as i32);
+        input_builder.set_total_sequence_length(SessionInputValue::Owned(
+            Value::from_array(total_sequence_length)
+                .map_err(|e| format!("Failed to create total_sequence_length value: {e}"))?
+                .into(),
+        ))?;
+
+        for layer in 0..self.runtime_spec.architecture.num_layers {
+            let key_name = self.runtime_spec.past_key_name(layer);
+            let value_name = self.runtime_spec.past_value_name(layer);
+            input_builder.set_past_key(
+                layer,
+                self.kv_array_to_input_value(kv_cache.key_array(layer).clone(), key_name.as_str())?,
+            )?;
+            input_builder.set_past_value(
+                layer,
+                self.kv_array_to_input_value(
+                    kv_cache.value_array(layer).clone(),
+                    value_name.as_str(),
+                )?,
+            )?;
+        }
+
+        let inputs = input_builder.ordered_inputs()?;
+        let mut session = self.session.lock().await;
+        let outputs = session
+            .session
+            .run(inputs)
+            .map_err(|e| format!("DirectML decode inference failed: {e}"))?;
+
+        let logits_name = self.runtime_spec.io.logits;
+        let logits_output = Self::get_required_output(&outputs, logits_name)?;
+        let (logits_shape, logits_data) = Self::extract_tensor_f32(logits_output, logits_name)?;
+
+        Self::validate_rank(logits_shape, 3, logits_name)?;
+        Self::validate_batch_dim(logits_shape, logits_name, 1)?;
+        let seq_len = Self::dim_to_usize(logits_shape, 1, logits_name)?;
+        let vocab_size = Self::dim_to_usize(logits_shape, 2, logits_name)?;
+        if seq_len == 0 {
+            return Err(format!(
+                "DirectML decode output '{logits_name}' has empty sequence dimension"
+            ));
+        }
+        if vocab_size == 0 {
+            return Err(format!(
+                "DirectML decode output '{logits_name}' has empty vocabulary dimension"
+            ));
+        }
+
+        let expected_logits_len =
+            Self::checked_product(&[seq_len, vocab_size], logits_name, "data length")?;
+        Self::validate_tensor_len(expected_logits_len, logits_data.len(), logits_name)?;
+        let last_pos_start = (seq_len - 1)
+            .checked_mul(vocab_size)
+            .ok_or_else(|| "Overflow while calculating decode logits offset".to_string())?;
+        let last_pos_end = last_pos_start
+            .checked_add(vocab_size)
+            .ok_or_else(|| "Overflow while calculating decode logits slice end".to_string())?;
+        let logits = Array1::from_vec(logits_data[last_pos_start..last_pos_end].to_vec());
+
+        let expected_valid_length = past_length + 1;
+        self.extract_and_populate_dml_cache(&outputs, kv_cache, expected_valid_length)?;
+
+        drop(outputs);
+        drop(session);
+
+        Ok(logits)
+    }
+
     /// Extract present.*.key/value outputs and populate the entire cache (for prefill)
-    fn extract_and_populate_cache(
+    fn extract_and_populate_cpu_cache(
         &self,
         outputs: &ort::session::SessionOutputs<'_>,
         kv_cache: &mut KVCache,
-        num_tokens: usize,
+        prompt_tokens: usize,
     ) -> Result<(), String> {
         // Extract all tokens' KV embeddings
         // present.*.key has shape [batch=1, heads, seq_len, head_dim]
@@ -644,9 +1037,10 @@ impl Generator {
         let num_kv_heads = self.runtime_spec.architecture.num_kv_heads;
         let head_dim = self.runtime_spec.architecture.head_dim;
 
+        let num_cache_tokens = prompt_tokens;
         let token_kv_size = num_layers * num_kv_heads * head_dim;
-        let mut all_keys = vec![0.0f32; num_tokens * token_kv_size];
-        let mut all_values = vec![0.0f32; num_tokens * token_kv_size];
+        let mut all_keys = vec![0.0f32; num_cache_tokens * token_kv_size];
+        let mut all_values = vec![0.0f32; num_cache_tokens * token_kv_size];
 
         for layer in 0..num_layers {
             let key_name = self.runtime_spec.present_key_name(layer);
@@ -655,13 +1049,10 @@ impl Generator {
             let key_output = Self::get_required_output(outputs, key_name.as_str())?;
             let value_output = Self::get_required_output(outputs, value_name.as_str())?;
 
-            let (key_shape, key_data) = key_output
-                .try_extract_tensor::<f32>()
-                .map_err(|e| format!("Failed to extract {}: {}", key_name, e))?;
+            let (key_shape, key_data) = Self::extract_tensor_f32(key_output, key_name.as_str())?;
 
-            let (value_shape, value_data) = value_output
-                .try_extract_tensor::<f32>()
-                .map_err(|e| format!("Failed to extract {}: {}", value_name, e))?;
+            let (value_shape, value_data) =
+                Self::extract_tensor_f32(value_output, value_name.as_str())?;
 
             Self::validate_rank(key_shape, 4, key_name.as_str())?;
             Self::validate_rank(value_shape, 4, value_name.as_str())?;
@@ -686,9 +1077,9 @@ impl Generator {
                     "Unexpected head dimension for layer {layer}: key={key_head_dim}, value={value_head_dim}, expected {HEAD_DIM}"
                 ));
             }
-            if key_seq_len != num_tokens || value_seq_len != num_tokens {
+            if key_seq_len != num_cache_tokens || value_seq_len != num_cache_tokens {
                 return Err(format!(
-                    "Unexpected KV sequence length for layer {layer}: key={key_seq_len}, value={value_seq_len}, expected {num_tokens}"
+                    "Unexpected KV sequence length for layer {layer}: key={key_seq_len}, value={value_seq_len}, expected {num_cache_tokens} (prompt_tokens={prompt_tokens})"
                 ));
             }
 
@@ -708,9 +1099,9 @@ impl Generator {
 
             // Copy data for each token position
             // present shape: [1, NUM_KV_HEADS, seq_len, HEAD_DIM]
-            for pos in 0..num_tokens {
+            for pos in 0..num_cache_tokens {
                 for head in 0..num_kv_heads {
-                    let src_offset = head * num_tokens * head_dim + pos * head_dim;
+                    let src_offset = head * num_cache_tokens * head_dim + pos * head_dim;
                     let dst_offset =
                         pos * token_kv_size + layer * num_kv_heads * head_dim + head * head_dim;
 
@@ -723,13 +1114,130 @@ impl Generator {
         }
 
         // Extend cache with all tokens
-        kv_cache.extend(&all_keys, &all_values, num_tokens);
+        kv_cache.extend(&all_keys, &all_values, num_cache_tokens);
 
         Ok(())
     }
 
+    /// Extract present.*.key/value outputs into DirectML fixed-size buffers.
+    fn extract_and_populate_dml_cache(
+        &self,
+        outputs: &ort::session::SessionOutputs<'_>,
+        kv_cache: &mut DmlKvCache,
+        expected_valid_length: usize,
+    ) -> Result<(), String> {
+        let num_layers = self.runtime_spec.architecture.num_layers;
+        let num_kv_heads = self.runtime_spec.architecture.num_kv_heads;
+        let head_dim = self.runtime_spec.architecture.head_dim;
+        let max_sequence_length = kv_cache.max_sequence_length();
+
+        if expected_valid_length > max_sequence_length {
+            return Err(format!(
+                "DirectML cache update exceeds max sequence length: expected_valid_length={} max_sequence_length={}",
+                expected_valid_length, max_sequence_length
+            ));
+        }
+
+        for layer in 0..num_layers {
+            let key_name = self.runtime_spec.present_key_name(layer);
+            let value_name = self.runtime_spec.present_value_name(layer);
+
+            let key_output = Self::get_required_output(outputs, key_name.as_str())?;
+            let value_output = Self::get_required_output(outputs, value_name.as_str())?;
+
+            let (key_shape, key_data) = Self::extract_tensor_f32(key_output, key_name.as_str())?;
+            let (value_shape, value_data) =
+                Self::extract_tensor_f32(value_output, value_name.as_str())?;
+
+            Self::validate_rank(key_shape, 4, key_name.as_str())?;
+            Self::validate_rank(value_shape, 4, value_name.as_str())?;
+            Self::validate_batch_dim(key_shape, key_name.as_str(), 1)?;
+            Self::validate_batch_dim(value_shape, value_name.as_str(), 1)?;
+
+            let key_heads = Self::dim_to_usize(key_shape, 1, key_name.as_str())?;
+            let key_seq_len = Self::dim_to_usize(key_shape, 2, key_name.as_str())?;
+            let key_head_dim = Self::dim_to_usize(key_shape, 3, key_name.as_str())?;
+            let value_heads = Self::dim_to_usize(value_shape, 1, value_name.as_str())?;
+            let value_seq_len = Self::dim_to_usize(value_shape, 2, value_name.as_str())?;
+            let value_head_dim = Self::dim_to_usize(value_shape, 3, value_name.as_str())?;
+
+            if key_heads != NUM_KV_HEADS || value_heads != NUM_KV_HEADS {
+                return Err(format!(
+                    "Unexpected DML KV head count for layer {layer}: key={key_heads}, value={value_heads}, expected {NUM_KV_HEADS}"
+                ));
+            }
+            if key_head_dim != HEAD_DIM || value_head_dim != HEAD_DIM {
+                return Err(format!(
+                    "Unexpected DML head dimension for layer {layer}: key={key_head_dim}, value={value_head_dim}, expected {HEAD_DIM}"
+                ));
+            }
+            if key_seq_len != value_seq_len {
+                return Err(format!(
+                    "Mismatched DML KV sequence lengths for layer {layer}: key={key_seq_len}, value={value_seq_len}"
+                ));
+            }
+
+            let copy_seq_len = if key_seq_len >= expected_valid_length {
+                expected_valid_length
+            } else {
+                return Err(format!(
+                    "DML present output too short for layer {layer}: output_seq_len={key_seq_len}, expected_valid_length={expected_valid_length}"
+                ));
+            };
+
+            let expected_key_len = Self::checked_product(
+                &[key_heads, key_seq_len, key_head_dim],
+                key_name.as_str(),
+                "data length",
+            )?;
+            let expected_value_len = Self::checked_product(
+                &[value_heads, value_seq_len, value_head_dim],
+                value_name.as_str(),
+                "data length",
+            )?;
+            Self::validate_tensor_len(expected_key_len, key_data.len(), key_name.as_str())?;
+            Self::validate_tensor_len(expected_value_len, value_data.len(), value_name.as_str())?;
+
+            {
+                let key_dst = kv_cache
+                    .key_array_mut(layer)
+                    .as_slice_mut()
+                    .ok_or_else(|| format!("DML key cache for layer {layer} is not contiguous"))?;
+                for head in 0..num_kv_heads {
+                    for pos in 0..copy_seq_len {
+                        let src_offset = head * key_seq_len * head_dim + pos * head_dim;
+                        let dst_offset = head * max_sequence_length * head_dim + pos * head_dim;
+                        key_dst[dst_offset..dst_offset + head_dim]
+                            .copy_from_slice(&key_data[src_offset..src_offset + head_dim]);
+                    }
+                }
+            }
+
+            {
+                let value_dst =
+                    kv_cache
+                        .value_array_mut(layer)
+                        .as_slice_mut()
+                        .ok_or_else(|| {
+                            format!("DML value cache for layer {layer} is not contiguous")
+                        })?;
+                for head in 0..num_kv_heads {
+                    for pos in 0..copy_seq_len {
+                        let src_offset = head * key_seq_len * head_dim + pos * head_dim;
+                        let dst_offset = head * max_sequence_length * head_dim + pos * head_dim;
+                        value_dst[dst_offset..dst_offset + head_dim]
+                            .copy_from_slice(&value_data[src_offset..src_offset + head_dim]);
+                    }
+                }
+            }
+        }
+
+        kv_cache.complete_prefill(expected_valid_length)?;
+        Ok(())
+    }
+
     /// Extract the last token's KV from present outputs and append to cache (for decode)
-    fn extract_and_append_single_token(
+    fn extract_and_append_cpu_single_token(
         &self,
         outputs: &ort::session::SessionOutputs<'_>,
         kv_cache: &mut KVCache,
@@ -751,13 +1259,10 @@ impl Generator {
             let key_output = Self::get_required_output(outputs, key_name.as_str())?;
             let value_output = Self::get_required_output(outputs, value_name.as_str())?;
 
-            let (key_shape, key_data) = key_output
-                .try_extract_tensor::<f32>()
-                .map_err(|e| format!("Failed to extract {}: {}", key_name, e))?;
+            let (key_shape, key_data) = Self::extract_tensor_f32(key_output, key_name.as_str())?;
 
-            let (value_shape, value_data) = value_output
-                .try_extract_tensor::<f32>()
-                .map_err(|e| format!("Failed to extract {}: {}", value_name, e))?;
+            let (value_shape, value_data) =
+                Self::extract_tensor_f32(value_output, value_name.as_str())?;
 
             Self::validate_rank(key_shape, 4, key_name.as_str())?;
             Self::validate_rank(value_shape, 4, value_name.as_str())?;
@@ -878,6 +1383,8 @@ impl Generator {
             Self::apply_repetition_penalty(&mut logits_vec, window, config.repetition_penalty);
         }
 
+        Self::ensure_finite_logits(ArrayView1::from(logits_vec.as_slice()), "Sampling")?;
+
         // Greedy sampling: temperature = 0 or effectively disabled
         if config.temperature <= 0.0 || config.top_k == Some(1) {
             let (max_idx, _) = logits_vec
@@ -965,30 +1472,6 @@ impl Generator {
         Ok(max_idx as u32)
     }
 
-    /// Update generation configuration
-    #[allow(dead_code)]
-    pub fn set_config(&mut self, config: GenerationConfig) {
-        self.config = config;
-    }
-
-    /// Get current configuration
-    #[allow(dead_code)]
-    pub fn config(&self) -> &GenerationConfig {
-        &self.config
-    }
-
-    /// Set maximum context window
-    #[allow(dead_code)]
-    pub fn set_max_context(&mut self, max_context: usize) {
-        self.max_context = max_context;
-    }
-
-    /// Set number of sink tokens
-    #[allow(dead_code)]
-    pub fn set_sink_size(&mut self, sink_size: usize) {
-        self.sink_size = sink_size;
-    }
-
     /// Get reference to tokenizer (for benchmarking/testing)
     #[cfg(test)]
     pub fn tokenizer(&self) -> &TokenizerWrapper {
@@ -1004,7 +1487,10 @@ mod tests {
     use ort::tensor::Shape;
 
     fn runtime_spec() -> crate::models::ModelRuntimeSpec {
-        ModelRegistry::runtime_spec("qwen2.5-coder-1.5b")
+        ModelRegistry::runtime_spec_for_backend(
+            "qwen2.5-coder-1.5b",
+            crate::models::RuntimeBackendTarget::Cpu,
+        )
             .expect("Missing runtime spec for qwen2.5-coder-1.5b")
     }
 
@@ -1065,32 +1551,31 @@ mod tests {
             TokenizerWrapper::from_file(tokenizer_path).expect("Failed to load tokenizer");
 
         // Create generator with reduced max_length for testing
-        let mut generator =
+        let generator =
             Generator::new(session, tokenizer, runtime_spec()).expect("Failed to create generator");
-        generator.set_config(GenerationConfig {
-            max_length: 10, // Just generate a few tokens for testing
-            ..Default::default()
-        });
 
         // Generate
         let prompt = "def hello";
         println!("Prompt: {}", prompt);
 
-        let result = generator.generate(prompt).await;
-        match result {
-            Ok(res) => {
-                println!("Generated: {}", res.text);
-                println!("Metrics: {:?}", res.metrics);
-                assert!(
-                    res.metrics.total_tokens > 0
-                        || res.text.is_empty() == false
-                        || res.text.is_empty()
-                );
-            }
-            Err(e) => {
-                panic!("Generation failed: {}", e);
-            }
-        }
+        let mut generated_text = String::new();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let metrics = generator
+            .generate_stream(
+                prompt,
+                Some(GenerationConfig {
+                    max_length: 10,
+                    ..Default::default()
+                }),
+                cancelled,
+                |token| generated_text.push_str(&token),
+            )
+            .await
+            .expect("Generation failed");
+
+        println!("Generated: {}", generated_text);
+        println!("Metrics: {:?}", metrics);
+        assert!(metrics.total_tokens > 0 || !generated_text.is_empty());
     }
 
     #[tokio::test]

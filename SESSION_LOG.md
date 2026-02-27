@@ -4,6 +4,237 @@ This file tracks progress across Claude Code sessions for SmolPC Code Helper.
 
 ---
 
+## 2026-02-27 (Session 12) - DirectML GenAI Runtime Finalization + Cleanup + Handoff Refresh
+
+**Focus**: finalize DirectML inferencing implementation path, clean warning/dead-code surface, and update handoff artifacts for merge readiness
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- DirectML runtime path finalized on ONNX Runtime GenAI C-FFI:
+  - Added runtime adapter split (`ort_cpu` vs `genai_dml`)
+  - Added GenAI DirectML loader and streaming generation bridge
+  - Added DML gating and forced-backend behavior (`SMOLPC_ENABLE_DML_GENAI`, `SMOLPC_FORCE_EP`, `SMOLPC_DML_DEVICE_ID`)
+  - Added DML export/run helper scripts and runtime dependency setup updates
+- Dead-code/warning cleanup pass completed:
+  - Removed deprecated/unused code paths in benchmark/inference/model modules
+  - `cargo check --all-targets` is warning-clean
+- Added technical handoff doc:
+  - `docs/DML_plans/DIRECTML_GENAI_FULL_RUNDOWN.md`
+  - Includes full architecture explanation + sequence diagrams for load and generation flow
+- Repository hygiene:
+  - Added ignore rules for local artifacts (`cache_dir/`, `scripts/src-tauri/`)
+
+**Validation**:
+- `cargo check --all-targets`: pass
+- `cargo test --lib -- --nocapture`: pass (`79 passed, 0 failed, 9 ignored`)
+- `npm run check`: pass (existing non-blocking frontend a11y warning remains)
+
+**Key commits**:
+- `0b38f67` - DirectML GenAI runtime path + export tooling
+- `477ca60` - dead-code and warning-surface cleanup
+- `7460015` - DML full rundown doc + local artifact ignore rules
+
+**Next Session / Next Action**:
+1. Push branch and finalize PR review.
+2. Run clean-machine Windows installer validation.
+3. Decide and scope OpenVINO acceleration track (ORT EP first vs GenAI build-from-source path).
+
+**Last Known Good Commit**: `7460015`
+**Resume From Step**: PR merge + packaging validation matrix
+
+## 2026-02-24 (Session 11) - Planning Doc Preservation + PR Consolidation
+
+**Focus**: Preserve canonical DirectML execution plan doc and consolidate open PR path
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- Added canonical plan doc used for this implementation session:
+  - `docs/new_onnx_plan/DIRECTML_CPU_FALLBACK_INTEGRATION_PLAN.md`
+- Linked canonical plan doc from:
+  - `docs/new_onnx_plan/CURRENT_STATE.md`
+- Prepared branch for consolidated PR flow (`codex/directml-inferencing` -> `main`) so frontend + DirectML work is reviewed together.
+
+**Next Session / Next Action**:
+1. Run Windows validation matrix on this branch.
+2. Keep superseded legacy PRs closed in favor of consolidated branch PR.
+
+## 2026-02-24 (Session 10) - Selector + Demotion + Diagnostics (Milestones 5-6)
+
+**Focus**: Implement Milestones 5 and 6 from DirectML integration plan
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- Backend selector + persistence wiring in `src-tauri/src/commands/inference.rs`:
+  - Added load-time backend decision context using:
+    - model id
+    - adapter identity
+    - driver version
+    - app version
+    - ORT version
+  - Added persisted decision reuse via `BackendStore`
+  - Added stale decision invalidation for same-model key changes
+  - Added hidden override `SMOLPC_FORCE_EP=cpu|dml`
+- First-load benchmark gate:
+  - Added bounded 2s benchmark (`timeout`) for CPU vs DirectML
+  - Added decode speedup and TTFT ratio gating:
+    - DirectML requires `>= 1.30x` decode tok/s
+    - TTFT regression must be `<= 1.15x`
+- Failure accounting + demotion:
+  - Init/runtime failures now update persistent `FailureCounters`
+  - DirectML auto-demotes to CPU after 3 consecutive failures
+  - Runtime demotion triggers CPU model reload for subsequent requests
+- Diagnostics:
+  - Added `get_inference_backend_status` command returning `BackendStatus`
+  - Registered command in `src-tauri/src/lib.rs`
+  - Added structured logs for candidate ranking, benchmark outcome, fallback cause, and demotion events
+- Test additions:
+  - Added selector unit tests for force override, persisted preference, and benchmark gate behavior
+
+**Quality Gates**:
+- `cargo check` (Rust 1.88 toolchain): ✅ pass
+- Targeted tests:
+  - `cargo test commands::inference --lib`: ✅ 8 passed
+  - `cargo test backend --lib`: ✅ 9 passed (includes backend and store tests)
+
+**Manual Validation Still Required**:
+1. Windows 10 20H1+ DirectML-capable adapter path
+2. Windows 11 DirectML-capable adapter path
+3. Forced failure/demotion scenario (3 consecutive init/runtime failures)
+4. Benchmark budget enforcement under slow model-load conditions
+
+**Last Known Good Commit**: `f8111a5` (Milestone 4)
+**Resume From Step**: Windows matrix validation + tuning thresholds/logging based on observed runs
+
+## 2026-02-24 (Session 9) - Backend-Aware Session Builder + Fallback (Milestone 4)
+
+**Focus**: Implement Milestone 4 from DirectML integration plan
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- Refactored `src-tauri/src/inference/session.rs`:
+  - Added `InferenceSession::new_with_backend(model_path, backend)`
+  - Added backend-specific config for `DirectML` and `Cpu`
+  - Kept `InferenceSession::new()` as CPU wrapper for compatibility
+- Added DirectML session option policy:
+  - `with_execution_providers([ep::DirectML::default().build().error_on_failure()])`
+  - `with_parallel_execution(false)`
+  - `with_memory_pattern(false)`
+  - `with_optimization_level(Level3)`
+- Updated ORT init in `src-tauri/src/inference/mod.rs`:
+  - Preloads `DirectML.dll` on Windows before calling `ort::init_from(...)`
+  - Searches bundled resource locations, executable directory, and fallback paths
+- Added fallback load helper in `src-tauri/src/commands/inference.rs`:
+  - If DirectML session init fails, load immediately retries CPU in same command flow
+  - Backend used by loaded model is now tracked in `InferenceState`
+
+**Quality Gates**:
+- `cargo check` (Rust 1.88 toolchain): ✅ pass
+- Targeted tests:
+  - `cargo test commands::inference --lib`: ✅ pass
+  - `cargo test session --lib`: ✅ pass
+
+**Next Session / Next Commit Target**:
+1. Milestone 5: selector, benchmark gate, persistence, forced override, and demotion wiring
+2. Milestone 6: backend diagnostics command + structured selection/fallback/demotion logs
+
+**Last Known Good Commit**: `4f688ad` (Milestone 3)
+**Resume From Step**: Milestone 5
+
+## 2026-02-24 (Session 8) - Hardware Identity Enrichment (Milestone 3)
+
+**Focus**: Implement Milestone 3 from DirectML integration plan
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- Extended Rust GPU IPC type in `src-tauri/src/hardware/types.rs`:
+  - Added `driver_version: Option<String>`
+  - Added `pci_device_id: Option<String>`
+- Updated GPU conversion in `src-tauri/src/hardware/detector.rs`:
+  - Populates new fields from `hardware-query` GPU metadata
+  - Normalizes empty strings to `None`
+- Synced frontend type in `src/lib/types/hardware.ts`:
+  - Added optional `driver_version` + `pci_device_id` fields in `GpuInfo`
+
+**Quality Gates**:
+- `cargo check` (Rust 1.88 toolchain): ✅ pass
+- Targeted tests (`cargo test hardware --lib`): ✅ pass (0 filtered tests, compile gate clean)
+
+**Next Session / Next Commit Target**:
+1. Milestone 4: backend-aware session builder (`Cpu` + `DirectML`) and same-flow fallback
+2. Milestone 5: first-load benchmark selector, persistence key wiring, forced override env, demotion after 3 failures
+3. Milestone 6: structured backend diagnostics logs + `get_inference_backend_status` command
+
+**Last Known Good Commit**: `b7a8f1f` (Milestone 2)
+**Resume From Step**: Milestone 4
+
+## 2026-02-24 (Session 7) - DirectML Backend Domain + Persistence (Milestone 2)
+
+**Focus**: Implement Milestone 2 from DirectML integration plan
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- Added `src-tauri/src/inference/backend.rs`:
+  - Backend enums (`InferenceBackend`), decision metadata (`BackendDecision`, `DecisionReason`)
+  - Benchmark policy constants (`+30%` decode speedup, `+15%` TTFT regression cap, 2s budget)
+  - Failure counter model with demotion threshold handling (`3` consecutive DirectML failures)
+- Added `src-tauri/src/inference/backend_store.rs`:
+  - Versioned backend decision store schema (`backend_decisions.v1.json`)
+  - Key fingerprint persistence on `model + adapter + driver + app version + ORT version`
+  - Atomic write path (`tmp` file + replace) and stale-record invalidation for key changes
+- Exported backend domain types via `src-tauri/src/inference/mod.rs`
+- Added unit tests for backend gate logic, demotion threshold, store round-trip, stale-key invalidation, and invalid JSON recovery
+
+**Quality Gates**:
+- `cargo check` (Rust 1.88 toolchain): ✅ pass
+- Targeted tests (`cargo test backend --lib`): ✅ 6 passed
+
+**Next Session / Next Commit Target**:
+1. Milestone 3: hardware identity enrichment (`driver_version`, `pci_device_id`) across Rust + TS IPC types
+2. Milestone 4: backend-aware session builder with DirectML + CPU fallback in same load flow
+3. Milestone 5: first-load benchmark-gated selector + persistent decision application + 3-failure demotion wiring
+
+**Last Known Good Commit**: `5f8cf76` (Milestone 1)
+**Resume From Step**: Milestone 3
+
+## 2026-02-24 (Session 6) - DirectML Plan Implementation Start (Milestone 1)
+
+**Focus**: Execute Milestone 1 (toolchain + runtime packaging) from DirectML integration plan
+
+**Branch**: `codex/directml-inferencing`
+
+**Completed**:
+- Bumped Rust MSRV in `src-tauri/Cargo.toml` to `1.88`
+- Upgraded ONNX wrapper from `ort = 2.0.0-rc.10` to `ort = 2.0.0-rc.11`
+- Added repo-level `rust-toolchain.toml` pinned to `1.88.0`
+- Rewrote `scripts/setup-libs.sh`:
+  - Windows now installs DirectML-capable runtime from NuGet
+  - Bundles `onnxruntime.dll`, `onnxruntime_providers_shared.dll`, `DirectML.dll`
+  - Adds SHA256 verification for all runtime package/archive downloads
+  - Supports `windows-x64`, `windows-arm64`, `macos-arm64`, `macos-x64`, `linux-x64`, `linux-arm64`
+- Updated `src-tauri/libs/README.md` with bundled runtime file expectations
+- Applied ORT rc.11 compatibility fixes:
+  - Session metadata access now uses `inputs()/outputs()` and `name()`
+  - ORT init now handles `init_from(...)->EnvironmentBuilder` before `commit()`
+  - Aligned local `ndarray` crate to `0.17` for `Value::from_array` compatibility
+- Compile gate passed with Rust 1.88 toolchain (`cargo check`)
+
+**Key Discoveries**:
+- Local workstation default Cargo/Rustc path still points to Homebrew Rust `1.87.0`
+- Explicit `RUSTC` override to Rustup 1.88 toolchain is currently required for local checks
+
+**Next Session / Next Commit Target**:
+1. Milestone 2: add backend domain model (`inference/backend.rs`)
+2. Milestone 2: add persistent backend decision store (`inference/backend_store.rs`)
+3. Wire minimum status surface for backend state needed by upcoming selector flow
+
+**Blockers**: None for implementation; local toolchain path quirk is documented in `codex/WORKING_ISSUES.md`
+
 ## 2026-02-09 (Session 5) - Stop Token Fix + ChatML + Repetition Penalty
 
 **Focus**: Fix runaway generation (model producing self-Q&A training data patterns)

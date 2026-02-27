@@ -61,6 +61,8 @@ export interface GpuInfo {
 	vendor: 'Nvidia' | 'Amd' | 'Intel' | 'Apple' | 'Qualcomm' | 'Unknown';
 	backend: string;
 	device_type: string;
+	driver_version?: string;
+	pci_device_id?: string;
 	vram_mb?: number;
 	temperature_c?: number;
 	utilization_percent?: number;
