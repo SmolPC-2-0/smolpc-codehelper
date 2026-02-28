@@ -153,7 +153,9 @@ fn convert_gpu_info(hw_info: &hardware_query::HardwareInfo) -> Vec<GpuInfo> {
                 vram_mb,
                 temperature_c: gpu.temperature().map(|t| t as u32),
                 utilization_percent: gpu.usage_percent().map(|u| u as u32),
-                cuda_compute_capability: gpu.cuda_capability().map(std::string::ToString::to_string),
+                cuda_compute_capability: gpu
+                    .cuda_capability()
+                    .map(std::string::ToString::to_string),
             }
         })
         .collect()
@@ -166,7 +168,7 @@ fn convert_npu_info(hw_info: &hardware_query::HardwareInfo) -> Option<NpuInfo> {
     }
 
     let npu = &hw_info.npus()[0]; // Use first NPU
- 
+
     let details = if let Some(tops) = npu.tops_performance() {
         format!("{} - {:.1} TOPS", npu.model_name(), tops)
     } else {
@@ -196,10 +198,10 @@ fn convert_storage_info(hw_info: &hardware_query::HardwareInfo) -> StorageInfo {
     let storage_devices = hw_info.storage_devices();
 
     // Find primary storage device (largest capacity or first device)
-    if let Some(primary) = storage_devices.iter().max_by(|a, b| {
-        a.capacity_gb()
-            .total_cmp(&b.capacity_gb())
-    }) {
+    if let Some(primary) = storage_devices
+        .iter()
+        .max_by(|a, b| a.capacity_gb().total_cmp(&b.capacity_gb()))
+    {
         let total_gb = primary.capacity_gb();
         let available_gb = primary.available_gb();
         let device_name = primary.model().to_string();
@@ -211,7 +213,9 @@ fn convert_storage_info(hw_info: &hardware_query::HardwareInfo) -> StorageInfo {
 
         // Log storage detection results
         if total_gb == 0.0 {
-            log::warn!("Storage capacity detection failed for device '{device_name}' (returned 0.0 GB)");
+            log::warn!(
+                "Storage capacity detection failed for device '{device_name}' (returned 0.0 GB)"
+            );
         } else {
             log::debug!(
                 "Storage detected: {device_name} - {total_gb:.2} GB total, {available_gb:.2} GB available, SSD: {is_ssd}");

@@ -126,14 +126,16 @@ mod tests {
 
     #[test]
     fn runtime_spec_only_defined_for_1_5b() {
-        assert!(
-            ModelRegistry::runtime_spec_for_backend("qwen2.5-coder-1.5b", RuntimeBackendTarget::Cpu)
-                .is_some()
-        );
-        assert!(
-            ModelRegistry::runtime_spec_for_backend("qwen2.5-coder-7b", RuntimeBackendTarget::Cpu)
-                .is_none()
-        );
+        assert!(ModelRegistry::runtime_spec_for_backend(
+            "qwen2.5-coder-1.5b",
+            RuntimeBackendTarget::Cpu
+        )
+        .is_some());
+        assert!(ModelRegistry::runtime_spec_for_backend(
+            "qwen2.5-coder-7b",
+            RuntimeBackendTarget::Cpu
+        )
+        .is_none());
         assert!(
             ModelRegistry::runtime_spec_for_backend("unknown", RuntimeBackendTarget::Cpu).is_none()
         );

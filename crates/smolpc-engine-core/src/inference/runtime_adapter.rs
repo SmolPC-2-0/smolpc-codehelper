@@ -1,6 +1,6 @@
-use super::generator::Generator;
 #[cfg(target_os = "windows")]
 use super::genai::GenAiDirectMlGenerator;
+use super::generator::Generator;
 use super::types::{GenerationConfig, GenerationMetrics};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -10,9 +10,13 @@ use std::sync::Arc;
 /// CPU inference currently uses the ORT generator path. DirectML uses
 /// ONNX Runtime GenAI via native C FFI to align with exported DML artifacts.
 pub enum InferenceRuntimeAdapter {
-    Ort { generator: Generator },
+    Ort {
+        generator: Generator,
+    },
     #[cfg(target_os = "windows")]
-    GenAiDirectMl { generator: GenAiDirectMlGenerator },
+    GenAiDirectMl {
+        generator: GenAiDirectMlGenerator,
+    },
 }
 
 impl InferenceRuntimeAdapter {

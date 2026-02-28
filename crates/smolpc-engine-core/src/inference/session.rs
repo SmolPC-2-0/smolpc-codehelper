@@ -139,7 +139,6 @@ impl InferenceSession {
                 .collect(),
         }
     }
-
 }
 
 #[cfg(test)]

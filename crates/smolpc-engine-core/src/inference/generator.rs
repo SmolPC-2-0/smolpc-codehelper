@@ -566,7 +566,9 @@ impl Generator {
         )?;
 
         for (token_index, token_id) in input_ids.iter().enumerate().skip(initial_chunk) {
-            last_logits = self.run_decode_cpu(*token_id, kv_cache, input_builder).await?;
+            last_logits = self
+                .run_decode_cpu(*token_id, kv_cache, input_builder)
+                .await?;
             Self::ensure_finite_logits(
                 last_logits.view(),
                 &format!("DirectML prefill workaround decode step (token_index={token_index})"),
@@ -830,7 +832,7 @@ impl Generator {
 
         if self.runtime_spec.io.position_ids.is_some() {
             let position_ids = Array2::from_shape_vec((1, 1), vec![past_length as i64])
-                    .map_err(|e| format!("Failed to create position_ids tensor: {e}"))?;
+                .map_err(|e| format!("Failed to create position_ids tensor: {e}"))?;
             input_builder.set_position_ids(SessionInputValue::Owned(
                 Value::from_array(position_ids)
                     .map_err(|e| format!("Failed to create position_ids value: {e}"))?
@@ -1491,7 +1493,7 @@ mod tests {
             "qwen2.5-coder-1.5b",
             crate::models::RuntimeBackendTarget::Cpu,
         )
-            .expect("Missing runtime spec for qwen2.5-coder-1.5b")
+        .expect("Missing runtime spec for qwen2.5-coder-1.5b")
     }
 
     #[test]

@@ -19,7 +19,7 @@ pub struct HardwareInfo {
 pub struct CpuInfo {
     pub vendor: String,
     pub brand: String,
-    pub architecture: String,  // "x86_64", "aarch64", etc.
+    pub architecture: String, // "x86_64", "aarch64", etc.
     pub cores_physical: usize,
     pub cores_logical: usize,
     pub frequency_mhz: Option<u32>,
@@ -54,7 +54,6 @@ pub enum GpuVendor {
     Qualcomm,
     Unknown,
 }
-
 
 /// NPU information
 #[derive(Debug, Clone, Serialize, Deserialize)]

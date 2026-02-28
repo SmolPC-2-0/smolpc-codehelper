@@ -593,7 +593,6 @@ impl DmlKvCache {
     pub fn value_array_mut(&mut self, layer: usize) -> &mut Array4<f32> {
         &mut self.value_caches[layer]
     }
-
 }
 
 #[cfg(test)]

@@ -161,7 +161,7 @@ mod tests {
             "qwen2.5-coder-1.5b",
             crate::models::RuntimeBackendTarget::Cpu,
         )
-            .expect("Missing runtime spec for qwen2.5-coder-1.5b")
+        .expect("Missing runtime spec for qwen2.5-coder-1.5b")
     }
 
     /// Benchmark pure KV cache operations (no model needed)
