@@ -49,6 +49,18 @@ Default base URL: `http://127.0.0.1:19432`
     - `top_p`
     - `repetition_penalty`
     - `repetition_penalty_last_n`
+  - Non-stream responses include `smolpc_metrics`:
+    - `total_tokens`
+    - `time_to_first_token_ms`
+    - `tokens_per_second`
+    - `total_time_ms`
+  - Streaming SSE emits:
+    - token chunks (`chat.completion.chunk`)
+    - one metrics event (`chat.completion.metrics`) with `smolpc_metrics`
+    - terminal `[DONE]`
+  - Streaming errors are emitted as:
+    - `{"error":{"message":"...","code":"...","type":"..."}}`
+    - Codes include `INFERENCE_GENERATION_CANCELLED` and `ENGINE_STREAM_ERROR`
 
 ## Scheduling Defaults
 
@@ -57,3 +69,9 @@ Default base URL: `http://127.0.0.1:19432`
 - Queue timeout: 60 seconds.
 - Queue full: HTTP 429.
 - Queue timeout: HTTP 504.
+
+## Protocol Compatibility
+
+- Current protocol major: `1`.
+- Client and host must match protocol major versions.
+- On mismatch, clients return an explicit protocol mismatch error.

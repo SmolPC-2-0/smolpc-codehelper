@@ -34,11 +34,33 @@ Frontend command names are unchanged:
 Resolution order:
 
 1. `SMOLPC_ENGINE_HOST_BIN`
-2. Workspace target binary (`target/debug/smolpc-engine-host` in dev)
+2. Resource sidecar directories (`<resource-dir>` and `<resource-dir>/binaries`)
 3. Sidecar path next to current executable
+4. Workspace target binary (`target/debug/smolpc-engine-host` then `target/release/smolpc-engine-host`)
+
+The client also coordinates spawn with a short-lived lock file:
+
+- `<runtime-root>/engine-spawn.lock`
+
+This avoids duplicate spawn races when two apps connect at the same time.
+
+## Packaging
+
+Tauri bundles `smolpc-engine-host` as a packaged resource via:
+
+- `src-tauri/tauri.conf.json -> bundle.resources` (`binaries/*`)
+- `src-tauri/binaries/` target-triple sidecar naming
+
+Release workflow stages sidecar binaries before running `tauri-action`.
+
+## Streaming and Metrics Contract
+
+- Stream errors are structured SSE error events (not token text).
+- Cancellation uses code `INFERENCE_GENERATION_CANCELLED`.
+- Runtime stream errors use code `ENGINE_STREAM_ERROR`.
+- `smolpc_metrics` is emitted for stream completion and non-stream responses.
 
 ## Next Steps
 
-- Bundle `smolpc-engine-host` as a sidecar for production packaging.
 - Migrate Blender and LibreOffice to this client contract.
 - Replace remaining Ollama-specific benchmark path.

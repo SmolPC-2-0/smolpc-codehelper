@@ -71,8 +71,18 @@ npm run tauri dev
 When CodeHelper starts inference, `smolpc-engine-client` resolves host binary in this order:
 
 1. `SMOLPC_ENGINE_HOST_BIN`
-2. `target/debug/smolpc-engine-host` (dev)
+2. resource sidecar locations (`<resource-dir>`, `<resource-dir>/binaries`)
 3. sidecar next to app executable
+4. `target/debug/smolpc-engine-host` then `target/release/smolpc-engine-host`
+
+If multiple apps connect simultaneously, client spawn is coordinated via:
+
+- `%LOCALAPPDATA%/SmolPC/engine-runtime/engine-spawn.lock`
+
+### Sidecar Packaging
+
+Release bundles include `smolpc-engine-host` via Tauri resource packaging (`bundle.resources`).
+Sidecar binaries are staged in `src-tauri/binaries/` with target-triple suffixes.
 
 ### Shared Runtime Paths
 
