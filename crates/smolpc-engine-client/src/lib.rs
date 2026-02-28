@@ -1,4 +1,3 @@
-
 use futures_util::StreamExt;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
@@ -7,9 +6,27 @@ use reqwest::Client;
 use smolpc_engine_core::inference::backend::BackendStatus;
 use smolpc_engine_core::models::registry::ModelDefinition;
 use smolpc_engine_core::{GenerationConfig, GenerationMetrics, GenerationResult};
+use std::fs::OpenOptions;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const ENGINE_PROTOCOL_VERSION: &str = "1.0.0";
+const ENGINE_HOST_BASENAME: &str = "smolpc-engine-host";
+const SPAWN_LOCK_FILENAME: &str = "engine-spawn.lock";
+const SPAWN_LOCK_WAIT: Duration = Duration::from_secs(10);
+const SPAWN_LOCK_STALE_AGE: Duration = Duration::from_secs(30);
+
+struct SpawnLockGuard {
+    path: PathBuf,
+}
+
+impl Drop for SpawnLockGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineClientError {
@@ -195,7 +212,12 @@ impl EngineClient {
         Ok(out)
     }
 
-    pub async fn generate_text(&self, prompt: &str, config: Option<GenerationConfig>) -> Result<GenerationResult, EngineClientError> {
+    pub async fn generate_text(
+        &self,
+        prompt: &str,
+        config: Option<GenerationConfig>,
+    ) -> Result<GenerationResult, EngineClientError> {
+        let started = Instant::now();
         let body = completion_body(prompt, false, config);
         let value = self
             .http
@@ -209,6 +231,10 @@ impl EngineClient {
             .json::<serde_json::Value>()
             .await?;
 
+        if let Some(error_message) = parse_error_message(&value) {
+            return Err(EngineClientError::Message(error_message));
+        }
+
         let text = value
             .get("choices")
             .and_then(|c| c.as_array())
@@ -219,15 +245,9 @@ impl EngineClient {
             .unwrap_or_default()
             .to_string();
 
-        Ok(GenerationResult {
-            text,
-            metrics: GenerationMetrics {
-                total_tokens: 0,
-                time_to_first_token_ms: None,
-                tokens_per_second: 0.0,
-                total_time_ms: 0,
-            },
-        })
+        let metrics = non_stream_metrics(&value, started, &text)?;
+
+        Ok(GenerationResult { text, metrics })
     }
 
     pub async fn generate_stream<F>(
@@ -239,6 +259,11 @@ impl EngineClient {
     where
         F: FnMut(String),
     {
+        let started = Instant::now();
+        let mut emitted_chunks = 0usize;
+        let mut first_chunk_at = None;
+        let mut host_metrics: Option<GenerationMetrics> = None;
+
         let body = completion_body(prompt, true, config);
         let response = self
             .http
@@ -266,17 +291,23 @@ impl EngineClient {
                 }
                 let data = line[5..].trim();
                 if data == "[DONE]" {
-                    return Ok(GenerationMetrics {
-                        total_tokens: 0,
-                        time_to_first_token_ms: None,
-                        tokens_per_second: 0.0,
-                        total_time_ms: 0,
-                    });
+                    return Ok(host_metrics.unwrap_or_else(|| {
+                        fallback_stream_metrics(started, emitted_chunks, first_chunk_at)
+                    }));
                 }
                 if data.is_empty() {
                     continue;
                 }
                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(error_message) = parse_error_message(&value) {
+                        return Err(EngineClientError::Message(error_message));
+                    }
+
+                    if let Some(metrics_value) = value.get("smolpc_metrics") {
+                        host_metrics = Some(serde_json::from_value(metrics_value.clone())?);
+                        continue;
+                    }
+
                     if let Some(content) = value
                         .get("choices")
                         .and_then(|c| c.as_array())
@@ -285,22 +316,24 @@ impl EngineClient {
                         .and_then(|d| d.get("content"))
                         .and_then(|c| c.as_str())
                     {
+                        emitted_chunks += 1;
+                        if first_chunk_at.is_none() {
+                            first_chunk_at = Some(started.elapsed().as_millis() as u64);
+                        }
                         on_token(content.to_string());
                     }
                 }
             }
         }
 
-        Ok(GenerationMetrics {
-            total_tokens: 0,
-            time_to_first_token_ms: None,
-            tokens_per_second: 0.0,
-            total_time_ms: 0,
-        })
+        Ok(host_metrics
+            .unwrap_or_else(|| fallback_stream_metrics(started, emitted_chunks, first_chunk_at)))
     }
 }
 
-pub async fn connect_or_spawn(options: EngineConnectOptions) -> Result<EngineClient, EngineClientError> {
+pub async fn connect_or_spawn(
+    options: EngineConnectOptions,
+) -> Result<EngineClient, EngineClientError> {
     std::fs::create_dir_all(&options.shared_runtime_dir)?;
     std::fs::create_dir_all(&options.data_dir)?;
 
@@ -311,7 +344,7 @@ pub async fn connect_or_spawn(options: EngineConnectOptions) -> Result<EngineCli
 
     if client.health().await.unwrap_or(false) {
         let meta = client.meta().await?;
-        if protocol_major_matches(&meta.protocol_version, "1.0.0") {
+        if protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION) {
             return Ok(client);
         }
 
@@ -331,7 +364,15 @@ pub async fn connect_or_spawn(options: EngineConnectOptions) -> Result<EngineCli
         }
     }
 
-    spawn_host(&options, &token)?;
+    let _spawn_lock = acquire_spawn_lock(&options.shared_runtime_dir).await?;
+    if client.health().await.unwrap_or(false) {
+        let meta = client.meta().await?;
+        if protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION) {
+            return Ok(client);
+        }
+    } else {
+        spawn_host(&options, &token)?;
+    }
 
     let started = std::time::Instant::now();
     loop {
@@ -347,7 +388,7 @@ pub async fn connect_or_spawn(options: EngineConnectOptions) -> Result<EngineCli
     }
 
     let meta = client.meta().await?;
-    if !protocol_major_matches(&meta.protocol_version, "1.0.0") {
+    if !protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION) {
         return Err(EngineClientError::Message(format!(
             "Engine protocol mismatch: {}",
             meta.protocol_version
@@ -357,7 +398,11 @@ pub async fn connect_or_spawn(options: EngineConnectOptions) -> Result<EngineCli
     Ok(client)
 }
 
-fn completion_body(prompt: &str, stream: bool, config: Option<GenerationConfig>) -> serde_json::Value {
+fn completion_body(
+    prompt: &str,
+    stream: bool,
+    config: Option<GenerationConfig>,
+) -> serde_json::Value {
     let mut body = serde_json::json!({
         "model": "smolpc-engine",
         "stream": stream,
@@ -380,6 +425,67 @@ fn protocol_major_matches(actual: &str, expected: &str) -> bool {
     let a = actual.split('.').next().unwrap_or(actual);
     let e = expected.split('.').next().unwrap_or(expected);
     a == e
+}
+
+fn parse_error_message(value: &serde_json::Value) -> Option<String> {
+    let error = value.get("error")?;
+    if let Some(message) = error.get("message").and_then(|m| m.as_str()) {
+        return Some(message.to_string());
+    }
+    if let Some(message) = error.as_str() {
+        return Some(message.to_string());
+    }
+    Some(error.to_string())
+}
+
+fn non_stream_metrics(
+    value: &serde_json::Value,
+    started: Instant,
+    text: &str,
+) -> Result<GenerationMetrics, EngineClientError> {
+    if let Some(metrics_value) = value.get("smolpc_metrics") {
+        return Ok(serde_json::from_value(metrics_value.clone())?);
+    }
+
+    let total_tokens = value
+        .get("usage")
+        .and_then(|usage| usage.get("completion_tokens"))
+        .and_then(|token_count| token_count.as_u64())
+        .map(|token_count| token_count as usize)
+        .unwrap_or_else(|| text.split_whitespace().count());
+    let total_time_ms = started.elapsed().as_millis() as u64;
+    let tokens_per_second = if total_tokens > 0 && total_time_ms > 0 {
+        total_tokens as f64 / (total_time_ms as f64 / 1_000.0)
+    } else {
+        0.0
+    };
+
+    Ok(GenerationMetrics {
+        total_tokens,
+        time_to_first_token_ms: None,
+        tokens_per_second,
+        total_time_ms,
+    })
+}
+
+fn fallback_stream_metrics(
+    started: Instant,
+    emitted_chunks: usize,
+    first_chunk_at: Option<u64>,
+) -> GenerationMetrics {
+    let total_time_ms = started.elapsed().as_millis() as u64;
+    let tokens_per_second = if emitted_chunks > 0 && total_time_ms > 0 {
+        emitted_chunks as f64 / (total_time_ms as f64 / 1_000.0)
+    } else {
+        0.0
+    };
+
+    GenerationMetrics {
+        total_tokens: emitted_chunks,
+        time_to_first_token_ms: first_chunk_at,
+        tokens_per_second,
+        total_time_ms,
+    }
 }
 
 fn load_or_create_token(path: &Path) -> Result<String, EngineClientError> {
@@ -430,6 +536,90 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
     Ok(())
 }
 
+async fn acquire_spawn_lock(
+    shared_runtime_dir: &Path,
+) -> Result<SpawnLockGuard, EngineClientError> {
+    let lock_path = shared_runtime_dir.join(SPAWN_LOCK_FILENAME);
+    let started = Instant::now();
+
+    loop {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(mut file) => {
+                let _ = writeln!(file, "pid={}", std::process::id());
+                return Ok(SpawnLockGuard { path: lock_path });
+            }
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                let stale = std::fs::metadata(&lock_path)
+                    .and_then(|meta| meta.modified())
+                    .ok()
+                    .and_then(|modified| modified.elapsed().ok())
+                    .is_some_and(|age| age > SPAWN_LOCK_STALE_AGE);
+                if stale {
+                    let _ = std::fs::remove_file(&lock_path);
+                    continue;
+                }
+
+                if started.elapsed() > SPAWN_LOCK_WAIT {
+                    return Err(EngineClientError::Message(
+                        "Timed out waiting for engine spawn lock".to_string(),
+                    ));
+                }
+
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
+
+fn host_binary_candidates() -> Vec<String> {
+    let mut candidates = vec![format!(
+        "{}{}",
+        ENGINE_HOST_BASENAME,
+        std::env::consts::EXE_SUFFIX
+    )];
+    if let Ok(target_triple) = std::env::var("TAURI_ENV_TARGET_TRIPLE") {
+        candidates.push(format!(
+            "{}-{}{}",
+            ENGINE_HOST_BASENAME,
+            target_triple,
+            std::env::consts::EXE_SUFFIX
+        ));
+    }
+    candidates
+}
+
+fn find_host_binary_in_dir(dir: &Path) -> Option<PathBuf> {
+    for candidate in host_binary_candidates() {
+        let full_path = dir.join(&candidate);
+        if full_path.exists() {
+            return Some(full_path);
+        }
+    }
+
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        if file_name.starts_with(ENGINE_HOST_BASENAME) {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
 fn resolve_host_binary(options: &EngineConnectOptions) -> Result<PathBuf, EngineClientError> {
     if let Some(path) = &options.host_binary {
         if path.exists() {
@@ -444,26 +634,92 @@ fn resolve_host_binary(options: &EngineConnectOptions) -> Result<PathBuf, Engine
         }
     }
 
+    if let Some(resource_dir) = &options.resource_dir {
+        if let Some(path) = find_host_binary_in_dir(resource_dir) {
+            return Ok(path);
+        }
+        let binaries_dir = resource_dir.join("binaries");
+        if let Some(path) = find_host_binary_in_dir(&binaries_dir) {
+            return Ok(path);
+        }
+    }
+
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(dir) = current_exe.parent() {
-            let sidecar = dir.join(format!(
-                "smolpc-engine-host{}",
-                std::env::consts::EXE_SUFFIX
-            ));
-            if sidecar.exists() {
-                return Ok(sidecar);
+            if let Some(path) = find_host_binary_in_dir(dir) {
+                return Ok(path);
+            }
+
+            let resources_dir = dir.join("resources");
+            if let Some(path) = find_host_binary_in_dir(&resources_dir) {
+                return Ok(path);
             }
         }
     }
 
-    let fallback = PathBuf::from("target")
-        .join("debug")
-        .join(format!("smolpc-engine-host{}", std::env::consts::EXE_SUFFIX));
+    let fallback = PathBuf::from("target").join("debug").join(format!(
+        "{}{}",
+        ENGINE_HOST_BASENAME,
+        std::env::consts::EXE_SUFFIX
+    ));
     if fallback.exists() {
         return Ok(fallback);
+    }
+
+    let fallback_release = PathBuf::from("target").join("release").join(format!(
+        "{}{}",
+        ENGINE_HOST_BASENAME,
+        std::env::consts::EXE_SUFFIX
+    ));
+    if fallback_release.exists() {
+        return Ok(fallback_release);
     }
 
     Err(EngineClientError::Message(
         "Unable to locate smolpc-engine-host binary".to_string(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_error_message_extracts_nested_message() {
+        let value = serde_json::json!({
+            "error": {
+                "message": "stream failed"
+            }
+        });
+
+        assert_eq!(
+            parse_error_message(&value),
+            Some("stream failed".to_string())
+        );
+    }
+
+    #[test]
+    fn non_stream_metrics_prefers_host_metrics_extension() {
+        let value = serde_json::json!({
+            "smolpc_metrics": {
+                "total_tokens": 24,
+                "time_to_first_token_ms": 321,
+                "tokens_per_second": 14.2,
+                "total_time_ms": 1690
+            }
+        });
+
+        let metrics = non_stream_metrics(&value, Instant::now(), "ignored")
+            .expect("host metrics extension should parse");
+        assert_eq!(metrics.total_tokens, 24);
+        assert_eq!(metrics.time_to_first_token_ms, Some(321));
+        assert_eq!(metrics.total_time_ms, 1690);
+    }
+
+    #[test]
+    fn fallback_stream_metrics_reflects_emitted_chunks() {
+        let metrics = fallback_stream_metrics(Instant::now(), 3, Some(10));
+        assert_eq!(metrics.total_tokens, 3);
+        assert_eq!(metrics.time_to_first_token_ms, Some(10));
+    }
 }

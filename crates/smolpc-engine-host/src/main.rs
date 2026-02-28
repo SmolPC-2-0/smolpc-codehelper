@@ -1,4 +1,3 @@
-
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -217,23 +216,35 @@ impl EngineState {
         }
         let model_def = ModelRegistry::get_model(&model_id)
             .ok_or_else(|| format!("Unknown model ID: {}", model_id))?;
-        let cpu_spec = ModelRegistry::runtime_spec_for_backend(&model_id, RuntimeBackendTarget::Cpu)
-            .ok_or_else(|| format!("Missing CPU runtime spec for model ID: {}", model_id))?;
+        let cpu_spec =
+            ModelRegistry::runtime_spec_for_backend(&model_id, RuntimeBackendTarget::Cpu)
+                .ok_or_else(|| format!("Missing CPU runtime spec for model ID: {}", model_id))?;
         cpu_spec.validate()?;
 
-        let cpu_model_path = ModelLoader::validate_model_for_backend(&model_def.directory, ModelArtifactBackend::Cpu)?;
-        let dml_model_path = ModelLoader::resolve_model_file_for_backend(&model_def.directory, ModelArtifactBackend::DirectML);
+        let cpu_model_path = ModelLoader::validate_model_for_backend(
+            &model_def.directory,
+            ModelArtifactBackend::Cpu,
+        )?;
+        let dml_model_path = ModelLoader::resolve_model_file_for_backend(
+            &model_def.directory,
+            ModelArtifactBackend::DirectML,
+        );
         let tokenizer_path = ModelLoader::tokenizer_file(&model_def.directory);
 
         let force = std::env::var("SMOLPC_FORCE_EP").ok();
         let enable_dml = parse_bool_env("SMOLPC_ENABLE_DML_GENAI");
-        let dml_id = std::env::var("SMOLPC_DML_DEVICE_ID").ok().and_then(|v| v.parse::<i32>().ok());
+        let dml_id = std::env::var("SMOLPC_DML_DEVICE_ID")
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok());
 
         let mut backend = InferenceBackend::Cpu;
         let mut engine_name = "ort_cpu".to_string();
 
-        let adapter = if force.as_deref() == Some("dml") || (enable_dml && dml_model_path.is_some()) {
-            let dml_path = dml_model_path.as_deref().ok_or_else(|| "DirectML model artifact missing".to_string())?;
+        let adapter = if force.as_deref() == Some("dml") || (enable_dml && dml_model_path.is_some())
+        {
+            let dml_path = dml_model_path
+                .as_deref()
+                .ok_or_else(|| "DirectML model artifact missing".to_string())?;
             match build_directml_runtime_adapter(dml_path, dml_id) {
                 Ok(adapter) => {
                     backend = InferenceBackend::DirectML;
@@ -244,20 +255,30 @@ impl EngineState {
                     if force.as_deref() == Some("dml") {
                         return Err(e);
                     }
-                    let (adapter, _) = build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)?;
+                    let (adapter, _) =
+                        build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)?;
                     adapter
                 }
             }
         } else {
-            let (adapter, _) = build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)?;
+            let (adapter, _) =
+                build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)?;
             adapter
+        };
+        let active_model_path = if backend == InferenceBackend::DirectML {
+            dml_model_path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| cpu_model_path.display().to_string())
+        } else {
+            cpu_model_path.display().to_string()
         };
 
         *self.runtime_adapter.lock().await = Some(adapter);
         *self.current_model.lock().await = Some(model_id);
         *self.backend_status.lock().await = BackendStatus {
             active_backend: Some(backend),
-            active_model_path: Some(cpu_model_path.display().to_string()),
+            active_model_path: Some(active_model_path),
             active_artifact_backend: Some(backend),
             runtime_engine: Some(engine_name),
             ..Default::default()
@@ -283,14 +304,22 @@ impl EngineState {
         Ok(())
     }
 
-    async fn generate_text(&self, prompt: &str, config: Option<GenerationConfig>) -> Result<GenerationResult, String> {
+    async fn generate_text(
+        &self,
+        prompt: &str,
+        config: Option<GenerationConfig>,
+    ) -> Result<GenerationResult, String> {
         let (_permit, cancelled) = self.begin_generation()?;
         let mut text = String::new();
         let metrics = {
             let adapter_guard = self.runtime_adapter.lock().await;
-            let adapter = adapter_guard.as_ref().ok_or_else(|| "No model loaded. Call /engine/load first.".to_string())?;
+            let adapter = adapter_guard
+                .as_ref()
+                .ok_or_else(|| "No model loaded. Call /engine/load first.".to_string())?;
             adapter
-                .generate_stream(prompt, config, cancelled.clone(), |token| text.push_str(&token))
+                .generate_stream(prompt, config, cancelled.clone(), |token| {
+                    text.push_str(&token)
+                })
                 .await?
         };
         if cancelled.load(Ordering::SeqCst) {
@@ -299,15 +328,24 @@ impl EngineState {
         Ok(GenerationResult { text, metrics })
     }
 
-    async fn generate_stream<F>(&self, prompt: &str, config: Option<GenerationConfig>, on_token: F) -> Result<GenerationMetrics, String>
+    async fn generate_stream<F>(
+        &self,
+        prompt: &str,
+        config: Option<GenerationConfig>,
+        on_token: F,
+    ) -> Result<GenerationMetrics, String>
     where
         F: FnMut(String),
     {
         let (_permit, cancelled) = self.begin_generation()?;
         let metrics = {
             let adapter_guard = self.runtime_adapter.lock().await;
-            let adapter = adapter_guard.as_ref().ok_or_else(|| "No model loaded. Call /engine/load first.".to_string())?;
-            adapter.generate_stream(prompt, config, cancelled.clone(), on_token).await?
+            let adapter = adapter_guard
+                .as_ref()
+                .ok_or_else(|| "No model loaded. Call /engine/load first.".to_string())?;
+            adapter
+                .generate_stream(prompt, config, cancelled.clone(), on_token)
+                .await?
         };
         if cancelled.load(Ordering::SeqCst) {
             return Err("INFERENCE_GENERATION_CANCELLED: Generation cancelled".to_string());
@@ -347,7 +385,13 @@ fn build_cpu_runtime_adapter(
     model_path: &Path,
     tokenizer_path: &Path,
     runtime_spec: ModelRuntimeSpec,
-) -> Result<(InferenceRuntimeAdapter, smolpc_engine_core::inference::types::ModelInfo), String> {
+) -> Result<
+    (
+        InferenceRuntimeAdapter,
+        smolpc_engine_core::inference::types::ModelInfo,
+    ),
+    String,
+> {
     let session = InferenceSession::new_with_backend_options(
         model_path,
         InferenceBackend::Cpu,
@@ -393,8 +437,9 @@ struct AppState {
 
 enum StreamMessage {
     Token(String),
+    Metrics(GenerationMetrics),
     Done,
-    Error(String),
+    Error { message: String, code: &'static str },
 }
 
 struct CancelOnDrop {
@@ -409,13 +454,28 @@ impl Drop for CancelOnDrop {
 
 fn auth(headers: &HeaderMap, token: &str) -> Result<(), ApiError> {
     let Some(value) = headers.get("authorization") else {
-        return Err((StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "Unauthorized".to_string() })));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "Unauthorized".to_string(),
+            }),
+        ));
     };
     let Ok(value) = value.to_str() else {
-        return Err((StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "Unauthorized".to_string() })));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "Unauthorized".to_string(),
+            }),
+        ));
     };
     if value != format!("Bearer {}", token) {
-        return Err((StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "Unauthorized".to_string() })));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "Unauthorized".to_string(),
+            }),
+        ));
     }
     Ok(())
 }
@@ -441,22 +501,58 @@ fn request_to_prompt(messages: &[ChatCompletionMessage]) -> Result<String, Strin
 fn request_to_config(request: &ChatCompletionRequest) -> Option<GenerationConfig> {
     let mut c = GenerationConfig::default();
     let mut changed = false;
-    if let Some(v) = request.max_tokens { c.max_length = v; changed = true; }
-    if let Some(v) = request.temperature { c.temperature = v; changed = true; }
-    if let Some(v) = request.top_k { c.top_k = Some(v); changed = true; }
-    if let Some(v) = request.top_p { c.top_p = Some(v); changed = true; }
-    if let Some(v) = request.repetition_penalty { c.repetition_penalty = v; changed = true; }
-    if let Some(v) = request.repetition_penalty_last_n { c.repetition_penalty_last_n = v; changed = true; }
-    if changed { Some(c) } else { None }
+    if let Some(v) = request.max_tokens {
+        c.max_length = v;
+        changed = true;
+    }
+    if let Some(v) = request.temperature {
+        c.temperature = v;
+        changed = true;
+    }
+    if let Some(v) = request.top_k {
+        c.top_k = Some(v);
+        changed = true;
+    }
+    if let Some(v) = request.top_p {
+        c.top_p = Some(v);
+        changed = true;
+    }
+    if let Some(v) = request.repetition_penalty {
+        c.repetition_penalty = v;
+        changed = true;
+    }
+    if let Some(v) = request.repetition_penalty_last_n {
+        c.repetition_penalty_last_n = v;
+        changed = true;
+    }
+    if changed {
+        Some(c)
+    } else {
+        None
+    }
 }
 
-async fn health(headers: HeaderMap, State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+fn stream_error_code(error: &str) -> &'static str {
+    if error.contains("INFERENCE_GENERATION_CANCELLED") {
+        "INFERENCE_GENERATION_CANCELLED"
+    } else {
+        "ENGINE_STREAM_ERROR"
+    }
+}
+
+async fn health(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     auth(&headers, &state.token)?;
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
-async fn meta(headers: HeaderMap, State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+async fn meta(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     auth(&headers, &state.token)?;
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
     Ok(Json(serde_json::json!({
@@ -468,7 +564,10 @@ async fn meta(headers: HeaderMap, State(state): State<AppState>) -> Result<Json<
     })))
 }
 
-async fn status(headers: HeaderMap, State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+async fn status(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     auth(&headers, &state.token)?;
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
     let current_model = state.engine.current_model.lock().await.clone();
@@ -481,35 +580,67 @@ async fn status(headers: HeaderMap, State(state): State<AppState>) -> Result<Jso
     })))
 }
 
-async fn load(headers: HeaderMap, State(state): State<AppState>, Json(req): Json<LoadRequest>) -> Result<Json<serde_json::Value>, ApiError> {
+async fn load(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<LoadRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     auth(&headers, &state.token)?;
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
-    state.engine.load_model(req.model_id).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    state.engine.load_model(req.model_id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
-async fn unload(headers: HeaderMap, State(state): State<AppState>, Json(req): Json<UnloadRequest>) -> Result<Json<serde_json::Value>, ApiError> {
+async fn unload(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<UnloadRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     auth(&headers, &state.token)?;
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
-    state.engine.unload_model(req.force.unwrap_or(false)).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    state
+        .engine
+        .unload_model(req.force.unwrap_or(false))
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: e }),
+            )
+        })?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
-async fn cancel(headers: HeaderMap, State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+async fn cancel(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     auth(&headers, &state.token)?;
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
     state.engine.cancel();
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
-async fn shutdown(headers: HeaderMap, State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+async fn shutdown(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     auth(&headers, &state.token)?;
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
     state.shutdown.notify_waiters();
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
-async fn check_model(headers: HeaderMap, State(state): State<AppState>, Json(req): Json<CheckModelRequest>) -> Result<Json<serde_json::Value>, ApiError> {
+async fn check_model(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<CheckModelRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     auth(&headers, &state.token)?;
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
     let exists = ModelRegistry::get_model(&req.model_id)
@@ -521,7 +652,10 @@ async fn check_model(headers: HeaderMap, State(state): State<AppState>, Json(req
     Ok(Json(serde_json::json!({"exists": exists})))
 }
 
-async fn v1_models(headers: HeaderMap, State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+async fn v1_models(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     auth(&headers, &state.token)?;
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
     let data = ModelRegistry::available_models()
@@ -543,12 +677,38 @@ async fn v1_chat_completions(
         .queue_semaphore
         .clone()
         .try_acquire_owned()
-        .map_err(|_| (StatusCode::TOO_MANY_REQUESTS, Json(ErrorResponse { error: "Engine queue is full".to_string() })))?;
+        .map_err(|_| {
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ErrorResponse {
+                    error: "Engine queue is full".to_string(),
+                }),
+            )
+        })?;
 
-    let gen_permit = timeout(state.queue_timeout, state.generation_semaphore.clone().acquire_owned())
-        .await
-        .map_err(|_| (StatusCode::GATEWAY_TIMEOUT, Json(ErrorResponse { error: "Queued request timed out".to_string() })))
-        .and_then(|r| r.map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Generation semaphore closed".to_string() }))))?;
+    let gen_permit = timeout(
+        state.queue_timeout,
+        state.generation_semaphore.clone().acquire_owned(),
+    )
+    .await
+    .map_err(|_| {
+        (
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(ErrorResponse {
+                error: "Queued request timed out".to_string(),
+            }),
+        )
+    })
+    .and_then(|r| {
+        r.map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Generation semaphore closed".to_string(),
+                }),
+            )
+        })
+    })?;
 
     drop(queue_permit);
 
@@ -565,13 +725,21 @@ async fn v1_chat_completions(
         let activity = state.last_activity_ms.clone();
         tokio::spawn(async move {
             let _permit = gen_permit;
-            let result = engine.generate_stream(&prompt, config, |t| {
-                let _ = tx.send(StreamMessage::Token(t));
-            }).await;
+            let result = engine
+                .generate_stream(&prompt, config, |t| {
+                    let _ = tx.send(StreamMessage::Token(t));
+                })
+                .await;
             match result {
-                Ok(_) => { let _ = tx.send(StreamMessage::Done); }
+                Ok(metrics) => {
+                    let _ = tx.send(StreamMessage::Metrics(metrics));
+                    let _ = tx.send(StreamMessage::Done);
+                }
                 Err(e) => {
-                    let _ = tx.send(StreamMessage::Error(e));
+                    let _ = tx.send(StreamMessage::Error {
+                        code: stream_error_code(&e),
+                        message: e,
+                    });
                     let _ = tx.send(StreamMessage::Done);
                 }
             }
@@ -601,15 +769,30 @@ async fn v1_chat_completions(
                         });
                         yield Ok(Event::default().data(chunk.to_string()));
                     }
-                    StreamMessage::Error(e) => {
-                        let chunk = serde_json::json!({
+                    StreamMessage::Metrics(metrics) => {
+                        let metrics_event = serde_json::json!({
                             "id": request_id,
-                            "object": "chat.completion.chunk",
+                            "object": "chat.completion.metrics",
                             "created": created,
                             "model": model_name,
-                            "choices": [{"index": 0, "delta": {"content": format!("[error] {e}")}, "finish_reason": "stop"}],
+                            "smolpc_metrics": metrics,
                         });
-                        yield Ok(Event::default().data(chunk.to_string()));
+                        yield Ok(Event::default().data(metrics_event.to_string()));
+                    }
+                    StreamMessage::Error { message, code } => {
+                        let error_type = if code == "INFERENCE_GENERATION_CANCELLED" {
+                            "cancelled"
+                        } else {
+                            "runtime_error"
+                        };
+                        let error_event = serde_json::json!({
+                            "error": {
+                                "message": message,
+                                "code": code,
+                                "type": error_type
+                            }
+                        });
+                        yield Ok(Event::default().data(error_event.to_string()));
                     }
                     StreamMessage::Done => {
                         let done = serde_json::json!({
@@ -627,12 +810,21 @@ async fn v1_chat_completions(
             }
         };
 
-        return Ok(Sse::new(stream).keep_alive(KeepAlive::default()).into_response());
+        return Ok(Sse::new(stream)
+            .keep_alive(KeepAlive::default())
+            .into_response());
     }
 
-    let result = state.engine.generate_text(&prompt, config)
+    let result = state
+        .engine
+        .generate_text(&prompt, config)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: e }),
+            )
+        })?;
     drop(gen_permit);
 
     let response = serde_json::json!({
@@ -649,7 +841,8 @@ async fn v1_chat_completions(
             "prompt_tokens": 0,
             "completion_tokens": result.metrics.total_tokens,
             "total_tokens": result.metrics.total_tokens
-        }
+        },
+        "smolpc_metrics": result.metrics
     });
 
     Ok(Json(response).into_response())
@@ -660,8 +853,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = parse_args();
     std::fs::create_dir_all(&args.data_dir)?;
 
-    let token = std::env::var("SMOLPC_ENGINE_TOKEN").map_err(|_| "SMOLPC_ENGINE_TOKEN is required")?;
-    init_onnx_runtime(args.resource_dir.as_deref()).map_err(|e| format!("ONNX Runtime init failed: {e}"))?;
+    let token =
+        std::env::var("SMOLPC_ENGINE_TOKEN").map_err(|_| "SMOLPC_ENGINE_TOKEN is required")?;
+    init_onnx_runtime(args.resource_dir.as_deref())
+        .map_err(|e| format!("ONNX Runtime init failed: {e}"))?;
 
     let state = AppState {
         token: Arc::new(token),
@@ -677,7 +872,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         loop {
             sleep(Duration::from_secs(30)).await;
-            let idle_ms = epoch_ms().saturating_sub(idle_state.last_activity_ms.load(Ordering::SeqCst));
+            let idle_ms =
+                epoch_ms().saturating_sub(idle_state.last_activity_ms.load(Ordering::SeqCst));
             if idle_ms >= args.model_idle_unload.as_millis() as u64
                 && !idle_state.engine.generating.load(Ordering::SeqCst)
                 && idle_state.engine.current_model.lock().await.is_some()
@@ -707,7 +903,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_state(state.clone());
 
     let listener = TcpListener::bind(("127.0.0.1", args.port)).await?;
-    println!("smolpc-engine-host listening on http://127.0.0.1:{}", args.port);
+    println!(
+        "smolpc-engine-host listening on http://127.0.0.1:{}",
+        args.port
+    );
 
     let shutdown_signal = async move {
         tokio::select! {

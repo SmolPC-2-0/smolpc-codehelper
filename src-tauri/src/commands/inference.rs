@@ -29,13 +29,21 @@ async fn resolve_client(
     state: &InferenceState,
 ) -> Result<EngineClient, String> {
     if let Some(client) = state.client.lock().await.clone() {
-        return Ok(client);
+        if client.health().await.unwrap_or(false) {
+            return Ok(client);
+        }
+        log::warn!("Cached shared engine client is unhealthy; reconnecting");
+        *state.client.lock().await = None;
     }
 
     let _guard = state.connect_lock.lock().await;
 
     if let Some(client) = state.client.lock().await.clone() {
-        return Ok(client);
+        if client.health().await.unwrap_or(false) {
+            return Ok(client);
+        }
+        log::warn!("Cached shared engine client is unhealthy after lock; reconnecting");
+        *state.client.lock().await = None;
     }
 
     let app_data_dir = app_handle
@@ -114,8 +122,15 @@ fn resolve_host_binary_path() -> Option<PathBuf> {
     let workspace_target = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("target")
-        .join(if cfg!(debug_assertions) { "debug" } else { "release" })
-        .join(format!("smolpc-engine-host{}", std::env::consts::EXE_SUFFIX));
+        .join(if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        })
+        .join(format!(
+            "smolpc-engine-host{}",
+            std::env::consts::EXE_SUFFIX
+        ));
     if workspace_target.exists() {
         return Some(workspace_target);
     }
