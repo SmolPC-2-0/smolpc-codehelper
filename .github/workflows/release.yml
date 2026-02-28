@@ -19,13 +19,16 @@ jobs:
       matrix:
         include:
           - platform: 'macos-latest'
+            target: 'aarch64-apple-darwin'
             args: '--target aarch64-apple-darwin'
           # Uncomment for Intel builds
           #   - platform: 'macos-latest' # for Intel based macs.
           #     args: '--target x86_64-apple-darwin'
           - platform: 'ubuntu-24.04'
+            target: 'x86_64-unknown-linux-gnu'
             args: ''
           - platform: 'windows-latest'
+            target: 'x86_64-pc-windows-msvc'
             args: ''
 
     runs-on: ${{ matrix.platform }}
@@ -49,6 +52,30 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Build shared engine host sidecar
+        run: cargo build --release -p smolpc-engine-host ${{ matrix.args }}
+
+      - name: Stage sidecar binary (unix)
+        if: matrix.platform != 'windows-latest'
+        run: |
+          mkdir -p src-tauri/binaries
+          SIDE_BIN="target/${{ matrix.target }}/release/smolpc-engine-host"
+          if [ ! -f "$SIDE_BIN" ]; then
+            SIDE_BIN="target/release/smolpc-engine-host"
+          fi
+          cp "$SIDE_BIN" "src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}"
+          chmod +x "src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}"
+
+      - name: Stage sidecar binary (windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          New-Item -ItemType Directory -Path src-tauri/binaries -Force | Out-Null
+          $sideBin = "target/${{ matrix.target }}/release/smolpc-engine-host.exe"
+          if (!(Test-Path $sideBin)) {
+            $sideBin = "target/release/smolpc-engine-host.exe"
+          }
+          Copy-Item $sideBin "src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}.exe" -Force
 
       - name: Build Tauri
         uses: tauri-apps/tauri-action@v0
