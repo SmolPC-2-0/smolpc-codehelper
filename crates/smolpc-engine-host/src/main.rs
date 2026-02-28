@@ -683,6 +683,9 @@ impl EngineState {
         if error.contains("INFERENCE_GENERATION_CANCELLED") {
             return;
         }
+        if parse_force_override() == Some(InferenceBackend::DirectML) {
+            return;
+        }
 
         let status_snapshot = self.backend_status.lock().await.clone();
         if status_snapshot.active_backend != Some(InferenceBackend::DirectML) {
