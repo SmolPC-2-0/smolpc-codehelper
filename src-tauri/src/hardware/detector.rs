@@ -2,6 +2,9 @@ use crate::hardware::errors::HardwareError;
 use crate::hardware::types::{
     CpuInfo, GpuInfo, GpuVendor, HardwareInfo, MemoryInfo, NpuConfidence, NpuInfo, StorageInfo,
 };
+use std::time::{Duration, Instant};
+
+const HARDWARE_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Helper Functions
 /// Convert non-zero u64 to Option (0 = detection failed)
@@ -23,9 +26,30 @@ fn non_empty_string(value: Option<String>) -> Option<String> {
 /// Main entry point for hardware detection using hardware-query crate
 /// Detects CPU, GPU, and NPU information offline
 pub async fn detect_all() -> Result<HardwareInfo, HardwareError> {
-    // Query all hardware information using hardware-query
-    let hw_info = hardware_query::HardwareInfo::query()
-        .map_err(|e| HardwareError::QueryFailed(e.to_string()))?;
+    let started = Instant::now();
+    log::info!(
+        "Starting hardware detection using hardware-query (timeout={}s)",
+        HARDWARE_DETECTION_TIMEOUT.as_secs()
+    );
+
+    let query_task = tokio::task::spawn_blocking(hardware_query::HardwareInfo::query);
+    let hw_info = match tokio::time::timeout(HARDWARE_DETECTION_TIMEOUT, query_task).await {
+        Ok(Ok(Ok(info))) => info,
+        Ok(Ok(Err(error))) => {
+            return Err(HardwareError::QueryFailed(error.to_string()));
+        }
+        Ok(Err(error)) => {
+            return Err(HardwareError::QueryFailed(format!(
+                "Hardware detection worker task failed: {error}"
+            )));
+        }
+        Err(_) => {
+            return Err(HardwareError::QueryFailed(format!(
+                "Hardware detection timed out after {} seconds",
+                HARDWARE_DETECTION_TIMEOUT.as_secs()
+            )));
+        }
+    };
 
     // Convert CPU info
     let cpu_info = convert_cpu_info(&hw_info);
@@ -42,14 +66,20 @@ pub async fn detect_all() -> Result<HardwareInfo, HardwareError> {
     // Convert storage info
     let storage_info = convert_storage_info(&hw_info);
 
-    Ok(HardwareInfo {
+    let info = HardwareInfo {
         cpu: cpu_info,
         gpus: gpu_info,
         npu: npu_info,
         memory: memory_info,
         storage: storage_info,
         detected_at: chrono::Utc::now().to_rfc3339(),
-    })
+    };
+
+    log::info!(
+        "Hardware detection completed in {} ms",
+        started.elapsed().as_millis()
+    );
+    Ok(info)
 }
 
 /// Convert hardware-query CPU info to our CpuInfo format
