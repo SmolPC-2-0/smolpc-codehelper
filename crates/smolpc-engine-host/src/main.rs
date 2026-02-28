@@ -98,6 +98,7 @@ struct DirectMlCandidate {
 #[derive(Debug, Clone)]
 struct BackendProbeResult {
     available_backends: Vec<InferenceBackend>,
+    directml_device_count: usize,
     directml_candidate: Option<DirectMlCandidate>,
 }
 
@@ -105,6 +106,7 @@ impl Default for BackendProbeResult {
     fn default() -> Self {
         Self {
             available_backends: vec![InferenceBackend::Cpu],
+            directml_device_count: 0,
             directml_candidate: None,
         }
     }
@@ -289,6 +291,12 @@ fn probe_backend_capabilities() -> BackendProbeResult {
         return BackendProbeResult::default();
     };
     let mut result = BackendProbeResult::default();
+    let directml_device_count = info
+        .gpus()
+        .iter()
+        .filter(|gpu| gpu.supports_directml())
+        .count();
+    result.directml_device_count = directml_device_count;
     if let Some(candidate) = pick_best_dml_candidate(info.gpus()) {
         result.available_backends.push(InferenceBackend::DirectML);
         result.directml_candidate = Some(candidate);
@@ -511,11 +519,45 @@ impl EngineState {
             .directml_candidate
             .as_ref()
             .map(|candidate| candidate.device_id);
-        let selected_device_id = forced_device_id.or(probe_device_id);
+        let mut selected_device_id = forced_device_id.or(probe_device_id);
         let selected_device_name = probe
             .directml_candidate
             .as_ref()
             .map(|candidate| candidate.device_name.clone());
+
+        if let Some(forced_id) = forced_device_id {
+            let forced_out_of_range = forced_id < 0
+                || (probe.directml_device_count > 0
+                    && forced_id as usize >= probe.directml_device_count);
+            if forced_out_of_range {
+                let error = format!(
+                    "Invalid SMOLPC_DML_DEVICE_ID={forced_id}; detected DirectML device count={}",
+                    probe.directml_device_count
+                );
+                if force_override == Some(InferenceBackend::DirectML) {
+                    *self.backend_status.lock().await = BackendStatus {
+                        available_backends: available_backends.clone(),
+                        selection_state: Some("error".to_string()),
+                        selection_reason: Some("invalid_directml_device_id".to_string()),
+                        selected_device_id: Some(forced_id),
+                        selected_device_name: selected_device_name.clone(),
+                        dml_gate_state: Some("error".to_string()),
+                        dml_gate_reason: Some("invalid_directml_device_id".to_string()),
+                        directml_probe_passed: Some(directml_detected),
+                        directml_probe_error: Some(error.clone()),
+                        directml_probe_at: Some(Utc::now().to_rfc3339()),
+                        force_override,
+                        store_path: self
+                            .store_path
+                            .as_ref()
+                            .map(|path| path.display().to_string()),
+                        ..Default::default()
+                    };
+                    return Err(error);
+                }
+                selected_device_id = probe_device_id;
+            }
+        }
 
         let adapter_identity = probe
             .directml_candidate
