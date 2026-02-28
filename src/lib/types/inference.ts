@@ -63,6 +63,20 @@ export interface AvailableModel {
 }
 
 /**
+ * Active inference backend state exposed by the shared engine host.
+ */
+export interface BackendStatus {
+	/** Active backend identifier ("cpu" or "directml") */
+	active_backend: string | null;
+
+	/** Resolved active model path on disk */
+	active_model_path: string | null;
+
+	/** Runtime implementation in use (e.g. "ort_cpu", "genai_dml") */
+	runtime_engine: string | null;
+}
+
+/**
  * Generation configuration
  */
 export interface GenerationConfig {
@@ -100,4 +114,13 @@ export interface InferenceStatus {
 
 	/** Error message if any */
 	error: string | null;
+
+	/** Active backend identifier ("cpu" or "directml") */
+	activeBackend: string | null;
+
+	/** Runtime implementation in use (e.g. "ort_cpu", "genai_dml") */
+	runtimeEngine: string | null;
+
+	/** Resolved active model path on disk */
+	activeModelPath: string | null;
 }

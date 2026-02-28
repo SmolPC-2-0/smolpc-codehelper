@@ -6,19 +6,37 @@
 	}
 
 	let { status }: Props = $props();
+
+	function formatBackendLabel(backend: string | null): string {
+		if (!backend) {
+			return 'Unknown Backend';
+		}
+		if (backend === 'directml') {
+			return 'DirectML';
+		}
+		if (backend === 'cpu') {
+			return 'CPU';
+		}
+		return backend.toUpperCase();
+	}
 </script>
 
 <div class={`status-indicator ${status.isGenerating ? 'status-indicator--generating' : status.isLoaded ? 'status-indicator--ready' : 'status-indicator--idle'}`}>
 	<div class="status-indicator__dot"></div>
-	<span class="status-indicator__text">
+	<div class="status-indicator__content">
+		<span class="status-indicator__text">
 		{#if status.isGenerating}
 			Generating...
 		{:else if status.isLoaded}
-			{status.currentModel ?? 'Model Ready'}
+			{status.currentModel ?? 'Model Ready'} • {formatBackendLabel(status.activeBackend)}
 		{:else}
 			No Model Loaded
 		{/if}
-	</span>
+		</span>
+		{#if status.isLoaded && status.runtimeEngine}
+			<span class="status-indicator__runtime">{status.runtimeEngine}</span>
+		{/if}
+	</div>
 	{#if status.error}
 		<span class="status-indicator__error">({status.error})</span>
 	{/if}
@@ -49,6 +67,21 @@
 	.status-indicator__text {
 		font-size: 0.74rem;
 		font-weight: 620;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		overflow: hidden;
+	}
+
+	.status-indicator__content {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 0.16rem;
+	}
+
+	.status-indicator__runtime {
+		font-size: 0.66rem;
+		color: var(--color-muted-foreground);
 		white-space: nowrap;
 		text-overflow: ellipsis;
 		overflow: hidden;
