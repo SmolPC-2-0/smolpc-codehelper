@@ -11,6 +11,7 @@ pub const ORT_CRATE_VERSION: &str = "2.0.0-rc.11";
 #[serde(rename_all = "snake_case")]
 pub enum InferenceBackend {
     Cpu,
+    #[serde(rename = "directml")]
     DirectML,
 }
 
@@ -304,5 +305,12 @@ mod tests {
         };
 
         assert_eq!(comparison.directml_ttft_ratio(), 1.0);
+    }
+
+    #[test]
+    fn directml_backend_serializes_without_split_initialism() {
+        let serialized = serde_json::to_string(&InferenceBackend::DirectML)
+            .expect("directml backend should serialize");
+        assert_eq!(serialized, "\"directml\"");
     }
 }

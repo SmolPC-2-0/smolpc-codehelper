@@ -17,6 +17,8 @@ const ENGINE_HOST_BASENAME: &str = "smolpc-engine-host";
 const SPAWN_LOCK_FILENAME: &str = "engine-spawn.lock";
 const SPAWN_LOCK_WAIT: Duration = Duration::from_secs(10);
 const SPAWN_LOCK_STALE_AGE: Duration = Duration::from_secs(30);
+const DEV_FORCE_RESPAWN_ENV: &str = "SMOLPC_ENGINE_DEV_FORCE_RESPAWN";
+const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
 
 struct SpawnLockGuard {
     path: PathBuf,
@@ -308,6 +310,15 @@ impl EngineClient {
                         continue;
                     }
 
+                    if value.get("object").and_then(|object| object.as_str())
+                        == Some("chat.completion.metrics")
+                    {
+                        return Err(EngineClientError::Message(
+                            "Engine stream metrics event is missing required smolpc_metrics payload"
+                                .to_string(),
+                        ));
+                    }
+
                     if let Some(content) = value
                         .get("choices")
                         .and_then(|c| c.as_array())
@@ -341,36 +352,19 @@ pub async fn connect_or_spawn(
     let token = load_or_create_token(&token_path)?;
     let base_url = format!("http://127.0.0.1:{}", options.port);
     let client = EngineClient::new(base_url, token.clone());
+    let force_override = force_override_requested();
+    let dev_force_respawn = parse_bool_env(DEV_FORCE_RESPAWN_ENV);
 
-    if client.health().await.unwrap_or(false) {
-        let meta = client.meta().await?;
-        if protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION) {
-            return Ok(client);
-        }
-
-        let status = client.status().await?;
-        if !status.generating {
-            let _ = client
-                .http
-                .post(client.url("/engine/shutdown"))
-                .header(AUTHORIZATION, client.auth_header())
-                .send()
-                .await;
-            tokio::time::sleep(Duration::from_millis(300)).await;
-        } else {
-            return Err(EngineClientError::Message(
-                "Running engine protocol is incompatible and daemon is busy".to_string(),
-            ));
-        }
+    if enforce_running_host_policy(&client, force_override.as_deref(), dev_force_respawn).await? {
+        return Ok(client);
     }
 
     let _spawn_lock = acquire_spawn_lock(&options.shared_runtime_dir).await?;
-    if client.health().await.unwrap_or(false) {
-        let meta = client.meta().await?;
-        if protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION) {
-            return Ok(client);
-        }
-    } else {
+    if enforce_running_host_policy(&client, force_override.as_deref(), dev_force_respawn).await? {
+        return Ok(client);
+    }
+
+    if !client.health().await.unwrap_or(false) {
         spawn_host(&options, &token)?;
     }
 
@@ -396,6 +390,82 @@ pub async fn connect_or_spawn(
     }
 
     Ok(client)
+}
+
+async fn enforce_running_host_policy(
+    client: &EngineClient,
+    force_override: Option<&str>,
+    dev_force_respawn: bool,
+) -> Result<bool, EngineClientError> {
+    if !client.health().await.unwrap_or(false) {
+        return Ok(false);
+    }
+
+    let meta = client.meta().await?;
+    if !protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION) {
+        let status = client.status().await?;
+        if status.generating {
+            return Err(EngineClientError::Message(
+                "Running engine protocol is incompatible and daemon is busy".to_string(),
+            ));
+        }
+
+        request_engine_shutdown(client).await?;
+        wait_for_engine_down(client, Duration::from_secs(5)).await?;
+        return Ok(false);
+    }
+
+    if force_override.is_some() || dev_force_respawn {
+        let status = client.status().await?;
+        if status.generating {
+            let policy = force_override
+                .map(|value| format!("{FORCE_EP_ENV}={value}"))
+                .unwrap_or_else(|| format!("{DEV_FORCE_RESPAWN_ENV}=1"));
+            return Err(EngineClientError::Message(format!(
+                "Engine is busy and cannot apply {policy}. Cancel generation and retry."
+            )));
+        }
+
+        request_engine_shutdown(client).await?;
+        wait_for_engine_down(client, Duration::from_secs(5)).await?;
+        return Ok(false);
+    }
+
+    Ok(true)
+}
+
+async fn request_engine_shutdown(client: &EngineClient) -> Result<(), EngineClientError> {
+    let response = client
+        .http
+        .post(client.url("/engine/shutdown"))
+        .header(AUTHORIZATION, client.auth_header())
+        .send()
+        .await;
+
+    match response {
+        Ok(r) => {
+            r.error_for_status()?;
+            Ok(())
+        }
+        Err(e) if e.is_connect() => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+async fn wait_for_engine_down(
+    client: &EngineClient,
+    timeout: Duration,
+) -> Result<(), EngineClientError> {
+    let started = Instant::now();
+    while client.health().await.unwrap_or(false) {
+        if started.elapsed() > timeout {
+            return Err(EngineClientError::Message(
+                "Engine shutdown timed out while applying runtime policy".to_string(),
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Ok(())
 }
 
 fn completion_body(
@@ -425,6 +495,25 @@ fn protocol_major_matches(actual: &str, expected: &str) -> bool {
     let a = actual.split('.').next().unwrap_or(actual);
     let e = expected.split('.').next().unwrap_or(expected);
     a == e
+}
+
+fn parse_bool_env(key: &str) -> bool {
+    std::env::var(key)
+        .ok()
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            normalized == "1" || normalized == "true" || normalized == "yes"
+        })
+        .unwrap_or(false)
+}
+
+fn force_override_requested() -> Option<String> {
+    let value = std::env::var(FORCE_EP_ENV).ok()?;
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "cpu" | "dml" => Some(normalized),
+        _ => None,
+    }
 }
 
 fn parse_error_message(value: &serde_json::Value) -> Option<String> {

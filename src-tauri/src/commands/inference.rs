@@ -4,6 +4,7 @@ use smolpc_engine_core::models::registry::ModelDefinition;
 use smolpc_engine_core::{GenerationConfig, GenerationMetrics, GenerationResult};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 use tauri::ipc::Channel;
 use tauri::Manager;
 use tokio::sync::Mutex;
@@ -64,6 +65,7 @@ async fn resolve_client(
         .or_else(|| Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))));
     let models_dir = resolve_models_dir(resource_dir.as_ref());
     let host_binary = resolve_host_binary_path();
+    log_host_binary_resolution(host_binary.as_ref());
 
     let port = std::env::var("SMOLPC_ENGINE_PORT")
         .ok()
@@ -136,6 +138,37 @@ fn resolve_host_binary_path() -> Option<PathBuf> {
     }
 
     None
+}
+
+fn log_host_binary_resolution(host_binary: Option<&PathBuf>) {
+    let Some(path) = host_binary else {
+        log::info!("Shared engine host binary will be resolved via runtime discovery");
+        return;
+    };
+
+    match std::fs::metadata(path) {
+        Ok(metadata) => {
+            let modified_unix = metadata
+                .modified()
+                .ok()
+                .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs().to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            log::info!(
+                "Resolved shared engine host binary: path={} size_bytes={} modified_unix={}",
+                path.display(),
+                metadata.len(),
+                modified_unix
+            );
+        }
+        Err(error) => {
+            log::warn!(
+                "Resolved shared engine host binary path exists check failed: path={} error={}",
+                path.display(),
+                error
+            );
+        }
+    }
 }
 
 #[tauri::command]
