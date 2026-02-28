@@ -23,6 +23,7 @@ Default base URL: `http://127.0.0.1:19432`
     - `backend_status.available_backends`: detected candidates on this machine (`cpu`, optional `directml`)
     - `backend_status.selection_state`: `pending | ready | fallback | error`
     - `backend_status.selection_reason`: host-side reason code for latest backend decision
+      - Examples: `default_directml_candidate`, `persisted_decision`, `forced_override`, `directml_initialization_failed`, `runtime_failure_fallback`
     - `backend_status.selected_device_id`: active or candidate DirectML device id
     - `backend_status.selected_device_name`: active or candidate DirectML device name
 

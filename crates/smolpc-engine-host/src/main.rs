@@ -213,6 +213,24 @@ fn parse_dml_device_id_env() -> Option<i32> {
         .and_then(|v| v.parse::<i32>().ok())
 }
 
+fn decision_reason_code(reason: &DecisionReason) -> &'static str {
+    match reason {
+        DecisionReason::DefaultCpu => "default_cpu",
+        DecisionReason::DefaultDirectMLCandidate => "default_directml_candidate",
+        DecisionReason::ForcedOverride => "forced_override",
+        DecisionReason::PersistedDecision => "persisted_decision",
+        DecisionReason::BenchmarkPassed => "benchmark_passed",
+        DecisionReason::BenchmarkDecodeTooSlow => "benchmark_directml_decode_too_slow",
+        DecisionReason::BenchmarkTtftTooHigh => "benchmark_ttft_too_high",
+        DecisionReason::BenchmarkBudgetExceeded => "benchmark_budget_exceeded",
+        DecisionReason::NoDirectMLCandidate => "no_directml_candidate",
+        DecisionReason::DirectMLInitializationFailed => "directml_initialization_failed",
+        DecisionReason::DirectMLPreflightFailed => "directml_preflight_failed",
+        DecisionReason::RuntimeFailureFallback => "runtime_failure_fallback",
+        DecisionReason::DemotedAfterFailures => "demoted_after_failures",
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn gpu_rank_key(gpu: &hardware_query::GPUInfo) -> (bool, u64, String) {
     let device_type = gpu.gpu_type().to_string().to_ascii_lowercase();
@@ -294,7 +312,6 @@ struct EngineState {
     backend_store: Arc<Mutex<Option<BackendStore>>>,
     startup_probe: Arc<Mutex<Option<BackendProbeResult>>>,
     startup_probe_ready: Arc<Notify>,
-    session_demoted: Arc<AtomicBool>,
 }
 
 impl EngineState {
@@ -340,7 +357,6 @@ impl EngineState {
             backend_store: Arc::new(Mutex::new(backend_store)),
             startup_probe: Arc::new(Mutex::new(None)),
             startup_probe_ready: Arc::new(Notify::new()),
-            session_demoted: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -457,8 +473,6 @@ impl EngineState {
         if self.generating.load(Ordering::SeqCst) {
             return Err("Cannot load or unload model while generation is in progress".to_string());
         }
-        self.session_demoted.store(false, Ordering::SeqCst);
-
         let model_def = ModelRegistry::get_model(&model_id)
             .ok_or_else(|| format!("Unknown model ID: {}", model_id))?;
         let cpu_spec =
@@ -482,15 +496,16 @@ impl EngineState {
             .wait_for_startup_probe(Duration::from_millis(STARTUP_PROBE_WAIT_MS))
             .await;
 
-        let mut available_backends = vec![InferenceBackend::Cpu];
-        let has_dml_candidate = dml_model_path.is_some()
-            && (probe
-                .available_backends
-                .contains(&InferenceBackend::DirectML)
-                || force_override == Some(InferenceBackend::DirectML));
-        if has_dml_candidate {
-            available_backends.push(InferenceBackend::DirectML);
+        let mut available_backends = probe.available_backends.clone();
+        if !available_backends.contains(&InferenceBackend::Cpu) {
+            available_backends.push(InferenceBackend::Cpu);
         }
+        let directml_detected = probe
+            .available_backends
+            .contains(&InferenceBackend::DirectML)
+            || force_override == Some(InferenceBackend::DirectML);
+        let directml_artifact_available = dml_model_path.is_some();
+        let has_dml_candidate = directml_detected && directml_artifact_available;
 
         let probe_device_id = probe
             .directml_candidate
@@ -554,42 +569,123 @@ impl EngineState {
         let mut persisted_backend = preferred_backend;
         let mut persisted_reason = decision_reason.clone();
         let mut active_backend = preferred_backend;
+        let mut active_reason = decision_reason.clone();
         let mut runtime_engine = "ort_cpu".to_string();
         let mut selection_state = "ready".to_string();
-        let mut selection_reason = format!("{decision_reason:?}").to_ascii_lowercase();
+        let mut selection_reason = decision_reason_code(&active_reason).to_string();
 
         let adapter = if preferred_backend == InferenceBackend::DirectML {
-            let dml_path = dml_model_path.as_deref().ok_or_else(|| {
-                "DirectML model artifact missing (expected models/<model>/dml/model.onnx)"
-                    .to_string()
-            })?;
-            match build_directml_runtime_adapter(dml_path, selected_device_id) {
-                Ok(adapter) => {
-                    failure_counters.record_directml_success();
-                    runtime_engine = "genai_dml".to_string();
-                    adapter
+            match dml_model_path.as_deref() {
+                Some(dml_path) => {
+                    match build_directml_runtime_adapter(dml_path, selected_device_id) {
+                        Ok(adapter) => {
+                            failure_counters.record_directml_success();
+                            runtime_engine = "genai_dml".to_string();
+                            adapter
+                        }
+                        Err(error) => {
+                            if force_override == Some(InferenceBackend::DirectML) {
+                                failure_counters.record_directml_failure(
+                                    DirectMLFailureStage::Init,
+                                    error.clone(),
+                                );
+                                *self.backend_status.lock().await = BackendStatus {
+                                    available_backends: available_backends.clone(),
+                                    selection_state: Some("error".to_string()),
+                                    selection_reason: Some(
+                                        decision_reason_code(
+                                            &DecisionReason::DirectMLInitializationFailed,
+                                        )
+                                        .to_string(),
+                                    ),
+                                    selected_device_id,
+                                    selected_device_name: selected_device_name.clone(),
+                                    dml_gate_state: Some("error".to_string()),
+                                    dml_gate_reason: Some(
+                                        decision_reason_code(
+                                            &DecisionReason::DirectMLInitializationFailed,
+                                        )
+                                        .to_string(),
+                                    ),
+                                    directml_probe_passed: Some(directml_detected),
+                                    directml_probe_error: Some(error.clone()),
+                                    directml_probe_at: Some(Utc::now().to_rfc3339()),
+                                    failure_counters: failure_counters.clone(),
+                                    force_override,
+                                    store_path: self
+                                        .store_path
+                                        .as_ref()
+                                        .map(|path| path.display().to_string()),
+                                    ..Default::default()
+                                };
+                                return Err(error);
+                            }
+
+                            failure_counters
+                                .record_directml_failure(DirectMLFailureStage::Init, error.clone());
+                            selection_state = "fallback".to_string();
+                            active_backend = InferenceBackend::Cpu;
+                            active_reason = DecisionReason::DirectMLInitializationFailed;
+                            persisted_backend = InferenceBackend::DirectML;
+                            persisted_reason = DecisionReason::DirectMLInitializationFailed;
+
+                            if failure_counters.should_demote_directml() {
+                                failure_counters.mark_demotion();
+                                persisted_backend = InferenceBackend::Cpu;
+                                persisted_reason = DecisionReason::DemotedAfterFailures;
+                                active_reason = DecisionReason::DemotedAfterFailures;
+                            }
+                            selection_reason = decision_reason_code(&active_reason).to_string();
+
+                            let (adapter, _) = build_cpu_runtime_adapter(
+                                &cpu_model_path,
+                                &tokenizer_path,
+                                cpu_spec,
+                            )?;
+                            adapter
+                        }
+                    }
                 }
-                Err(error) => {
+                None => {
+                    let error =
+                        "DirectML model artifact missing (expected models/<model>/dml/model.onnx)"
+                            .to_string();
                     if force_override == Some(InferenceBackend::DirectML) {
+                        failure_counters
+                            .record_directml_failure(DirectMLFailureStage::Init, error.clone());
+                        *self.backend_status.lock().await = BackendStatus {
+                            available_backends: available_backends.clone(),
+                            selection_state: Some("error".to_string()),
+                            selection_reason: Some("directml_artifact_missing".to_string()),
+                            selected_device_id,
+                            selected_device_name: selected_device_name.clone(),
+                            dml_gate_state: Some("artifact_missing".to_string()),
+                            dml_gate_reason: Some("directml_artifact_missing".to_string()),
+                            directml_probe_passed: Some(directml_detected),
+                            directml_probe_error: if directml_detected {
+                                None
+                            } else {
+                                Some("No DirectML-capable adapter detected".to_string())
+                            },
+                            directml_probe_at: Some(Utc::now().to_rfc3339()),
+                            failure_counters: failure_counters.clone(),
+                            force_override,
+                            store_path: self
+                                .store_path
+                                .as_ref()
+                                .map(|path| path.display().to_string()),
+                            ..Default::default()
+                        };
                         return Err(error);
                     }
-
-                    failure_counters
-                        .record_directml_failure(DirectMLFailureStage::Init, error.clone());
-                    selection_state = "fallback".to_string();
-                    selection_reason = "directml_initialization_failed".to_string();
-                    active_backend = InferenceBackend::Cpu;
-                    persisted_backend = InferenceBackend::DirectML;
-                    persisted_reason = DecisionReason::DirectMLInitializationFailed;
-
-                    if failure_counters.should_demote_directml() {
-                        failure_counters.mark_demotion();
-                        persisted_backend = InferenceBackend::Cpu;
-                        persisted_reason = DecisionReason::DemotedAfterFailures;
-                    }
-
                     let (adapter, _) =
                         build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)?;
+                    active_backend = InferenceBackend::Cpu;
+                    active_reason = DecisionReason::NoDirectMLCandidate;
+                    persisted_backend = InferenceBackend::Cpu;
+                    persisted_reason = DecisionReason::NoDirectMLCandidate;
+                    selection_state = "fallback".to_string();
+                    selection_reason = decision_reason_code(&active_reason).to_string();
                     adapter
                 }
             }
@@ -622,19 +718,21 @@ impl EngineState {
             selected_device_name,
             dml_gate_state: Some(if active_backend == InferenceBackend::DirectML {
                 "selected".to_string()
+            } else if directml_detected && !directml_artifact_available {
+                "artifact_missing".to_string()
             } else if has_dml_candidate {
                 "fallback_cpu".to_string()
             } else {
                 "cpu_only".to_string()
             }),
-            dml_gate_reason: Some(format!("{persisted_reason:?}")),
+            dml_gate_reason: Some(decision_reason_code(&persisted_reason).to_string()),
             decision_key: Some(decision_key.clone()),
-            last_decision: Some(BackendDecision::new(active_backend, decision_reason, None)),
-            directml_probe_passed: Some(has_dml_candidate),
-            directml_probe_error: if has_dml_candidate {
+            last_decision: Some(BackendDecision::new(active_backend, active_reason, None)),
+            directml_probe_passed: Some(directml_detected),
+            directml_probe_error: if directml_detected {
                 None
             } else {
-                Some("No DirectML-capable adapter or artifact".to_string())
+                Some("No DirectML-capable adapter detected".to_string())
             },
             directml_probe_at: Some(Utc::now().to_rfc3339()),
             failure_counters: failure_counters.clone(),
@@ -668,7 +766,6 @@ impl EngineState {
         }
         *self.runtime_adapter.lock().await = None;
         *self.current_model.lock().await = None;
-        self.session_demoted.store(false, Ordering::SeqCst);
         let mut status = self.backend_status.lock().await;
         status.active_backend = None;
         status.active_model_path = None;
@@ -722,8 +819,6 @@ impl EngineState {
         };
 
         *self.runtime_adapter.lock().await = Some(cpu_adapter);
-        self.session_demoted.store(true, Ordering::SeqCst);
-
         let mut counters = status_snapshot.failure_counters.clone();
         counters.record_directml_failure(DirectMLFailureStage::Runtime, error.to_string());
         let mut persisted_backend = InferenceBackend::DirectML;
@@ -742,9 +837,9 @@ impl EngineState {
         updated.runtime_engine = Some("ort_cpu".to_string());
         updated.active_model_path = Some(cpu_model_path.display().to_string());
         updated.selection_state = Some("fallback".to_string());
-        updated.selection_reason = Some("directml_runtime_failure".to_string());
+        updated.selection_reason = Some(decision_reason_code(&decision_reason).to_string());
         updated.dml_gate_state = Some("fallback_cpu".to_string());
-        updated.dml_gate_reason = Some("runtime_failure".to_string());
+        updated.dml_gate_reason = Some(decision_reason_code(&persisted_reason).to_string());
         updated.last_decision = Some(BackendDecision::new(
             InferenceBackend::Cpu,
             decision_reason,

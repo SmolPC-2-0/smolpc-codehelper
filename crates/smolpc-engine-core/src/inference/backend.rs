@@ -28,15 +28,32 @@ impl InferenceBackend {
 #[serde(rename_all = "snake_case")]
 pub enum DecisionReason {
     DefaultCpu,
+    #[serde(
+        rename = "default_directml_candidate",
+        alias = "default_direct_m_l_candidate"
+    )]
     DefaultDirectMLCandidate,
     ForcedOverride,
     PersistedDecision,
     BenchmarkPassed,
+    #[serde(
+        rename = "benchmark_directml_decode_too_slow",
+        alias = "benchmark_decode_too_slow"
+    )]
     BenchmarkDecodeTooSlow,
     BenchmarkTtftTooHigh,
     BenchmarkBudgetExceeded,
+    #[serde(rename = "no_directml_candidate", alias = "no_direct_m_l_candidate")]
     NoDirectMLCandidate,
+    #[serde(
+        rename = "directml_initialization_failed",
+        alias = "direct_m_l_initialization_failed"
+    )]
     DirectMLInitializationFailed,
+    #[serde(
+        rename = "directml_preflight_failed",
+        alias = "direct_m_l_preflight_failed"
+    )]
     DirectMLPreflightFailed,
     RuntimeFailureFallback,
     DemotedAfterFailures,
