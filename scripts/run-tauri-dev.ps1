@@ -32,7 +32,24 @@ function Request-EngineShutdown {
     } catch {
         # Ignore shutdown errors - host may already be offline.
     }
+
+    $deadline = (Get-Date).AddSeconds(4)
+    while ($null -ne (Get-Process -Name "smolpc-engine-host" -ErrorAction SilentlyContinue)) {
+        if ((Get-Date) -gt $deadline) {
+            break
+        }
+        Start-Sleep -Milliseconds 200
+    }
+
+    $remaining = Get-Process -Name "smolpc-engine-host" -ErrorAction SilentlyContinue
+    if ($null -ne $remaining) {
+        Write-Host "Force-stopping stale smolpc-engine-host process(es) to release binary lock..."
+        $remaining | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 300
+    }
 }
+
+Request-EngineShutdown
 
 Write-Host "Building smolpc-engine-host (debug) for deterministic dev runtime..."
 cargo build -p smolpc-engine-host
@@ -64,8 +81,6 @@ switch ($ForceEp) {
         Write-Host "Starting Tauri dev with automatic backend selection..."
     }
 }
-
-Request-EngineShutdown
 
 npx tauri dev
 exit $LASTEXITCODE
