@@ -16,6 +16,9 @@ Default base URL: `http://127.0.0.1:19432`
 
 - `GET /engine/status`
   - Returns loaded model, generation activity, and backend status.
+  - `backend_status.active_backend` and `backend_status.active_artifact_backend` are serialized as:
+    - `cpu`
+    - `directml`
 
 - `POST /engine/load`
   - Body: `{ "model_id": "qwen2.5-coder-1.5b" }`

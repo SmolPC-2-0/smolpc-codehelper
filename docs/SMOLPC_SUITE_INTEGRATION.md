@@ -44,6 +44,19 @@ The client also coordinates spawn with a short-lived lock file:
 
 This avoids duplicate spawn races when two apps connect at the same time.
 
+## Dev Runtime Policy
+
+Recommended local launch:
+
+- `npm run tauri:dev`
+- `npm run tauri:dml` (forced DirectML)
+
+`run-tauri-dev.ps1` now:
+
+1. Builds `smolpc-engine-host` before app launch.
+2. Sets `SMOLPC_ENGINE_DEV_FORCE_RESPAWN=1` for deterministic host reuse behavior.
+3. Requests host shutdown pre-launch so force overrides (`SMOLPC_FORCE_EP`) apply cleanly.
+
 ## Packaging
 
 Tauri bundles `smolpc-engine-host` as a packaged resource via:
@@ -59,6 +72,11 @@ Release workflow stages sidecar binaries before running `tauri-action`.
 - Cancellation uses code `INFERENCE_GENERATION_CANCELLED`.
 - Runtime stream errors use code `ENGINE_STREAM_ERROR`.
 - `smolpc_metrics` is emitted for stream completion and non-stream responses.
+
+Backend status payloads now use canonical backend strings:
+
+- `cpu`
+- `directml`
 
 ## Next Steps
 

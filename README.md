@@ -63,7 +63,13 @@ Full endpoint notes: `docs/ENGINE_API.md`.
 ```bash
 cargo check --workspace
 npm install
-npm run tauri dev
+npm run tauri:dev
+```
+
+DirectML debug launch (forced):
+
+```bash
+npm run tauri:dml
 ```
 
 ### Engine Host Binary Resolution
@@ -78,6 +84,12 @@ When CodeHelper starts inference, `smolpc-engine-client` resolves host binary in
 If multiple apps connect simultaneously, client spawn is coordinated via:
 
 - `%LOCALAPPDATA%/SmolPC/engine-runtime/engine-spawn.lock`
+
+During local dev launches, `scripts/run-tauri-dev.ps1` builds `smolpc-engine-host` first and sets:
+
+- `SMOLPC_ENGINE_DEV_FORCE_RESPAWN=1`
+
+This prevents stale host binaries and stale backend mode reuse across restarts.
 
 ### Sidecar Packaging
 
@@ -111,10 +123,23 @@ The frontend still uses these Tauri commands:
 - `check_model_exists`
 - `get_inference_backend_status`
 
+The workspace header status indicator now shows active backend/runtime (CPU/DirectML and engine mode).
+
 ## Integration Docs
 
 - API contract: `docs/ENGINE_API.md`
 - suite integration notes: `docs/SMOLPC_SUITE_INTEGRATION.md`
+
+## Troubleshooting
+
+- `npm run tauri:dml` still appears to run CPU:
+  - Ensure you launch with `npm run tauri:dml` (not raw `npx tauri dev`).
+  - Check `/engine/status` and confirm `backend_status.active_backend` is `directml`.
+- Slow/chunky generation after code changes:
+  - Confirm `smolpc-engine-host` was rebuilt (dev launcher now does this automatically).
+  - If needed, restart the host with `POST /engine/shutdown` and relaunch.
+- App appears stuck around hardware detection:
+  - Hardware detection now runs in a blocking worker with timeout and should not block inference startup.
 
 ## Status
 

@@ -16,6 +16,7 @@
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
 		"tauri": "tauri",
+		"tauri:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-tauri-dev.ps1",
 		"tauri:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-tauri-dml.ps1",
 		"model:export:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/export-dml-model.ps1"
 	},
