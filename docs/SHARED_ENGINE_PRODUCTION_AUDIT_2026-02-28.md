@@ -77,8 +77,7 @@ Observed:
 1. Large existing warning debt in formatting style lints and API design lints (`large_enum_variant`, `len_without_is_empty`, `uninlined_format_args`, etc.).
 2. No dedicated host integration-test suite for fallback and reconnect scenarios.
 1. Current verification is runtime smoke + workspace tests.
-3. Forced DML device-id validation depends on runtime behavior.
-1. Invalid/high device ids may still be accepted by the underlying runtime.
+3. Host-side forced DML device-id validation now exists, but should be covered by automated integration tests.
 
 ## Recommended Next Improvements
 

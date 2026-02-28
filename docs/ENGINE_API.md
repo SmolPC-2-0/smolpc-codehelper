@@ -90,6 +90,7 @@ Default base URL: `http://127.0.0.1:19432`
 - Forced overrides for diagnostics:
   - `SMOLPC_FORCE_EP=cpu|dml`
   - `SMOLPC_DML_DEVICE_ID=<non-negative int>`
+  - invalid forced device ids now fail with explicit load error (`invalid_directml_device_id`)
 - Runtime failure handling:
   - If DirectML fails during generation, host demotes to CPU for the current session/model and keeps serving requests without app restart.
 

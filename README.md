@@ -213,6 +213,8 @@ Debug/diagnostic:
 2. `SMOLPC_DML_DEVICE_ID=<int>`
 3. `SMOLPC_ENGINE_DEV_FORCE_RESPAWN=1` (dev launcher sets this)
 
+If `SMOLPC_FORCE_EP=dml` and `SMOLPC_DML_DEVICE_ID` is invalid/out-of-range, model load fails explicitly with `invalid_directml_device_id`.
+
 ## Troubleshooting
 
 If engine appears on CPU when GPU exists:
