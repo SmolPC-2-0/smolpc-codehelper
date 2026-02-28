@@ -4665,6 +4665,7 @@ dependencies = [
  "axum",
  "chrono",
  "dirs",
+ "hardware-query",
  "log",
  "serde",
  "serde_json",

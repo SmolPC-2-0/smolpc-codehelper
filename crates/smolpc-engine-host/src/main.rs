@@ -5,7 +5,13 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
-use smolpc_engine_core::inference::backend::{BackendStatus, InferenceBackend};
+use smolpc_engine_core::inference::backend::{
+    BackendDecision, BackendDecisionKey, BackendStatus, DecisionReason, DirectMLFailureStage,
+    FailureCounters, InferenceBackend, ORT_CRATE_VERSION,
+};
+use smolpc_engine_core::inference::backend_store::{
+    backend_store_path, BackendDecisionRecord, BackendStore,
+};
 #[cfg(target_os = "windows")]
 use smolpc_engine_core::inference::genai::GenAiDirectMlGenerator;
 use smolpc_engine_core::inference::session::SessionBackendOptions;
@@ -16,6 +22,7 @@ use smolpc_engine_core::models::{
     ModelArtifactBackend, ModelLoader, ModelRegistry, ModelRuntimeSpec, RuntimeBackendTarget,
 };
 use smolpc_engine_core::{GenerationConfig, GenerationMetrics, GenerationResult};
+use std::cmp::Ordering as CmpOrdering;
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -71,10 +78,36 @@ struct ParsedArgs {
     port: u16,
     data_dir: PathBuf,
     resource_dir: Option<PathBuf>,
+    app_version: String,
     queue_size: usize,
     queue_timeout: Duration,
     model_idle_unload: Duration,
     process_idle_exit: Duration,
+}
+
+const STARTUP_PROBE_WAIT_MS: u64 = 1_500;
+
+#[derive(Debug, Clone)]
+struct DirectMlCandidate {
+    device_id: i32,
+    device_name: String,
+    adapter_identity: String,
+    driver_version: String,
+}
+
+#[derive(Debug, Clone)]
+struct BackendProbeResult {
+    available_backends: Vec<InferenceBackend>,
+    directml_candidate: Option<DirectMlCandidate>,
+}
+
+impl Default for BackendProbeResult {
+    fn default() -> Self {
+        Self {
+            available_backends: vec![InferenceBackend::Cpu],
+            directml_candidate: None,
+        }
+    }
 }
 
 fn epoch_ms() -> u64 {
@@ -91,20 +124,11 @@ fn default_data_dir() -> PathBuf {
     PathBuf::from(".smolpc-engine")
 }
 
-fn parse_bool_env(key: &str) -> bool {
-    std::env::var(key)
-        .ok()
-        .map(|v| {
-            let n = v.trim().to_ascii_lowercase();
-            n == "1" || n == "true" || n == "yes"
-        })
-        .unwrap_or(false)
-}
-
 fn parse_args() -> ParsedArgs {
     let mut port = 19432u16;
     let mut data_dir = default_data_dir();
     let mut resource_dir = None;
+    let mut app_version = "dev".to_string();
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -127,7 +151,9 @@ fn parse_args() -> ParsedArgs {
                 }
             }
             "--app-version" => {
-                let _ = args.next();
+                if let Some(v) = args.next() {
+                    app_version = v;
+                }
             }
             _ => {}
         }
@@ -164,11 +190,97 @@ fn parse_args() -> ParsedArgs {
         port,
         data_dir,
         resource_dir,
+        app_version,
         queue_size,
         queue_timeout,
         model_idle_unload,
         process_idle_exit,
     }
+}
+
+fn parse_force_override() -> Option<InferenceBackend> {
+    let value = std::env::var("SMOLPC_FORCE_EP").ok()?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "cpu" => Some(InferenceBackend::Cpu),
+        "dml" | "directml" => Some(InferenceBackend::DirectML),
+        _ => None,
+    }
+}
+
+fn parse_dml_device_id_env() -> Option<i32> {
+    std::env::var("SMOLPC_DML_DEVICE_ID")
+        .ok()
+        .and_then(|v| v.parse::<i32>().ok())
+}
+
+#[cfg(target_os = "windows")]
+fn gpu_rank_key(gpu: &hardware_query::GPUInfo) -> (bool, u64, String) {
+    let device_type = gpu.gpu_type().to_string().to_ascii_lowercase();
+    let is_discrete = device_type.contains("discrete");
+    let vram_mb = gpu.memory_mb();
+    let name = gpu.model_name().to_ascii_lowercase();
+    (is_discrete, vram_mb, name)
+}
+
+#[cfg(target_os = "windows")]
+fn pick_best_dml_candidate(gpus: &[hardware_query::GPUInfo]) -> Option<DirectMlCandidate> {
+    let mut candidates = gpus
+        .iter()
+        .enumerate()
+        .filter(|(_, gpu)| gpu.supports_directml())
+        .collect::<Vec<_>>();
+    candidates.sort_by(|a, b| {
+        let ka = gpu_rank_key(a.1);
+        let kb = gpu_rank_key(b.1);
+        match kb.0.cmp(&ka.0) {
+            CmpOrdering::Equal => match kb.1.cmp(&ka.1) {
+                CmpOrdering::Equal => ka.2.cmp(&kb.2),
+                other => other,
+            },
+            other => other,
+        }
+    });
+
+    let (device_index, gpu) = candidates.first()?;
+    let vendor = gpu.vendor().to_string().to_ascii_lowercase();
+    let model = gpu.model_name().trim().to_ascii_lowercase();
+    let pci = gpu
+        .pci_device_id
+        .as_deref()
+        .unwrap_or("unknown")
+        .trim()
+        .to_ascii_lowercase();
+    let driver = gpu
+        .driver_version
+        .as_deref()
+        .unwrap_or("unknown")
+        .trim()
+        .to_string();
+    Some(DirectMlCandidate {
+        device_id: *device_index as i32,
+        device_name: gpu.model_name().to_string(),
+        adapter_identity: format!("{vendor}:{model}:{pci}"),
+        driver_version: driver,
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn probe_backend_capabilities() -> BackendProbeResult {
+    let queried = hardware_query::HardwareInfo::query();
+    let Ok(info) = queried else {
+        return BackendProbeResult::default();
+    };
+    let mut result = BackendProbeResult::default();
+    if let Some(candidate) = pick_best_dml_candidate(info.gpus()) {
+        result.available_backends.push(InferenceBackend::DirectML);
+        result.directml_candidate = Some(candidate);
+    }
+    result
+}
+
+#[cfg(not(target_os = "windows"))]
+fn probe_backend_capabilities() -> BackendProbeResult {
+    BackendProbeResult::default()
 }
 
 struct EngineState {
@@ -177,16 +289,147 @@ struct EngineState {
     backend_status: Arc<Mutex<BackendStatus>>,
     active_cancel: Arc<StdMutex<Option<Arc<AtomicBool>>>>,
     generating: Arc<AtomicBool>,
+    app_version: String,
+    store_path: Option<PathBuf>,
+    backend_store: Arc<Mutex<Option<BackendStore>>>,
+    startup_probe: Arc<Mutex<Option<BackendProbeResult>>>,
+    startup_probe_ready: Arc<Notify>,
+    session_demoted: Arc<AtomicBool>,
 }
 
 impl EngineState {
-    fn new() -> Self {
+    fn new(args: &ParsedArgs) -> Self {
+        let store_path = match backend_store_path(&args.data_dir) {
+            Ok(path) => Some(path),
+            Err(error) => {
+                log::warn!("Failed to resolve backend decision store path: {error}");
+                None
+            }
+        };
+
+        let backend_store = match store_path.as_ref() {
+            Some(path) => match BackendStore::load(path) {
+                Ok(store) => Some(store),
+                Err(error) => {
+                    log::warn!(
+                        "Failed to load backend decision store {}: {error}",
+                        path.display()
+                    );
+                    None
+                }
+            },
+            None => None,
+        };
+
+        let status = BackendStatus {
+            available_backends: vec![InferenceBackend::Cpu],
+            selection_state: Some("pending".to_string()),
+            selection_reason: Some("startup_probe_pending".to_string()),
+            store_path: store_path.as_ref().map(|path| path.display().to_string()),
+            ..Default::default()
+        };
+
         Self {
             runtime_adapter: Arc::new(Mutex::new(None)),
             current_model: Arc::new(Mutex::new(None)),
-            backend_status: Arc::new(Mutex::new(BackendStatus::default())),
+            backend_status: Arc::new(Mutex::new(status)),
             active_cancel: Arc::new(StdMutex::new(None)),
             generating: Arc::new(AtomicBool::new(false)),
+            app_version: args.app_version.clone(),
+            store_path,
+            backend_store: Arc::new(Mutex::new(backend_store)),
+            startup_probe: Arc::new(Mutex::new(None)),
+            startup_probe_ready: Arc::new(Notify::new()),
+            session_demoted: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    fn launch_startup_probe(self: &Arc<Self>) {
+        let engine = Arc::clone(self);
+        tokio::spawn(async move {
+            let probed = tokio::task::spawn_blocking(probe_backend_capabilities)
+                .await
+                .unwrap_or_else(|error| {
+                    log::warn!("Backend startup probe task failed: {error}");
+                    BackendProbeResult::default()
+                });
+
+            let now = Utc::now().to_rfc3339();
+            {
+                let mut probe_guard = engine.startup_probe.lock().await;
+                *probe_guard = Some(probed.clone());
+            }
+
+            {
+                let mut status = engine.backend_status.lock().await;
+                status.available_backends = probed.available_backends.clone();
+                status.directml_probe_passed = Some(probed.directml_candidate.is_some());
+                status.directml_probe_error = if probed.directml_candidate.is_some() {
+                    None
+                } else {
+                    Some("No DirectML-capable adapter detected".to_string())
+                };
+                status.directml_probe_at = Some(now);
+                status.selected_device_id = probed.directml_candidate.as_ref().map(|c| c.device_id);
+                status.selected_device_name = probed
+                    .directml_candidate
+                    .as_ref()
+                    .map(|c| c.device_name.clone());
+                if status.selection_state.as_deref() == Some("pending") {
+                    status.selection_state = Some("ready".to_string());
+                    status.selection_reason = Some(if probed.directml_candidate.is_some() {
+                        "startup_probe_ready".to_string()
+                    } else {
+                        "startup_probe_cpu_only".to_string()
+                    });
+                }
+            }
+
+            engine.startup_probe_ready.notify_waiters();
+        });
+    }
+
+    async fn wait_for_startup_probe(&self, budget: Duration) -> BackendProbeResult {
+        if let Some(existing) = self.startup_probe.lock().await.clone() {
+            return existing;
+        }
+
+        let wait = self.startup_probe_ready.notified();
+        let _ = timeout(budget, wait).await;
+        self.startup_probe.lock().await.clone().unwrap_or_default()
+    }
+
+    async fn lookup_backend_record(
+        &self,
+        key: &BackendDecisionKey,
+    ) -> Option<BackendDecisionRecord> {
+        let store_guard = self.backend_store.lock().await;
+        let store = store_guard.as_ref()?;
+        store.get(key).cloned()
+    }
+
+    async fn persist_backend_record(
+        &self,
+        key: BackendDecisionKey,
+        decision: BackendDecision,
+        failure_counters: FailureCounters,
+    ) {
+        let mut store_guard = self.backend_store.lock().await;
+        let Some(store) = store_guard.as_mut() else {
+            return;
+        };
+
+        let record = BackendDecisionRecord {
+            key: key.clone(),
+            decision,
+            failure_counters,
+            updated_at: Utc::now().to_rfc3339(),
+        };
+
+        let _ = store.remove_stale_for_model(&key);
+        store.upsert(record);
+        if let Err(error) = store.persist() {
+            log::warn!("Failed to persist backend decision store: {error}");
         }
     }
 
@@ -214,6 +457,8 @@ impl EngineState {
         if self.generating.load(Ordering::SeqCst) {
             return Err("Cannot load or unload model while generation is in progress".to_string());
         }
+        self.session_demoted.store(false, Ordering::SeqCst);
+
         let model_def = ModelRegistry::get_model(&model_id)
             .ok_or_else(|| format!("Unknown model ID: {}", model_id))?;
         let cpu_spec =
@@ -231,30 +476,118 @@ impl EngineState {
         );
         let tokenizer_path = ModelLoader::tokenizer_file(&model_def.directory);
 
-        let force = std::env::var("SMOLPC_FORCE_EP").ok();
-        let enable_dml = parse_bool_env("SMOLPC_ENABLE_DML_GENAI");
-        let dml_id = std::env::var("SMOLPC_DML_DEVICE_ID")
-            .ok()
-            .and_then(|v| v.parse::<i32>().ok());
+        let force_override = parse_force_override();
+        let forced_device_id = parse_dml_device_id_env();
+        let probe = self
+            .wait_for_startup_probe(Duration::from_millis(STARTUP_PROBE_WAIT_MS))
+            .await;
 
-        let mut backend = InferenceBackend::Cpu;
-        let mut engine_name = "ort_cpu".to_string();
+        let mut available_backends = vec![InferenceBackend::Cpu];
+        let has_dml_candidate = dml_model_path.is_some()
+            && (probe
+                .available_backends
+                .contains(&InferenceBackend::DirectML)
+                || force_override == Some(InferenceBackend::DirectML));
+        if has_dml_candidate {
+            available_backends.push(InferenceBackend::DirectML);
+        }
 
-        let adapter = if force.as_deref() == Some("dml") || (enable_dml && dml_model_path.is_some())
-        {
-            let dml_path = dml_model_path
-                .as_deref()
-                .ok_or_else(|| "DirectML model artifact missing".to_string())?;
-            match build_directml_runtime_adapter(dml_path, dml_id) {
+        let probe_device_id = probe
+            .directml_candidate
+            .as_ref()
+            .map(|candidate| candidate.device_id);
+        let selected_device_id = forced_device_id.or(probe_device_id);
+        let selected_device_name = probe
+            .directml_candidate
+            .as_ref()
+            .map(|candidate| candidate.device_name.clone());
+
+        let adapter_identity = probe
+            .directml_candidate
+            .as_ref()
+            .map(|candidate| candidate.adapter_identity.clone())
+            .unwrap_or_else(|| "cpu-only".to_string());
+        let driver_version = probe
+            .directml_candidate
+            .as_ref()
+            .map(|candidate| candidate.driver_version.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let decision_key = BackendDecisionKey {
+            model_id: model_id.clone(),
+            adapter_identity,
+            driver_version,
+            app_version: self.app_version.clone(),
+            ort_version: ORT_CRATE_VERSION.to_string(),
+            directml_device_id: selected_device_id,
+        };
+        let stored = self.lookup_backend_record(&decision_key).await;
+        let mut failure_counters = stored
+            .as_ref()
+            .map(|record| record.failure_counters.clone())
+            .unwrap_or_default();
+
+        let mut preferred_backend = InferenceBackend::Cpu;
+        let mut decision_reason = DecisionReason::NoDirectMLCandidate;
+        if let Some(override_backend) = force_override {
+            preferred_backend = override_backend;
+            decision_reason = DecisionReason::ForcedOverride;
+        } else if failure_counters.should_demote_directml() {
+            preferred_backend = InferenceBackend::Cpu;
+            decision_reason = DecisionReason::DemotedAfterFailures;
+        } else if let Some(record) = stored.as_ref() {
+            if record.decision.backend == InferenceBackend::DirectML && has_dml_candidate {
+                preferred_backend = InferenceBackend::DirectML;
+                decision_reason = DecisionReason::PersistedDecision;
+            } else if has_dml_candidate {
+                preferred_backend = InferenceBackend::DirectML;
+                decision_reason = DecisionReason::DefaultDirectMLCandidate;
+            } else {
+                preferred_backend = InferenceBackend::Cpu;
+                decision_reason = DecisionReason::PersistedDecision;
+            }
+        } else if has_dml_candidate {
+            preferred_backend = InferenceBackend::DirectML;
+            decision_reason = DecisionReason::DefaultDirectMLCandidate;
+        }
+
+        let mut persisted_backend = preferred_backend;
+        let mut persisted_reason = decision_reason.clone();
+        let mut active_backend = preferred_backend;
+        let mut runtime_engine = "ort_cpu".to_string();
+        let mut selection_state = "ready".to_string();
+        let mut selection_reason = format!("{decision_reason:?}").to_ascii_lowercase();
+
+        let adapter = if preferred_backend == InferenceBackend::DirectML {
+            let dml_path = dml_model_path.as_deref().ok_or_else(|| {
+                "DirectML model artifact missing (expected models/<model>/dml/model.onnx)"
+                    .to_string()
+            })?;
+            match build_directml_runtime_adapter(dml_path, selected_device_id) {
                 Ok(adapter) => {
-                    backend = InferenceBackend::DirectML;
-                    engine_name = "genai_dml".to_string();
+                    failure_counters.record_directml_success();
+                    runtime_engine = "genai_dml".to_string();
                     adapter
                 }
-                Err(e) => {
-                    if force.as_deref() == Some("dml") {
-                        return Err(e);
+                Err(error) => {
+                    if force_override == Some(InferenceBackend::DirectML) {
+                        return Err(error);
                     }
+
+                    failure_counters
+                        .record_directml_failure(DirectMLFailureStage::Init, error.clone());
+                    selection_state = "fallback".to_string();
+                    selection_reason = "directml_initialization_failed".to_string();
+                    active_backend = InferenceBackend::Cpu;
+                    persisted_backend = InferenceBackend::DirectML;
+                    persisted_reason = DecisionReason::DirectMLInitializationFailed;
+
+                    if failure_counters.should_demote_directml() {
+                        failure_counters.mark_demotion();
+                        persisted_backend = InferenceBackend::Cpu;
+                        persisted_reason = DecisionReason::DemotedAfterFailures;
+                    }
+
                     let (adapter, _) =
                         build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)?;
                     adapter
@@ -265,7 +598,8 @@ impl EngineState {
                 build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)?;
             adapter
         };
-        let active_model_path = if backend == InferenceBackend::DirectML {
+
+        let active_model_path = if active_backend == InferenceBackend::DirectML {
             dml_model_path
                 .as_ref()
                 .map(|path| path.display().to_string())
@@ -275,14 +609,52 @@ impl EngineState {
         };
 
         *self.runtime_adapter.lock().await = Some(adapter);
-        *self.current_model.lock().await = Some(model_id);
+        *self.current_model.lock().await = Some(model_id.clone());
         *self.backend_status.lock().await = BackendStatus {
-            active_backend: Some(backend),
+            active_backend: Some(active_backend),
             active_model_path: Some(active_model_path),
-            active_artifact_backend: Some(backend),
-            runtime_engine: Some(engine_name),
+            active_artifact_backend: Some(active_backend),
+            runtime_engine: Some(runtime_engine),
+            available_backends,
+            selection_state: Some(selection_state),
+            selection_reason: Some(selection_reason),
+            selected_device_id,
+            selected_device_name,
+            dml_gate_state: Some(if active_backend == InferenceBackend::DirectML {
+                "selected".to_string()
+            } else if has_dml_candidate {
+                "fallback_cpu".to_string()
+            } else {
+                "cpu_only".to_string()
+            }),
+            dml_gate_reason: Some(format!("{persisted_reason:?}")),
+            decision_key: Some(decision_key.clone()),
+            last_decision: Some(BackendDecision::new(active_backend, decision_reason, None)),
+            directml_probe_passed: Some(has_dml_candidate),
+            directml_probe_error: if has_dml_candidate {
+                None
+            } else {
+                Some("No DirectML-capable adapter or artifact".to_string())
+            },
+            directml_probe_at: Some(Utc::now().to_rfc3339()),
+            failure_counters: failure_counters.clone(),
+            force_override,
+            store_path: self
+                .store_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
             ..Default::default()
         };
+
+        if force_override.is_none() {
+            self.persist_backend_record(
+                decision_key,
+                BackendDecision::new(persisted_backend, persisted_reason, None),
+                failure_counters,
+            )
+            .await;
+        }
+
         Ok(())
     }
 
@@ -296,12 +668,97 @@ impl EngineState {
         }
         *self.runtime_adapter.lock().await = None;
         *self.current_model.lock().await = None;
+        self.session_demoted.store(false, Ordering::SeqCst);
         let mut status = self.backend_status.lock().await;
         status.active_backend = None;
         status.active_model_path = None;
         status.active_artifact_backend = None;
         status.runtime_engine = None;
+        status.selection_state = Some("ready".to_string());
+        status.selection_reason = Some("model_unloaded".to_string());
         Ok(())
+    }
+
+    async fn try_runtime_fallback_after_directml_failure(&self, error: &str) {
+        if error.contains("INFERENCE_GENERATION_CANCELLED") {
+            return;
+        }
+
+        let status_snapshot = self.backend_status.lock().await.clone();
+        if status_snapshot.active_backend != Some(InferenceBackend::DirectML) {
+            return;
+        }
+
+        let Some(model_id) = self.current_model.lock().await.clone() else {
+            return;
+        };
+        let Some(model_def) = ModelRegistry::get_model(&model_id) else {
+            return;
+        };
+        let Some(cpu_spec) =
+            ModelRegistry::runtime_spec_for_backend(&model_id, RuntimeBackendTarget::Cpu)
+        else {
+            return;
+        };
+        if cpu_spec.validate().is_err() {
+            return;
+        }
+
+        let cpu_model_path = match ModelLoader::validate_model_for_backend(
+            &model_def.directory,
+            ModelArtifactBackend::Cpu,
+        ) {
+            Ok(path) => path,
+            Err(_) => return,
+        };
+        let tokenizer_path = ModelLoader::tokenizer_file(&model_def.directory);
+        let Ok((cpu_adapter, _)) =
+            build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)
+        else {
+            return;
+        };
+
+        *self.runtime_adapter.lock().await = Some(cpu_adapter);
+        self.session_demoted.store(true, Ordering::SeqCst);
+
+        let mut counters = status_snapshot.failure_counters.clone();
+        counters.record_directml_failure(DirectMLFailureStage::Runtime, error.to_string());
+        let mut persisted_backend = InferenceBackend::DirectML;
+        let mut persisted_reason = DecisionReason::RuntimeFailureFallback;
+        let mut decision_reason = DecisionReason::RuntimeFailureFallback;
+        if counters.should_demote_directml() {
+            counters.mark_demotion();
+            persisted_backend = InferenceBackend::Cpu;
+            persisted_reason = DecisionReason::DemotedAfterFailures;
+            decision_reason = DecisionReason::DemotedAfterFailures;
+        }
+
+        let mut updated = status_snapshot.clone();
+        updated.active_backend = Some(InferenceBackend::Cpu);
+        updated.active_artifact_backend = Some(InferenceBackend::Cpu);
+        updated.runtime_engine = Some("ort_cpu".to_string());
+        updated.active_model_path = Some(cpu_model_path.display().to_string());
+        updated.selection_state = Some("fallback".to_string());
+        updated.selection_reason = Some("directml_runtime_failure".to_string());
+        updated.dml_gate_state = Some("fallback_cpu".to_string());
+        updated.dml_gate_reason = Some("runtime_failure".to_string());
+        updated.last_decision = Some(BackendDecision::new(
+            InferenceBackend::Cpu,
+            decision_reason,
+            None,
+        ));
+        updated.failure_counters = counters.clone();
+        updated.force_override = parse_force_override();
+        *self.backend_status.lock().await = updated;
+
+        if let Some(decision_key) = status_snapshot.decision_key {
+            self.persist_backend_record(
+                decision_key,
+                BackendDecision::new(persisted_backend, persisted_reason, None),
+                counters,
+            )
+            .await;
+        }
     }
 
     async fn generate_text(
@@ -311,7 +768,7 @@ impl EngineState {
     ) -> Result<GenerationResult, String> {
         let (_permit, cancelled) = self.begin_generation()?;
         let mut text = String::new();
-        let metrics = {
+        let result = {
             let adapter_guard = self.runtime_adapter.lock().await;
             let adapter = adapter_guard
                 .as_ref()
@@ -320,7 +777,15 @@ impl EngineState {
                 .generate_stream(prompt, config, cancelled.clone(), |token| {
                     text.push_str(&token)
                 })
-                .await?
+                .await
+        };
+        let metrics = match result {
+            Ok(metrics) => metrics,
+            Err(error) => {
+                self.try_runtime_fallback_after_directml_failure(&error)
+                    .await;
+                return Err(error);
+            }
         };
         if cancelled.load(Ordering::SeqCst) {
             return Err("INFERENCE_GENERATION_CANCELLED: Generation cancelled".to_string());
@@ -338,14 +803,22 @@ impl EngineState {
         F: FnMut(String),
     {
         let (_permit, cancelled) = self.begin_generation()?;
-        let metrics = {
+        let result = {
             let adapter_guard = self.runtime_adapter.lock().await;
             let adapter = adapter_guard
                 .as_ref()
                 .ok_or_else(|| "No model loaded. Call /engine/load first.".to_string())?;
             adapter
                 .generate_stream(prompt, config, cancelled.clone(), on_token)
-                .await?
+                .await
+        };
+        let metrics = match result {
+            Ok(metrics) => metrics,
+            Err(error) => {
+                self.try_runtime_fallback_after_directml_failure(&error)
+                    .await;
+                return Err(error);
+            }
         };
         if cancelled.load(Ordering::SeqCst) {
             return Err("INFERENCE_GENERATION_CANCELLED: Generation cancelled".to_string());
@@ -413,6 +886,7 @@ fn build_directml_runtime_adapter(
         .parent()
         .ok_or_else(|| format!("Invalid DirectML model path: {}", dml_model_path.display()))?;
     let generator = GenAiDirectMlGenerator::new(model_dir, directml_device_id)?;
+    generator.run_preflight("Warmup preflight")?;
     Ok(InferenceRuntimeAdapter::genai_directml(generator))
 }
 
@@ -860,13 +1334,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState {
         token: Arc::new(token),
-        engine: Arc::new(EngineState::new()),
+        engine: Arc::new(EngineState::new(&args)),
         generation_semaphore: Arc::new(Semaphore::new(1)),
         queue_semaphore: Arc::new(Semaphore::new(args.queue_size)),
         queue_timeout: args.queue_timeout,
         shutdown: Arc::new(Notify::new()),
         last_activity_ms: Arc::new(AtomicU64::new(epoch_ms())),
     };
+    state.engine.launch_startup_probe();
 
     let idle_state = state.clone();
     tokio::spawn(async move {

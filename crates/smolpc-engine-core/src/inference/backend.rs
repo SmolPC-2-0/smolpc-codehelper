@@ -190,11 +190,17 @@ impl BackendDecision {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
 pub struct BackendStatus {
     pub active_backend: Option<InferenceBackend>,
     pub active_model_path: Option<String>,
     pub active_artifact_backend: Option<InferenceBackend>,
     pub runtime_engine: Option<String>,
+    pub available_backends: Vec<InferenceBackend>,
+    pub selection_state: Option<String>,
+    pub selection_reason: Option<String>,
+    pub selected_device_id: Option<i32>,
+    pub selected_device_name: Option<String>,
     pub dml_gate_state: Option<String>,
     pub dml_gate_reason: Option<String>,
     pub decision_key: Option<BackendDecisionKey>,
