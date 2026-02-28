@@ -70,7 +70,10 @@ export const inferenceStore = {
 			error,
 			activeBackend: normalizeBackendName(backendStatus?.active_backend),
 			runtimeEngine: backendStatus?.runtime_engine ?? null,
-			activeModelPath: backendStatus?.active_model_path ?? null
+			activeModelPath: backendStatus?.active_model_path ?? null,
+			selectionState: backendStatus?.selection_state ?? null,
+			selectionReason: backendStatus?.selection_reason ?? null,
+			selectedDeviceName: backendStatus?.selected_device_name ?? null
 		};
 	},
 
@@ -153,6 +156,7 @@ export const inferenceStore = {
 			console.error('Generation failed:', e);
 			return null;
 		} finally {
+			await this.refreshBackendStatus();
 			isGenerating = false;
 		}
 	},
@@ -225,6 +229,7 @@ export const inferenceStore = {
 			console.error('Streaming generation failed:', e);
 			return null;
 		} finally {
+			await this.refreshBackendStatus();
 			isGenerating = false;
 		}
 	},

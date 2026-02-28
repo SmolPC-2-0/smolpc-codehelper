@@ -74,6 +74,21 @@ export interface BackendStatus {
 
 	/** Runtime implementation in use (e.g. "ort_cpu", "genai_dml") */
 	runtime_engine: string | null;
+
+	/** Available backend identifiers on current machine */
+	available_backends: string[];
+
+	/** Selection lifecycle state ("pending", "ready", "fallback", "error") */
+	selection_state: string | null;
+
+	/** Selection reason code from host */
+	selection_reason: string | null;
+
+	/** Selected DirectML device id when applicable */
+	selected_device_id: number | null;
+
+	/** Selected DirectML device name when applicable */
+	selected_device_name: string | null;
 }
 
 /**
@@ -123,4 +138,13 @@ export interface InferenceStatus {
 
 	/** Resolved active model path on disk */
 	activeModelPath: string | null;
+
+	/** Selection lifecycle state ("pending", "ready", "fallback", "error") */
+	selectionState: string | null;
+
+	/** Selection reason code from host */
+	selectionReason: string | null;
+
+	/** Selected DirectML device name when applicable */
+	selectedDeviceName: string | null;
 }

@@ -19,6 +19,12 @@ Default base URL: `http://127.0.0.1:19432`
   - `backend_status.active_backend` and `backend_status.active_artifact_backend` are serialized as:
     - `cpu`
     - `directml`
+  - Selector/runtime diagnostics:
+    - `backend_status.available_backends`: detected candidates on this machine (`cpu`, optional `directml`)
+    - `backend_status.selection_state`: `pending | ready | fallback | error`
+    - `backend_status.selection_reason`: host-side reason code for latest backend decision
+    - `backend_status.selected_device_id`: active or candidate DirectML device id
+    - `backend_status.selected_device_name`: active or candidate DirectML device name
 
 - `POST /engine/load`
   - Body: `{ "model_id": "qwen2.5-coder-1.5b" }`
@@ -72,6 +78,19 @@ Default base URL: `http://127.0.0.1:19432`
 - Queue timeout: 60 seconds.
 - Queue full: HTTP 429.
 - Queue timeout: HTTP 504.
+
+## Backend Selection Policy (Windows)
+
+- Host starts an async startup probe and ranks DirectML candidates (discrete-first, then higher VRAM).
+- On model load, host waits up to ~1.5s for probe completion; if probe is still pending, load continues with safe defaults.
+- Default auto policy is capability-first:
+  - Prefer DirectML when available and model `dml/model.onnx` artifact exists.
+  - Fallback to CPU when DirectML init/runtime fails.
+- Forced overrides for diagnostics:
+  - `SMOLPC_FORCE_EP=cpu|dml`
+  - `SMOLPC_DML_DEVICE_ID=<non-negative int>`
+- Runtime failure handling:
+  - If DirectML fails during generation, host demotes to CPU for the current session/model and keeps serving requests without app restart.
 
 ## Protocol Compatibility
 

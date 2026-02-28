@@ -57,6 +57,23 @@ Recommended local launch:
 2. Sets `SMOLPC_ENGINE_DEV_FORCE_RESPAWN=1` for deterministic host reuse behavior.
 3. Requests host shutdown pre-launch so force overrides (`SMOLPC_FORCE_EP`) apply cleanly.
 
+## Automatic Backend Selection (Current)
+
+At startup, the host runs an async capability probe and then applies capability-first selection on load:
+
+1. Detect available backends (`cpu`, optional `directml`).
+2. Rank DirectML candidates on multi-GPU systems (prefer discrete GPU, then higher VRAM).
+3. Select backend with sticky decision support and failure counters from backend store.
+
+Behavior details:
+
+- Startup remains non-blocking for UI; model load waits up to ~1.5s for probe completion.
+- In auto mode, DirectML is preferred when available and artifact exists.
+- On DirectML init/runtime failure, host falls back to CPU for current session flow without requiring app restart.
+- Force overrides remain supported for diagnostics:
+  - `SMOLPC_FORCE_EP=cpu|dml`
+  - `SMOLPC_DML_DEVICE_ID=<id>`
+
 ## Packaging
 
 Tauri bundles `smolpc-engine-host` as a packaged resource via:
@@ -77,6 +94,14 @@ Backend status payloads now use canonical backend strings:
 
 - `cpu`
 - `directml`
+
+Additional status fields used by consumers/UI:
+
+- `available_backends`
+- `selection_state`
+- `selection_reason`
+- `selected_device_id`
+- `selected_device_name`
 
 ## Next Steps
 

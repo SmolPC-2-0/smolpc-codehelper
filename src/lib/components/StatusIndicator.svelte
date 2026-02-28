@@ -19,6 +19,13 @@
 		}
 		return backend.toUpperCase();
 	}
+
+	function formatReason(reason: string | null): string {
+		if (!reason) {
+			return '';
+		}
+		return reason.replaceAll('_', ' ');
+	}
 </script>
 
 <div class={`status-indicator ${status.isGenerating ? 'status-indicator--generating' : status.isLoaded ? 'status-indicator--ready' : 'status-indicator--idle'}`}>
@@ -35,6 +42,11 @@
 		</span>
 		{#if status.isLoaded && status.runtimeEngine}
 			<span class="status-indicator__runtime">{status.runtimeEngine}</span>
+		{/if}
+		{#if status.isLoaded && status.selectionState === 'fallback'}
+			<span class="status-indicator__runtime">
+				Fallback active{status.selectedDeviceName ? ` (${status.selectedDeviceName})` : ''}: {formatReason(status.selectionReason)}
+			</span>
 		{/if}
 	</div>
 	{#if status.error}
