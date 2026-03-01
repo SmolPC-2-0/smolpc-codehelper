@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { inferenceStore } from '$lib/stores/inference.svelte';
+	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { BrainCircuit, Loader2 } from '@lucide/svelte';
 
 	let isLoading = $state(false);
@@ -9,11 +10,17 @@
 		const modelId = target.value;
 
 		// Don't reload if same model
-		if (modelId === inferenceStore.currentModel) return;
+		if (modelId === inferenceStore.currentModel) {
+			settingsStore.setModel(modelId);
+			return;
+		}
 
 		isLoading = true;
 		try {
-			await inferenceStore.loadModel(modelId);
+			const loaded = await inferenceStore.loadModel(modelId);
+			if (loaded) {
+				settingsStore.setModel(modelId);
+			}
 		} finally {
 			isLoading = false;
 		}

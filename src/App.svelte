@@ -69,7 +69,7 @@
 		'Give clear, concise explanations. ' +
 		'When showing code, use simple examples and add brief comments.';
 
-	// Build ChatML-formatted prompt for Qwen2.5-Coder
+	// Build ChatML-formatted prompt for Qwen chat-template style models.
 	function buildChatMLPrompt(userMessage: string, historyMessages: Message[]): string {
 		let prompt = `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>\n`;
 
@@ -347,9 +347,28 @@
 
 		async function initInference() {
 			await inferenceStore.listModels();
-			if (!inferenceStore.isLoaded && inferenceStore.availableModels.length > 0) {
-				const firstModel = inferenceStore.availableModels[0];
-				await inferenceStore.loadModel(firstModel.id);
+			await inferenceStore.syncStatus();
+
+			if (inferenceStore.availableModels.length === 0) {
+				return;
+			}
+
+			const availableModelIds = new Set(
+				inferenceStore.availableModels.map((model) => model.id)
+			);
+			let targetModelId = settingsStore.selectedModel;
+			if (!availableModelIds.has(targetModelId)) {
+				targetModelId = inferenceStore.availableModels[0].id;
+			}
+
+			if (inferenceStore.currentModel && availableModelIds.has(inferenceStore.currentModel)) {
+				settingsStore.setModel(inferenceStore.currentModel);
+				return;
+			}
+
+			const loaded = await inferenceStore.loadModel(targetModelId);
+			if (loaded) {
+				settingsStore.setModel(targetModelId);
 			}
 		}
 
