@@ -31,6 +31,7 @@ smolpc-codehelper/
     smolpc-engine-client/            # connect-or-spawn Rust client
   src-tauri/                         # CodeHelper Rust/Tauri app
   src/                               # CodeHelper Svelte frontend
+  docs/APP_ONBOARDING_PLAYBOOK.md    # app-team onboarding checklist + AI prompt starter
   docs/ENGINE_API.md                 # API contract
   docs/SMOLPC_SUITE_INTEGRATION.md   # integration notes
 ```
@@ -115,6 +116,8 @@ Do not:
 1. Depend on branch head behavior.
 2. Parse internal logs as contract.
 3. Assume a backend (always check `/engine/status`).
+
+For onboarding details and validation criteria, use [docs/APP_ONBOARDING_PLAYBOOK.md](docs/APP_ONBOARDING_PLAYBOOK.md).
 
 ## Rust Integration (Preferred Inside SmolPC Apps)
 
