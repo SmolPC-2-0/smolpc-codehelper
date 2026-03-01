@@ -28,6 +28,7 @@ Frontend command names are unchanged:
 - Shared runtime root: `%LOCALAPPDATA%/SmolPC/engine-runtime` (or platform equivalent)
 - Host data dir: `<runtime-root>/host-data`
 - Token file: `<runtime-root>/engine-token.txt`
+- Shared model root (recommended): `%LOCALAPPDATA%/SmolPC/models`
 
 ## Host Discovery
 
@@ -57,6 +58,11 @@ Recommended local launch:
 2. Sets `SMOLPC_ENGINE_DEV_FORCE_RESPAWN=1` for deterministic host reuse behavior.
 3. Requests host shutdown pre-launch so force overrides (`SMOLPC_FORCE_EP`) apply cleanly.
 
+Shared Qwen3 bootstrap:
+
+- `npm run model:setup:qwen3`
+- Creates `qwen3-4b-instruct-2507` under shared models root for cross-app reuse.
+
 ## Automatic Backend Selection (Current)
 
 At startup, the host runs an async capability probe and then applies capability-first selection on load:
@@ -73,6 +79,11 @@ Behavior details:
 - Force overrides remain supported for diagnostics:
   - `SMOLPC_FORCE_EP=cpu|dml`
   - `SMOLPC_DML_DEVICE_ID=<id>`
+
+Current model priority in registry:
+
+1. `qwen3-4b-instruct-2507`
+2. `qwen2.5-coder-1.5b`
 
 ## Packaging
 

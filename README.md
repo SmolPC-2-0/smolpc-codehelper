@@ -43,7 +43,7 @@ smolpc-codehelper/
 1. Node.js 20+
 2. Rust stable toolchain (workspace uses Rust 1.88)
 3. Windows runtime libraries available in `src-tauri/libs` (includes `onnxruntime*.dll`, `DirectML.dll`)
-4. Model assets in `src-tauri/models`
+4. Python 3.10+ with `huggingface_hub`, `onnx`, and `onnxruntime-genai`
 
 ## Build and Validate
 
@@ -52,6 +52,23 @@ npm install
 cargo check --workspace
 npm run check
 ```
+
+## Shared Model Setup (Qwen3 Default)
+
+Prepare the shared model directory used by CodeHelper and other apps:
+
+```bash
+npm run model:setup:qwen3
+```
+
+This creates and validates:
+
+1. `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-instruct-2507/cpu/model.onnx` (plus external data files)
+2. `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-instruct-2507/dml/model.onnx`
+3. `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-instruct-2507/dml/genai_config.json`
+4. `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-instruct-2507/tokenizer.json`
+
+The script also sets `SMOLPC_MODELS_DIR` at user scope unless `-NoUserEnv` is specified.
 
 ## Run CodeHelper
 
@@ -71,6 +88,7 @@ Notes:
 
 1. Dev launcher rebuilds `smolpc-engine-host` before app startup.
 2. Dev launcher requests host shutdown before launch so overrides apply cleanly.
+3. For demo reliability, use `npm run tauri:dml`.
 
 ## Engine Contract (What Consumers Depend On)
 
@@ -110,6 +128,11 @@ Use this sequence:
 4. Generate via `/v1/chat/completions`.
 5. Read backend status via `/engine/status` for diagnostics and telemetry.
 6. Handle cancellation, queue full (429), queue timeout (504), and reconnect paths.
+
+Default model IDs exposed by `/v1/models`:
+
+1. `qwen3-4b-instruct-2507` (default priority)
+2. `qwen2.5-coder-1.5b` (fallback)
 
 Do not:
 
@@ -207,7 +230,7 @@ Release packaging includes sidecar resources via `src-tauri/tauri.conf.json`.
 
 Common:
 
-1. `SMOLPC_MODELS_DIR` override model root
+1. `SMOLPC_MODELS_DIR` override model root (recommended shared path: `%LOCALAPPDATA%/SmolPC/models`)
 2. `SMOLPC_ENGINE_PORT` override host port
 
 Debug/diagnostic:
@@ -224,8 +247,10 @@ If engine appears on CPU when GPU exists:
 
 1. Check `/engine/status.backend_status.active_backend`
 2. Check `selection_reason` and `dml_gate_state`
-3. Ensure `dml/model.onnx` artifact exists for model
+3. Ensure DirectML bundle exists for model:
+   `dml/model.onnx`, `dml/genai_config.json`, `dml/tokenizer.json`
 4. Confirm DirectML runtime DLLs are present in `src-tauri/libs`
+5. Use `npm run tauri:dml` for deterministic demo runs
 
 If `tauri:dml` fails with binary lock:
 

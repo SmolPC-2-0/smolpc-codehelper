@@ -14,7 +14,24 @@ This is the fastest path for both developers and AI-assisted integration session
 
 1. Read [ENGINE_API.md](./ENGINE_API.md).
 2. Read [SMOLPC_SUITE_INTEGRATION.md](./SMOLPC_SUITE_INTEGRATION.md).
-3. Use this playbook as the implementation checklist.
+3. Run shared model bootstrap once on the machine:
+   - `npm run model:setup:qwen3`
+4. Use this playbook as the implementation checklist.
+
+## Shared Model Baseline
+
+Default shared model for onboarding:
+
+1. `qwen3-4b-instruct-2507`
+
+Fallback model:
+
+1. `qwen2.5-coder-1.5b`
+
+Shared model root (recommended):
+
+1. `%LOCALAPPDATA%/SmolPC/models`
+2. `SMOLPC_MODELS_DIR` should point to the same path for all apps.
 
 ## Contract Boundary
 
@@ -52,7 +69,7 @@ Do not depend on:
    - Header: `Authorization: Bearer <token>`
 3. Required flow:
    1. `GET /engine/meta`
-   2. `POST /engine/load`
+   2. `POST /engine/load` (`model_id=qwen3-4b-instruct-2507`)
    3. `POST /v1/chat/completions`
 
 ## Minimum Onboarding Checklist
@@ -80,6 +97,7 @@ Every app integration must pass all checks below.
    - Client handles `504` (queue timeout).
 7. Backend diagnostics:
    - App can surface/log `active_backend`, `runtime_engine`, `selection_reason`, `dml_gate_state`.
+   - For demo reliability, verify `active_backend=directml`.
 
 ## Required Error Handling
 
@@ -97,6 +115,7 @@ Treat these as expected operational states:
 1. A known deferred issue can cause auto mode to select CPU on some DML-capable systems due to startup probe gating.
    - Tracking: `codex/WORKING_ISSUES.md` issue #5.
    - Workaround for debugging: force DML (`SMOLPC_FORCE_EP=dml`) and inspect `/engine/status`.
+2. Qwen3 CPU artifacts are included for compatibility/fallback, but the demo readiness gate is DML-first.
 
 ## Definition of Done (Per App)
 
@@ -139,4 +158,3 @@ Reference docs:
 - docs/ENGINE_API.md
 - docs/SMOLPC_SUITE_INTEGRATION.md
 ```
-

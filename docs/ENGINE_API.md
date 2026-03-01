@@ -28,7 +28,7 @@ Default base URL: `http://127.0.0.1:19432`
     - `backend_status.selected_device_name`: active or candidate DirectML device name
 
 - `POST /engine/load`
-  - Body: `{ "model_id": "qwen2.5-coder-1.5b" }`
+  - Body: `{ "model_id": "qwen3-4b-instruct-2507" }`
 
 - `POST /engine/unload`
   - Body: `{ "force": false }`
@@ -37,7 +37,7 @@ Default base URL: `http://127.0.0.1:19432`
   - Cancels the currently active generation.
 
 - `POST /engine/check-model`
-  - Body: `{ "model_id": "qwen2.5-coder-1.5b" }`
+  - Body: `{ "model_id": "qwen3-4b-instruct-2507" }`
   - Returns `{ "exists": true | false }`
 
 - `POST /engine/shutdown`
@@ -85,7 +85,10 @@ Default base URL: `http://127.0.0.1:19432`
 - Host starts an async startup probe and ranks DirectML candidates (discrete-first, then higher VRAM).
 - On model load, host waits up to ~1.5s for probe completion; if probe is still pending, load continues with safe defaults.
 - Default auto policy is capability-first:
-  - Prefer DirectML when available and model `dml/model.onnx` artifact exists.
+  - Prefer DirectML when available and DirectML GenAI bundle exists:
+    - `dml/model.onnx`
+    - `dml/genai_config.json`
+    - `dml/tokenizer.json`
   - Fallback to CPU when DirectML init/runtime fails.
 - Forced overrides for diagnostics:
   - `SMOLPC_FORCE_EP=cpu|dml`
