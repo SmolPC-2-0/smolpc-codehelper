@@ -20,6 +20,7 @@ half = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
 libloading = { workspace = true }
+dirs = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true }

@@ -2,7 +2,11 @@
 use std::path::PathBuf;
 
 const MODELS_DIR_OVERRIDE_ENV: &str = "SMOLPC_MODELS_DIR";
+const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
+const SHARED_MODELS_DIR: &str = "models";
 const LEGACY_MODEL_FILENAME: &str = "model.onnx";
+const TOKENIZER_FILENAME: &str = "tokenizer.json";
+const GENAI_CONFIG_FILENAME: &str = "genai_config.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelArtifactBackend {
@@ -23,8 +27,19 @@ impl ModelArtifactBackend {
 pub struct ModelLoader;
 
 impl ModelLoader {
+    fn shared_models_dir() -> Option<PathBuf> {
+        dirs::data_local_dir()
+            .map(|base| base.join(SHARED_MODELS_VENDOR_DIR).join(SHARED_MODELS_DIR))
+    }
+
     fn default_models_dir() -> PathBuf {
-        // Resolve from crate root (`src-tauri`) so paths are stable regardless of process CWD.
+        if let Some(shared) = Self::shared_models_dir() {
+            if shared.exists() {
+                return shared;
+            }
+        }
+
+        // Development fallback from crate root (`src-tauri`) so paths are stable regardless of CWD.
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models")
     }
 
@@ -39,7 +54,8 @@ impl ModelLoader {
     ///
     /// Resolution order:
     /// 1. `SMOLPC_MODELS_DIR` environment variable (if set and non-empty)
-    /// 2. Deterministic default: `<src-tauri>/models`
+    /// 2. Shared runtime location: `%LOCALAPPDATA%/SmolPC/models` (when present)
+    /// 3. Development fallback: `<src-tauri>/models`
     pub fn models_dir() -> PathBuf {
         let override_dir = std::env::var_os(MODELS_DIR_OVERRIDE_ENV).map(PathBuf::from);
         Self::resolve_models_dir(override_dir)
@@ -68,6 +84,28 @@ impl ModelLoader {
             .join(LEGACY_MODEL_FILENAME)
     }
 
+    fn directml_dir(model_name: &str) -> PathBuf {
+        Self::model_path(model_name).join(ModelArtifactBackend::DirectML.as_dir())
+    }
+
+    fn directml_genai_config_file(model_name: &str) -> PathBuf {
+        Self::directml_dir(model_name).join(GENAI_CONFIG_FILENAME)
+    }
+
+    fn directml_tokenizer_file(model_name: &str) -> PathBuf {
+        Self::directml_dir(model_name).join(TOKENIZER_FILENAME)
+    }
+
+    fn directml_missing_required_files(model_name: &str) -> Vec<PathBuf> {
+        let required = [
+            Self::backend_model_file(model_name, ModelArtifactBackend::DirectML),
+            Self::directml_genai_config_file(model_name),
+            Self::directml_tokenizer_file(model_name),
+        ];
+
+        required.into_iter().filter(|path| !path.exists()).collect()
+    }
+
     /// Resolve the CPU model path with backward compatibility.
     ///
     /// Preferred layout:
@@ -94,15 +132,18 @@ impl ModelLoader {
         match backend {
             ModelArtifactBackend::Cpu => Some(Self::resolve_cpu_model_file(model_name)),
             ModelArtifactBackend::DirectML => {
-                let path = Self::backend_model_file(model_name, backend);
-                path.exists().then_some(path)
+                if Self::directml_missing_required_files(model_name).is_empty() {
+                    Some(Self::backend_model_file(model_name, backend))
+                } else {
+                    None
+                }
             }
         }
     }
 
     /// Get path to tokenizer file
     pub fn tokenizer_file(model_name: &str) -> PathBuf {
-        Self::model_path(model_name).join("tokenizer.json")
+        Self::model_path(model_name).join(TOKENIZER_FILENAME)
     }
 
     /// Check if model files exist
@@ -122,10 +163,18 @@ impl ModelLoader {
         model_name: &str,
         backend: ModelArtifactBackend,
     ) -> (bool, bool) {
-        let model_exists = Self::resolve_model_file_for_backend(model_name, backend)
-            .as_ref()
-            .is_some_and(|path| path.exists());
-        let tokenizer_exists = Self::tokenizer_file(model_name).exists();
+        let (model_exists, tokenizer_exists) = match backend {
+            ModelArtifactBackend::Cpu => (
+                Self::resolve_model_file_for_backend(model_name, backend)
+                    .as_ref()
+                    .is_some_and(|path| path.exists()),
+                Self::tokenizer_file(model_name).exists(),
+            ),
+            ModelArtifactBackend::DirectML => (
+                Self::directml_missing_required_files(model_name).is_empty(),
+                Self::directml_tokenizer_file(model_name).exists(),
+            ),
+        };
         (model_exists, tokenizer_exists)
     }
 
@@ -134,6 +183,22 @@ impl ModelLoader {
         model_name: &str,
         backend: ModelArtifactBackend,
     ) -> Result<PathBuf, String> {
+        if backend == ModelArtifactBackend::DirectML {
+            let missing = Self::directml_missing_required_files(model_name);
+            if !missing.is_empty() {
+                let missing_paths = missing
+                    .into_iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(format!(
+                    "DirectML GenAI artifact is incomplete for model '{model_name}'. Missing: {missing_paths}"
+                ));
+            }
+
+            return Ok(Self::backend_model_file(model_name, backend));
+        }
+
         let (model_exists, tokenizer_exists) =
             Self::check_model_files_for_backend(model_name, backend);
         let resolved_model_path = Self::resolve_model_file_for_backend(model_name, backend)
@@ -187,5 +252,11 @@ mod tests {
     fn backend_dir_names_are_stable() {
         assert_eq!(ModelArtifactBackend::Cpu.as_dir(), "cpu");
         assert_eq!(ModelArtifactBackend::DirectML.as_dir(), "dml");
+    }
+
+    #[test]
+    fn default_models_dir_prefers_models_suffix() {
+        let path = ModelLoader::default_models_dir();
+        assert!(path.ends_with("models"));
     }
 }

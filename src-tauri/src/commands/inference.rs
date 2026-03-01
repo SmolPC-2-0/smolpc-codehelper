@@ -10,6 +10,8 @@ use tauri::Manager;
 use tokio::sync::Mutex;
 
 const DEFAULT_ENGINE_PORT: u16 = 19432;
+const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
+const SHARED_MODELS_DIR: &str = "models";
 
 pub struct InferenceState {
     client: Arc<Mutex<Option<EngineClient>>>,
@@ -95,6 +97,13 @@ fn resolve_models_dir(resource_dir: Option<&PathBuf>) -> Option<PathBuf> {
         let path = PathBuf::from(override_dir);
         if path.exists() {
             return Some(path);
+        }
+    }
+
+    if let Some(base) = dirs::data_local_dir() {
+        let shared = base.join(SHARED_MODELS_VENDOR_DIR).join(SHARED_MODELS_DIR);
+        if shared.exists() {
+            return Some(shared);
         }
     }
 

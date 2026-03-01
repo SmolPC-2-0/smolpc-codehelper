@@ -19,6 +19,8 @@ const SPAWN_LOCK_WAIT: Duration = Duration::from_secs(10);
 const SPAWN_LOCK_STALE_AGE: Duration = Duration::from_secs(30);
 const DEV_FORCE_RESPAWN_ENV: &str = "SMOLPC_ENGINE_DEV_FORCE_RESPAWN";
 const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
+const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
+const SHARED_MODELS_DIR: &str = "models";
 
 struct SpawnLockGuard {
     path: PathBuf,
@@ -609,7 +611,12 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
     if let Some(resource_dir) = &options.resource_dir {
         cmd.arg("--resource-dir").arg(resource_dir);
     }
-    if let Some(models_dir) = &options.models_dir {
+    if let Some(models_dir) = options
+        .models_dir
+        .as_ref()
+        .cloned()
+        .or_else(default_shared_models_dir)
+    {
         cmd.env("SMOLPC_MODELS_DIR", models_dir);
     }
 
@@ -623,6 +630,12 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
 
     cmd.spawn()?;
     Ok(())
+}
+
+fn default_shared_models_dir() -> Option<PathBuf> {
+    let base = dirs::data_local_dir()?;
+    let path = base.join(SHARED_MODELS_VENDOR_DIR).join(SHARED_MODELS_DIR);
+    path.exists().then_some(path)
 }
 
 async fn acquire_spawn_lock(
