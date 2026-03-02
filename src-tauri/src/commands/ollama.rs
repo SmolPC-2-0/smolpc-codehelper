@@ -7,14 +7,26 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::broadcast;
 
-// Student-friendly system prompt for coding assistance
-const SYSTEM_PROMPT: &str = r"Role: Expert Coding Mentor for secondary students (11-18). Treat the user as a Junior Developer (professional, encouraging, never childish).
+// System prompt for coding assistance
+const SYSTEM_PROMPT: &str = r"You are a coding tutor and engineering collaborator for secondary-school students.
 
-Directives:
-1. CODE QUALITY: Produce 100% functional, optimized, and bug-free code. No placeholders. Use modern best practices.
-2. OFFLINE-FIRST: All solutions must work 100% offline. Use local libraries/storage (e.g., SQLite) only; no external APIs or cloud.
-3. TEACHING: Explain the why behind complex logic. Break down problems step-by-step.
-4. FORMAT: Output complete, self-contained files. Add educational comments to key lines.";
+Tone and interaction style:
+- Professional, clear, and direct.
+- Respectful and encouraging, but never childish.
+- Conversational and engaging without artificial hype or flattery.
+
+Response standards:
+- Prioritize technical correctness and intellectual honesty.
+- Explain reasoning step-by-step when needed, but do not oversimplify.
+- If the request is ambiguous, ask a short clarifying question before committing to a solution.
+- When providing code, give complete, practical examples and concise comments on non-obvious parts.
+- Point out tradeoffs, assumptions, and common failure modes.
+- Challenge weak ideas politely and offer stronger alternatives.
+
+Teaching approach:
+- Treat the user like a capable learner, not a beginner by default.
+- Build conceptual understanding and practical skill at the same time.
+- End with a useful next step (test, check, refactor, or extension) when appropriate.";
 
 /// Shared HTTP client for connection pooling
 pub struct HttpClient {
@@ -43,18 +55,19 @@ pub struct OllamaConfig {
 impl Default for OllamaConfig {
     fn default() -> Self {
         // Read from environment variable or use default
-        let base_url = env::var("OLLAMA_URL")
-            .unwrap_or_else(|_| "http://localhost:11434".to_string());
+        let base_url =
+            env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".to_string());
 
         // Validate URL is localhost only for security (uses proper URL parsing)
-        let validated_url = security::validate_ollama_url(&base_url)
-            .unwrap_or_else(|err| {
-                log::error!("{err}");
-                log::warn!("Falling back to default: http://localhost:11434");
-                "http://localhost:11434".to_string()
-            });
+        let validated_url = security::validate_ollama_url(&base_url).unwrap_or_else(|err| {
+            log::error!("{err}");
+            log::warn!("Falling back to default: http://localhost:11434");
+            "http://localhost:11434".to_string()
+        });
 
-        Self { base_url: validated_url }
+        Self {
+            base_url: validated_url,
+        }
     }
 }
 
@@ -82,11 +95,11 @@ pub struct OllamaResponse {
     pub message: Option<OllamaMessage>,
     pub done: bool,
     // Token count metadata (only present when done=true)
-    pub eval_count: Option<usize>,        // Number of tokens in the response
+    pub eval_count: Option<usize>, // Number of tokens in the response
     // Timing metadata (only present when done=true)
-    pub total_duration: Option<u64>,      // Total time in nanoseconds
+    pub total_duration: Option<u64>, // Total time in nanoseconds
     pub prompt_eval_duration: Option<u64>, // Prompt evaluation time in nanoseconds
-    pub eval_duration: Option<u64>,       // Response generation time in nanoseconds
+    pub eval_duration: Option<u64>,  // Response generation time in nanoseconds
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,15 +127,19 @@ impl Default for StreamCancellation {
 
 impl StreamCancellation {
     pub fn create_channel(&self) -> broadcast::Receiver<()> {
-        let mut sender_lock = self.sender.lock()
+        let mut sender_lock = self
+            .sender
+            .lock()
             .expect("StreamCancellation mutex poisoned - indicates panic in stream handler");
-        let (tx, rx) = broadcast::channel(1); 
+        let (tx, rx) = broadcast::channel(1);
         *sender_lock = Some(tx); // Transmitter stored globally for cancellation
         rx // Return receiver for this stream
     }
 
     pub fn cancel(&self) {
-        let sender_lock = self.sender.lock() // 
+        let sender_lock = self
+            .sender
+            .lock() //
             .expect("StreamCancellation mutex poisoned - indicates panic in stream handler");
         if let Some(sender) = sender_lock.as_ref() {
             let _ = sender.send(());
@@ -130,7 +147,9 @@ impl StreamCancellation {
     }
 
     pub fn clear(&self) {
-        let mut sender_lock = self.sender.lock()
+        let mut sender_lock = self
+            .sender
+            .lock()
             .expect("StreamCancellation mutex poisoned - indicates panic in stream handler");
         *sender_lock = None;
     }
@@ -143,10 +162,7 @@ pub async fn check_ollama(
     config: State<'_, OllamaConfig>,
 ) -> Result<bool, Error> {
     let url = format!("{}/api/tags", config.base_url());
-    let response = client.get()
-        .get(&url)
-        .send()
-        .await;
+    let response = client.get().get(&url).send().await;
 
     match response {
         Ok(resp) => Ok(resp.status().is_success()),
@@ -161,7 +177,8 @@ pub async fn get_ollama_models(
     config: State<'_, OllamaConfig>,
 ) -> Result<Vec<String>, Error> {
     let url = format!("{}/api/tags", config.base_url());
-    let response = client.get()
+    let response = client
+        .get()
         .get(&url)
         .send()
         .await
@@ -219,7 +236,8 @@ pub async fn generate_stream(
     };
 
     let url = format!("{}/api/chat", config.base_url());
-    let response = client.get()
+    let response = client
+        .get()
         .post(&url)
         .json(&request)
         .send()
