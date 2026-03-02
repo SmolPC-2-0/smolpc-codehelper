@@ -368,10 +368,21 @@
 				return;
 			}
 
-			const loaded = await inferenceStore.loadModel(targetModelId);
-			if (loaded) {
-				settingsStore.setModel(targetModelId);
+			const candidateModelIds = [
+				targetModelId,
+				...inferenceStore.availableModels
+					.map((model) => model.id)
+					.filter((modelId) => modelId !== targetModelId)
+			];
+			for (const candidateModelId of candidateModelIds) {
+				const loaded = await inferenceStore.loadModel(candidateModelId);
+				if (loaded) {
+					settingsStore.setModel(candidateModelId);
+					return;
+				}
 			}
+
+			console.error('Failed to load any available shared-engine model');
 		}
 
 		initInference();

@@ -87,8 +87,8 @@ impl LayerCache {
     /// # Panics
     /// Panics if position >= max_context or embeddings length is wrong
     fn write_at(&mut self, position: usize, embeddings: &[f32]) {
-        debug_assert!(position < self.max_context, "Position out of bounds");
-        debug_assert_eq!(
+        assert!(position < self.max_context, "Position out of bounds");
+        assert_eq!(
             embeddings.len(),
             NUM_KV_HEADS * HEAD_DIM,
             "Embedding size mismatch"
@@ -255,12 +255,12 @@ impl KVCache {
         let embedding_size = NUM_KV_HEADS * HEAD_DIM;
         let total_size = NUM_LAYERS * embedding_size;
 
-        debug_assert_eq!(
+        assert_eq!(
             key_embeddings.len(),
             total_size,
             "Key embeddings size mismatch"
         );
-        debug_assert_eq!(
+        assert_eq!(
             value_embeddings.len(),
             total_size,
             "Value embeddings size mismatch"
@@ -316,7 +316,7 @@ impl KVCache {
     pub fn extend(&mut self, key_embeddings: &[f32], value_embeddings: &[f32], num_tokens: usize) {
         let token_size = NUM_LAYERS * NUM_KV_HEADS * HEAD_DIM;
 
-        debug_assert_eq!(
+        assert_eq!(
             key_embeddings.len(),
             num_tokens * token_size,
             "Key embeddings size mismatch for extend"

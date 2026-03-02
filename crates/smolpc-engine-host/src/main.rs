@@ -215,6 +215,32 @@ fn parse_dml_device_id_env() -> Option<i32> {
         .and_then(|v| v.parse::<i32>().ok())
 }
 
+fn model_requires_directml(model_id: &str) -> bool {
+    matches!(model_id, "qwen3-4b-instruct-2507")
+}
+
+fn directml_required_error(model_id: &str, reason: &str) -> String {
+    format!(
+        "Model '{}' currently requires DirectML backend in shared engine: {}",
+        model_id, reason
+    )
+}
+
+fn select_active_model_path(
+    active_backend: InferenceBackend,
+    cpu_model_path: &Path,
+    dml_model_path: Option<&PathBuf>,
+) -> String {
+    if active_backend == InferenceBackend::DirectML {
+        dml_model_path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| cpu_model_path.display().to_string())
+    } else {
+        cpu_model_path.display().to_string()
+    }
+}
+
 fn decision_reason_code(reason: &DecisionReason) -> &'static str {
     match reason {
         DecisionReason::DefaultCpu => "default_cpu",
@@ -481,6 +507,7 @@ impl EngineState {
         if self.generating.load(Ordering::SeqCst) {
             return Err("Cannot load or unload model while generation is in progress".to_string());
         }
+        let directml_required = model_requires_directml(&model_id);
         let model_def = ModelRegistry::get_model(&model_id)
             .ok_or_else(|| format!("Unknown model ID: {}", model_id))?;
         let cpu_spec =
@@ -514,6 +541,21 @@ impl EngineState {
             || force_override == Some(InferenceBackend::DirectML);
         let directml_artifact_available = dml_model_path.is_some();
         let has_dml_candidate = directml_detected && directml_artifact_available;
+
+        if directml_required && force_override == Some(InferenceBackend::Cpu) {
+            return Err(directml_required_error(
+                &model_id,
+                "forced CPU mode is not supported for this model",
+            ));
+        }
+        if directml_required && !has_dml_candidate {
+            let reason = if !directml_detected {
+                "no DirectML-capable adapter was detected"
+            } else {
+                "the DirectML model artifact is missing"
+            };
+            return Err(directml_required_error(&model_id, reason));
+        }
 
         let probe_device_id = probe
             .directml_candidate
@@ -626,7 +668,9 @@ impl EngineState {
                             adapter
                         }
                         Err(error) => {
-                            if force_override == Some(InferenceBackend::DirectML) {
+                            if force_override == Some(InferenceBackend::DirectML)
+                                || directml_required
+                            {
                                 failure_counters.record_directml_failure(
                                     DirectMLFailureStage::Init,
                                     error.clone(),
@@ -692,7 +736,7 @@ impl EngineState {
                     let error =
                         "DirectML model artifact missing (expected models/<model>/dml/model.onnx)"
                             .to_string();
-                    if force_override == Some(InferenceBackend::DirectML) {
+                    if force_override == Some(InferenceBackend::DirectML) || directml_required {
                         failure_counters
                             .record_directml_failure(DirectMLFailureStage::Init, error.clone());
                         *self.backend_status.lock().await = BackendStatus {
@@ -732,19 +776,19 @@ impl EngineState {
                 }
             }
         } else {
+            if directml_required {
+                return Err(directml_required_error(
+                    &model_id,
+                    "CPU backend is unsupported for this model",
+                ));
+            }
             let (adapter, _) =
                 build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)?;
             adapter
         };
 
-        let active_model_path = if active_backend == InferenceBackend::DirectML {
-            dml_model_path
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| cpu_model_path.display().to_string())
-        } else {
-            cpu_model_path.display().to_string()
-        };
+        let active_model_path =
+            select_active_model_path(active_backend, &cpu_model_path, dml_model_path.as_ref());
 
         *self.runtime_adapter.lock().await = Some(adapter);
         *self.current_model.lock().await = Some(model_id.clone());
@@ -1083,7 +1127,8 @@ fn auth(headers: &HeaderMap, token: &str) -> Result<(), ApiError> {
             }),
         ));
     };
-    if value != format!("Bearer {}", token) {
+    let expected = format!("Bearer {}", token);
+    if !constant_time_eq(value.as_bytes(), expected.as_bytes()) {
         return Err((
             StatusCode::UNAUTHORIZED,
             Json(ErrorResponse {
@@ -1094,21 +1139,62 @@ fn auth(headers: &HeaderMap, token: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+fn constant_time_eq(lhs: &[u8], rhs: &[u8]) -> bool {
+    if lhs.len() != rhs.len() {
+        return false;
+    }
+
+    let mut diff = 0u8;
+    for (a, b) in lhs.iter().zip(rhs.iter()) {
+        diff |= a ^ b;
+    }
+    diff == 0
+}
+
+fn looks_like_chatml_prompt(content: &str) -> bool {
+    content.contains("<|im_start|>") && content.contains("<|im_end|>")
+}
+
 fn request_to_prompt(messages: &[ChatCompletionMessage]) -> Result<String, String> {
     if messages.is_empty() {
         return Err("messages cannot be empty".to_string());
     }
+
+    // Compatibility mode: older clients may already send a full ChatML prompt
+    // as a single user message. Preserve that payload as-is.
+    if messages.len() == 1 {
+        let only = &messages[0];
+        if only.role.trim().eq_ignore_ascii_case("user") {
+            let content = only.content.clone().unwrap_or_default();
+            if !content.trim().is_empty() && looks_like_chatml_prompt(&content) {
+                return Ok(content);
+            }
+        }
+    }
+
     let mut prompt = String::new();
     for m in messages {
         let content = m.content.clone().unwrap_or_default();
         if !content.is_empty() {
-            prompt.push_str(&m.role);
-            prompt.push_str(": ");
-            prompt.push_str(&content);
+            let role = match m.role.trim().to_ascii_lowercase().as_str() {
+                "system" => "system",
+                "user" => "user",
+                "assistant" => "assistant",
+                other => return Err(format!("unsupported message role: {other}")),
+            };
+            prompt.push_str("<|im_start|>");
+            prompt.push_str(role);
             prompt.push('\n');
+            prompt.push_str(&content);
+            prompt.push_str("<|im_end|>\n");
         }
     }
-    prompt.push_str("assistant: ");
+
+    if prompt.is_empty() {
+        return Err("messages must contain at least one non-empty content item".to_string());
+    }
+
+    prompt.push_str("<|im_start|>assistant\n");
     Ok(prompt)
 }
 
@@ -1535,4 +1621,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_to_prompt_renders_chatml() {
+        let messages = vec![
+            ChatCompletionMessage {
+                role: "system".to_string(),
+                content: Some("You are helpful.".to_string()),
+            },
+            ChatCompletionMessage {
+                role: "user".to_string(),
+                content: Some("hello".to_string()),
+            },
+        ];
+
+        let prompt = request_to_prompt(&messages).expect("chatml prompt");
+        assert!(prompt.contains("<|im_start|>system\nYou are helpful.<|im_end|>\n"));
+        assert!(prompt.contains("<|im_start|>user\nhello<|im_end|>\n"));
+        assert!(prompt.ends_with("<|im_start|>assistant\n"));
+    }
+
+    #[test]
+    fn request_to_prompt_preserves_preformatted_chatml_single_user_message() {
+        let preformatted = "<|im_start|>system\ns<|im_end|>\n<|im_start|>user\nu<|im_end|>\n<|im_start|>assistant\n";
+        let messages = vec![ChatCompletionMessage {
+            role: "user".to_string(),
+            content: Some(preformatted.to_string()),
+        }];
+
+        let prompt = request_to_prompt(&messages).expect("preformatted chatml");
+        assert_eq!(prompt, preformatted);
+    }
+
+    #[test]
+    fn auth_compare_is_constant_time_functionally() {
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"ab"));
+    }
+
+    #[test]
+    fn select_active_model_path_prefers_directml_artifact_when_active() {
+        let cpu = PathBuf::from("cpu/model.onnx");
+        let dml = PathBuf::from("dml/model.onnx");
+
+        let dml_selected = select_active_model_path(InferenceBackend::DirectML, &cpu, Some(&dml));
+        let cpu_selected = select_active_model_path(InferenceBackend::Cpu, &cpu, Some(&dml));
+
+        assert_eq!(dml_selected, dml.display().to_string());
+        assert_eq!(cpu_selected, cpu.display().to_string());
+    }
 }

@@ -17,10 +17,28 @@ const ENGINE_HOST_BASENAME: &str = "smolpc-engine-host";
 const SPAWN_LOCK_FILENAME: &str = "engine-spawn.lock";
 const SPAWN_LOCK_WAIT: Duration = Duration::from_secs(10);
 const SPAWN_LOCK_STALE_AGE: Duration = Duration::from_secs(30);
-const DEV_FORCE_RESPAWN_ENV: &str = "SMOLPC_ENGINE_DEV_FORCE_RESPAWN";
 const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
+const DML_DEVICE_ENV: &str = "SMOLPC_DML_DEVICE_ID";
 const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
 const SHARED_MODELS_DIR: &str = "models";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RuntimeModePreference {
+    #[default]
+    Auto,
+    Cpu,
+    Dml,
+}
+
+impl RuntimeModePreference {
+    fn as_force_override(self) -> Option<&'static str> {
+        match self {
+            Self::Auto => None,
+            Self::Cpu => Some("cpu"),
+            Self::Dml => Some("dml"),
+        }
+    }
+}
 
 struct SpawnLockGuard {
     path: PathBuf,
@@ -53,6 +71,9 @@ pub struct EngineConnectOptions {
     pub resource_dir: Option<PathBuf>,
     pub models_dir: Option<PathBuf>,
     pub host_binary: Option<PathBuf>,
+    pub runtime_mode: RuntimeModePreference,
+    pub dml_device_id: Option<i32>,
+    pub force_respawn: bool,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -200,23 +221,7 @@ impl EngineClient {
             .await?;
         let response = ensure_success(response, "/v1/models").await?;
         let value = response.json::<serde_json::Value>().await?;
-
-        let mut out = Vec::new();
-        if let Some(data) = value.get("data").and_then(|d| d.as_array()) {
-            for item in data {
-                if let Some(id) = item.get("id").and_then(|s| s.as_str()) {
-                    if let Some(model) =
-                        smolpc_engine_core::models::registry::ModelRegistry::get_model(id)
-                    {
-                        out.push(model);
-                    }
-                }
-            }
-        }
-        if out.is_empty() {
-            out = smolpc_engine_core::models::registry::ModelRegistry::available_models();
-        }
-        Ok(out)
+        parse_models_response(&value)
     }
 
     pub async fn generate_text(
@@ -289,9 +294,11 @@ impl EngineClient {
             let text = String::from_utf8_lossy(&bytes);
             buffer.push_str(&text);
 
-            while let Some(newline) = buffer.find('\n') {
-                let line = buffer[..newline].trim().to_string();
-                buffer = buffer[newline + 1..].to_string();
+            let mut consumed_until = 0usize;
+            while let Some(rel_newline) = buffer[consumed_until..].find('\n') {
+                let newline = consumed_until + rel_newline;
+                let line = buffer[consumed_until..newline].trim();
+                consumed_until = newline + 1;
                 if !line.starts_with("data:") {
                     continue;
                 }
@@ -339,6 +346,10 @@ impl EngineClient {
                     }
                 }
             }
+
+            if consumed_until > 0 {
+                buffer.drain(..consumed_until);
+            }
         }
 
         Ok(host_metrics
@@ -382,15 +393,15 @@ pub async fn connect_or_spawn(
     let token = load_or_create_token(&token_path)?;
     let base_url = format!("http://127.0.0.1:{}", options.port);
     let client = EngineClient::new(base_url, token.clone());
-    let force_override = force_override_requested();
-    let dev_force_respawn = parse_bool_env(DEV_FORCE_RESPAWN_ENV);
+    let force_override = options.runtime_mode.as_force_override();
+    let force_respawn = options.force_respawn;
 
-    if enforce_running_host_policy(&client, force_override.as_deref(), dev_force_respawn).await? {
+    if enforce_running_host_policy(&client, force_override, force_respawn).await? {
         return Ok(client);
     }
 
     let _spawn_lock = acquire_spawn_lock(&options.shared_runtime_dir).await?;
-    if enforce_running_host_policy(&client, force_override.as_deref(), dev_force_respawn).await? {
+    if enforce_running_host_policy(&client, force_override, force_respawn).await? {
         return Ok(client);
     }
 
@@ -425,7 +436,7 @@ pub async fn connect_or_spawn(
 async fn enforce_running_host_policy(
     client: &EngineClient,
     force_override: Option<&str>,
-    dev_force_respawn: bool,
+    force_respawn: bool,
 ) -> Result<bool, EngineClientError> {
     if !client.health().await.unwrap_or(false) {
         return Ok(false);
@@ -445,12 +456,12 @@ async fn enforce_running_host_policy(
         return Ok(false);
     }
 
-    if force_override.is_some() || dev_force_respawn {
+    if force_override.is_some() || force_respawn {
         let status = client.status().await?;
         if status.generating {
             let policy = force_override
                 .map(|value| format!("{FORCE_EP_ENV}={value}"))
-                .unwrap_or_else(|| format!("{DEV_FORCE_RESPAWN_ENV}=1"));
+                .unwrap_or_else(|| "forced respawn policy".to_string());
             return Err(EngineClientError::Message(format!(
                 "Engine is busy and cannot apply {policy}. Cancel generation and retry."
             )));
@@ -527,25 +538,6 @@ fn protocol_major_matches(actual: &str, expected: &str) -> bool {
     a == e
 }
 
-fn parse_bool_env(key: &str) -> bool {
-    std::env::var(key)
-        .ok()
-        .map(|value| {
-            let normalized = value.trim().to_ascii_lowercase();
-            normalized == "1" || normalized == "true" || normalized == "yes"
-        })
-        .unwrap_or(false)
-}
-
-fn force_override_requested() -> Option<String> {
-    let value = std::env::var(FORCE_EP_ENV).ok()?;
-    let normalized = value.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "cpu" | "dml" => Some(normalized),
-        _ => None,
-    }
-}
-
 fn parse_error_message(value: &serde_json::Value) -> Option<String> {
     let error = value.get("error")?;
     if let Some(message) = error.get("message").and_then(|m| m.as_str()) {
@@ -555,6 +547,45 @@ fn parse_error_message(value: &serde_json::Value) -> Option<String> {
         return Some(message.to_string());
     }
     Some(error.to_string())
+}
+
+fn parse_models_response(value: &serde_json::Value) -> Result<Vec<ModelDefinition>, EngineClientError> {
+    let data = value
+        .get("data")
+        .and_then(|d| d.as_array())
+        .ok_or_else(|| {
+            EngineClientError::Message(
+                "Invalid /v1/models response: expected top-level 'data' array".to_string(),
+            )
+        })?;
+
+    let mut out = Vec::with_capacity(data.len());
+    for item in data {
+        let Some(id) = item.get("id").and_then(|s| s.as_str()) else {
+            return Err(EngineClientError::Message(
+                "Invalid /v1/models response: every model entry must contain string 'id'"
+                    .to_string(),
+            ));
+        };
+
+        if let Some(model) = smolpc_engine_core::models::registry::ModelRegistry::get_model(id) {
+            out.push(model);
+        } else {
+            log::warn!(
+                "Host reported unknown model id '{}' in /v1/models; ignoring entry",
+                id
+            );
+        }
+    }
+
+    if out.is_empty() && !data.is_empty() {
+        return Err(EngineClientError::Message(format!(
+            "Host returned {} models but none matched local registry IDs",
+            data.len()
+        )));
+    }
+
+    Ok(out)
 }
 
 fn non_stream_metrics(
@@ -608,20 +639,69 @@ fn fallback_stream_metrics(
 }
 
 fn load_or_create_token(path: &Path) -> Result<String, EngineClientError> {
-    if let Ok(token) = std::fs::read_to_string(path) {
-        let trimmed = token.trim().to_string();
-        if !trimmed.is_empty() {
-            return Ok(trimmed);
+    if let Some(token) = read_non_empty_token(path)? {
+        return Ok(token);
+    }
+
+    for _ in 0..3 {
+        let token: String = thread_rng()
+            .sample_iter(&Alphanumeric)
+            .map(char::from)
+            .take(48)
+            .collect();
+
+        match create_new_token_file(path, &token) {
+            Ok(()) => return Ok(token),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                if let Some(existing) = read_non_empty_token(path)? {
+                    return Ok(existing);
+                }
+                let _ = std::fs::remove_file(path);
+            }
+            Err(error) => return Err(error.into()),
         }
     }
 
-    let token: String = thread_rng()
-        .sample_iter(&Alphanumeric)
-        .map(char::from)
-        .take(48)
-        .collect();
-    std::fs::write(path, &token)?;
-    Ok(token)
+    Err(EngineClientError::Message(
+        "Failed to initialize engine token file after retrying".to_string(),
+    ))
+}
+
+fn read_non_empty_token(path: &Path) -> Result<Option<String>, EngineClientError> {
+    match std::fs::read_to_string(path) {
+        Ok(token) => {
+            let trimmed = token.trim().to_string();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed))
+            }
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn create_new_token_file(path: &Path, token: &str) -> Result<(), std::io::Error> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(token.as_bytes())?;
+        return Ok(());
+    }
+
+    #[cfg(not(unix))]
+    {
+        let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+        file.write_all(token.as_bytes())?;
+        Ok(())
+    }
 }
 
 fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineClientError> {
@@ -635,6 +715,18 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
         .arg(&options.app_version)
         .env("SMOLPC_ENGINE_TOKEN", token)
         .env("SMOLPC_ENGINE_PORT", options.port.to_string());
+
+    if let Some(force_ep) = options.runtime_mode.as_force_override() {
+        cmd.env(FORCE_EP_ENV, force_ep);
+    } else {
+        cmd.env_remove(FORCE_EP_ENV);
+    }
+
+    if let Some(device_id) = options.dml_device_id {
+        cmd.env(DML_DEVICE_ENV, device_id.to_string());
+    } else {
+        cmd.env_remove(DML_DEVICE_ENV);
+    }
 
     if let Some(resource_dir) = &options.resource_dir {
         cmd.arg("--resource-dir").arg(resource_dir);
@@ -654,6 +746,15 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
         const DETACHED_PROCESS: u32 = 0x00000008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
         cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
     }
 
     cmd.spawn()?;
@@ -787,22 +888,25 @@ fn resolve_host_binary(options: &EngineConnectOptions) -> Result<PathBuf, Engine
         }
     }
 
-    let fallback = PathBuf::from("target").join("debug").join(format!(
-        "{}{}",
-        ENGINE_HOST_BASENAME,
-        std::env::consts::EXE_SUFFIX
-    ));
-    if fallback.exists() {
-        return Ok(fallback);
-    }
+    #[cfg(debug_assertions)]
+    {
+        let fallback = PathBuf::from("target").join("debug").join(format!(
+            "{}{}",
+            ENGINE_HOST_BASENAME,
+            std::env::consts::EXE_SUFFIX
+        ));
+        if fallback.exists() {
+            return Ok(fallback);
+        }
 
-    let fallback_release = PathBuf::from("target").join("release").join(format!(
-        "{}{}",
-        ENGINE_HOST_BASENAME,
-        std::env::consts::EXE_SUFFIX
-    ));
-    if fallback_release.exists() {
-        return Ok(fallback_release);
+        let fallback_release = PathBuf::from("target").join("release").join(format!(
+            "{}{}",
+            ENGINE_HOST_BASENAME,
+            std::env::consts::EXE_SUFFIX
+        ));
+        if fallback_release.exists() {
+            return Ok(fallback_release);
+        }
     }
 
     Err(EngineClientError::Message(
@@ -813,6 +917,7 @@ fn resolve_host_binary(options: &EngineConnectOptions) -> Result<PathBuf, Engine
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn parse_error_message_extracts_nested_message() {
@@ -851,5 +956,71 @@ mod tests {
         let metrics = fallback_stream_metrics(Instant::now(), 3, Some(10));
         assert_eq!(metrics.total_tokens, 3);
         assert_eq!(metrics.time_to_first_token_ms, Some(10));
+    }
+
+    #[test]
+    fn parse_models_response_rejects_missing_data_array() {
+        let payload = serde_json::json!({"object": "list"});
+        let error = parse_models_response(&payload).expect_err("missing data should fail");
+        assert!(error.to_string().contains("expected top-level 'data' array"));
+    }
+
+    #[test]
+    fn parse_models_response_rejects_unknown_only_models() {
+        let payload = serde_json::json!({
+            "object": "list",
+            "data": [{"id": "unknown-model", "object": "model"}]
+        });
+        let error = parse_models_response(&payload).expect_err("unknown-only should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("none matched local registry IDs")
+        );
+    }
+
+    #[test]
+    fn parse_models_response_accepts_known_model() {
+        let payload = serde_json::json!({
+            "object": "list",
+            "data": [{"id": "qwen2.5-coder-1.5b", "object": "model"}]
+        });
+        let models = parse_models_response(&payload).expect("known model should parse");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "qwen2.5-coder-1.5b");
+    }
+
+    #[test]
+    fn load_or_create_token_creates_private_file() {
+        let unique = format!(
+            "smolpc-engine-client-token-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("engine-token.txt");
+
+        let created = load_or_create_token(&path).expect("create token");
+        assert!(!created.is_empty());
+        let loaded_again = load_or_create_token(&path).expect("load token");
+        assert_eq!(created, loaded_again);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&path)
+                .expect("token metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode & 0o077, 0, "token file must not be group/other-readable");
+        }
+
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(&dir);
     }
 }

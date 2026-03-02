@@ -1,4 +1,6 @@
-use smolpc_engine_client::{connect_or_spawn, EngineClient, EngineConnectOptions};
+use smolpc_engine_client::{
+    connect_or_spawn, EngineClient, EngineConnectOptions, RuntimeModePreference,
+};
 use smolpc_engine_core::inference::backend::BackendStatus;
 use smolpc_engine_core::models::registry::ModelDefinition;
 use smolpc_engine_core::{GenerationConfig, GenerationMetrics, GenerationResult};
@@ -12,13 +14,26 @@ use tokio::sync::Mutex;
 const DEFAULT_ENGINE_PORT: u16 = 19432;
 const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
 const SHARED_MODELS_DIR: &str = "models";
-const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
-const DML_DEVICE_ENV: &str = "SMOLPC_DML_DEVICE_ID";
-const DEV_FORCE_RESPAWN_ENV: &str = "SMOLPC_ENGINE_DEV_FORCE_RESPAWN";
+
+#[derive(Debug, Clone, Copy)]
+struct RuntimeClientConfig {
+    runtime_mode: RuntimeModePreference,
+    dml_device_id: Option<i32>,
+}
+
+impl Default for RuntimeClientConfig {
+    fn default() -> Self {
+        Self {
+            runtime_mode: RuntimeModePreference::Auto,
+            dml_device_id: None,
+        }
+    }
+}
 
 pub struct InferenceState {
     client: Arc<Mutex<Option<EngineClient>>>,
     connect_lock: Arc<Mutex<()>>,
+    runtime_config: Arc<Mutex<RuntimeClientConfig>>,
 }
 
 impl Default for InferenceState {
@@ -26,29 +41,56 @@ impl Default for InferenceState {
         Self {
             client: Arc::new(Mutex::new(None)),
             connect_lock: Arc::new(Mutex::new(())),
+            runtime_config: Arc::new(Mutex::new(RuntimeClientConfig::default())),
         }
+    }
+}
+
+fn parse_runtime_mode(mode: &str) -> Result<RuntimeModePreference, String> {
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(RuntimeModePreference::Auto),
+        "cpu" => Ok(RuntimeModePreference::Cpu),
+        "dml" | "directml" => Ok(RuntimeModePreference::Dml),
+        _ => Err(format!(
+            "Unsupported runtime mode '{mode}'. Use one of: auto, cpu, dml"
+        )),
+    }
+}
+
+fn runtime_mode_label(mode: RuntimeModePreference) -> &'static str {
+    match mode {
+        RuntimeModePreference::Auto => "auto",
+        RuntimeModePreference::Cpu => "cpu",
+        RuntimeModePreference::Dml => "dml",
     }
 }
 
 async fn resolve_client(
     app_handle: &tauri::AppHandle,
     state: &InferenceState,
+    force_respawn: bool,
 ) -> Result<EngineClient, String> {
-    if let Some(client) = state.client.lock().await.clone() {
-        if client.health().await.unwrap_or(false) {
-            return Ok(client);
+    if !force_respawn {
+        if let Some(client) = state.client.lock().await.clone() {
+            if client.health().await.unwrap_or(false) {
+                return Ok(client);
+            }
+            log::warn!("Cached shared engine client is unhealthy; reconnecting");
+            *state.client.lock().await = None;
         }
-        log::warn!("Cached shared engine client is unhealthy; reconnecting");
-        *state.client.lock().await = None;
     }
 
     let _guard = state.connect_lock.lock().await;
 
-    if let Some(client) = state.client.lock().await.clone() {
-        if client.health().await.unwrap_or(false) {
-            return Ok(client);
+    if !force_respawn {
+        if let Some(client) = state.client.lock().await.clone() {
+            if client.health().await.unwrap_or(false) {
+                return Ok(client);
+            }
+            log::warn!("Cached shared engine client is unhealthy after lock; reconnecting");
+            *state.client.lock().await = None;
         }
-        log::warn!("Cached shared engine client is unhealthy after lock; reconnecting");
+    } else {
         *state.client.lock().await = None;
     }
 
@@ -77,6 +119,7 @@ async fn resolve_client(
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(DEFAULT_ENGINE_PORT);
 
+    let runtime_config = *state.runtime_config.lock().await;
     let options = EngineConnectOptions {
         port,
         app_version: app_handle.package_info().version.to_string(),
@@ -85,14 +128,16 @@ async fn resolve_client(
         resource_dir,
         models_dir,
         host_binary,
+        runtime_mode: runtime_config.runtime_mode,
+        dml_device_id: runtime_config.dml_device_id,
+        force_respawn,
     };
-    let force_ep = std::env::var(FORCE_EP_ENV).ok();
-    let dml_device = std::env::var(DML_DEVICE_ENV).ok();
     log::info!(
-        "Resolving shared engine client: port={} force_ep={:?} dml_device_id={:?}",
+        "Resolving shared engine client: port={} runtime_mode={} dml_device_id={:?} force_respawn={}",
         options.port,
-        force_ep,
-        dml_device
+        runtime_mode_label(options.runtime_mode),
+        options.dml_device_id,
+        options.force_respawn
     );
 
     let client = connect_or_spawn(options)
@@ -191,30 +236,6 @@ fn log_host_binary_resolution(host_binary: Option<&PathBuf>) {
     }
 }
 
-fn apply_runtime_mode_env(mode: &str) -> Result<String, String> {
-    let normalized = mode.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "auto" => {
-            std::env::remove_var(FORCE_EP_ENV);
-            std::env::remove_var(DML_DEVICE_ENV);
-            Ok("auto".to_string())
-        }
-        "cpu" => {
-            std::env::set_var(FORCE_EP_ENV, "cpu");
-            std::env::remove_var(DML_DEVICE_ENV);
-            Ok("cpu".to_string())
-        }
-        "dml" | "directml" => {
-            std::env::set_var(FORCE_EP_ENV, "dml");
-            std::env::remove_var(DML_DEVICE_ENV);
-            Ok("dml".to_string())
-        }
-        _ => Err(format!(
-            "Unsupported runtime mode '{mode}'. Use one of: auto, cpu, dml"
-        )),
-    }
-}
-
 #[tauri::command]
 pub async fn load_model(
     model_id: String,
@@ -222,7 +243,7 @@ pub async fn load_model(
     state: tauri::State<'_, InferenceState>,
 ) -> Result<String, String> {
     log::info!("Loading model via shared engine: {}", model_id);
-    let client = resolve_client(&app_handle, &state).await?;
+    let client = resolve_client(&app_handle, &state, false).await?;
     client.load_model(&model_id).await.map_err(|e| {
         log::error!("Model load failed for {}: {}", model_id, e);
         format!("Failed to load model: {e}")
@@ -244,7 +265,7 @@ pub async fn unload_model(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<String, String> {
-    let client = resolve_client(&app_handle, &state).await?;
+    let client = resolve_client(&app_handle, &state, false).await?;
     client
         .unload_model(false)
         .await
@@ -258,7 +279,7 @@ pub async fn generate_text(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<GenerationResult, String> {
-    let client = resolve_client(&app_handle, &state).await?;
+    let client = resolve_client(&app_handle, &state, false).await?;
     client
         .generate_text(&prompt, None)
         .await
@@ -270,7 +291,7 @@ pub async fn list_models(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<Vec<ModelDefinition>, String> {
-    let client = resolve_client(&app_handle, &state).await?;
+    let client = resolve_client(&app_handle, &state, false).await?;
     client
         .list_models()
         .await
@@ -282,7 +303,7 @@ pub async fn get_current_model(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<Option<String>, String> {
-    let client = resolve_client(&app_handle, &state).await?;
+    let client = resolve_client(&app_handle, &state, false).await?;
     let status = client
         .status()
         .await
@@ -295,7 +316,7 @@ pub async fn get_inference_backend_status(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<BackendStatus, String> {
-    let client = resolve_client(&app_handle, &state).await?;
+    let client = resolve_client(&app_handle, &state, false).await?;
     let status = client
         .status()
         .await
@@ -310,24 +331,26 @@ pub async fn set_inference_runtime_mode(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<BackendStatus, String> {
-    let normalized_mode = apply_runtime_mode_env(&mode)?;
-    log::info!("Applying inference runtime mode: {}", normalized_mode);
+    let requested_mode = parse_runtime_mode(&mode)?;
+    let previous_config = *state.runtime_config.lock().await;
+    log::info!(
+        "Applying inference runtime mode: previous={} requested={}",
+        runtime_mode_label(previous_config.runtime_mode),
+        runtime_mode_label(requested_mode)
+    );
 
-    std::env::set_var(DEV_FORCE_RESPAWN_ENV, "1");
-    {
-        let mut client = state.client.lock().await;
-        *client = None;
-    }
+    state.runtime_config.lock().await.runtime_mode = requested_mode;
+    *state.client.lock().await = None;
 
     let result = async {
-        let client = resolve_client(&app_handle, &state).await?;
+        let client = resolve_client(&app_handle, &state, true).await?;
 
         if let Some(model_id) = model_id.as_ref().map(|value| value.trim()) {
             if !model_id.is_empty() {
                 log::info!(
                     "Reloading model '{}' after runtime mode switch to {}",
                     model_id,
-                    normalized_mode
+                    runtime_mode_label(requested_mode)
                 );
                 client
                     .load_model(model_id)
@@ -344,14 +367,21 @@ pub async fn set_inference_runtime_mode(
     }
     .await;
 
-    std::env::remove_var(DEV_FORCE_RESPAWN_ENV);
-
     if let Err(error) = &result {
         log::warn!(
             "Runtime mode switch '{}' failed: {}",
-            normalized_mode,
+            runtime_mode_label(requested_mode),
             error
         );
+        *state.runtime_config.lock().await = previous_config;
+        *state.client.lock().await = None;
+
+        if let Err(rollback_error) = resolve_client(&app_handle, &state, true).await {
+            return Err(format!(
+                "Runtime mode switch failed: {error}. Rollback to '{}' also failed: {rollback_error}",
+                runtime_mode_label(previous_config.runtime_mode)
+            ));
+        }
     }
 
     result
@@ -363,7 +393,7 @@ pub async fn check_model_exists(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<bool, String> {
-    let client = resolve_client(&app_handle, &state).await?;
+    let client = resolve_client(&app_handle, &state, false).await?;
     client
         .check_model_exists(&model_id)
         .await
@@ -378,7 +408,7 @@ pub async fn inference_generate(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<GenerationMetrics, String> {
-    let client = resolve_client(&app_handle, &state).await?;
+    let client = resolve_client(&app_handle, &state, false).await?;
     client
         .generate_stream(&prompt, config, |token| {
             if let Err(e) = on_token.send(token) {
@@ -394,7 +424,7 @@ pub async fn inference_cancel(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<(), String> {
-    let client = resolve_client(&app_handle, &state).await?;
+    let client = resolve_client(&app_handle, &state, false).await?;
     client
         .cancel()
         .await
@@ -406,7 +436,7 @@ pub async fn is_generating(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<bool, String> {
-    let client = resolve_client(&app_handle, &state).await?;
+    let client = resolve_client(&app_handle, &state, false).await?;
     let status = client
         .status()
         .await
