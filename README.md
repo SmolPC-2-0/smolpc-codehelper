@@ -1,276 +1,110 @@
-# SmolPC Shared Engine Workspace
+# SmolPC Code Helper
 
-Local-first inference workspace for CodeHelper and other SmolPC desktop apps.
+Offline AI coding assistant for secondary school students, built on a shared inference engine that other SmolPC desktop apps can consume.
 
-This repo contains:
+The inference engine runs locally as a localhost HTTP daemon with bearer-token auth. Apps connect to it (or spawn it) and use an OpenAI-compatible API surface for chat completions. Backend selection (CPU / DirectML) is automatic with manual override support.
 
-1. A reusable shared inference daemon (`smolpc-engine-host`)
-2. A typed Rust client with connect-or-spawn lifecycle (`smolpc-engine-client`)
-3. Shared model/runtime logic (`smolpc-engine-core`)
-4. The CodeHelper desktop app (`src-tauri` + `src`)
+## Repo Structure
 
-The goal is one stable engine contract that multiple apps can consume.
-
-## Who This README Is For
-
-This README is written for:
-
-1. Engineers integrating another app (Blender helper, GIMP helper, etc.)
-2. AI agents asked to "wire app X to the shared engine"
-
-Assume the app team should integrate against the engine contract, not engine internals.
-
-## Repo Layout
-
-```text
-smolpc-codehelper/
-  Cargo.toml                         # workspace root
-  crates/
-    smolpc-engine-core/              # model/runtime/backend selection domain
-    smolpc-engine-host/              # localhost HTTP/SSE daemon
-    smolpc-engine-client/            # connect-or-spawn Rust client
-  src-tauri/                         # CodeHelper Rust/Tauri app
-  src/                               # CodeHelper Svelte frontend
-  docs/APP_ONBOARDING_PLAYBOOK.md    # app-team onboarding checklist + AI prompt starter
-  docs/ENGINE_API.md                 # API contract
-  docs/SMOLPC_SUITE_INTEGRATION.md   # integration notes
 ```
-
-## Quick Start (Dev)
+smolpc-codehelper/
+  crates/
+    smolpc-engine-core/       # model registry, backend selection, runtime logic
+    smolpc-engine-host/       # localhost HTTP/SSE inference daemon
+    smolpc-engine-client/     # typed Rust client (connect-or-spawn lifecycle)
+  src-tauri/                  # CodeHelper desktop app (Tauri 2 / Rust)
+  src/                        # CodeHelper frontend (Svelte 5)
+  docs/
+    ENGINE_API.md             # full API contract
+    APP_ONBOARDING_PLAYBOOK.md # integration checklist for app teams
+    SMOLPC_SUITE_INTEGRATION.md
+```
 
 ## Prerequisites
 
-1. Node.js 20+
-2. Rust stable toolchain (workspace uses Rust 1.88)
-3. Windows runtime libraries available in `src-tauri/libs` (includes `onnxruntime*.dll`, `DirectML.dll`)
-4. Python 3.10+ with `huggingface_hub`, `onnx`, and `onnxruntime-genai`
+- Node.js 20+
+- Rust stable toolchain (1.88+)
+- Windows runtime libraries in `src-tauri/libs` (`onnxruntime*.dll`, `DirectML.dll`)
+- Python 3.10+ with `huggingface_hub`, `onnx`, `onnxruntime-genai` (for model setup)
 
-## Build and Validate
+## Setup
 
 ```bash
 npm install
 cargo check --workspace
-npm run check
 ```
 
-## Shared Model Setup (Qwen3 Default)
-
-Prepare the shared model directory used by CodeHelper and other apps:
+Set up the shared model directory (Qwen3, used by all SmolPC apps):
 
 ```bash
 npm run model:setup:qwen3
 ```
 
-This creates and validates:
+This downloads and validates model artifacts into `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-instruct-2507/`.
 
-1. `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-instruct-2507/cpu/model.onnx` (plus external data files)
-2. `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-instruct-2507/dml/model.onnx`
-3. `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-instruct-2507/dml/genai_config.json`
-4. `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-instruct-2507/tokenizer.json`
-
-The script also sets `SMOLPC_MODELS_DIR` at user scope unless `-NoUserEnv` is specified.
-
-## Run CodeHelper
-
-Automatic backend selection:
+## Running
 
 ```bash
-npm run tauri:dev
+npm run tauri:dev       # dev mode, auto backend selection
+npm run tauri:dml       # force DirectML (recommended for demos)
 ```
 
-Forced DirectML:
+The dev launcher rebuilds the engine host before app startup and shuts down any existing host so overrides apply cleanly.
 
-```bash
-npm run tauri:dml
-```
+## Engine API
 
-Notes:
+The shared engine listens on `http://127.0.0.1:19432` with bearer-token auth.
 
-1. Dev launcher rebuilds `smolpc-engine-host` before app startup.
-2. Dev launcher requests host shutdown before launch so overrides apply cleanly.
-3. For demo reliability, use `npm run tauri:dml`.
+**Control endpoints:**
 
-## Engine Contract (What Consumers Depend On)
+| Endpoint | Purpose |
+|---|---|
+| `GET /engine/health` | Liveness check |
+| `GET /engine/meta` | Protocol version, capabilities |
+| `GET /engine/status` | Backend info, model state, diagnostics |
+| `POST /engine/load` | Load a model |
+| `POST /engine/unload` | Unload current model |
+| `POST /engine/cancel` | Cancel active generation |
+| `POST /engine/shutdown` | Shut down the host |
 
-Base URL:
+**Inference endpoints (OpenAI-compatible):**
 
-`http://127.0.0.1:19432`
+| Endpoint | Purpose |
+|---|---|
+| `GET /v1/models` | List available models |
+| `POST /v1/chat/completions` | Generate (streaming and non-streaming) |
 
-Auth:
+Full contract details: [docs/ENGINE_API.md](docs/ENGINE_API.md)
 
-`Authorization: Bearer <token>`
+## Integrating Another App
 
-Core control endpoints:
+If you're wiring a new SmolPC app (Blender helper, GIMP helper, etc.) to the shared engine, start here:
 
-1. `GET /engine/health`
-2. `GET /engine/meta`
-3. `GET /engine/status`
-4. `POST /engine/load`
-5. `POST /engine/unload`
-6. `POST /engine/cancel`
-7. `POST /engine/check-model`
-8. `POST /engine/shutdown`
+**[docs/APP_ONBOARDING_PLAYBOOK.md](docs/APP_ONBOARDING_PLAYBOOK.md)** — integration checklist, validation criteria, error handling requirements, and an AI session starter prompt.
 
-Inference surface:
+The short version:
 
-1. `GET /v1/models`
-2. `POST /v1/chat/completions` (streaming and non-streaming)
+- **Rust apps**: depend on `smolpc-engine-client`, call `connect_or_spawn()`, use typed methods (`load_model`, `generate_stream`, `status`, `cancel`). The client handles host discovery, token auth, spawn locking, and protocol checks.
+- **Non-Rust apps**: read the bearer token from `%LOCALAPPDATA%/SmolPC/engine-runtime/engine-token.txt`, hit the HTTP endpoints directly.
 
-Authoritative API details are in [docs/ENGINE_API.md](docs/ENGINE_API.md).
-
-## Integration Workflow (For External Apps)
-
-Use this sequence:
-
-1. Connect to existing engine or spawn it.
-2. Check health and protocol via `/engine/meta`.
-3. Load model with `/engine/load`.
-4. Generate via `/v1/chat/completions`.
-5. Read backend status via `/engine/status` for diagnostics and telemetry.
-6. Handle cancellation, queue full (429), queue timeout (504), and reconnect paths.
-
-Default model IDs exposed by `/v1/models`:
-
-1. `qwen3-4b-instruct-2507` (default priority)
-2. `qwen2.5-coder-1.5b` (fallback)
-
-Do not:
-
-1. Depend on branch head behavior.
-2. Parse internal logs as contract.
-3. Assume a backend (always check `/engine/status`).
-
-For onboarding details and validation criteria, use [docs/APP_ONBOARDING_PLAYBOOK.md](docs/APP_ONBOARDING_PLAYBOOK.md).
-
-## Rust Integration (Preferred Inside SmolPC Apps)
-
-Inside Rust app code, use `smolpc-engine-client`:
-
-1. Build `EngineConnectOptions`
-2. Call `connect_or_spawn(options)`
-3. Use typed methods:
-1. `load_model`
-2. `generate_stream` or `generate_text`
-3. `status`
-4. `cancel`
-
-The client handles:
-
-1. Host binary discovery
-2. Token auth file lifecycle
-3. Spawn locking for multi-app races
-4. Protocol major-version checks
-
-## HTTP Integration (Non-Rust Apps)
-
-For Python or other apps, treat host as localhost HTTP service with bearer auth.
-
-Minimal non-stream example:
-
-```bash
-curl -H "Authorization: Bearer <token>" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"model\":\"smolpc-engine\",\"stream\":false,\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}" ^
-  http://127.0.0.1:19432/v1/chat/completions
-```
-
-Streaming example:
-
-```bash
-curl -N -H "Authorization: Bearer <token>" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"model\":\"smolpc-engine\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Count to 5\"}]}" ^
-  http://127.0.0.1:19432/v1/chat/completions
-```
-
-## Backend Selection Behavior (Windows)
-
-Current policy is capability-first with resilience:
-
-1. Startup probe detects available backends and DirectML device candidates.
-2. On load, host prefers DirectML when available and artifact exists.
-3. If DirectML init/runtime fails in auto mode, host falls back to CPU.
-4. Forced DirectML mode is strict (failure is returned as error).
-
-Relevant status fields in `/engine/status.backend_status`:
-
-1. `active_backend`
-2. `runtime_engine`
-3. `available_backends`
-4. `selection_state`
-5. `selection_reason`
-6. `selected_device_id`
-7. `selected_device_name`
-8. `failure_counters`
-
-Use these fields for UI badges, telemetry, and triage.
-
-## Runtime Discovery and Packaging
-
-Host binary resolution order:
-
-1. `SMOLPC_ENGINE_HOST_BIN`
-2. Resource sidecar directories
-3. Sidecar near executable
-4. Workspace `target/debug` then `target/release`
-
-Shared runtime directory (Windows):
-
-`%LOCALAPPDATA%/SmolPC/engine-runtime`
-
-Important files:
-
-1. `engine-token.txt`
-2. `engine-spawn.lock`
-3. Host data directory (`host-data`)
-
-Release packaging includes sidecar resources via `src-tauri/tauri.conf.json`.
+Integrate against the documented contract, not engine internals or branch-head behavior.
 
 ## Environment Variables
 
-Common:
-
-1. `SMOLPC_MODELS_DIR` override model root (recommended shared path: `%LOCALAPPDATA%/SmolPC/models`)
-2. `SMOLPC_ENGINE_PORT` override host port
-
-Debug/diagnostic:
-
-1. `SMOLPC_FORCE_EP=cpu|dml`
-2. `SMOLPC_DML_DEVICE_ID=<int>`
-3. `SMOLPC_ENGINE_DEV_FORCE_RESPAWN=1` (dev launcher sets this)
-
-If `SMOLPC_FORCE_EP=dml` and `SMOLPC_DML_DEVICE_ID` is invalid/out-of-range, model load fails explicitly with `invalid_directml_device_id`.
+| Variable | Purpose |
+|---|---|
+| `SMOLPC_MODELS_DIR` | Override model root (default: `%LOCALAPPDATA%/SmolPC/models`) |
+| `SMOLPC_ENGINE_PORT` | Override host port (default: `19432`) |
+| `SMOLPC_FORCE_EP` | Force backend: `cpu` or `dml` |
+| `SMOLPC_DML_DEVICE_ID` | Select specific DirectML device |
 
 ## Troubleshooting
 
-If engine appears on CPU when GPU exists:
+**Engine running on CPU when GPU is available:**
+Check `/engine/status` — look at `active_backend`, `selection_reason`, and `dml_gate_state`. Ensure DirectML model artifacts exist (`dml/model.onnx`, `dml/genai_config.json`) and runtime DLLs are in `src-tauri/libs`.
 
-1. Check `/engine/status.backend_status.active_backend`
-2. Check `selection_reason` and `dml_gate_state`
-3. Ensure DirectML bundle exists for model:
-   `dml/model.onnx`, `dml/genai_config.json`, `dml/tokenizer.json`
-4. Confirm DirectML runtime DLLs are present in `src-tauri/libs`
-5. Use `npm run tauri:dml` for deterministic demo runs
+**Stale engine process blocking startup:**
+Kill any running `smolpc-engine-host.exe` and retry. The dev launcher handles this automatically in most cases.
 
-If `tauri:dml` fails with binary lock:
-
-1. Ensure no stale `smolpc-engine-host.exe` process is running
-2. Re-run `npm run tauri:dml` (launcher now requests shutdown and force-kills stale host if needed)
-
-If streaming looks chunked/slow:
-
-1. Verify active backend in `/engine/status`
-2. Inspect `smolpc_metrics` from stream/non-stream responses
-3. Retry after `POST /engine/shutdown` to clear stale runtime state
-
-## Developer Handoff Notes
-
-When handing this repo to another team:
-
-1. Share the release tag and `docs/ENGINE_API.md`
-2. Require integration against tagged contract, not branch head
-3. Ask teams to report blockers with:
-1. Request payload
-2. Response body/status
-3. `/engine/status` snapshot
-4. Exact app version and hardware
+**Reporting integration issues:**
+Include: app name/version, OS + hardware, request payload, HTTP status + response body, `/engine/status` snapshot, and any `SMOLPC_FORCE_EP` settings. See the full template in [APP_ONBOARDING_PLAYBOOK.md](docs/APP_ONBOARDING_PLAYBOOK.md#integration-issue-report-template).
