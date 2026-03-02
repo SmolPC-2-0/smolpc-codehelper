@@ -109,7 +109,9 @@ jobs:
           })
           if ($prettierFiles.Count -gt 0) {
             Write-Host "Running Prettier check on changed files..."
-            npx prettier --check -- $prettierFiles
+            foreach ($file in $prettierFiles) {
+              npx prettier --check -- $file
+            }
           } else {
             Write-Host "No changed files matched Prettier extensions."
           }
@@ -119,7 +121,9 @@ jobs:
           })
           if ($eslintFiles.Count -gt 0) {
             Write-Host "Running ESLint on changed files..."
-            npx eslint --max-warnings 0 -- $eslintFiles
+            foreach ($file in $eslintFiles) {
+              npx eslint --max-warnings 0 -- $file
+            }
           } else {
             Write-Host "No changed files matched ESLint extensions."
           }
