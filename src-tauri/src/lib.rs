@@ -11,10 +11,6 @@ use commands::inference::{
     inference_cancel, inference_generate, is_generating, list_models, load_model,
     set_inference_runtime_mode, unload_model, InferenceState,
 };
-use commands::ollama::{
-    cancel_generation, check_ollama, generate_stream, get_ollama_models, HttpClient, OllamaConfig,
-    StreamCancellation,
-};
 #[allow(clippy::missing_panics_doc)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -31,19 +27,12 @@ pub fn run() {
             log::info!("Hardware detection will occur on first request");
             Ok(())
         })
-        .manage(StreamCancellation::default())
-        .manage(HttpClient::default())
-        .manage(OllamaConfig::default())
         .manage(HardwareCache::default())
         .manage(InferenceState::default())
         .invoke_handler(tauri::generate_handler![
             read,
             write,
             save_code,
-            check_ollama,
-            get_ollama_models,
-            generate_stream,
-            cancel_generation,
             run_benchmark,
             get_benchmarks_directory,
             open_benchmarks_folder,
