@@ -12,6 +12,9 @@ use tokio::sync::Mutex;
 const DEFAULT_ENGINE_PORT: u16 = 19432;
 const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
 const SHARED_MODELS_DIR: &str = "models";
+const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
+const DML_DEVICE_ENV: &str = "SMOLPC_DML_DEVICE_ID";
+const DEV_FORCE_RESPAWN_ENV: &str = "SMOLPC_ENGINE_DEV_FORCE_RESPAWN";
 
 pub struct InferenceState {
     client: Arc<Mutex<Option<EngineClient>>>,
@@ -83,6 +86,14 @@ async fn resolve_client(
         models_dir,
         host_binary,
     };
+    let force_ep = std::env::var(FORCE_EP_ENV).ok();
+    let dml_device = std::env::var(DML_DEVICE_ENV).ok();
+    log::info!(
+        "Resolving shared engine client: port={} force_ep={:?} dml_device_id={:?}",
+        options.port,
+        force_ep,
+        dml_device
+    );
 
     let client = connect_or_spawn(options)
         .await
@@ -180,17 +191,51 @@ fn log_host_binary_resolution(host_binary: Option<&PathBuf>) {
     }
 }
 
+fn apply_runtime_mode_env(mode: &str) -> Result<String, String> {
+    let normalized = mode.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "auto" => {
+            std::env::remove_var(FORCE_EP_ENV);
+            std::env::remove_var(DML_DEVICE_ENV);
+            Ok("auto".to_string())
+        }
+        "cpu" => {
+            std::env::set_var(FORCE_EP_ENV, "cpu");
+            std::env::remove_var(DML_DEVICE_ENV);
+            Ok("cpu".to_string())
+        }
+        "dml" | "directml" => {
+            std::env::set_var(FORCE_EP_ENV, "dml");
+            std::env::remove_var(DML_DEVICE_ENV);
+            Ok("dml".to_string())
+        }
+        _ => Err(format!(
+            "Unsupported runtime mode '{mode}'. Use one of: auto, cpu, dml"
+        )),
+    }
+}
+
 #[tauri::command]
 pub async fn load_model(
     model_id: String,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<String, String> {
+    log::info!("Loading model via shared engine: {}", model_id);
     let client = resolve_client(&app_handle, &state).await?;
-    client
-        .load_model(&model_id)
-        .await
-        .map_err(|e| format!("Failed to load model: {e}"))?;
+    client.load_model(&model_id).await.map_err(|e| {
+        log::error!("Model load failed for {}: {}", model_id, e);
+        format!("Failed to load model: {e}")
+    })?;
+    if let Ok(status) = client.status().await {
+        log::info!(
+            "Model loaded: model={} backend={:?} runtime_engine={:?} selection_reason={:?}",
+            model_id,
+            status.backend_status.active_backend,
+            status.backend_status.runtime_engine,
+            status.backend_status.selection_reason
+        );
+    }
     Ok(format!("Model loaded: {model_id}"))
 }
 
@@ -256,6 +301,60 @@ pub async fn get_inference_backend_status(
         .await
         .map_err(|e| format!("Failed to get backend status: {e}"))?;
     Ok(status.backend_status)
+}
+
+#[tauri::command]
+pub async fn set_inference_runtime_mode(
+    mode: String,
+    model_id: Option<String>,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, InferenceState>,
+) -> Result<BackendStatus, String> {
+    let normalized_mode = apply_runtime_mode_env(&mode)?;
+    log::info!("Applying inference runtime mode: {}", normalized_mode);
+
+    std::env::set_var(DEV_FORCE_RESPAWN_ENV, "1");
+    {
+        let mut client = state.client.lock().await;
+        *client = None;
+    }
+
+    let result = async {
+        let client = resolve_client(&app_handle, &state).await?;
+
+        if let Some(model_id) = model_id.as_ref().map(|value| value.trim()) {
+            if !model_id.is_empty() {
+                log::info!(
+                    "Reloading model '{}' after runtime mode switch to {}",
+                    model_id,
+                    normalized_mode
+                );
+                client
+                    .load_model(model_id)
+                    .await
+                    .map_err(|e| format!("Failed to load model after mode switch: {e}"))?;
+            }
+        }
+
+        let status = client
+            .status()
+            .await
+            .map_err(|e| format!("Failed to query engine status after mode switch: {e}"))?;
+        Ok::<BackendStatus, String>(status.backend_status)
+    }
+    .await;
+
+    std::env::remove_var(DEV_FORCE_RESPAWN_ENV);
+
+    if let Err(error) = &result {
+        log::warn!(
+            "Runtime mode switch '{}' failed: {}",
+            normalized_mode,
+            error
+        );
+    }
+
+    result
 }
 
 #[tauri::command]

@@ -65,6 +65,8 @@ export interface AvailableModel {
 /**
  * Active inference backend state exposed by the shared engine host.
  */
+export type InferenceRuntimeMode = 'auto' | 'cpu' | 'dml';
+
 export interface BackendStatus {
 	/** Active backend identifier ("cpu" or "directml") */
 	active_backend: string | null;
@@ -89,6 +91,15 @@ export interface BackendStatus {
 
 	/** Selected DirectML device name when applicable */
 	selected_device_name: string | null;
+
+	/** Runtime gate state for DML policy visibility */
+	dml_gate_state?: string | null;
+
+	/** Runtime gate reason for DML policy visibility */
+	dml_gate_reason?: string | null;
+
+	/** Force override mode applied by host policy when present */
+	force_override?: string | null;
 }
 
 /**
@@ -147,4 +158,13 @@ export interface InferenceStatus {
 
 	/** Selected DirectML device name when applicable */
 	selectedDeviceName: string | null;
+
+	/** Runtime mode preference used by host policy */
+	runtimeMode: InferenceRuntimeMode;
+
+	/** Runtime gate state for DML policy visibility */
+	dmlGateState: string | null;
+
+	/** Runtime gate reason for DML policy visibility */
+	dmlGateReason: string | null;
 }

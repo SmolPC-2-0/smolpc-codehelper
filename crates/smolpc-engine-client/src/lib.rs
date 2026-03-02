@@ -122,7 +122,8 @@ impl EngineClient {
             .header(AUTHORIZATION, self.auth_header())
             .send()
             .await?;
-        Ok(response.error_for_status()?.json::<EngineMeta>().await?)
+        let response = ensure_success(response, "/engine/meta").await?;
+        Ok(response.json::<EngineMeta>().await?)
     }
 
     pub async fn status(&self) -> Result<EngineStatus, EngineClientError> {
@@ -132,55 +133,58 @@ impl EngineClient {
             .header(AUTHORIZATION, self.auth_header())
             .send()
             .await?;
-        Ok(response.error_for_status()?.json::<EngineStatus>().await?)
+        let response = ensure_success(response, "/engine/status").await?;
+        Ok(response.json::<EngineStatus>().await?)
     }
 
     pub async fn load_model(&self, model_id: &str) -> Result<(), EngineClientError> {
-        self.http
+        let response = self
+            .http
             .post(self.url("/engine/load"))
             .header(AUTHORIZATION, self.auth_header())
             .header(CONTENT_TYPE, "application/json")
             .body(serde_json::json!({"model_id": model_id}).to_string())
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+        let _ = ensure_success(response, "/engine/load").await?;
         Ok(())
     }
 
     pub async fn unload_model(&self, force: bool) -> Result<(), EngineClientError> {
-        self.http
+        let response = self
+            .http
             .post(self.url("/engine/unload"))
             .header(AUTHORIZATION, self.auth_header())
             .header(CONTENT_TYPE, "application/json")
             .body(serde_json::json!({"force": force}).to_string())
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+        let _ = ensure_success(response, "/engine/unload").await?;
         Ok(())
     }
 
     pub async fn cancel(&self) -> Result<(), EngineClientError> {
-        self.http
+        let response = self
+            .http
             .post(self.url("/engine/cancel"))
             .header(AUTHORIZATION, self.auth_header())
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+        let _ = ensure_success(response, "/engine/cancel").await?;
         Ok(())
     }
 
     pub async fn check_model_exists(&self, model_id: &str) -> Result<bool, EngineClientError> {
-        let value = self
+        let response = self
             .http
             .post(self.url("/engine/check-model"))
             .header(AUTHORIZATION, self.auth_header())
             .header(CONTENT_TYPE, "application/json")
             .body(serde_json::json!({"model_id": model_id}).to_string())
             .send()
-            .await?
-            .error_for_status()?
-            .json::<serde_json::Value>()
             .await?;
+        let response = ensure_success(response, "/engine/check-model").await?;
+        let value = response.json::<serde_json::Value>().await?;
         Ok(value
             .get("exists")
             .and_then(|v| v.as_bool())
@@ -188,15 +192,14 @@ impl EngineClient {
     }
 
     pub async fn list_models(&self) -> Result<Vec<ModelDefinition>, EngineClientError> {
-        let value = self
+        let response = self
             .http
             .get(self.url("/v1/models"))
             .header(AUTHORIZATION, self.auth_header())
             .send()
-            .await?
-            .error_for_status()?
-            .json::<serde_json::Value>()
             .await?;
+        let response = ensure_success(response, "/v1/models").await?;
+        let value = response.json::<serde_json::Value>().await?;
 
         let mut out = Vec::new();
         if let Some(data) = value.get("data").and_then(|d| d.as_array()) {
@@ -223,17 +226,16 @@ impl EngineClient {
     ) -> Result<GenerationResult, EngineClientError> {
         let started = Instant::now();
         let body = completion_body(prompt, false, config);
-        let value = self
+        let response = self
             .http
             .post(self.url("/v1/chat/completions"))
             .header(AUTHORIZATION, self.auth_header())
             .header(CONTENT_TYPE, "application/json")
             .body(body.to_string())
             .send()
-            .await?
-            .error_for_status()?
-            .json::<serde_json::Value>()
             .await?;
+        let response = ensure_success(response, "/v1/chat/completions").await?;
+        let value = response.json::<serde_json::Value>().await?;
 
         if let Some(error_message) = parse_error_message(&value) {
             return Err(EngineClientError::Message(error_message));
@@ -276,8 +278,8 @@ impl EngineClient {
             .header(CONTENT_TYPE, "application/json")
             .body(body.to_string())
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+        let response = ensure_success(response, "/v1/chat/completions").await?;
 
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
@@ -342,6 +344,32 @@ impl EngineClient {
         Ok(host_metrics
             .unwrap_or_else(|| fallback_stream_metrics(started, emitted_chunks, first_chunk_at)))
     }
+}
+
+async fn ensure_success(
+    response: reqwest::Response,
+    context: &str,
+) -> Result<reqwest::Response, EngineClientError> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+
+    let body = response.text().await.unwrap_or_default();
+    let detail = if body.trim().is_empty() {
+        None
+    } else if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
+        parse_error_message(&value).or_else(|| Some(value.to_string()))
+    } else {
+        Some(body)
+    };
+
+    let message = match detail {
+        Some(detail) => format!("{context} failed with HTTP {}: {}", status.as_u16(), detail),
+        None => format!("{context} failed with HTTP {}", status.as_u16()),
+    };
+
+    Err(EngineClientError::Message(message))
 }
 
 pub async fn connect_or_spawn(

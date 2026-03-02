@@ -81,10 +81,17 @@
 		font-size: 0.78rem;
 		background: transparent;
 		color: var(--color-foreground);
+		line-height: 1.25;
 		outline: none;
 		border: none;
 		appearance: none;
 		padding-right: 0.4rem;
+		color-scheme: light dark;
+	}
+
+	.model-selector__control option {
+		background: var(--surface-floating);
+		color: var(--color-foreground);
 	}
 
 	.model-selector__control:disabled {

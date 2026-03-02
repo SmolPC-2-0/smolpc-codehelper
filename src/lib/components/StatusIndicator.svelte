@@ -3,70 +3,70 @@
 
 	interface Props {
 		status: InferenceStatus;
+		active?: boolean;
+		onToggle?: () => void;
 	}
 
-	let { status }: Props = $props();
+	let { status, active = false, onToggle }: Props = $props();
 
-	function formatBackendLabel(backend: string | null): string {
-		if (!backend) {
-			return 'Unknown Backend';
-		}
-		if (backend === 'directml') {
-			return 'DirectML';
-		}
-		if (backend === 'cpu') {
-			return 'CPU';
-		}
-		return backend.toUpperCase();
-	}
-
-	function formatReason(reason: string | null): string {
-		if (!reason) {
-			return '';
-		}
-		return reason.replaceAll('_', ' ');
+	function handleClick() {
+		onToggle?.();
 	}
 </script>
 
-<div class={`status-indicator ${status.isGenerating ? 'status-indicator--generating' : status.isLoaded ? 'status-indicator--ready' : 'status-indicator--idle'}`}>
+<button
+	type="button"
+	class={`status-indicator ${active ? 'status-indicator--active' : ''} ${status.isGenerating ? 'status-indicator--generating' : status.isLoaded ? 'status-indicator--ready' : 'status-indicator--idle'}`}
+	onclick={handleClick}
+	aria-label="Open model and runtime info"
+	title="Open model and runtime info"
+>
 	<div class="status-indicator__dot"></div>
 	<div class="status-indicator__content">
 		<span class="status-indicator__text">
-		{#if status.isGenerating}
-			Generating...
-		{:else if status.isLoaded}
-			{status.currentModel ?? 'Model Ready'} • {formatBackendLabel(status.activeBackend)}
-		{:else}
-			No Model Loaded
-		{/if}
+			{#if status.isGenerating}
+				Generating
+			{:else if status.isLoaded}
+				{status.currentModel ?? 'Model loaded'}
+			{:else}
+				No Model Loaded
+			{/if}
 		</span>
-		{#if status.isLoaded && status.runtimeEngine}
-			<span class="status-indicator__runtime">{status.runtimeEngine}</span>
-		{/if}
-		{#if status.isLoaded && status.selectionState === 'fallback'}
+		{#if status.isLoaded}
 			<span class="status-indicator__runtime">
-				Fallback active{status.selectedDeviceName ? ` (${status.selectedDeviceName})` : ''}: {formatReason(status.selectionReason)}
+				Open model and runtime settings
 			</span>
 		{/if}
 	</div>
-	{#if status.error}
-		<span class="status-indicator__error">({status.error})</span>
-	{/if}
-</div>
+</button>
 
 <style>
 	.status-indicator {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.5rem;
+		font: inherit;
+		color: inherit;
 		border: 1px solid var(--outline-soft);
 		border-radius: var(--radius-lg);
-		padding: 0.45rem 0.7rem;
+		padding: 0.52rem 0.72rem;
 		font-size: 0.76rem;
-		line-height: 1;
+		line-height: 1.18;
 		background: color-mix(in srgb, var(--surface-widget) 95%, black);
-		max-width: min(19rem, 48vw);
+		max-width: min(21rem, 58vw);
 		box-shadow: var(--glow-subtle);
+		cursor: pointer;
+		text-align: left;
+		transition: border-color 120ms ease;
+	}
+
+	.status-indicator:hover {
+		border-color: var(--outline-strong);
+	}
+
+	.status-indicator--active {
+		border-color: var(--outline-strong);
+		background: var(--surface-active);
 	}
 
 	.status-indicator__dot {
@@ -79,6 +79,7 @@
 	.status-indicator__text {
 		font-size: 0.74rem;
 		font-weight: 620;
+		line-height: 1.2;
 		white-space: nowrap;
 		text-overflow: ellipsis;
 		overflow: hidden;
@@ -93,15 +94,8 @@
 
 	.status-indicator__runtime {
 		font-size: 0.66rem;
+		line-height: 1.2;
 		color: var(--color-muted-foreground);
-		white-space: nowrap;
-		text-overflow: ellipsis;
-		overflow: hidden;
-	}
-
-	.status-indicator__error {
-		color: var(--color-destructive);
-		font-size: 0.7rem;
 		white-space: nowrap;
 		text-overflow: ellipsis;
 		overflow: hidden;

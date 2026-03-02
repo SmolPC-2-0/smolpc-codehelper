@@ -9,10 +9,12 @@
 		title: string;
 		showSidebarToggle?: boolean;
 		status: InferenceStatus;
+		modelInfoActive?: boolean;
 		hardwareActive?: boolean;
 		shortcutsOpen?: boolean;
 		canExport?: boolean;
 		onOpenSidebar: () => void;
+		onToggleModelInfo: () => void;
 		onToggleHardware: () => void;
 		onToggleShortcuts: () => void;
 		onExportChat: () => void;
@@ -22,10 +24,12 @@
 		title,
 		showSidebarToggle = false,
 		status,
+		modelInfoActive = false,
 		hardwareActive = false,
 		shortcutsOpen = false,
 		canExport = false,
 		onOpenSidebar,
+		onToggleModelInfo,
 		onToggleHardware,
 		onToggleShortcuts,
 		onExportChat
@@ -72,7 +76,7 @@
 			<Keyboard class="h-4 w-4" />
 		</Button>
 		<HardwareIndicator onclick={onToggleHardware} active={hardwareActive} />
-		<StatusIndicator status={status} />
+		<StatusIndicator status={status} active={modelInfoActive} onToggle={onToggleModelInfo} />
 	</div>
 </header>
 

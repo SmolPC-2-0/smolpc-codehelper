@@ -4,6 +4,7 @@
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import BenchmarkPanel from '$lib/components/BenchmarkPanel.svelte';
 	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
+	import ModelInfoPanel from '$lib/components/ModelInfoPanel.svelte';
 	import KeyboardShortcutsOverlay from '$lib/components/KeyboardShortcutsOverlay.svelte';
 	import WorkspaceHeader from '$lib/components/layout/WorkspaceHeader.svelte';
 	import WorkspaceControls from '$lib/components/layout/WorkspaceControls.svelte';
@@ -31,6 +32,7 @@
 	const pageTitle = $derived(currentChat?.title ?? 'New Chat');
 	const showBenchmarkPanel = $derived(uiStore.activeOverlay === 'benchmark');
 	const showHardwarePanel = $derived(uiStore.activeOverlay === 'hardware');
+	const showModelInfoPanel = $derived(uiStore.activeOverlay === 'modelInfo');
 	const showScrollToLatest = $derived(uiStore.userHasScrolledUp && messages.length > 0);
 	const latestAssistantMessageId = $derived(
 		[...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null
@@ -421,10 +423,12 @@
 			title={pageTitle}
 			showSidebarToggle={!uiStore.isSidebarOpen}
 			status={inferenceStore.status}
+			modelInfoActive={showModelInfoPanel}
 			hardwareActive={showHardwarePanel}
 			shortcutsOpen={showShortcutsOverlay}
 			canExport={messages.length > 0}
 			onOpenSidebar={() => uiStore.setSidebarOpen(true)}
+			onToggleModelInfo={() => uiStore.toggleOverlay('modelInfo')}
 			onToggleHardware={() => uiStore.toggleOverlay('hardware')}
 			onToggleShortcuts={() => (showShortcutsOverlay = !showShortcutsOverlay)}
 			onExportChat={handleExportChat}
@@ -459,6 +463,7 @@
 
 	<BenchmarkPanel visible={showBenchmarkPanel} onClose={() => uiStore.closeOverlay()} />
 	<HardwarePanel visible={showHardwarePanel} onClose={() => uiStore.closeOverlay()} />
+	<ModelInfoPanel visible={showModelInfoPanel} onClose={() => uiStore.closeOverlay()} />
 	<KeyboardShortcutsOverlay open={showShortcutsOverlay} onClose={() => (showShortcutsOverlay = false)} />
 </div>
 
