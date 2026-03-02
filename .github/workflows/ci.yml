@@ -9,7 +9,7 @@ on:
 jobs:
   engine-tests-msrv:
     name: Engine Tests (Rust 1.88.0)
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -20,7 +20,7 @@ jobs:
 
   engine-tests-stable:
     name: Engine Tests (stable)
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -29,15 +29,11 @@ jobs:
 
   tauri-build-check:
     name: Tauri Build Check
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.88.0
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - name: Check Tauri crate builds
         run: cargo check -p smolpc-code-helper
