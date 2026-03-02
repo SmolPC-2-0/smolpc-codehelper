@@ -28,15 +28,32 @@ impl InferenceBackend {
 #[serde(rename_all = "snake_case")]
 pub enum DecisionReason {
     DefaultCpu,
+    #[serde(
+        rename = "default_directml_candidate",
+        alias = "default_direct_m_l_candidate"
+    )]
     DefaultDirectMLCandidate,
     ForcedOverride,
     PersistedDecision,
     BenchmarkPassed,
+    #[serde(
+        rename = "benchmark_directml_decode_too_slow",
+        alias = "benchmark_decode_too_slow"
+    )]
     BenchmarkDecodeTooSlow,
     BenchmarkTtftTooHigh,
     BenchmarkBudgetExceeded,
+    #[serde(rename = "no_directml_candidate", alias = "no_direct_m_l_candidate")]
     NoDirectMLCandidate,
+    #[serde(
+        rename = "directml_initialization_failed",
+        alias = "direct_m_l_initialization_failed"
+    )]
     DirectMLInitializationFailed,
+    #[serde(
+        rename = "directml_preflight_failed",
+        alias = "direct_m_l_preflight_failed"
+    )]
     DirectMLPreflightFailed,
     RuntimeFailureFallback,
     DemotedAfterFailures,
@@ -190,11 +207,17 @@ impl BackendDecision {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
 pub struct BackendStatus {
     pub active_backend: Option<InferenceBackend>,
     pub active_model_path: Option<String>,
     pub active_artifact_backend: Option<InferenceBackend>,
     pub runtime_engine: Option<String>,
+    pub available_backends: Vec<InferenceBackend>,
+    pub selection_state: Option<String>,
+    pub selection_reason: Option<String>,
+    pub selected_device_id: Option<i32>,
+    pub selected_device_name: Option<String>,
     pub dml_gate_state: Option<String>,
     pub dml_gate_reason: Option<String>,
     pub decision_key: Option<BackendDecisionKey>,

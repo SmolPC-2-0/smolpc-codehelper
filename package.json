@@ -16,8 +16,10 @@
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
 		"tauri": "tauri",
+		"tauri:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-tauri-dev.ps1",
 		"tauri:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-tauri-dml.ps1",
-		"model:export:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/export-dml-model.ps1"
+		"model:export:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/export-dml-model.ps1",
+		"model:setup:qwen3": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-qwen3-shared-model.ps1"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^1.2.9",

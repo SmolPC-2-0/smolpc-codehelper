@@ -9,7 +9,8 @@ import type {
 	GenerationMetrics,
 	GenerationConfig,
 	AvailableModel,
-	InferenceStatus
+	InferenceStatus,
+	BackendStatus
 } from '$lib/types/inference';
 
 // State
@@ -20,6 +21,21 @@ let error = $state<string | null>(null);
 let availableModels = $state<AvailableModel[]>([]);
 let lastResult = $state<GenerationResult | null>(null);
 let lastMetrics = $state<GenerationMetrics | null>(null);
+let backendStatus = $state<BackendStatus | null>(null);
+
+function normalizeBackendName(raw: string | null | undefined): string | null {
+	if (!raw) {
+		return null;
+	}
+	const normalized = raw.toLowerCase().replaceAll('_', '');
+	if (normalized === 'directml') {
+		return 'directml';
+	}
+	if (normalized === 'cpu') {
+		return 'cpu';
+	}
+	return raw.toLowerCase();
+}
 
 export const inferenceStore = {
 	// Getters
@@ -51,7 +67,13 @@ export const inferenceStore = {
 			isLoaded,
 			currentModel,
 			isGenerating,
-			error
+			error,
+			activeBackend: normalizeBackendName(backendStatus?.active_backend),
+			runtimeEngine: backendStatus?.runtime_engine ?? null,
+			activeModelPath: backendStatus?.active_model_path ?? null,
+			selectionState: backendStatus?.selection_state ?? null,
+			selectionReason: backendStatus?.selection_reason ?? null,
+			selectedDeviceName: backendStatus?.selected_device_name ?? null
 		};
 	},
 
@@ -84,6 +106,7 @@ export const inferenceStore = {
 			await invoke('load_model', { modelId });
 			isLoaded = true;
 			currentModel = modelId;
+			await this.refreshBackendStatus();
 			return true;
 		} catch (e) {
 			error = String(e);
@@ -100,6 +123,7 @@ export const inferenceStore = {
 			await invoke('unload_model');
 			isLoaded = false;
 			currentModel = null;
+			backendStatus = null;
 		} catch (e) {
 			error = String(e);
 			console.error('Failed to unload model:', e);
@@ -132,6 +156,7 @@ export const inferenceStore = {
 			console.error('Generation failed:', e);
 			return null;
 		} finally {
+			await this.refreshBackendStatus();
 			isGenerating = false;
 		}
 	},
@@ -204,6 +229,7 @@ export const inferenceStore = {
 			console.error('Streaming generation failed:', e);
 			return null;
 		} finally {
+			await this.refreshBackendStatus();
 			isGenerating = false;
 		}
 	},
@@ -244,12 +270,27 @@ export const inferenceStore = {
 			if (model) {
 				isLoaded = true;
 				currentModel = model;
+				await this.refreshBackendStatus();
 			} else {
 				isLoaded = false;
 				currentModel = null;
+				backendStatus = null;
 			}
 		} catch (e) {
 			console.error('Failed to sync status:', e);
+		}
+	},
+
+	/**
+	 * Fetch backend/runtime status from shared engine host.
+	 */
+	async refreshBackendStatus(): Promise<void> {
+		try {
+			const status = await invoke<BackendStatus>('get_inference_backend_status');
+			backendStatus = status;
+		} catch (e) {
+			backendStatus = null;
+			console.warn('Failed to fetch backend status:', e);
 		}
 	},
 

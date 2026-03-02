@@ -28,6 +28,9 @@ futures-util = "0.3"
 tokio = { version = "1", features = ["full"] }
 rfd = "0.15.4"
 url = "2.5"
+dirs = "6"
+smolpc-engine-core = { path = "../crates/smolpc-engine-core" }
+smolpc-engine-client = { path = "../crates/smolpc-engine-client" }
 
 # Benchmarking dependencies
 sysinfo = "0.32"
@@ -37,23 +40,9 @@ chrono = "0.4"
 # Hardware detection
 hardware-query = "0.2.1"
 
-# ONNX Runtime inference
-ort = { version = "=2.0.0-rc.11", features = ["load-dynamic", "ndarray", "half", "directml"] }
-
-# Tokenization
-tokenizers = "0.20"
-
-# Tensor operations
-ndarray = "0.17"
-half = "2.4"
-
-# Sampling utilities
-rand = "0.8"
-rand_distr = "0.4"
-libloading = "0.8"
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59.0", features = ["Win32_Storage_FileSystem"] }
-
 [dev-dependencies]
 tempfile = "3.13"
+ort = { version = "=2.0.0-rc.11", features = ["load-dynamic", "ndarray", "half", "directml"] }
+ndarray = "0.17"
+half = "2.4"
+libloading = "0.8"

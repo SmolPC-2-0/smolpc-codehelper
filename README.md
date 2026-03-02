@@ -1,1019 +1,276 @@
-# 🎓 SmolPC Code Helper
+# SmolPC Shared Engine Workspace
 
-An offline AI-powered coding assistant for secondary school students (ages 11-18). Built with Tauri + Svelte 5 and powered by local Ollama models - works 100% offline after initial setup.
+Local-first inference workspace for CodeHelper and other SmolPC desktop apps.
 
-![Status](https://img.shields.io/badge/Status-Active-brightgreen)
-![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
-![License](https://img.shields.io/badge/License-MIT-orange)
+This repo contains:
 
----
+1. A reusable shared inference daemon (`smolpc-engine-host`)
+2. A typed Rust client with connect-or-spawn lifecycle (`smolpc-engine-client`)
+3. Shared model/runtime logic (`smolpc-engine-core`)
+4. The CodeHelper desktop app (`src-tauri` + `src`)
 
-## ✨ Features
+The goal is one stable engine contract that multiple apps can consume.
 
-- 🤖 **100% Offline AI** - Uses local Ollama models (no cloud, no API keys)
-- 💬 **Chat Interface** - Natural conversation-style coding help
-- 📚 **Student-Friendly** - Clear explanations with well-commented code examples
-- 🔄 **Multiple Chats** - Organize different projects/topics in separate conversations
-- ⚡ **Streaming Responses** - See AI responses as they're generated
-- 🎯 **Context-Aware** - Optional conversation history for follow-up questions
-- 🌐 **Background Generation** - Switch chats while responses are generating
-- 🎨 **Workbench UI** - Bold, structured workspace layout for sustained coding sessions
-- 🌓 **Theme Modes** - Fully supports `system`, `light`, and `dark` themes
-- 🔄 **Multiple Models** - Switch between different coding models
-- 💾 **Auto-Save** - Chats persist across sessions
-- 🔍 **Hardware Detection** - Automatic CPU, GPU, Memory, Storage, and NPU detection
-- 📊 **System Profiling** - Real-time hardware information for optimization decisions
-- ⚙️ **Intelligent Configuration** - Hardware-aware settings (coming soon)
+## Who This README Is For
 
----
+This README is written for:
 
-## 📸 Screenshots
+1. Engineers integrating another app (Blender helper, GIMP helper, etc.)
+2. AI agents asked to "wire app X to the shared engine"
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ [☰] SmolPC Code Helper                      ● Ollama Ready │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  Model: qwen2.5-coder:7b ▾    Context: [✓] Enabled          │
-│                                                               │
-│  ┌─── Welcome to SmolPC Code Helper! ──────────────────┐   │
-│  │                                                        │   │
-│  │  Your offline AI coding assistant for learning and   │   │
-│  │  problem-solving                                      │   │
-│  │                                                        │   │
-│  │  Quick Examples:                                      │   │
-│  │  [Explain Functions] [Debug Code] [Write Calculator] │   │
-│  │  [HTML Template]     [Sort Array] [File Handling]    │   │
-│  └────────────────────────────────────────────────────────┘   │
-│                                                               │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │ Ask a coding question (Shift+Enter for new line)...  │  │
-│  └───────────────────────────────────────────────────────┘  │
-│                                                               │
-└───────────────────────────────────────────────────────────────┘
+Assume the app team should integrate against the engine contract, not engine internals.
 
-Sidebar:
-┌─────────────────┐
-│ Chats           │
-├─────────────────┤
-│ ✓ New Chat      │
-│   Python Loops  │
-│   HTML Forms    │
-│   Debug Help    │
-└─────────────────┘
-```
+## Repo Layout
 
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **Node.js** v20 or higher
-- **Rust** (latest stable)
-- **Ollama** with coding models installed
-- **10GB+ free disk space** (for AI models)
-- **Internet connection** (for initial setup only)
-
----
-
-## 🍎 macOS Setup
-
-### Step 1: Install Prerequisites
-
-```bash
-# Install Homebrew (if not already installed)
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Install Node.js
-brew install node
-
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-
-# Install Xcode Command Line Tools
-xcode-select --install
-
-# Install Ollama
-brew install ollama
-```
-
-### Step 2: Start Ollama and Download Models
-
-```bash
-# Start Ollama (keep this terminal open)
-ollama serve
-```
-
-**In a NEW terminal window:**
-
-```bash
-# Download AI models (this takes 10-20 minutes)
-ollama pull qwen2.5-coder:7b      # 4.7GB - Recommended
-ollama pull deepseek-coder:6.7b   # 3.8GB - Faster alternative
-
-# Verify installation
-ollama list
-
-# Quick test
-ollama run qwen2.5-coder:7b "Write hello world in Python"
-# Press Ctrl+D to exit
-```
-
-### Step 3: Clone and Run
-
-```bash
-# Clone the repository
-git clone https://github.com/SmolPC-2-0/smolpc-codehelper.git
-cd smolpc-codehelper
-
-# Install dependencies
-npm install
-
-# Run the app (first time takes 3-5 minutes to compile)
-npm run tauri dev
-```
-
-**The app window should open!** Try asking: "Explain what functions are in Python"
-
----
-
-## 🪟 Windows Setup
-
-### Step 1: Install Node.js
-
-1. Download from **https://nodejs.org/**
-2. Choose **LTS version** (v20+)
-3. Run installer - **CHECK** "Automatically install necessary tools"
-4. **Restart your computer** after installation
-
-**Verify:**
-
-```powershell
-node --version
-npm --version
-```
-
-### Step 2: Install Rust
-
-1. Download from **https://rustup.rs/**
-2. Click **"rustup-init.exe"**
-3. Press **1** then Enter (default installation)
-4. Wait 5-10 minutes
-5. **Close and reopen PowerShell**
-
-**Verify:**
-
-```powershell
-rustc --version
-cargo --version
-```
-
-### Step 3: Install Ollama
-
-1. Download from **https://ollama.com/download/windows**
-2. Run **OllamaSetup.exe**
-3. Ollama starts automatically in system tray (bottom-right)
-
-**Download AI models:**
-
-```powershell
-# Download models (takes 10-20 minutes)
-ollama pull qwen2.5-coder:7b      # 4.7GB - Recommended
-ollama pull deepseek-coder:6.7b   # 3.8GB - Faster
-
-# Verify
-ollama list
-
-# Test
-ollama run qwen2.5-coder:7b "Write hello world in Python"
-# Type /bye to exit
-```
-
-### Step 4: Clone and Run
-
-```powershell
-# Clone repository
-git clone https://github.com/SmolPC-2-0/smolpc-codehelper.git
-cd smolpc-codehelper
-
-# Install dependencies
-npm install
-
-# Run the app (first time takes 3-5 minutes)
-npm run tauri dev
-```
-
-**The app window should open!** Try asking: "Explain what functions are in Python"
-
----
-
-## 📖 How to Use
-
-### 1. Chat with the AI
-
-Type your coding question in the input box at the bottom and press Enter:
-
-- "What are variables in Python?"
-- "How do I create a for loop in JavaScript?"
-- "Explain how recursion works"
-- "Show me how to read a file in Python"
-
-The AI will respond with explanations and code examples in real-time.
-
-### 2. Use Quick Examples
-
-Click the example buttons to get started quickly:
-
-- **Explain Functions** - Learn about functions and parameters
-- **Debug Code** - Get help fixing errors
-- **Write Calculator** - Build a basic calculator
-- **HTML Template** - Create HTML structure
-- **Sort Array** - Learn sorting algorithms
-- **File Handling** - Read and write files
-
-### 3. Have Follow-Up Conversations
-
-**With Context Enabled** (default):
-- The AI remembers previous messages in the current chat
-- Ask follow-up questions naturally
-- Build on previous examples
-
-**Example conversation:**
-```
-You: "How do I create a function in Python?"
-AI: [Explains functions with example]
-
-You: "Can you show me one with multiple parameters?"
-AI: [Builds on previous explanation]
-```
-
-**Toggle Context** using the switch in the top bar to disable history if needed.
-
-### 4. Manage Multiple Chats
-
-Click the **☰** button to open the sidebar:
-
-- **New Chat** - Start a fresh conversation
-- **Switch Chats** - Click any chat to switch to it
-- **Delete** - Click 🗑️ to remove a chat
-- **Auto-Titles** - Chats are automatically named from your first message
-
-**Use cases:**
-- One chat for each homework assignment
-- Separate chats for different programming languages
-- Keep debugging sessions separate from learning
-
-### 5. Background Generation
-
-Start typing a question in one chat, then switch to another chat while it's still generating:
-
-- The response continues generating in the background
-- Switch back anytime to see the completed answer
-- Work on multiple questions simultaneously
-
-### 6. Switch Models
-
-Use the **Model** dropdown (top bar) to switch between:
-
-- **qwen2.5-coder:7b** (Recommended) - More detailed, educational explanations
-- **deepseek-coder:6.7b** (Faster) - Quicker responses, good for quick lookups
-
-Different models available based on what you have installed in Ollama.
-
-### 7. Cancel Generation
-
-If a response is taking too long or going off-track:
-
-- Click the **✖ Cancel Generation** button that appears while generating
-- The response stops immediately
-- Try rephrasing your question
-
----
-
-## 🧪 Example Questions to Try
-
-### Beginner Level
-
-```
-"What is a variable?"
-"How do I print text in Python?"
-"Show me a simple if statement"
-"What's the difference between = and ==?"
-```
-
-### Intermediate Level
-
-```
-"Create a calculator with +, -, ×, ÷"
-"Explain how lists work in Python"
-"Show me a for loop that counts to 10"
-"How do I create a class?"
-```
-
-### Advanced Level
-
-```
-"Explain recursion with the factorial example"
-"How do I read a CSV file and find averages?"
-"Show me a binary search algorithm"
-"Explain generators vs list comprehensions"
-```
-
-### Debugging
-
-Paste your code and ask:
-
-```
-"Why is this code not working?
-
-def add(a, b)
-    return a + b
-"
-
-"I'm getting 'IndexError: list index out of range' - help?"
-
-"This loop runs forever, why?"
-```
-
----
-
-## 🏗️ Building an Executable
-
-### Development Mode
-
-```bash
-npm run tauri dev
-```
-
-- Hot-reload enabled for Svelte changes
-- Rust changes require restart
-- Press Ctrl+C to stop
-
-### Production Build
-
-```bash
-npm run tauri build
-```
-
-**Output locations:**
-
-- **macOS:** `src-tauri/target/release/bundle/macos/SmolPC Code Helper.app`
-- **Windows:** `src-tauri/target/release/bundle/msi/SmolPC Code Helper_x.x.x_x64_en-US.msi`
-- **Linux:** `src-tauri/target/release/bundle/deb/smolpc-code-helper_x.x.x_amd64.deb`
-
-Executable size: ~8-12MB (Ollama must still be installed separately)
-
----
-
-## 📁 Project Structure
-
-```
+```text
 smolpc-codehelper/
-├── src/                          # Frontend (Svelte 5)
-│   ├── App.svelte               # Orchestration shell
-│   ├── app.css                  # Design tokens, typography, motion system
-│   ├── lib/
-│   │   ├── components/          # UI components
-│   │   │   ├── Sidebar.svelte  # Chat list sidebar
-│   │   │   ├── ChatMessage.svelte
-│   │   │   ├── ChatInput.svelte
-│   │   │   ├── ThemeSelector.svelte
-│   │   │   ├── chat/            # ConversationView, ComposerBar, WelcomeState
-│   │   │   ├── layout/          # WorkspaceHeader, WorkspaceControls
-│   │   │   ├── HardwarePanel.svelte      # Hardware info display
-│   │   │   ├── HardwareIndicator.svelte  # Status bar indicator
-│   │   │   └── ...
-│   │   ├── stores/              # State management
-│   │   │   ├── chats.svelte.ts    # Chat state (Svelte 5 runes)
-│   │   │   ├── settings.svelte.ts
-│   │   │   ├── inference.svelte.ts
-│   │   │   ├── ui.svelte.ts
-│   │   │   └── hardware.svelte.ts # Hardware detection state
-│   │   ├── utils/
-│   │   │   ├── theme.ts         # Runtime theme application (`system`/`light`/`dark`)
-│   │   │   └── ...
-│   │   └── types/               # TypeScript types
-│   │       ├── hardware.ts      # Hardware type definitions
-│   │       └── ...
-│   └── main.ts                  # Entry point
-│
-├── src-tauri/                   # Backend (Rust)
-│   ├── src/
-│   │   ├── commands/
-│   │   │   ├── ollama.rs       # Ollama API integration
-│   │   │   ├── hardware.rs     # Hardware detection commands
-│   │   │   └── errors.rs       # Error handling
-│   │   ├── hardware/           # Hardware detection module
-│   │   │   ├── types.rs        # Hardware type definitions
-│   │   │   ├── detector.rs     # Detection implementation
-│   │   │   └── mod.rs          # Module exports
-│   │   ├── benchmark/          # Benchmarking system
-│   │   │   └── runner.rs       # Benchmark execution
-│   │   ├── lib.rs              # Main Rust library
-│   │   └── main.rs             # Entry point
-│   ├── Cargo.toml              # Rust dependencies
-│   └── tauri.conf.json         # App configuration
-│
-├── docs/
-│   └── hardware-detection.md   # Hardware detection feature docs
-├── package.json                # Node.js dependencies
-├── vite.config.ts              # Vite configuration
-├── tsconfig.json               # TypeScript configuration
-└── README.md                   # This file
+  Cargo.toml                         # workspace root
+  crates/
+    smolpc-engine-core/              # model/runtime/backend selection domain
+    smolpc-engine-host/              # localhost HTTP/SSE daemon
+    smolpc-engine-client/            # connect-or-spawn Rust client
+  src-tauri/                         # CodeHelper Rust/Tauri app
+  src/                               # CodeHelper Svelte frontend
+  docs/APP_ONBOARDING_PLAYBOOK.md    # app-team onboarding checklist + AI prompt starter
+  docs/ENGINE_API.md                 # API contract
+  docs/SMOLPC_SUITE_INTEGRATION.md   # integration notes
 ```
 
----
+## Quick Start (Dev)
 
-## 🔧 Tech Stack
+## Prerequisites
 
-| Component         | Technology              | Why?                                   |
-| ----------------- | ----------------------- | -------------------------------------- |
-| Frontend          | Svelte 5                | Reactive, minimal boilerplate          |
-| State Management  | Svelte 5 Runes          | Built-in reactivity                    |
-| Styling           | Tailwind CSS 4          | Utility-first, fast development        |
-| UI Components     | shadcn-svelte           | Pre-built accessible components        |
-| Backend           | Rust                    | Performance, memory safety             |
-| Desktop Framework | Tauri 2.6.2             | Small executables (~8MB vs 100MB+)     |
-| Build Tool        | Vite 6                  | Fast HMR, optimized builds             |
-| AI Engine         | Ollama                  | Best local LLM solution                |
-| Primary Model     | Qwen 2.5 Coder (7B)     | Specialized for code, educational      |
-| Secondary Model   | DeepSeek Coder (6.7B)   | Fast inference, good code quality      |
-| Hardware Detection| hardware-query v0.2.1   | Cross-platform, offline detection      |
-| Storage           | localStorage            | Persistent chats across sessions       |
+1. Node.js 20+
+2. Rust stable toolchain (workspace uses Rust 1.88)
+3. Windows runtime libraries available in `src-tauri/libs` (includes `onnxruntime*.dll`, `DirectML.dll`)
+4. Python 3.10+ with `huggingface_hub`, `onnx`, and `onnxruntime-genai`
 
----
-
-## 🐛 Troubleshooting
-
-### "Ollama not running" error
-
-**Status indicator shows red dot** at top-right.
-
-**macOS/Linux:**
+## Build and Validate
 
 ```bash
-# Start Ollama in terminal
-ollama serve
-```
-
-**Windows:**
-
-- Check system tray (bottom-right) for Ollama icon
-- If not running: Start menu → search "Ollama" → launch it
-- Or open Command Prompt and run: `ollama serve`
-
-### "Failed to connect to Ollama"
-
-Test if Ollama is responding:
-
-```bash
-# macOS/Linux/Windows (Command Prompt)
-curl http://localhost:11434/api/tags
-
-# Windows PowerShell
-Invoke-WebRequest http://localhost:11434/api/tags
-```
-
-Should return JSON with model info. If not, restart Ollama.
-
-### "No models available" in dropdown
-
-```bash
-# Check installed models
-ollama list
-
-# Should see models like:
-# qwen2.5-coder:7b
-# deepseek-coder:6.7b
-
-# If empty, download models
-ollama pull qwen2.5-coder:7b
-```
-
-Refresh the app after downloading models.
-
-### Chat not saving/persisting
-
-Chats are saved to browser's localStorage. If they're not persisting:
-
-1. Check browser console (F12) for errors
-2. Make sure you have storage permissions
-3. Try clearing storage and restarting: Developer Tools → Application → Clear Storage
-
-### Response generation stuck
-
-If "Generating response..." never finishes:
-
-1. Check Ollama is running (`ollama list` in terminal)
-2. Click **Cancel Generation** button
-3. Try a simpler question first
-4. Check available RAM (models need 6-8GB free)
-
-### App window is blank/white screen
-
-1. Press **F12** to open Developer Tools
-2. Check Console for errors
-3. Common causes:
-   - Missing `node_modules` - run `npm install`
-   - Build issues - try `npm run tauri dev` again
-   - Port conflicts - close other dev servers
-
-### Rust compilation errors
-
-```bash
-# Update Rust
-rustup update
-
-# Clean and rebuild
-cd src-tauri
-cargo clean
-cd ..
-npm run tauri dev
-```
-
-### TypeScript errors
-
-```bash
-# Check TypeScript version
-npx tsc --version
-
-# Should be 5.0+
-# If not, update dependencies
 npm install
+cargo check --workspace
+npm run check
 ```
 
-### Models downloading slowly
+## Shared Model Setup (Qwen3 Default)
 
-Models are large (4-5GB each). On slow internet:
-
-- **Qwen 2.5 Coder:** ~4.7GB (10-30 minutes)
-- **DeepSeek Coder:** ~3.8GB (10-25 minutes)
-
-Download happens once. Use offline forever after.
-
-### Custom Ollama URL
-
-If running Ollama on a different port:
+Prepare the shared model directory used by CodeHelper and other apps:
 
 ```bash
-# Set environment variable before starting app
-export OLLAMA_URL="http://localhost:8080"
-npm run tauri dev
-
-# Windows PowerShell
-$env:OLLAMA_URL="http://localhost:8080"
-npm run tauri dev
+npm run model:setup:qwen3
 ```
 
-**Note:** Only localhost URLs are allowed for security.
+This creates and validates:
 
----
+1. `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-instruct-2507/cpu/model.onnx` (plus external data files)
+2. `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-instruct-2507/dml/model.onnx`
+3. `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-instruct-2507/dml/genai_config.json`
+4. `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-instruct-2507/tokenizer.json`
 
-## 💡 Tips & Tricks
+The script also sets `SMOLPC_MODELS_DIR` at user scope unless `-NoUserEnv` is specified.
 
-### Keyboard Shortcuts
+## Run CodeHelper
 
-- **Shift+Enter** - New line in chat input (without sending)
-- **Enter** - Send message
-- **F12** - Open developer tools
-- **Ctrl+C** - Stop dev server (terminal)
+Automatic backend selection:
 
-### For Best Results
+```bash
+npm run tauri:dev
+```
 
-1. **Be specific** - "Create a Python function that adds two numbers and returns the result" beats "make a function"
-2. **Use examples** - "Show me like a calculator but for multiplication tables"
-3. **Ask for explanations** - "Explain how this code works line by line"
-4. **Break down complex tasks** - Ask step-by-step instead of all at once
-5. **Use context wisely** - Enable context for follow-ups, disable for fresh topics
+Forced DirectML:
 
-### Model Comparison
+```bash
+npm run tauri:dml
+```
 
-| Model          | Speed  | Detail        | Best For                        |
-| -------------- | ------ | ------------- | ------------------------------- |
-| Qwen Coder 7B  | Slower | More detailed | Learning, step-by-step teaching |
-| DeepSeek 6.7B  | Faster | Concise       | Quick lookups, simple questions |
+Notes:
 
-### Organizing Chats
+1. Dev launcher rebuilds `smolpc-engine-host` before app startup.
+2. Dev launcher requests host shutdown before launch so overrides apply cleanly.
+3. For demo reliability, use `npm run tauri:dml`.
 
-Create separate chats for:
-- Different programming languages (Python, JavaScript, etc.)
-- Different topics (loops, functions, file I/O)
-- Different projects (homework assignments)
-- Debug sessions vs learning sessions
+## Engine Contract (What Consumers Depend On)
 
-### Improving Response Quality
+Base URL:
 
-If responses aren't helpful:
-1. Add more context to your question
-2. Try rephrasing more specifically
-3. Ask for examples or code snippets explicitly
-4. Break complex questions into smaller parts
-5. Enable context if asking follow-up questions
+`http://127.0.0.1:19432`
 
----
+Auth:
 
-## 🎯 Use Cases
+`Authorization: Bearer <token>`
 
-### For Students
+Core control endpoints:
 
-- ✅ Get instant help with coding homework
-- ✅ Learn new programming concepts with examples
-- ✅ Debug code errors with explanations
-- ✅ Practice coding problems offline
-- ✅ Explore different programming languages
-- ✅ Understand error messages
-- ✅ Get study help 24/7
+1. `GET /engine/health`
+2. `GET /engine/meta`
+3. `GET /engine/status`
+4. `POST /engine/load`
+5. `POST /engine/unload`
+6. `POST /engine/cancel`
+7. `POST /engine/check-model`
+8. `POST /engine/shutdown`
 
-### For Teachers
+Inference surface:
 
-- ✅ Demonstrate coding concepts in class
-- ✅ Provide AI tutoring to all students
-- ✅ Works without internet (after setup)
-- ✅ Safe and private - data stays local
-- ✅ Free - no per-student API costs
-- ✅ Customize for curriculum needs
-- ✅ Track common student questions
+1. `GET /v1/models`
+2. `POST /v1/chat/completions` (streaming and non-streaming)
 
-### For Schools
+Authoritative API details are in [docs/ENGINE_API.md](docs/ENGINE_API.md).
 
-- ✅ Budget-friendly (runs on older hardware)
-- ✅ Privacy-compliant (GDPR, FERPA friendly)
-- ✅ No ongoing cloud costs
-- ✅ Easy to deploy across computer labs
-- ✅ Works during internet outages
-- ✅ Scales to entire school
-- ✅ Open source and auditable
+## Integration Workflow (For External Apps)
 
----
+Use this sequence:
 
-## 🔐 Privacy & Security
+1. Connect to existing engine or spawn it.
+2. Check health and protocol via `/engine/meta`.
+3. Load model with `/engine/load`.
+4. Generate via `/v1/chat/completions`.
+5. Read backend status via `/engine/status` for diagnostics and telemetry.
+6. Handle cancellation, queue full (429), queue timeout (504), and reconnect paths.
 
-**This app is 100% private:**
+Default model IDs exposed by `/v1/models`:
 
-- ✅ No data sent to the internet (after model download)
-- ✅ No cloud APIs or external services
-- ✅ No tracking, analytics, or telemetry
-- ✅ All AI processing happens on your computer
-- ✅ No account or login required
-- ✅ Chats stored locally in browser storage
-- ✅ GDPR and FERPA compliant by design
+1. `qwen3-4b-instruct-2507` (default priority)
+2. `qwen2.5-coder-1.5b` (fallback)
 
-**Security features:**
+Do not:
 
-- ✅ OLLAMA_URL restricted to localhost only (prevents data exfiltration)
-- ✅ HTTP client connection pooling (prevents resource exhaustion)
-- ✅ Proper event listener cleanup (prevents memory leaks)
-- ✅ Input sanitization (work in progress)
+1. Depend on branch head behavior.
+2. Parse internal logs as contract.
+3. Assume a backend (always check `/engine/status`).
 
-**Safe for students:**
-
-- ✅ No inappropriate content (educational models)
-- ✅ Age-appropriate explanations
-- ✅ No ads or distractions
-- ✅ No social features or chat with strangers
-- ✅ Offline-first design
-
----
-
-## 🚦 System Requirements
+For onboarding details and validation criteria, use [docs/APP_ONBOARDING_PLAYBOOK.md](docs/APP_ONBOARDING_PLAYBOOK.md).
 
-### Minimum
-
-- **OS:** Windows 10, macOS 10.15+, or Linux (Ubuntu 20.04+)
-- **RAM:** 8GB (6GB free for models)
-- **Storage:** 12GB free
-- **CPU:** Intel i3 / AMD Ryzen 3 or equivalent
-- **GPU:** Not required (CPU inference)
+## Rust Integration (Preferred Inside SmolPC Apps)
 
-### Recommended
+Inside Rust app code, use `smolpc-engine-client`:
 
-- **RAM:** 16GB
-- **Storage:** 20GB free (SSD preferred for faster model loading)
-- **CPU:** Intel i5 / AMD Ryzen 5 or better
-- **Display:** 1280×720 or higher
+1. Build `EngineConnectOptions`
+2. Call `connect_or_spawn(options)`
+3. Use typed methods:
+1. `load_model`
+2. `generate_stream` or `generate_text`
+3. `status`
+4. `cancel`
 
-**Performance expectations:**
+The client handles:
 
-- **First response:** 5-15 seconds (model loading)
-- **Subsequent responses:** 1-3 seconds to start streaming
-- **Generation speed:** 10-30 tokens/second (varies by CPU)
-- **SSD vs HDD:** SSD loads models 3-5× faster
+1. Host binary discovery
+2. Token auth file lifecycle
+3. Spawn locking for multi-app races
+4. Protocol major-version checks
 
----
+## HTTP Integration (Non-Rust Apps)
 
-## 🔄 Recent Updates
+For Python or other apps, treat host as localhost HTTP service with bearer auth.
 
-### Version 2.3.0 (In Progress - February 2026)
+Minimal non-stream example:
 
-**Frontend Revamp (Workbench Bold):**
-- ✅ Deep componentized shell (`WorkspaceHeader`, `WorkspaceControls`, `ConversationView`, `ComposerBar`, `WelcomeState`)
-- ✅ New UI-only store (`ui.svelte.ts`) to separate visual state from business stores
-- ✅ Semantic token refresh in `app.css` (color system, typography, motion, reduced-motion support)
-- ✅ Runtime theme engine (`system`/`light`/`dark`) with startup application and OS sync
-- ✅ Core chat surface redesign (sidebar, message cards, composer, quick examples, status/model/context controls)
-- ✅ Legacy static frontend path removed (`src/index.html`, `src/main.js`, `src/styles.css`)
+```bash
+curl -H "Authorization: Bearer <token>" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"model\":\"smolpc-engine\",\"stream\":false,\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}" ^
+  http://127.0.0.1:19432/v1/chat/completions
+```
 
-### Version 2.2.0 (Current - January 2025)
+Streaming example:
 
-**Hardware Detection System:**
-- ✅ Comprehensive CPU detection (vendor, cores, frequency, cache, AVX2/AVX512/NEON/SVE)
-- ✅ GPU detection with CUDA compute capability for optimization
-- ✅ Memory and storage profiling for intelligent model selection
-- ✅ NPU detection (Apple Neural Engine, Intel AI Boost, AMD Ryzen AI, Qualcomm Hexagon)
-- ✅ Cross-platform support (Windows/macOS/Linux, x86/ARM)
-- ✅ Completely offline - no internet required
-- ✅ Auto-detection on startup with caching
-- ✅ Hardware panel UI with real-time information
-- ✅ Integrated hardware-query v0.2.1 for unified detection
-
-**Bug Fixes:**
-- ✅ Fixed startup detection race condition
-- ✅ Fixed NPU confidence badge display logic
-- ✅ Resolved hardware-query API usage issues
-
-### Version 2.1.0 (December 2024)
-
-**Benchmarking System:**
-- ✅ Production-grade llama.cpp benchmarking
-- ✅ Benchmark result caching and persistence
-- ✅ Multi-threaded performance testing
-- ✅ Hardware-aware configuration
-
-### Version 2.0 (December 2024)
-
-**Major Features:**
-- ✅ Migrated to Svelte 5 with runes for better reactivity
-- ✅ Background generation - switch chats while AI responds
-- ✅ HTTP client pooling for better resource management
-- ✅ Configurable Ollama URL via environment variable
-- ✅ Security: URL validation to prevent data exfiltration
-- ✅ Fixed memory leaks in event listener cleanup
-- ✅ Improved array reactivity for Svelte 5
+```bash
+curl -N -H "Authorization: Bearer <token>" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"model\":\"smolpc-engine\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Count to 5\"}]}" ^
+  http://127.0.0.1:19432/v1/chat/completions
+```
 
-**UI/UX Improvements:**
-- ✅ Better scroll behavior with autoscroll resume
-- ✅ Fixed chat deletion and cancel button issues
-- ✅ Improved state management
-- ✅ Cleaned up unused variables
-
-**Technical:**
-- ✅ Upgraded to Tailwind 4.x
-- ✅ Replaced @apply with regular CSS
-- ✅ Fixed Svelte compilation errors
-- ✅ Updated dependencies
+## Backend Selection Behavior (Windows)
 
----
+Current policy is capability-first with resilience:
 
-## 📚 Resources
+1. Startup probe detects available backends and DirectML device candidates.
+2. On load, host prefers DirectML when available and artifact exists.
+3. If DirectML init/runtime fails in auto mode, host falls back to CPU.
+4. Forced DirectML mode is strict (failure is returned as error).
 
-### Documentation
+Relevant status fields in `/engine/status.backend_status`:
 
-- **Tauri 2.0:** https://v2.tauri.app/
-- **Svelte 5:** https://svelte.dev/docs/svelte/overview
-- **Ollama:** https://ollama.com/docs
-- **Tailwind CSS 4:** https://tailwindcss.com/docs
-- **Vite:** https://vitejs.dev/
+1. `active_backend`
+2. `runtime_engine`
+3. `available_backends`
+4. `selection_state`
+5. `selection_reason`
+6. `selected_device_id`
+7. `selected_device_name`
+8. `failure_counters`
 
-### AI Models
-
-- **Qwen 2.5 Coder:** https://huggingface.co/Qwen/Qwen2.5-Coder-7B
-- **DeepSeek Coder:** https://huggingface.co/deepseek-ai/deepseek-coder-6.7b-base
-
-### Learning Resources
+Use these fields for UI badges, telemetry, and triage.
 
-- **Rust Book:** https://doc.rust-lang.org/book/
-- **Svelte Tutorial:** https://learn.svelte.dev/
-- **TypeScript Handbook:** https://www.typescriptlang.org/docs/
-
----
-
-## 🤝 Contributing
-
-This is an open educational project. Contributions are welcome!
-
-### How to Contribute
-
-1. **Fork** the repository
-2. **Clone** your fork: `git clone https://github.com/YOUR_USERNAME/smolpc-codehelper.git`
-3. **Create** a feature branch: `git checkout -b feature/amazing-feature`
-4. **Make** your changes
-5. **Test** thoroughly on your platform
-6. **Commit** with clear messages: `git commit -m 'feat: add amazing feature'`
-7. **Push** to your fork: `git push origin feature/amazing-feature`
-8. **Open** a Pull Request
-
-### Contribution Ideas
-
-**Features:**
-- [ ] Multiple simultaneous generations (parallel chats)
-- [ ] Syntax highlighting in messages
-- [ ] Code block copy button
-- [ ] Export chat to markdown/PDF
-- [ ] Search across all chats
-- [ ] Chat folders/categories
-- [ ] Voice input support
-- [ ] Image paste support (for debugging screenshots)
-
-**UI/UX:**
-- [ ] Customizable themes
-- [ ] Font size adjustment
-- [ ] Keyboard shortcuts overlay
-- [ ] Better mobile/tablet support
-- [ ] Accessibility improvements (screen reader)
+## Runtime Discovery and Packaging
 
-**Educational:**
-- [ ] More quick example prompts
-- [ ] Tutorial mode for first-time users
-- [ ] Curriculum-aligned examples
-- [ ] Progress tracking
-- [ ] Code execution sandbox
+Host binary resolution order:
 
-**Technical:**
-- [ ] Add comprehensive tests
-- [ ] Input validation and sanitization
-- [ ] Better error handling
-- [ ] Rate limiting
-- [ ] Data size limits and cleanup
-- [ ] Performance monitoring
+1. `SMOLPC_ENGINE_HOST_BIN`
+2. Resource sidecar directories
+3. Sidecar near executable
+4. Workspace `target/debug` then `target/release`
 
-### Code Style
+Shared runtime directory (Windows):
 
-- **TypeScript:** Use Prettier (already configured)
-- **Rust:** Use `cargo fmt` and `cargo clippy`
-- **Svelte:** Follow Svelte 5 runes patterns
-- **Commits:** Use conventional commits (feat:, fix:, docs:, etc.)
+`%LOCALAPPDATA%/SmolPC/engine-runtime`
 
----
+Important files:
 
-## 🐛 Known Issues & Limitations
+1. `engine-token.txt`
+2. `engine-spawn.lock`
+3. Host data directory (`host-data`)
 
-### Current Limitations
+Release packaging includes sidecar resources via `src-tauri/tauri.conf.json`.
 
-1. **Single generation at a time** - Can't ask questions in multiple chats simultaneously (background generation works, but only one active request)
-2. **No XSS protection** - Markdown rendering needs DOMPurify integration
-3. **No input validation** - Large prompts or contexts not limited yet
-4. **No request timeouts** - Long-running requests can hang indefinitely
-5. **Unbounded data growth** - No limits on chat/message count yet
-6. **No tests** - Test suite needs to be added
+## Environment Variables
 
-### Planned Fixes
+Common:
 
-These will be addressed in future releases. See [Contributing](#contributing) for details.
+1. `SMOLPC_MODELS_DIR` override model root (recommended shared path: `%LOCALAPPDATA%/SmolPC/models`)
+2. `SMOLPC_ENGINE_PORT` override host port
 
----
+Debug/diagnostic:
 
-## 📅 Roadmap
+1. `SMOLPC_FORCE_EP=cpu|dml`
+2. `SMOLPC_DML_DEVICE_ID=<int>`
+3. `SMOLPC_ENGINE_DEV_FORCE_RESPAWN=1` (dev launcher sets this)
 
-### ✅ Phase 1: MVP (Complete - Dec 2024)
+If `SMOLPC_FORCE_EP=dml` and `SMOLPC_DML_DEVICE_ID` is invalid/out-of-range, model load fails explicitly with `invalid_directml_device_id`.
 
-- [x] Chat interface with Ollama integration
-- [x] Multiple chat support
-- [x] Streaming responses
-- [x] Context-aware conversations
-- [x] Model switching
-- [x] Quick example prompts
-- [x] Background generation
-- [x] Svelte 5 migration
-- [x] Production-grade benchmarking system
-- [x] Hardware detection (CPU, GPU, Memory, Storage, NPU)
+## Troubleshooting
 
-### 🚧 Phase 2: Intelligent Optimization (Q1 2025)
+If engine appears on CPU when GPU exists:
 
-**Current Focus:**
-- [ ] llama.cpp integration with hardware-optimized compilation
-- [ ] Automatic model selection based on available memory
-- [ ] GPU layer offloading configuration
-- [ ] CPU optimization flags (AVX2/AVX512/NEON)
-- [ ] Download manager with storage validation
-- [ ] Model recommendations based on hardware
+1. Check `/engine/status.backend_status.active_backend`
+2. Check `selection_reason` and `dml_gate_state`
+3. Ensure DirectML bundle exists for model:
+   `dml/model.onnx`, `dml/genai_config.json`, `dml/tokenizer.json`
+4. Confirm DirectML runtime DLLs are present in `src-tauri/libs`
+5. Use `npm run tauri:dml` for deterministic demo runs
 
-**UI/UX:**
-- [ ] Syntax highlighting in code blocks
-- [ ] Copy code button on code blocks
-- [ ] Export chat to markdown
-- [ ] Search functionality
-- [ ] Better error messages
+If `tauri:dml` fails with binary lock:
 
-**Security & Stability:**
-- [ ] Input validation
-- [ ] Request timeouts
-- [ ] XSS protection
+1. Ensure no stale `smolpc-engine-host.exe` process is running
+2. Re-run `npm run tauri:dml` (launcher now requests shutdown and force-kills stale host if needed)
 
-### 🔮 Phase 3: Advanced Features (Q2 2025)
+If streaming looks chunked/slow:
 
-- [ ] Multiple simultaneous generations
-- [ ] Chat folders/organization
-- [ ] Code execution sandbox
-- [ ] Image paste for debugging
-- [ ] Voice input
-- [ ] Tutorial mode
-- [ ] Progress tracking
-- [ ] Comprehensive test suite
+1. Verify active backend in `/engine/status`
+2. Inspect `smolpc_metrics` from stream/non-stream responses
+3. Retry after `POST /engine/shutdown` to clear stale runtime state
 
----
+## Developer Handoff Notes
 
-## 📝 License
+When handing this repo to another team:
 
-MIT License - see [LICENSE](LICENSE) file for details.
-
-Free for educational use. Attribution appreciated but not required.
-
----
-
-## 🎓 About SmolPC
-
-SmolPC Code Helper is part of the **SmolPC 2.0 initiative** - educational tools for secondary schools that:
-
-- Run on budget hardware
-- Work offline
-- Respect student privacy
-- Empower teachers and students
-- Are open source and free
-
-**Project Goals:**
-
-- Make quality education accessible
-- Reduce dependency on expensive cloud services
-- Enable offline learning
-- Give teachers powerful AI tools
-- Support student privacy
-
-**Other SmolPC Projects:**
-
-- Educational utilities
-- Offline learning resources
-- Teacher productivity tools
-
----
-
-## 👥 Credits
-
-**Built by the SmolPC Team**
-
-**Powered by:**
-
-- [Tauri](https://tauri.app/) - Desktop application framework
-- [Svelte](https://svelte.dev/) - Reactive UI framework
-- [Ollama](https://ollama.com/) - Local LLM runtime
-- [Qwen (Alibaba)](https://github.com/QwenLM/Qwen2.5-Coder) - Coding AI model
-- [DeepSeek](https://github.com/deepseek-ai/DeepSeek-Coder) - Alternative coding model
-- [Tailwind CSS](https://tailwindcss.com/) - Styling framework
-- [shadcn-svelte](https://shadcn-svelte.com/) - UI components
-
-**Special Thanks:**
-
-- Secondary school teachers who provided feedback
-- Students who tested early versions
-- Open-source community
-- Anthropic's Claude for development assistance
-
----
-
-## 📧 Support
-
-**For technical issues:**
-
-1. Check [Troubleshooting](#troubleshooting) section
-2. Search [GitHub Issues](https://github.com/SmolPC-2-0/smolpc-codehelper/issues)
-3. Open a new issue with:
-   - Your OS and version
-   - Node, Rust, Ollama versions
-   - Steps to reproduce
-   - Screenshots if applicable
-
-**For educational inquiries:**
-
-- Contact your school's IT department
-- See SmolPC project documentation
-
-**For security issues:**
-
-- Email: security@smolpc.org (if available)
-- Or open a GitHub security advisory
-
----
-
-## 🌟 Star This Project!
-
-If this tool helps you or your students, please ⭐ **star the repository** on GitHub!
-
-It helps others discover the project and motivates continued development.
-
----
-
-## 📈 Stats
-
-- **Project Start:** December 2024
-- **Current Version:** 2.2.0
-- **Lines of Code:** ~6,000+
-- **Contributors:** SmolPC Team
-- **License:** MIT
-- **Stars:** [Your count here]
-
----
-
-**Made with ❤️ for students and teachers worldwide**
-
-*Empowering education through open-source, privacy-first AI*
+1. Share the release tag and `docs/ENGINE_API.md`
+2. Require integration against tagged contract, not branch head
+3. Ask teams to report blockers with:
+1. Request payload
+2. Response body/status
+3. `/engine/status` snapshot
+4. Exact app version and hardware

@@ -1,9 +1,8 @@
 mod benchmark;
 mod commands;
 mod hardware;
-mod inference;
-mod models;
 mod security;
+
 use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_benchmark};
 use commands::default::{read, save_code, write};
 use commands::hardware::{detect_hardware, get_cached_hardware, HardwareCache};
@@ -16,8 +15,6 @@ use commands::ollama::{
     cancel_generation, check_ollama, generate_stream, get_ollama_models, HttpClient,
     OllamaConfig, StreamCancellation,
 };
-use tauri::Manager;
-
 #[allow(clippy::missing_panics_doc)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -31,20 +28,7 @@ pub fn run() {
                 )?;
             }
 
-            // Resolve resource directory for bundled libraries
-            let resource_dir = app.path().resource_dir().ok();
-            if let Err(e) = inference::init_onnx_runtime(resource_dir.as_deref()) {
-                log::error!("Failed to initialize ONNX Runtime: {}", e);
-
-                if !cfg!(debug_assertions) {
-                    // Production: ONNX Runtime is required — fail early with a clear message
-                    return Err(format!("ONNX Runtime initialization failed: {}", e).into());
-                }
-                // Dev mode: continue — inference commands will return individual errors
-            }
-
             log::info!("Hardware detection will occur on first request");
-
             Ok(())
         })
         .manage(StreamCancellation::default())
@@ -65,7 +49,6 @@ pub fn run() {
             open_benchmarks_folder,
             detect_hardware,
             get_cached_hardware,
-            // ONNX inference commands
             load_model,
             unload_model,
             generate_text,

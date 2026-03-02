@@ -63,6 +63,35 @@ export interface AvailableModel {
 }
 
 /**
+ * Active inference backend state exposed by the shared engine host.
+ */
+export interface BackendStatus {
+	/** Active backend identifier ("cpu" or "directml") */
+	active_backend: string | null;
+
+	/** Resolved active model path on disk */
+	active_model_path: string | null;
+
+	/** Runtime implementation in use (e.g. "ort_cpu", "genai_dml") */
+	runtime_engine: string | null;
+
+	/** Available backend identifiers on current machine */
+	available_backends: string[];
+
+	/** Selection lifecycle state ("pending", "ready", "fallback", "error") */
+	selection_state: string | null;
+
+	/** Selection reason code from host */
+	selection_reason: string | null;
+
+	/** Selected DirectML device id when applicable */
+	selected_device_id: number | null;
+
+	/** Selected DirectML device name when applicable */
+	selected_device_name: string | null;
+}
+
+/**
  * Generation configuration
  */
 export interface GenerationConfig {
@@ -100,4 +129,22 @@ export interface InferenceStatus {
 
 	/** Error message if any */
 	error: string | null;
+
+	/** Active backend identifier ("cpu" or "directml") */
+	activeBackend: string | null;
+
+	/** Runtime implementation in use (e.g. "ort_cpu", "genai_dml") */
+	runtimeEngine: string | null;
+
+	/** Resolved active model path on disk */
+	activeModelPath: string | null;
+
+	/** Selection lifecycle state ("pending", "ready", "fallback", "error") */
+	selectionState: string | null;
+
+	/** Selection reason code from host */
+	selectionReason: string | null;
+
+	/** Selected DirectML device name when applicable */
+	selectedDeviceName: string | null;
 }

@@ -2,9 +2,6 @@ use crate::hardware::errors::HardwareError;
 use crate::hardware::types::{
     CpuInfo, GpuInfo, GpuVendor, HardwareInfo, MemoryInfo, NpuConfidence, NpuInfo, StorageInfo,
 };
-use std::time::{Duration, Instant};
-
-const HARDWARE_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Helper Functions
 /// Convert non-zero u64 to Option (0 = detection failed)
@@ -26,30 +23,9 @@ fn non_empty_string(value: Option<String>) -> Option<String> {
 /// Main entry point for hardware detection using hardware-query crate
 /// Detects CPU, GPU, and NPU information offline
 pub async fn detect_all() -> Result<HardwareInfo, HardwareError> {
-    let started = Instant::now();
-    log::info!(
-        "Starting hardware detection using hardware-query (timeout={}s)",
-        HARDWARE_DETECTION_TIMEOUT.as_secs()
-    );
-
-    let query_task = tokio::task::spawn_blocking(hardware_query::HardwareInfo::query);
-    let hw_info = match tokio::time::timeout(HARDWARE_DETECTION_TIMEOUT, query_task).await {
-        Ok(Ok(Ok(info))) => info,
-        Ok(Ok(Err(error))) => {
-            return Err(HardwareError::QueryFailed(error.to_string()));
-        }
-        Ok(Err(error)) => {
-            return Err(HardwareError::QueryFailed(format!(
-                "Hardware detection worker task failed: {error}"
-            )));
-        }
-        Err(_) => {
-            return Err(HardwareError::QueryFailed(format!(
-                "Hardware detection timed out after {} seconds",
-                HARDWARE_DETECTION_TIMEOUT.as_secs()
-            )));
-        }
-    };
+    // Query all hardware information using hardware-query
+    let hw_info = hardware_query::HardwareInfo::query()
+        .map_err(|e| HardwareError::QueryFailed(e.to_string()))?;
 
     // Convert CPU info
     let cpu_info = convert_cpu_info(&hw_info);
@@ -66,20 +42,14 @@ pub async fn detect_all() -> Result<HardwareInfo, HardwareError> {
     // Convert storage info
     let storage_info = convert_storage_info(&hw_info);
 
-    let info = HardwareInfo {
+    Ok(HardwareInfo {
         cpu: cpu_info,
         gpus: gpu_info,
         npu: npu_info,
         memory: memory_info,
         storage: storage_info,
         detected_at: chrono::Utc::now().to_rfc3339(),
-    };
-
-    log::info!(
-        "Hardware detection completed in {} ms",
-        started.elapsed().as_millis()
-    );
-    Ok(info)
+    })
 }
 
 /// Convert hardware-query CPU info to our CpuInfo format
@@ -183,7 +153,9 @@ fn convert_gpu_info(hw_info: &hardware_query::HardwareInfo) -> Vec<GpuInfo> {
                 vram_mb,
                 temperature_c: gpu.temperature().map(|t| t as u32),
                 utilization_percent: gpu.usage_percent().map(|u| u as u32),
-                cuda_compute_capability: gpu.cuda_capability().map(std::string::ToString::to_string),
+                cuda_compute_capability: gpu
+                    .cuda_capability()
+                    .map(std::string::ToString::to_string),
             }
         })
         .collect()
@@ -196,7 +168,7 @@ fn convert_npu_info(hw_info: &hardware_query::HardwareInfo) -> Option<NpuInfo> {
     }
 
     let npu = &hw_info.npus()[0]; // Use first NPU
- 
+
     let details = if let Some(tops) = npu.tops_performance() {
         format!("{} - {:.1} TOPS", npu.model_name(), tops)
     } else {
@@ -226,10 +198,10 @@ fn convert_storage_info(hw_info: &hardware_query::HardwareInfo) -> StorageInfo {
     let storage_devices = hw_info.storage_devices();
 
     // Find primary storage device (largest capacity or first device)
-    if let Some(primary) = storage_devices.iter().max_by(|a, b| {
-        a.capacity_gb()
-            .total_cmp(&b.capacity_gb())
-    }) {
+    if let Some(primary) = storage_devices
+        .iter()
+        .max_by(|a, b| a.capacity_gb().total_cmp(&b.capacity_gb()))
+    {
         let total_gb = primary.capacity_gb();
         let available_gb = primary.available_gb();
         let device_name = primary.model().to_string();
@@ -241,7 +213,9 @@ fn convert_storage_info(hw_info: &hardware_query::HardwareInfo) -> StorageInfo {
 
         // Log storage detection results
         if total_gb == 0.0 {
-            log::warn!("Storage capacity detection failed for device '{device_name}' (returned 0.0 GB)");
+            log::warn!(
+                "Storage capacity detection failed for device '{device_name}' (returned 0.0 GB)"
+            );
         } else {
             log::debug!(
                 "Storage detected: {device_name} - {total_gb:.2} GB total, {available_gb:.2} GB available, SSD: {is_ssd}");
