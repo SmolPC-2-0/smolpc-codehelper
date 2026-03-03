@@ -1,6 +1,6 @@
 use futures_util::StreamExt;
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
+use rand::distributions::{Alphanumeric, DistString};
+use rand::rngs::OsRng;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use reqwest::Client;
 use smolpc_engine_core::inference::backend::BackendStatus;
@@ -383,6 +383,43 @@ async fn ensure_success(
     Err(EngineClientError::Message(message))
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum RunningHostPolicyDecision {
+    Reuse,
+    Restart,
+    Reject(String),
+}
+
+fn decide_running_host_policy(
+    protocol_matches: bool,
+    generating: bool,
+    force_override: Option<&str>,
+    force_respawn: bool,
+) -> RunningHostPolicyDecision {
+    if !protocol_matches {
+        if generating {
+            return RunningHostPolicyDecision::Reject(
+                "Running engine protocol is incompatible and daemon is busy".to_string(),
+            );
+        }
+        return RunningHostPolicyDecision::Restart;
+    }
+
+    if force_override.is_some() || force_respawn {
+        if generating {
+            let policy = force_override
+                .map(|value| format!("{FORCE_EP_ENV}={value}"))
+                .unwrap_or_else(|| "forced respawn policy".to_string());
+            return RunningHostPolicyDecision::Reject(format!(
+                "Engine is busy and cannot apply {policy}. Cancel generation and retry."
+            ));
+        }
+        return RunningHostPolicyDecision::Restart;
+    }
+
+    RunningHostPolicyDecision::Reuse
+}
+
 pub async fn connect_or_spawn(
     options: EngineConnectOptions,
 ) -> Result<EngineClient, EngineClientError> {
@@ -443,36 +480,27 @@ async fn enforce_running_host_policy(
     }
 
     let meta = client.meta().await?;
-    if !protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION) {
-        let status = client.status().await?;
-        if status.generating {
-            return Err(EngineClientError::Message(
-                "Running engine protocol is incompatible and daemon is busy".to_string(),
-            ));
-        }
-
-        request_engine_shutdown(client).await?;
-        wait_for_engine_down(client, Duration::from_secs(5)).await?;
-        return Ok(false);
+    let protocol_matches = protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION);
+    let needs_status_probe = !protocol_matches || force_override.is_some() || force_respawn;
+    if !needs_status_probe {
+        return Ok(true);
     }
 
-    if force_override.is_some() || force_respawn {
-        let status = client.status().await?;
-        if status.generating {
-            let policy = force_override
-                .map(|value| format!("{FORCE_EP_ENV}={value}"))
-                .unwrap_or_else(|| "forced respawn policy".to_string());
-            return Err(EngineClientError::Message(format!(
-                "Engine is busy and cannot apply {policy}. Cancel generation and retry."
-            )));
+    let status = client.status().await?;
+    match decide_running_host_policy(
+        protocol_matches,
+        status.generating,
+        force_override,
+        force_respawn,
+    ) {
+        RunningHostPolicyDecision::Reuse => Ok(true),
+        RunningHostPolicyDecision::Restart => {
+            request_engine_shutdown(client).await?;
+            wait_for_engine_down(client, Duration::from_secs(5)).await?;
+            Ok(false)
         }
-
-        request_engine_shutdown(client).await?;
-        wait_for_engine_down(client, Duration::from_secs(5)).await?;
-        return Ok(false);
+        RunningHostPolicyDecision::Reject(message) => Err(EngineClientError::Message(message)),
     }
-
-    Ok(true)
 }
 
 async fn request_engine_shutdown(client: &EngineClient) -> Result<(), EngineClientError> {
@@ -549,7 +577,9 @@ fn parse_error_message(value: &serde_json::Value) -> Option<String> {
     Some(error.to_string())
 }
 
-fn parse_models_response(value: &serde_json::Value) -> Result<Vec<ModelDefinition>, EngineClientError> {
+fn parse_models_response(
+    value: &serde_json::Value,
+) -> Result<Vec<ModelDefinition>, EngineClientError> {
     let data = value
         .get("data")
         .and_then(|d| d.as_array())
@@ -644,11 +674,7 @@ fn load_or_create_token(path: &Path) -> Result<String, EngineClientError> {
     }
 
     for _ in 0..3 {
-        let token: String = thread_rng()
-            .sample_iter(&Alphanumeric)
-            .map(char::from)
-            .take(48)
-            .collect();
+        let token = Alphanumeric.sample_string(&mut OsRng, 48);
 
         match create_new_token_file(path, &token) {
             Ok(()) => return Ok(token),
@@ -698,6 +724,7 @@ fn create_new_token_file(path: &Path, token: &str) -> Result<(), std::io::Error>
 
     #[cfg(not(unix))]
     {
+        // TODO: Harden Windows ACLs for engine-token.txt so only the current user can read it.
         let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
         file.write_all(token.as_bytes())?;
         Ok(())
@@ -962,7 +989,9 @@ mod tests {
     fn parse_models_response_rejects_missing_data_array() {
         let payload = serde_json::json!({"object": "list"});
         let error = parse_models_response(&payload).expect_err("missing data should fail");
-        assert!(error.to_string().contains("expected top-level 'data' array"));
+        assert!(error
+            .to_string()
+            .contains("expected top-level 'data' array"));
     }
 
     #[test]
@@ -972,11 +1001,9 @@ mod tests {
             "data": [{"id": "unknown-model", "object": "model"}]
         });
         let error = parse_models_response(&payload).expect_err("unknown-only should fail");
-        assert!(
-            error
-                .to_string()
-                .contains("none matched local registry IDs")
-        );
+        assert!(error
+            .to_string()
+            .contains("none matched local registry IDs"));
     }
 
     #[test]
@@ -988,6 +1015,22 @@ mod tests {
         let models = parse_models_response(&payload).expect("known model should parse");
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "qwen2.5-coder-1.5b");
+    }
+
+    #[test]
+    fn running_host_policy_restarts_when_protocol_is_incompatible_and_idle() {
+        let decision = decide_running_host_policy(false, false, None, false);
+        assert_eq!(decision, RunningHostPolicyDecision::Restart);
+    }
+
+    #[test]
+    fn running_host_policy_rejects_forced_override_when_busy() {
+        let decision = decide_running_host_policy(true, true, Some("cpu"), false);
+        let RunningHostPolicyDecision::Reject(message) = decision else {
+            panic!("busy forced override should reject");
+        };
+        assert!(message.contains("SMOLPC_FORCE_EP=cpu"));
+        assert!(message.contains("busy"));
     }
 
     #[test]
@@ -1006,6 +1049,13 @@ mod tests {
 
         let created = load_or_create_token(&path).expect("create token");
         assert!(!created.is_empty());
+        assert_eq!(created.len(), 48);
+        assert!(
+            created
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric()),
+            "token should remain alphanumeric"
+        );
         let loaded_again = load_or_create_token(&path).expect("load token");
         assert_eq!(created, loaded_again);
 
@@ -1017,7 +1067,11 @@ mod tests {
                 .permissions()
                 .mode()
                 & 0o777;
-            assert_eq!(mode & 0o077, 0, "token file must not be group/other-readable");
+            assert_eq!(
+                mode & 0o077,
+                0,
+                "token file must not be group/other-readable"
+            );
         }
 
         let _ = fs::remove_file(&path);

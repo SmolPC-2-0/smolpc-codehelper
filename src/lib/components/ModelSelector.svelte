@@ -41,7 +41,7 @@
 		aria-label="Select inference model"
 	>
 		{#if inferenceStore.availableModels.length > 0}
-			{#each inferenceStore.availableModels as model}
+			{#each inferenceStore.availableModels as model (model.id)}
 				<option value={model.id}>
 					{model.name} ({model.size})
 				</option>

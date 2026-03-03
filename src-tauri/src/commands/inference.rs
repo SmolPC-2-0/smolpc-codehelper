@@ -15,7 +15,7 @@ const DEFAULT_ENGINE_PORT: u16 = 19432;
 const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
 const SHARED_MODELS_DIR: &str = "models";
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RuntimeClientConfig {
     runtime_mode: RuntimeModePreference,
     dml_device_id: Option<i32>,
@@ -62,6 +62,29 @@ fn runtime_mode_label(mode: RuntimeModePreference) -> &'static str {
         RuntimeModePreference::Auto => "auto",
         RuntimeModePreference::Cpu => "cpu",
         RuntimeModePreference::Dml => "dml",
+    }
+}
+
+fn apply_runtime_mode_rollback<T>(
+    runtime_config: &mut RuntimeClientConfig,
+    client_slot: &mut Option<T>,
+    previous_config: RuntimeClientConfig,
+) {
+    *runtime_config = previous_config;
+    *client_slot = None;
+}
+
+fn format_runtime_mode_switch_failure(
+    switch_error: &str,
+    previous_mode: RuntimeModePreference,
+    rollback_error: Option<&str>,
+) -> String {
+    match rollback_error {
+        Some(rollback_error) => format!(
+            "Runtime mode switch failed: {switch_error}. Rollback to '{}' also failed: {rollback_error}",
+            runtime_mode_label(previous_mode)
+        ),
+        None => format!("Runtime mode switch failed: {switch_error}"),
     }
 }
 
@@ -373,13 +396,17 @@ pub async fn set_inference_runtime_mode(
             runtime_mode_label(requested_mode),
             error
         );
-        *state.runtime_config.lock().await = previous_config;
-        *state.client.lock().await = None;
+        {
+            let mut runtime_config = state.runtime_config.lock().await;
+            let mut client = state.client.lock().await;
+            apply_runtime_mode_rollback(&mut runtime_config, &mut *client, previous_config);
+        }
 
         if let Err(rollback_error) = resolve_client(&app_handle, &state, true).await {
-            return Err(format!(
-                "Runtime mode switch failed: {error}. Rollback to '{}' also failed: {rollback_error}",
-                runtime_mode_label(previous_config.runtime_mode)
+            return Err(format_runtime_mode_switch_failure(
+                error,
+                previous_config.runtime_mode,
+                Some(&rollback_error),
             ));
         }
     }
@@ -442,4 +469,39 @@ pub async fn is_generating(
         .await
         .map_err(|e| format!("Failed to query generation state: {e}"))?;
     Ok(status.generating)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_runtime_mode_rollback_restores_previous_config_and_clears_client() {
+        let previous_config = RuntimeClientConfig {
+            runtime_mode: RuntimeModePreference::Auto,
+            dml_device_id: Some(3),
+        };
+        let mut runtime_config = RuntimeClientConfig {
+            runtime_mode: RuntimeModePreference::Cpu,
+            dml_device_id: None,
+        };
+        let mut client_slot = Some(42usize);
+
+        apply_runtime_mode_rollback(&mut runtime_config, &mut client_slot, previous_config);
+
+        assert_eq!(runtime_config, previous_config);
+        assert!(client_slot.is_none());
+    }
+
+    #[test]
+    fn format_runtime_mode_switch_failure_includes_rollback_context() {
+        let message = format_runtime_mode_switch_failure(
+            "switch connect failed",
+            RuntimeModePreference::Dml,
+            Some("reconnect failed"),
+        );
+
+        assert!(message.contains("Runtime mode switch failed: switch connect failed."));
+        assert!(message.contains("Rollback to 'dml' also failed: reconnect failed"));
+    }
 }

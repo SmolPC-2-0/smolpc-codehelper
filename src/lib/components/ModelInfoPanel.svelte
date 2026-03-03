@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { BrainCircuit, Cpu, Gauge, RefreshCw, Settings2, X } from '@lucide/svelte';
+	import { Cpu, RefreshCw, Settings2, X } from '@lucide/svelte';
 	import { inferenceStore } from '$lib/stores/inference.svelte';
 	import ModelSelector from '$lib/components/ModelSelector.svelte';
 	import InferenceModeSelector from '$lib/components/InferenceModeSelector.svelte';
@@ -87,7 +87,12 @@
 				>
 					<RefreshCw class={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
 				</Button>
-				<Button variant="ghost" size="icon" onclick={closePanel} aria-label="Close model info panel">
+				<Button
+					variant="ghost"
+					size="icon"
+					onclick={closePanel}
+					aria-label="Close model info panel"
+				>
 					<X class="h-4 w-4" />
 				</Button>
 			</div>

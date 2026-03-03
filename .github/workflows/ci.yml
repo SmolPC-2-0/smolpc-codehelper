@@ -68,6 +68,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.88.0
+      - name: Install rustfmt
+        run: rustup component add rustfmt
       - name: Install frontend dependencies
         run: npm ci
       - name: Check formatting/lint only on changed files

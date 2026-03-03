@@ -118,16 +118,15 @@ Teaching rules:
 		if (!(target instanceof HTMLElement)) return false;
 		if (target.isContentEditable) return true;
 		return (
-			target.tagName === 'TEXTAREA' ||
-			target.tagName === 'INPUT' ||
-			target.tagName === 'SELECT'
+			target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.tagName === 'SELECT'
 		);
 	}
 
 	async function handleSendMessage(content: string) {
 		if (!inferenceStore.isLoaded || inferenceStore.isGenerating) return;
 
-		const activeChat = currentChat ?? chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
+		const activeChat =
+			currentChat ?? chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
 		if (!activeChat) return;
 		const historyBeforeMessage = [...activeChat.messages];
 
@@ -374,9 +373,7 @@ Teaching rules:
 				return;
 			}
 
-			const availableModelIds = new Set(
-				inferenceStore.availableModels.map((model) => model.id)
-			);
+			const availableModelIds = new Set(inferenceStore.availableModels.map((model) => model.id));
 			let targetModelId = settingsStore.selectedModel;
 			if (!availableModelIds.has(targetModelId)) {
 				targetModelId = inferenceStore.availableModels[0].id;
@@ -421,7 +418,10 @@ Teaching rules:
 	});
 
 	$effect(() => {
-		currentChat?.id;
+		if (currentChat?.id) {
+			uiStore.resetScrollState();
+			return;
+		}
 		uiStore.resetScrollState();
 	});
 
@@ -444,7 +444,9 @@ Teaching rules:
 </script>
 
 <div class="app-shell">
-	<div class={`sidebar-stage ${uiStore.isSidebarOpen ? 'sidebar-stage--open' : 'sidebar-stage--closed'}`}>
+	<div
+		class={`sidebar-stage ${uiStore.isSidebarOpen ? 'sidebar-stage--open' : 'sidebar-stage--closed'}`}
+	>
 		<Sidebar onClose={() => uiStore.setSidebarOpen(false)} />
 	</div>
 
@@ -494,7 +496,10 @@ Teaching rules:
 	<BenchmarkPanel visible={showBenchmarkPanel} onClose={() => uiStore.closeOverlay()} />
 	<HardwarePanel visible={showHardwarePanel} onClose={() => uiStore.closeOverlay()} />
 	<ModelInfoPanel visible={showModelInfoPanel} onClose={() => uiStore.closeOverlay()} />
-	<KeyboardShortcutsOverlay open={showShortcutsOverlay} onClose={() => (showShortcutsOverlay = false)} />
+	<KeyboardShortcutsOverlay
+		open={showShortcutsOverlay}
+		onClose={() => (showShortcutsOverlay = false)}
+	/>
 </div>
 
 <style>
@@ -532,14 +537,13 @@ Teaching rules:
 		position: absolute;
 		inset: 0;
 		pointer-events: none;
-		background:
-			linear-gradient(
-				180deg,
-				rgb(255 255 255 / 6%),
-				transparent 12%,
-				transparent 88%,
-				rgb(0 0 0 / 20%)
-			);
+		background: linear-gradient(
+			180deg,
+			rgb(255 255 255 / 6%),
+			transparent 12%,
+			transparent 88%,
+			rgb(0 0 0 / 20%)
+		);
 		opacity: 0.35;
 	}
 
@@ -603,11 +607,7 @@ Teaching rules:
 		position: absolute;
 		inset: 0;
 		pointer-events: none;
-		background: linear-gradient(
-			180deg,
-			rgb(255 255 255 / 4%),
-			transparent 30%
-		);
+		background: linear-gradient(180deg, rgb(255 255 255 / 4%), transparent 30%);
 	}
 
 	@media (max-width: 900px) {
