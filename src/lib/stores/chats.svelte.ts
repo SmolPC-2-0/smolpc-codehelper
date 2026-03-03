@@ -147,6 +147,15 @@ export const chatsStore = {
 		}
 	},
 
+	setWorkspacePath(id: string, workspacePath: string | null) {
+		const chat = chats.find((c) => c.id === id);
+		if (chat) {
+			chat.workspacePath = workspacePath ?? undefined;
+			chat.updatedAt = Date.now();
+			this.persist();
+		}
+	},
+
 	togglePinned(id: string) {
 		const chat = chats.find((c) => c.id === id);
 		if (!chat) return;

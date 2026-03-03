@@ -15,6 +15,7 @@ export interface Chat {
 	model: string;
 	pinned?: boolean;
 	archived?: boolean;
+	workspacePath?: string;
 }
 
 export interface ChatGroup {

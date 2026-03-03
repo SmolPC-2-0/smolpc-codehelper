@@ -28,6 +28,7 @@
 
 	const currentChat = $derived(chatsStore.currentChat);
 	const messages = $derived(currentChat?.messages ?? []);
+	const currentWorkspacePath = $derived(currentChat?.workspacePath ?? null);
 	const hasNoChats = $derived(chatsStore.chats.length === 0);
 	const pageTitle = $derived(currentChat?.title ?? 'New Chat');
 	const showBenchmarkPanel = $derived(uiStore.activeOverlay === 'benchmark');
@@ -257,6 +258,10 @@ Teaching rules:
 			});
 		}
 
+		if (currentChat.workspacePath) {
+			chatsStore.setWorkspacePath(branchChat.id, currentChat.workspacePath);
+		}
+
 		chatsStore.updateChatTitle(branchChat.id, `${currentChat.title} · Branch`);
 		uiStore.setShowQuickExamples(false);
 		uiStore.resetScrollState();
@@ -470,6 +475,7 @@ Teaching rules:
 
 		<ConversationView
 			{messages}
+			workspacePath={currentWorkspacePath}
 			{latestAssistantMessageId}
 			showQuickExamples={uiStore.showQuickExamples}
 			onSelectExample={handleExampleSelect}
