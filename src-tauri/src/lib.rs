@@ -4,7 +4,7 @@ mod hardware;
 mod security;
 
 use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_benchmark};
-use commands::default::{read, save_code, write};
+use commands::default::{pick_workspace_folder, read, save_code, write, write_workspace_files};
 use commands::hardware::{detect_hardware, get_cached_hardware, HardwareCache};
 use commands::inference::{
     check_model_exists, generate_text, get_current_model, get_inference_backend_status,
@@ -33,6 +33,8 @@ pub fn run() {
             read,
             write,
             save_code,
+            pick_workspace_folder,
+            write_workspace_files,
             run_benchmark,
             get_benchmarks_directory,
             open_benchmarks_folder,
