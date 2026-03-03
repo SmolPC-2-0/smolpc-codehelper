@@ -51,6 +51,16 @@ npm run tauri:dml       # force DirectML (recommended for demos)
 
 The dev launcher rebuilds the engine host before app startup and shuts down any existing host so overrides apply cleanly.
 
+## Workspace File Generation
+
+When an assistant response contains fenced code blocks, you can now:
+
+- choose a workspace folder per chat in the session controls,
+- click `Generate File` on individual code blocks,
+- click `Generate All Files` at the message level to write all detected files at once.
+
+If target files already exist, the app prompts before overwriting.
+
 ## Engine API
 
 The shared engine listens on `http://127.0.0.1:19432` with bearer-token auth.

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased (2026-03-03)
+
+### Workspace File Generation
+- Added chat-scoped workspace selection in the UI (`Choose Workspace` / `Change Workspace` / `Clear`).
+- Replaced assistant message `Save All Code` behavior with `Generate All Files` writing to the selected workspace.
+- Added per-code-block `Generate File` actions directly in rendered code blocks.
+- Added filename inference for fenced code blocks (e.g., `index.html`, `styles.css`, `script.js`) with collision-safe suffixing.
+- Added Tauri commands:
+  - `pick_workspace_folder`
+  - `write_workspace_files`
+- Added overwrite conflict detection with user confirmation before replacement.
+
 ## 2.1.0 (2025-11-18)
 
 ### Benchmark System - Production-Grade Data Collection

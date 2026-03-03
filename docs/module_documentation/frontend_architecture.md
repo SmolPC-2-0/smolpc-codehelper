@@ -4,6 +4,7 @@
 This document provides a comprehensive guide to the frontend architecture of SmolPC Code Helper, a Svelte 5 + Tauri 2.6.2 desktop application. It explains data flow, state management, component hierarchy, and integration patterns between the frontend and backend.
 
 > **Note (2026-02-10):** A Workbench Bold frontend revamp is in progress with a deep component refactor (`layout/*`, `chat/*`, and `ui.svelte.ts`). For current migration guardrails and phase tracking, see `docs/frontend-revamp-plan.md`.
+> **Note (2026-03-03):** Chat-scoped workspace file generation is now implemented. Primary touchpoints are `layout/WorkspaceControls.svelte` (workspace selection), `ChatMessage.svelte` (per-file/all-file generation actions), `utils/markdown.ts` (code-block filename extraction + generate button wiring), and Tauri commands `pick_workspace_folder` / `write_workspace_files`.
 
 **Target Audience**: Developers, technical reviewers, and anyone who needs to understand how data flows through the application.
 
