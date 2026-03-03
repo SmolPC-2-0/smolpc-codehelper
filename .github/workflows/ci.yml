@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  frontend-quality:
+    name: Frontend Quality
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '23'
+          cache: 'npm'
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Type + Svelte checks
+        run: npm run check
+      - name: NPM vulnerability audit (high+)
+        run: npm audit --omit=dev --audit-level=high
+
+  engine-tests-msrv:
+    name: Engine Tests (Rust 1.88.0)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+      - name: Test engine crates
+        run: cargo test -p smolpc-engine-core -p smolpc-engine-client -p smolpc-engine-host
+
+  engine-tests-stable:
+    name: Engine Tests (stable)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test engine crates
+        run: cargo test -p smolpc-engine-core -p smolpc-engine-client -p smolpc-engine-host
+
+  tauri-build-check:
+    name: Tauri Build Check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+      - name: Check Tauri crate builds
+        run: cargo check -p smolpc-code-helper
+
+  incremental-style-gates:
+    name: Incremental Style Gates
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '23'
+          cache: 'npm'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+      - name: Install rustfmt
+        run: rustup component add rustfmt
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Check formatting/lint only on changed files
+        shell: pwsh
+        run: |
+          $eventName = "${{ github.event_name }}"
+          if ($eventName -eq "pull_request") {
+            $base = "${{ github.event.pull_request.base.sha }}"
+          } else {
+            $base = "${{ github.event.before }}"
+          }
+          $head = "${{ github.sha }}"
+
+          if ([string]::IsNullOrWhiteSpace($base) -or $base -eq "0000000000000000000000000000000000000000") {
+            $base = "HEAD~1"
+          } else {
+            git fetch --no-tags --depth=1 origin $base 2>$null
+          }
+
+          $changed = @(git diff --name-only --diff-filter=ACMR $base $head)
+          if (-not $changed) {
+            Write-Host "No changed files detected for style gates."
+            exit 0
+          }
+
+          $changed = @(
+            $changed |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Where-Object { Test-Path $_ }
+          )
+          if (-not $changed) {
+            Write-Host "No existing changed files to evaluate."
+            exit 0
+          }
+
+          $prettierFiles = @($changed | Where-Object {
+            $_ -match '\.(cjs|mjs|js|jsx|ts|tsx|json|md|css|scss|yml|yaml|html|svelte)$'
+          })
+          if ($prettierFiles.Count -gt 0) {
+            Write-Host "Running Prettier check on changed files..."
+            foreach ($file in $prettierFiles) {
+              npx prettier --check -- $file
+            }
+          } else {
+            Write-Host "No changed files matched Prettier extensions."
+          }
+
+          $eslintFiles = @($changed | Where-Object {
+            $_ -match '\.(js|jsx|ts|tsx|svelte)$'
+          })
+          if ($eslintFiles.Count -gt 0) {
+            Write-Host "Running ESLint on changed files..."
+            foreach ($file in $eslintFiles) {
+              npx eslint --max-warnings 0 -- $file
+            }
+          } else {
+            Write-Host "No changed files matched ESLint extensions."
+          }
+
+          $rustFiles = @($changed | Where-Object { $_.ToLower().EndsWith(".rs") })
+          if ($rustFiles.Count -gt 0) {
+            Write-Host "Running rustfmt check on changed Rust files..."
+            foreach ($file in $rustFiles) {
+              rustfmt --edition 2021 --check $file
+            }
+          } else {
+            Write-Host "No changed Rust files detected."
+          }
+
+  rust-security-audit:
+    name: Rust Security Audit
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+      - uses: taiki-e/install-action@cargo-audit
+      - name: Cargo audit
+        run: cargo audit

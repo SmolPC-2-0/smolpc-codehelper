@@ -1,4 +1,4 @@
-export type ActiveOverlay = 'none' | 'hardware' | 'benchmark';
+export type ActiveOverlay = 'none' | 'hardware' | 'benchmark' | 'modelInfo';
 
 export interface UiState {
 	isSidebarOpen: boolean;

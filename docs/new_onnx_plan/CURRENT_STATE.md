@@ -1,6 +1,6 @@
 # ONNX Migration - Current State
 
-Last updated: 2026-02-27
+Last updated: 2026-02-28
 Branch: `codex/directml-inferencing`
 Phase: 2A DirectML acceleration (GenAI C-FFI path) completed and validated
 
@@ -10,7 +10,7 @@ Phase: 2A DirectML acceleration (GenAI C-FFI path) completed and validated
 
 DirectML inferencing is now operational through ONNX Runtime GenAI C-FFI on Windows, with:
 
-- Explicit gate control (`SMOLPC_ENABLE_DML_GENAI`)
+- Automatic startup capability probing and backend selection (DirectML-first when available)
 - Forced backend override (`SMOLPC_FORCE_EP=dml|cpu`)
 - Device override (`SMOLPC_DML_DEVICE_ID`)
 - Preflight probing and finite-logit validation
@@ -84,8 +84,6 @@ Latest local validation on this branch:
 
 ## Current Gates and Runtime Controls
 
-- Enable DML GenAI path:
-  - `SMOLPC_ENABLE_DML_GENAI=1`
 - Force backend:
   - `SMOLPC_FORCE_EP=dml`
   - `SMOLPC_FORCE_EP=cpu`
@@ -97,6 +95,8 @@ Latest local validation on this branch:
 ## What Is Complete
 
 - DirectML runtime integration through GenAI C-FFI
+- Startup backend probing with capability-first DirectML auto-selection
+- Multi-GPU DirectML ranking (discrete-first, then VRAM)
 - Load-time DML init + preflight probe
 - Runtime failure tracking and demotion behavior
 - Backend status surface fields:
@@ -133,4 +133,3 @@ Latest local validation on this branch:
   - `docs/DML_plans/DIRECTML_GENAI_FULL_RUNDOWN.md`
 - Historical audit context:
   - `docs/new_onnx_plan/PR37_DIRECTML_CODE_AUDIT.md`
-

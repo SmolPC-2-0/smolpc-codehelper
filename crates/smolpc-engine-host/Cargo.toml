@@ -1,0 +1,21 @@
+[package]
+name = "smolpc-engine-host"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+
+[dependencies]
+smolpc-engine-core = { path = "../smolpc-engine-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+async-stream = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+dirs = { workspace = true }
+hardware-query = { workspace = true }

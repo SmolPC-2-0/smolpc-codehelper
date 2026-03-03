@@ -63,6 +63,46 @@ export interface AvailableModel {
 }
 
 /**
+ * Active inference backend state exposed by the shared engine host.
+ */
+export type InferenceRuntimeMode = 'auto' | 'cpu' | 'dml';
+
+export interface BackendStatus {
+	/** Active backend identifier ("cpu" or "directml") */
+	active_backend: string | null;
+
+	/** Resolved active model path on disk */
+	active_model_path: string | null;
+
+	/** Runtime implementation in use (e.g. "ort_cpu", "genai_dml") */
+	runtime_engine: string | null;
+
+	/** Available backend identifiers on current machine */
+	available_backends: string[];
+
+	/** Selection lifecycle state ("pending", "ready", "fallback", "error") */
+	selection_state: string | null;
+
+	/** Selection reason code from host */
+	selection_reason: string | null;
+
+	/** Selected DirectML device id when applicable */
+	selected_device_id: number | null;
+
+	/** Selected DirectML device name when applicable */
+	selected_device_name: string | null;
+
+	/** Runtime gate state for DML policy visibility */
+	dml_gate_state?: string | null;
+
+	/** Runtime gate reason for DML policy visibility */
+	dml_gate_reason?: string | null;
+
+	/** Force override mode applied by host policy when present */
+	force_override?: string | null;
+}
+
+/**
  * Generation configuration
  */
 export interface GenerationConfig {
@@ -100,4 +140,31 @@ export interface InferenceStatus {
 
 	/** Error message if any */
 	error: string | null;
+
+	/** Active backend identifier ("cpu" or "directml") */
+	activeBackend: string | null;
+
+	/** Runtime implementation in use (e.g. "ort_cpu", "genai_dml") */
+	runtimeEngine: string | null;
+
+	/** Resolved active model path on disk */
+	activeModelPath: string | null;
+
+	/** Selection lifecycle state ("pending", "ready", "fallback", "error") */
+	selectionState: string | null;
+
+	/** Selection reason code from host */
+	selectionReason: string | null;
+
+	/** Selected DirectML device name when applicable */
+	selectedDeviceName: string | null;
+
+	/** Runtime mode preference used by host policy */
+	runtimeMode: InferenceRuntimeMode;
+
+	/** Runtime gate state for DML policy visibility */
+	dmlGateState: string | null;
+
+	/** Runtime gate reason for DML policy visibility */
+	dmlGateReason: string | null;
 }

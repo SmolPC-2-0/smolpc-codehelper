@@ -66,6 +66,8 @@
 
 <div
 	class="conversation-view"
+	role="region"
+	aria-label="Conversation messages"
 	bind:this={scrollContainer}
 	onscroll={onScroll}
 	onwheel={handleWheel}

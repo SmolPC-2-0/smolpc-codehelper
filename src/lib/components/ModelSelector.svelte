@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { inferenceStore } from '$lib/stores/inference.svelte';
+	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { BrainCircuit, Loader2 } from '@lucide/svelte';
 
 	let isLoading = $state(false);
@@ -9,11 +10,17 @@
 		const modelId = target.value;
 
 		// Don't reload if same model
-		if (modelId === inferenceStore.currentModel) return;
+		if (modelId === inferenceStore.currentModel) {
+			settingsStore.setModel(modelId);
+			return;
+		}
 
 		isLoading = true;
 		try {
-			await inferenceStore.loadModel(modelId);
+			const loaded = await inferenceStore.loadModel(modelId);
+			if (loaded) {
+				settingsStore.setModel(modelId);
+			}
 		} finally {
 			isLoading = false;
 		}
@@ -34,7 +41,7 @@
 		aria-label="Select inference model"
 	>
 		{#if inferenceStore.availableModels.length > 0}
-			{#each inferenceStore.availableModels as model}
+			{#each inferenceStore.availableModels as model (model.id)}
 				<option value={model.id}>
 					{model.name} ({model.size})
 				</option>
@@ -74,10 +81,17 @@
 		font-size: 0.78rem;
 		background: transparent;
 		color: var(--color-foreground);
+		line-height: 1.25;
 		outline: none;
 		border: none;
 		appearance: none;
 		padding-right: 0.4rem;
+		color-scheme: light dark;
+	}
+
+	.model-selector__control option {
+		background: var(--surface-floating);
+		color: var(--color-foreground);
 	}
 
 	.model-selector__control:disabled {

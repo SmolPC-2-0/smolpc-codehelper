@@ -4,6 +4,7 @@
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import BenchmarkPanel from '$lib/components/BenchmarkPanel.svelte';
 	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
+	import ModelInfoPanel from '$lib/components/ModelInfoPanel.svelte';
 	import KeyboardShortcutsOverlay from '$lib/components/KeyboardShortcutsOverlay.svelte';
 	import WorkspaceHeader from '$lib/components/layout/WorkspaceHeader.svelte';
 	import WorkspaceControls from '$lib/components/layout/WorkspaceControls.svelte';
@@ -31,6 +32,7 @@
 	const pageTitle = $derived(currentChat?.title ?? 'New Chat');
 	const showBenchmarkPanel = $derived(uiStore.activeOverlay === 'benchmark');
 	const showHardwarePanel = $derived(uiStore.activeOverlay === 'hardware');
+	const showModelInfoPanel = $derived(uiStore.activeOverlay === 'modelInfo');
 	const showScrollToLatest = $derived(uiStore.userHasScrolledUp && messages.length > 0);
 	const latestAssistantMessageId = $derived(
 		[...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null
@@ -64,12 +66,31 @@
 		}
 	}
 
-	const SYSTEM_PROMPT =
-		'You are a helpful coding assistant for students. ' +
-		'Give clear, concise explanations. ' +
-		'When showing code, use simple examples and add brief comments.';
+	const SYSTEM_PROMPT = `You are a rigorous coding tutor and engineering collaborator for secondary students.
 
-	// Build ChatML-formatted prompt for Qwen2.5-Coder
+Tone:
+- Professional, calm, and clear.
+- Friendly but not childish.
+- No hype, flattery, or filler.
+
+Response priorities:
+- Solve the request directly.
+- For create/build/write/implement/fix requests: start with runnable code.
+- After code, give a short explanation (3-6 bullets max).
+- Ask one concise clarifying question only if ambiguity changes the solution.
+
+Quality rules:
+- Be technically precise and state key assumptions.
+- Use concrete examples when useful.
+- Do not output generic planning checklists.
+- Do not repeat phrases, sections, or the same plan.
+- End once the answer is complete; do not restart the response.
+
+Teaching rules:
+- Treat the user as a capable learner.
+- Explain difficult parts clearly, without oversimplifying.`;
+
+	// Build ChatML-formatted prompt for Qwen chat-template style models.
 	function buildChatMLPrompt(userMessage: string, historyMessages: Message[]): string {
 		let prompt = `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>\n`;
 
@@ -97,16 +118,15 @@
 		if (!(target instanceof HTMLElement)) return false;
 		if (target.isContentEditable) return true;
 		return (
-			target.tagName === 'TEXTAREA' ||
-			target.tagName === 'INPUT' ||
-			target.tagName === 'SELECT'
+			target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.tagName === 'SELECT'
 		);
 	}
 
 	async function handleSendMessage(content: string) {
 		if (!inferenceStore.isLoaded || inferenceStore.isGenerating) return;
 
-		const activeChat = currentChat ?? chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
+		const activeChat =
+			currentChat ?? chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
 		if (!activeChat) return;
 		const historyBeforeMessage = [...activeChat.messages];
 
@@ -145,9 +165,9 @@
 				max_length: 2048,
 				temperature: settingsStore.temperature,
 				top_k: 40,
-				top_p: 0.9,
-				repetition_penalty: 1.1,
-				repetition_penalty_last_n: 64
+				top_p: 0.85,
+				repetition_penalty: 1.15,
+				repetition_penalty_last_n: 128
 			};
 
 			await inferenceStore.generateStream(
@@ -347,10 +367,38 @@
 
 		async function initInference() {
 			await inferenceStore.listModels();
-			if (!inferenceStore.isLoaded && inferenceStore.availableModels.length > 0) {
-				const firstModel = inferenceStore.availableModels[0];
-				await inferenceStore.loadModel(firstModel.id);
+			await inferenceStore.syncStatus();
+
+			if (inferenceStore.availableModels.length === 0) {
+				return;
 			}
+
+			const availableModelIds = new Set(inferenceStore.availableModels.map((model) => model.id));
+			let targetModelId = settingsStore.selectedModel;
+			if (!availableModelIds.has(targetModelId)) {
+				targetModelId = inferenceStore.availableModels[0].id;
+			}
+
+			if (inferenceStore.currentModel && availableModelIds.has(inferenceStore.currentModel)) {
+				settingsStore.setModel(inferenceStore.currentModel);
+				return;
+			}
+
+			const candidateModelIds = [
+				targetModelId,
+				...inferenceStore.availableModels
+					.map((model) => model.id)
+					.filter((modelId) => modelId !== targetModelId)
+			];
+			for (const candidateModelId of candidateModelIds) {
+				const loaded = await inferenceStore.loadModel(candidateModelId);
+				if (loaded) {
+					settingsStore.setModel(candidateModelId);
+					return;
+				}
+			}
+
+			console.error('Failed to load any available shared-engine model');
 		}
 
 		initInference();
@@ -370,7 +418,10 @@
 	});
 
 	$effect(() => {
-		currentChat?.id;
+		if (currentChat?.id) {
+			uiStore.resetScrollState();
+			return;
+		}
 		uiStore.resetScrollState();
 	});
 
@@ -393,7 +444,9 @@
 </script>
 
 <div class="app-shell">
-	<div class={`sidebar-stage ${uiStore.isSidebarOpen ? 'sidebar-stage--open' : 'sidebar-stage--closed'}`}>
+	<div
+		class={`sidebar-stage ${uiStore.isSidebarOpen ? 'sidebar-stage--open' : 'sidebar-stage--closed'}`}
+	>
 		<Sidebar onClose={() => uiStore.setSidebarOpen(false)} />
 	</div>
 
@@ -402,10 +455,12 @@
 			title={pageTitle}
 			showSidebarToggle={!uiStore.isSidebarOpen}
 			status={inferenceStore.status}
+			modelInfoActive={showModelInfoPanel}
 			hardwareActive={showHardwarePanel}
 			shortcutsOpen={showShortcutsOverlay}
 			canExport={messages.length > 0}
 			onOpenSidebar={() => uiStore.setSidebarOpen(true)}
+			onToggleModelInfo={() => uiStore.toggleOverlay('modelInfo')}
 			onToggleHardware={() => uiStore.toggleOverlay('hardware')}
 			onToggleShortcuts={() => (showShortcutsOverlay = !showShortcutsOverlay)}
 			onExportChat={handleExportChat}
@@ -440,7 +495,11 @@
 
 	<BenchmarkPanel visible={showBenchmarkPanel} onClose={() => uiStore.closeOverlay()} />
 	<HardwarePanel visible={showHardwarePanel} onClose={() => uiStore.closeOverlay()} />
-	<KeyboardShortcutsOverlay open={showShortcutsOverlay} onClose={() => (showShortcutsOverlay = false)} />
+	<ModelInfoPanel visible={showModelInfoPanel} onClose={() => uiStore.closeOverlay()} />
+	<KeyboardShortcutsOverlay
+		open={showShortcutsOverlay}
+		onClose={() => (showShortcutsOverlay = false)}
+	/>
 </div>
 
 <style>
@@ -478,14 +537,13 @@
 		position: absolute;
 		inset: 0;
 		pointer-events: none;
-		background:
-			linear-gradient(
-				180deg,
-				rgb(255 255 255 / 6%),
-				transparent 12%,
-				transparent 88%,
-				rgb(0 0 0 / 20%)
-			);
+		background: linear-gradient(
+			180deg,
+			rgb(255 255 255 / 6%),
+			transparent 12%,
+			transparent 88%,
+			rgb(0 0 0 / 20%)
+		);
 		opacity: 0.35;
 	}
 
@@ -549,11 +607,7 @@
 		position: absolute;
 		inset: 0;
 		pointer-events: none;
-		background: linear-gradient(
-			180deg,
-			rgb(255 255 255 / 4%),
-			transparent 30%
-		);
+		background: linear-gradient(180deg, rgb(255 255 255 / 4%), transparent 30%);
 	}
 
 	@media (max-width: 900px) {

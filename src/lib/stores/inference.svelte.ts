@@ -9,7 +9,9 @@ import type {
 	GenerationMetrics,
 	GenerationConfig,
 	AvailableModel,
-	InferenceStatus
+	InferenceStatus,
+	BackendStatus,
+	InferenceRuntimeMode
 } from '$lib/types/inference';
 
 // State
@@ -20,6 +22,36 @@ let error = $state<string | null>(null);
 let availableModels = $state<AvailableModel[]>([]);
 let lastResult = $state<GenerationResult | null>(null);
 let lastMetrics = $state<GenerationMetrics | null>(null);
+let backendStatus = $state<BackendStatus | null>(null);
+let runtimeMode = $state<InferenceRuntimeMode>('auto');
+
+function normalizeBackendName(raw: string | null | undefined): string | null {
+	if (!raw) {
+		return null;
+	}
+	const normalized = raw.toLowerCase().replaceAll('_', '');
+	if (normalized === 'directml') {
+		return 'directml';
+	}
+	if (normalized === 'cpu') {
+		return 'cpu';
+	}
+	return raw.toLowerCase();
+}
+
+function normalizeRuntimeMode(raw: string | null | undefined): InferenceRuntimeMode {
+	if (!raw) {
+		return 'auto';
+	}
+	const normalized = raw.toLowerCase().replaceAll('_', '');
+	if (normalized === 'directml' || normalized === 'dml') {
+		return 'dml';
+	}
+	if (normalized === 'cpu') {
+		return 'cpu';
+	}
+	return 'auto';
+}
 
 export const inferenceStore = {
 	// Getters
@@ -44,6 +76,9 @@ export const inferenceStore = {
 	get lastMetrics() {
 		return lastMetrics;
 	},
+	get runtimeMode() {
+		return runtimeMode;
+	},
 
 	// Get status object for display
 	get status(): InferenceStatus {
@@ -51,7 +86,16 @@ export const inferenceStore = {
 			isLoaded,
 			currentModel,
 			isGenerating,
-			error
+			error,
+			activeBackend: normalizeBackendName(backendStatus?.active_backend),
+			runtimeEngine: backendStatus?.runtime_engine ?? null,
+			activeModelPath: backendStatus?.active_model_path ?? null,
+			selectionState: backendStatus?.selection_state ?? null,
+			selectionReason: backendStatus?.selection_reason ?? null,
+			selectedDeviceName: backendStatus?.selected_device_name ?? null,
+			runtimeMode,
+			dmlGateState: backendStatus?.dml_gate_state ?? null,
+			dmlGateReason: backendStatus?.dml_gate_reason ?? null
 		};
 	},
 
@@ -84,6 +128,7 @@ export const inferenceStore = {
 			await invoke('load_model', { modelId });
 			isLoaded = true;
 			currentModel = modelId;
+			await this.refreshBackendStatus();
 			return true;
 		} catch (e) {
 			error = String(e);
@@ -100,6 +145,7 @@ export const inferenceStore = {
 			await invoke('unload_model');
 			isLoaded = false;
 			currentModel = null;
+			backendStatus = null;
 		} catch (e) {
 			error = String(e);
 			console.error('Failed to unload model:', e);
@@ -132,6 +178,7 @@ export const inferenceStore = {
 			console.error('Generation failed:', e);
 			return null;
 		} finally {
+			await this.refreshBackendStatus();
 			isGenerating = false;
 		}
 	},
@@ -204,6 +251,7 @@ export const inferenceStore = {
 			console.error('Streaming generation failed:', e);
 			return null;
 		} finally {
+			await this.refreshBackendStatus();
 			isGenerating = false;
 		}
 	},
@@ -241,6 +289,7 @@ export const inferenceStore = {
 	async syncStatus(): Promise<void> {
 		try {
 			const model = await invoke<string | null>('get_current_model');
+			await this.refreshBackendStatus();
 			if (model) {
 				isLoaded = true;
 				currentModel = model;
@@ -250,6 +299,53 @@ export const inferenceStore = {
 			}
 		} catch (e) {
 			console.error('Failed to sync status:', e);
+		}
+	},
+
+	/**
+	 * Fetch backend/runtime status from shared engine host.
+	 */
+	async refreshBackendStatus(): Promise<void> {
+		try {
+			const status = await invoke<BackendStatus>('get_inference_backend_status');
+			backendStatus = status;
+			runtimeMode = normalizeRuntimeMode(status.force_override);
+		} catch (e) {
+			backendStatus = null;
+			runtimeMode = normalizeRuntimeMode(null);
+			console.warn('Failed to fetch backend status:', e);
+		}
+	},
+
+	/**
+	 * Switch runtime mode policy and reconnect the shared engine host.
+	 * Optionally reload a model after mode switch.
+	 */
+	async setRuntimeMode(
+		mode: InferenceRuntimeMode,
+		modelId: string | null = null
+	): Promise<boolean> {
+		if (isGenerating) {
+			error = 'Cannot switch runtime mode while generation is in progress';
+			return false;
+		}
+
+		error = null;
+
+		try {
+			const status = await invoke<BackendStatus>('set_inference_runtime_mode', {
+				mode,
+				modelId
+			});
+			backendStatus = status;
+			runtimeMode = normalizeRuntimeMode(status.force_override);
+			await this.syncStatus();
+			return true;
+		} catch (e) {
+			error = String(e);
+			console.error('Failed to switch runtime mode:', e);
+			await this.refreshBackendStatus();
+			return false;
 		}
 	},
 

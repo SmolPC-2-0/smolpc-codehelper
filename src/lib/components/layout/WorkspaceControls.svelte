@@ -1,12 +1,10 @@
 <script lang="ts">
-	import ModelSelector from '$lib/components/ModelSelector.svelte';
 	import ContextToggle from '$lib/components/ContextToggle.svelte';
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
 </script>
 
 <section class="workspace-controls" aria-label="Session controls">
 	<div class="workspace-controls__row">
-		<ModelSelector />
 		<ContextToggle />
 	</div>
 	<div class="workspace-controls__row workspace-controls__row--compact">
