@@ -6,6 +6,7 @@
 
 	interface Props {
 		messages: Message[];
+		workspacePath: string | null;
 		latestAssistantMessageId: string | null;
 		showQuickExamples: boolean;
 		onSelectExample: (prompt: string) => void;
@@ -22,6 +23,7 @@
 
 	let {
 		messages,
+		workspacePath,
 		latestAssistantMessageId,
 		showQuickExamples,
 		onSelectExample,
@@ -86,6 +88,7 @@
 				{#each messages as message (message.id)}
 					<ChatMessage
 						{message}
+						{workspacePath}
 						canRegenerate={message.id === latestAssistantMessageId}
 						onRegenerate={() => onRegenerateMessage(message.id)}
 						onContinue={() => onContinueMessage(message.id)}

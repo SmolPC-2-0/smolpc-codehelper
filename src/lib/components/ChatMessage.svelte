@@ -4,19 +4,29 @@
 	import {
 		renderMarkdown,
 		copyToClipboard,
-		extractCode,
-		setupCodeCopyHandlers
+		extractCodeBlocks,
+		setupCodeActionHandlers
 	} from '$lib/utils/markdown';
 	import { invoke } from '@tauri-apps/api/core';
 	import { Bot, Check, Copy, Download, GitBranchPlus, RefreshCw, User, Waypoints } from '@lucide/svelte';
 
-	// src/lib/components/ChatMessage.svelte 9-30
+	interface WorkspaceFileInput {
+		fileName: string;
+		contents: string;
+	}
+
+	interface WorkspaceWriteResult {
+		writtenPaths: string[];
+		conflicts: string[];
+	}
+
 	interface Props {
 		message: Message;
 		canRegenerate?: boolean;
 		onRegenerate?: () => void;
 		onContinue?: () => void;
 		onBranchFromHere?: () => void;
+		workspacePath?: string | null;
 	}
 
 	let {
@@ -24,17 +34,19 @@
 		canRegenerate = false,
 		onRegenerate = () => {},
 		onContinue = () => {},
-		onBranchFromHere = () => {}
+		onBranchFromHere = () => {},
+		workspacePath = null
 	}: Props = $props();
 
 	let copied = $state(false);
 	let contentContainer: HTMLDivElement;
 
-	const renderedContent = $derived(renderMarkdown(message.content));
-	const codeBlocks = $derived(extractCode(message.content));
-
-	// Combine all code blocks into one string
-	const allCode = $derived(codeBlocks.join('\n\n'));
+	const canGenerate = $derived(message.role === 'assistant' && !message.isStreaming);
+	const renderedContent = $derived(
+		renderMarkdown(message.content, { showGenerateButtons: canGenerate })
+	);
+	const codeBlocks = $derived(extractCodeBlocks(message.content));
+	const allCode = $derived(codeBlocks.map((block) => block.code).join('\n\n'));
 
 	async function handleCopyAllCode() {
 		const success = await copyToClipboard(allCode);
@@ -44,19 +56,94 @@
 		}
 	}
 
-	async function handleSaveAllCode() {
+	function ensureWorkspaceSelected(): boolean {
+		if (workspacePath) return true;
+		alert('Choose a workspace for this chat before generating files.');
+		return false;
+	}
+
+	function formatConflictList(paths: string[]): string {
+		return paths
+			.map((path) => path.split(/[\\/]/).pop() ?? path)
+			.map((name) => `- ${name}`)
+			.join('\n');
+	}
+
+	async function writeFilesToWorkspace(files: WorkspaceFileInput[]): Promise<boolean> {
+		if (!ensureWorkspaceSelected() || files.length === 0) {
+			return false;
+		}
+
+		const initialResult = await invoke<WorkspaceWriteResult>('write_workspace_files', {
+			workspacePath,
+			files,
+			overwrite: false
+		});
+
+		if (initialResult.conflicts.length === 0) {
+			return true;
+		}
+
+		const shouldOverwrite = window.confirm(
+			`These files already exist:\n${formatConflictList(initialResult.conflicts)}\n\nOverwrite them?`
+		);
+		if (!shouldOverwrite) {
+			return false;
+		}
+
+		await invoke<WorkspaceWriteResult>('write_workspace_files', {
+			workspacePath,
+			files,
+			overwrite: true
+		});
+		return true;
+	}
+
+	async function handleGenerateFile(blockIndex: number) {
+		if (!canGenerate) return;
+		const block = codeBlocks[blockIndex];
+		if (!block) return;
+
 		try {
-			await invoke('save_code', { code: allCode });
+			const wrote = await writeFilesToWorkspace([
+				{
+					fileName: block.fileName,
+					contents: block.code
+				}
+			]);
+			if (wrote) {
+				alert(`Generated ${block.fileName} in workspace.`);
+			}
 		} catch (error) {
-			console.error('Failed to save code:', error);
-			alert('Failed to save file. Please try again.');
+			console.error('Failed to generate file:', error);
+			alert('Failed to generate file. Please try again.');
 		}
 	}
 
-	// Setup event delegation for copy buttons (CSP-compliant)
+	async function handleGenerateAllFiles() {
+		if (!canGenerate || codeBlocks.length === 0) return;
+
+		const files: WorkspaceFileInput[] = codeBlocks.map((block) => ({
+			fileName: block.fileName,
+			contents: block.code
+		}));
+
+		try {
+			const wrote = await writeFilesToWorkspace(files);
+			if (wrote) {
+				alert(`Generated ${files.length} file${files.length === 1 ? '' : 's'} in workspace.`);
+			}
+		} catch (error) {
+			console.error('Failed to generate files:', error);
+			alert('Failed to generate files. Please try again.');
+		}
+	}
+
 	onMount(() => {
 		if (contentContainer) {
-			return setupCodeCopyHandlers(contentContainer);
+			return setupCodeActionHandlers(contentContainer, {
+				onGenerateFile: handleGenerateFile
+			});
 		}
 	});
 </script>
@@ -141,12 +228,12 @@
 				</button>
 				<button
 					type="button"
-					onclick={handleSaveAllCode}
+					onclick={handleGenerateAllFiles}
 					class="chat-message__action"
-					title="Save all code from this message to file"
+					title="Generate all code files in workspace"
 				>
 					<Download class="h-3 w-3" />
-					<span>Save All Code</span>
+					<span>Generate All Files</span>
 				</button>
 				{/if}
 			</div>
@@ -334,6 +421,22 @@
 		text-transform: uppercase;
 		letter-spacing: 0.07em;
 		color: var(--color-muted-foreground);
+	}
+
+	:global(.code-block-meta) {
+		display: grid;
+		gap: 0.08rem;
+	}
+
+	:global(.code-block-file) {
+		font-size: 0.63rem;
+		color: var(--color-muted-foreground);
+	}
+
+	:global(.code-block-actions) {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
 	}
 
 	:global(.code-copy-btn-frame) {
