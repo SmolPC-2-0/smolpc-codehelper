@@ -3,6 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Cpu, RefreshCw, Settings2, X } from '@lucide/svelte';
 	import { inferenceStore } from '$lib/stores/inference.svelte';
+	import { settingsStore } from '$lib/stores/settings.svelte';
 	import ModelSelector from '$lib/components/ModelSelector.svelte';
 	import InferenceModeSelector from '$lib/components/InferenceModeSelector.svelte';
 
@@ -42,6 +43,16 @@
 		refreshing = true;
 		try {
 			await inferenceStore.listModels();
+			await inferenceStore.syncStatus();
+		} finally {
+			refreshing = false;
+		}
+	}
+
+	async function retryStartup() {
+		refreshing = true;
+		try {
+			await inferenceStore.retryStartup(settingsStore.selectedModel ?? null);
 			await inferenceStore.syncStatus();
 		} finally {
 			refreshing = false;
@@ -105,13 +116,22 @@
 			</div>
 
 			<div class="model-info-panel__control-block">
-				<div class="model-info-panel__control-label">Inference Mode</div>
+				<div class="model-info-panel__control-label">Inference Mode (Diagnostics)</div>
 				<InferenceModeSelector />
+				{#if !inferenceStore.runtimeModeControlsEnabled}
+					<div class="model-info-panel__helper">Runtime mode override is diagnostics-only.</div>
+				{/if}
 			</div>
 
 			<div class="model-info-panel__details">
 				<div class="model-info-panel__details-title">Active Runtime</div>
 				<div class="model-info-panel__details-grid">
+					<span>Readiness State</span>
+					<span>{status.readinessState}</span>
+					<span>Attempt ID</span>
+					<span title={status.readiness?.attempt_id ?? ''}>{status.readiness?.attempt_id ?? 'n/a'}</span>
+					<span>State Since</span>
+					<span title={status.readiness?.state_since ?? ''}>{status.readiness?.state_since ?? 'n/a'}</span>
 					<span>Loaded Model</span>
 					<span>{status.currentModel ?? 'none'}</span>
 					<span>Backend</span>
@@ -130,6 +150,12 @@
 					<span title={status.activeModelPath ?? ''}>{status.activeModelPath ?? 'n/a'}</span>
 				</div>
 			</div>
+
+			{#if status.readinessState === 'failed' && status.startupRetryable}
+				<Button variant="outline" onclick={retryStartup} disabled={refreshing}>
+					Retry startup
+				</Button>
+			{/if}
 
 			{#if status.error}
 				<div class="model-info-panel__error">
@@ -202,6 +228,11 @@
 		color: var(--color-muted-foreground);
 		text-transform: uppercase;
 		letter-spacing: 0.03em;
+	}
+
+	.model-info-panel__helper {
+		font-size: 0.68rem;
+		color: var(--color-muted-foreground);
 	}
 
 	.model-info-panel__details {

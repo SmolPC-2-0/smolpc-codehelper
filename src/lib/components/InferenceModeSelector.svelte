@@ -5,6 +5,7 @@
 	import type { InferenceRuntimeMode } from '$lib/types/inference';
 
 	let isSwitching = $state(false);
+	const diagnosticsOnly = $derived(!inferenceStore.runtimeModeControlsEnabled);
 
 	async function handleModeChange(event: Event) {
 		const target = event.target as HTMLSelectElement;
@@ -33,10 +34,14 @@
 	<select
 		value={inferenceStore.runtimeMode}
 		onchange={handleModeChange}
-		disabled={isSwitching || inferenceStore.isGenerating}
+		disabled={diagnosticsOnly || isSwitching || inferenceStore.isGenerating}
 		class="mode-selector__control"
 		aria-label="Select inference runtime mode"
-		title="Switch runtime mode and restart shared engine host"
+		title={
+			diagnosticsOnly
+				? 'Runtime mode override is diagnostics-only'
+				: 'Switch runtime mode and restart shared engine host'
+		}
 	>
 		<option value="auto">Mode: Auto</option>
 		<option value="dml">Mode: DirectML</option>

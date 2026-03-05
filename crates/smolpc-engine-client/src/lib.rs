@@ -146,6 +146,30 @@ pub struct EngineStatus {
     pub current_model: Option<String>,
     pub generating: bool,
     pub backend_status: BackendStatus,
+    #[serde(default)]
+    pub attempt_id: Option<String>,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub state_since: Option<String>,
+    #[serde(default)]
+    pub active_backend: Option<String>,
+    #[serde(default)]
+    pub active_model_id: Option<String>,
+    #[serde(default)]
+    pub error_code: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
+    #[serde(default)]
+    pub retryable: Option<bool>,
+    #[serde(default)]
+    pub ready: Option<bool>,
+    #[serde(default)]
+    pub startup_phase: Option<String>,
+    #[serde(default)]
+    pub last_error: Option<String>,
+    #[serde(default)]
+    pub engine_api_version: Option<String>,
 }
 
 #[derive(Debug, Clone)]

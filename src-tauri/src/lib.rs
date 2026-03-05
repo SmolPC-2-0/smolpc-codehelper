@@ -5,6 +5,7 @@ mod security;
 
 use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_benchmark};
 use commands::default::{read, save_code, write};
+use commands::engine_client_adapter::{engine_ensure_started, engine_status};
 use commands::hardware::{detect_hardware, get_cached_hardware, HardwareCache};
 use commands::inference::{
     check_model_exists, generate_text, get_current_model, get_inference_backend_status,
@@ -48,7 +49,9 @@ pub fn run() {
             get_current_model,
             check_model_exists,
             get_inference_backend_status,
-            set_inference_runtime_mode
+            set_inference_runtime_mode,
+            engine_ensure_started,
+            engine_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

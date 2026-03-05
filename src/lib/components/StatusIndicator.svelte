@@ -8,6 +8,15 @@
 	}
 
 	let { status, active = false, onToggle }: Props = $props();
+	const statusClass = $derived(
+		status.isGenerating
+			? 'status-indicator--generating'
+			: status.readinessState === 'ready'
+				? 'status-indicator--ready'
+				: status.readinessState === 'failed'
+					? 'status-indicator--failed'
+					: 'status-indicator--starting'
+	);
 
 	function handleClick() {
 		onToggle?.();
@@ -16,7 +25,7 @@
 
 <button
 	type="button"
-	class={`status-indicator ${active ? 'status-indicator--active' : ''} ${status.isGenerating ? 'status-indicator--generating' : status.isLoaded ? 'status-indicator--ready' : 'status-indicator--idle'}`}
+	class={`status-indicator ${active ? 'status-indicator--active' : ''} ${statusClass}`}
 	onclick={handleClick}
 	aria-label="Open model and runtime info"
 	title="Open model and runtime info"
@@ -26,13 +35,17 @@
 		<span class="status-indicator__text">
 			{#if status.isGenerating}
 				Generating
-			{:else if status.isLoaded}
+			{:else if status.readinessState === 'ready'}
 				{status.currentModel ?? 'Model loaded'}
+			{:else if status.readinessState === 'failed'}
+				Startup failed
 			{:else}
-				No Model Loaded
+				Starting engine...
 			{/if}
 		</span>
-		{#if status.isLoaded}
+		{#if status.readinessState === 'failed' && status.startupErrorCode}
+			<span class="status-indicator__runtime">{status.startupErrorCode}</span>
+		{:else if status.isLoaded}
 			<span class="status-indicator__runtime">
 				Open model and runtime settings
 			</span>
@@ -101,12 +114,16 @@
 		overflow: hidden;
 	}
 
-	.status-indicator--idle .status-indicator__dot {
+	.status-indicator--starting .status-indicator__dot {
 		background: color-mix(in srgb, var(--color-muted-foreground) 75%, transparent);
 	}
 
 	.status-indicator--ready .status-indicator__dot {
 		background: color-mix(in srgb, var(--color-success) 90%, transparent);
+	}
+
+	.status-indicator--failed .status-indicator__dot {
+		background: color-mix(in srgb, var(--color-destructive) 92%, transparent);
 	}
 
 	.status-indicator--generating .status-indicator__dot {

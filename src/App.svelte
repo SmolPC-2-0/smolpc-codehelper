@@ -367,38 +367,20 @@ Teaching rules:
 
 		async function initInference() {
 			await inferenceStore.listModels();
+			const availableModelIds = new Set(inferenceStore.availableModels.map((model) => model.id));
+			const selectedModelId = availableModelIds.has(settingsStore.selectedModel)
+				? settingsStore.selectedModel
+				: inferenceStore.availableModels[0]?.id ?? null;
+
+			await inferenceStore.ensureStarted({
+				mode: 'auto',
+				startup_policy: selectedModelId ? { default_model_id: selectedModelId } : null
+			});
 			await inferenceStore.syncStatus();
 
-			if (inferenceStore.availableModels.length === 0) {
-				return;
-			}
-
-			const availableModelIds = new Set(inferenceStore.availableModels.map((model) => model.id));
-			let targetModelId = settingsStore.selectedModel;
-			if (!availableModelIds.has(targetModelId)) {
-				targetModelId = inferenceStore.availableModels[0].id;
-			}
-
-			if (inferenceStore.currentModel && availableModelIds.has(inferenceStore.currentModel)) {
+			if (inferenceStore.currentModel) {
 				settingsStore.setModel(inferenceStore.currentModel);
-				return;
 			}
-
-			const candidateModelIds = [
-				targetModelId,
-				...inferenceStore.availableModels
-					.map((model) => model.id)
-					.filter((modelId) => modelId !== targetModelId)
-			];
-			for (const candidateModelId of candidateModelIds) {
-				const loaded = await inferenceStore.loadModel(candidateModelId);
-				if (loaded) {
-					settingsStore.setModel(candidateModelId);
-					return;
-				}
-			}
-
-			console.error('Failed to load any available shared-engine model');
 		}
 
 		initInference();

@@ -66,6 +66,35 @@ export interface AvailableModel {
  * Active inference backend state exposed by the shared engine host.
  */
 export type InferenceRuntimeMode = 'auto' | 'cpu' | 'dml';
+export type StartupModeDto = 'auto' | 'directml_required';
+export type EngineReadinessState =
+	| 'idle'
+	| 'starting'
+	| 'probing'
+	| 'resolving_assets'
+	| 'loading_model'
+	| 'ready'
+	| 'failed';
+
+export interface StartupPolicyDto {
+	default_model_id?: string | null;
+}
+
+export interface EnsureStartedRequestDto {
+	mode: StartupModeDto;
+	startup_policy?: StartupPolicyDto | null;
+}
+
+export interface EngineReadinessDto {
+	attempt_id: string;
+	state: EngineReadinessState;
+	state_since: string;
+	active_backend: string | null;
+	active_model_id: string | null;
+	error_code: string | null;
+	error_message: string | null;
+	retryable: boolean;
+}
 
 export interface BackendStatus {
 	/** Active backend identifier ("cpu" or "directml") */
@@ -129,6 +158,15 @@ export interface GenerationConfig {
  * Current inference state
  */
 export interface InferenceStatus {
+	/** Readiness payload from engine contract adapter */
+	readiness: EngineReadinessDto | null;
+
+	/** Readiness state used for startup/inference gating */
+	readinessState: EngineReadinessState | 'unknown';
+
+	/** Whether engine reports readiness state as ready */
+	isReady: boolean;
+
 	/** Whether a model is currently loaded */
 	isLoaded: boolean;
 
@@ -140,6 +178,15 @@ export interface InferenceStatus {
 
 	/** Error message if any */
 	error: string | null;
+
+	/** Startup failure code from readiness payload */
+	startupErrorCode: string | null;
+
+	/** Startup failure message from readiness payload */
+	startupErrorMessage: string | null;
+
+	/** Whether startup failure is retryable */
+	startupRetryable: boolean;
 
 	/** Active backend identifier ("cpu" or "directml") */
 	activeBackend: string | null;
