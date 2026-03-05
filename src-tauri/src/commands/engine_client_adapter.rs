@@ -1,6 +1,6 @@
 use super::inference::{apply_runtime_mode_preference, resolve_client, InferenceState};
 use chrono::Utc;
-use smolpc_engine_client::{EngineStatus, RuntimeModePreference};
+use smolpc_engine_client::{EngineStatus, RuntimeModePreference, StartupMode, StartupPolicy};
 
 const CONTRACT_STATES: [&str; 7] = [
     "idle",
@@ -61,6 +61,19 @@ impl EngineReadinessDto {
             retryable,
         }
     }
+
+    fn fallback_failed(error_message: impl Into<String>) -> Self {
+        Self {
+            attempt_id: "unknown".to_string(),
+            state: "failed".to_string(),
+            state_since: now_rfc3339(),
+            active_backend: None,
+            active_model_id: None,
+            error_code: Some("ENGINE_ENSURE_STARTED_FAILED".to_string()),
+            error_message: Some(error_message.into()),
+            retryable: true,
+        }
+    }
 }
 
 fn now_rfc3339() -> String {
@@ -74,6 +87,13 @@ fn startup_mode_to_runtime_mode(mode: StartupModeDto) -> RuntimeModePreference {
     }
 }
 
+fn startup_mode_to_engine_mode(mode: StartupModeDto) -> StartupMode {
+    match mode {
+        StartupModeDto::Auto => StartupMode::Auto,
+        StartupModeDto::DirectmlRequired => StartupMode::DirectmlRequired,
+    }
+}
+
 fn normalize_contract_state(value: &str) -> Option<String> {
     let normalized = value.trim().to_ascii_lowercase();
     if CONTRACT_STATES.contains(&normalized.as_str()) {
@@ -84,13 +104,7 @@ fn normalize_contract_state(value: &str) -> Option<String> {
 }
 
 fn resolve_legacy_state(status: &EngineStatus) -> String {
-    if let Some(phase) = status.startup_phase.as_deref() {
-        if let Some(normalized) = normalize_contract_state(phase) {
-            return normalized;
-        }
-    }
-
-    if status.ready.unwrap_or(false) || status.current_model.is_some() {
+    if status.ready || status.current_model.is_some() {
         "ready".to_string()
     } else {
         "starting".to_string()
@@ -108,14 +122,16 @@ fn resolve_active_backend(status: &EngineStatus) -> Option<String> {
         .map(|backend| backend.as_str().to_string())
 }
 
-fn resolve_default_model_id(request: &EnsureStartedRequestDto) -> Option<String> {
-    request
+fn normalize_startup_policy(request: &EnsureStartedRequestDto) -> StartupPolicy {
+    let default_model_id = request
         .startup_policy
         .as_ref()
         .and_then(|policy| policy.default_model_id.as_ref())
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
-        .map(str::to_string)
+        .map(str::to_string);
+
+    StartupPolicy { default_model_id }
 }
 
 fn map_engine_status_to_readiness(status: &EngineStatus) -> EngineReadinessDto {
@@ -123,14 +139,14 @@ fn map_engine_status_to_readiness(status: &EngineStatus) -> EngineReadinessDto {
         .state
         .as_deref()
         .and_then(normalize_contract_state)
+        .or_else(|| {
+            status
+                .startup_phase
+                .as_deref()
+                .and_then(normalize_contract_state)
+        })
         .unwrap_or_else(|| resolve_legacy_state(status));
-    let attempt_id = status
-        .attempt_id
-        .as_ref()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| "legacy-attempt".to_string());
+
     let state_since = status
         .state_since
         .as_ref()
@@ -138,19 +154,24 @@ fn map_engine_status_to_readiness(status: &EngineStatus) -> EngineReadinessDto {
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .unwrap_or_else(now_rfc3339);
-    let error_message = status
-        .error_message
-        .clone()
-        .or_else(|| status.last_error.clone());
-    let error_code = status.error_code.clone().or_else(|| {
-        error_message
+
+    let error_message = status.error_message.clone().or_else(|| {
+        status
+            .last_error
             .as_ref()
-            .map(|_| "ENGINE_STATUS_LEGACY_ERROR".to_string())
+            .map(|error| error.message.clone())
     });
-    let retryable = status.retryable.unwrap_or(state != "ready");
+    let error_code = status
+        .error_code
+        .clone()
+        .or_else(|| status.last_error.as_ref().map(|error| error.code.clone()));
+    let retryable = status
+        .retryable
+        .or_else(|| status.last_error.as_ref().map(|error| error.retryable))
+        .unwrap_or(state != "ready");
 
     EngineReadinessDto {
-        attempt_id,
+        attempt_id: status.attempt_id.clone(),
         state,
         state_since,
         active_backend: resolve_active_backend(status),
@@ -187,95 +208,70 @@ pub async fn engine_ensure_started(
     let mode_changed = apply_runtime_mode_preference(&state, runtime_mode).await;
     let client = resolve_client(&app_handle, &state, mode_changed).await?;
 
-    let mut status = client
-        .status()
-        .await
-        .map_err(|error| format!("Failed to query engine status: {error}"))?;
+    let startup_mode = startup_mode_to_engine_mode(request.mode.clone());
+    let startup_policy = normalize_startup_policy(&request);
 
-    let requested_model_id = resolve_default_model_id(&request);
-    if let (Some(active_model_id), Some(default_model_id)) = (
-        status.current_model.as_deref(),
-        requested_model_id.as_deref(),
-    ) {
-        if active_model_id != default_model_id {
-            let baseline = map_engine_status_to_readiness(&status);
-            return Ok(EngineReadinessDto::failed_from(
-                &baseline,
-                "STARTUP_POLICY_CONFLICT",
-                format!(
-                    "Engine already started with model '{}' but startup policy requested '{}'",
-                    active_model_id, default_model_id
-                ),
-                false,
-            ));
+    match client.ensure_started(startup_mode, startup_policy).await {
+        Ok(status) => Ok(map_engine_status_to_readiness(&status)),
+        Err(error) => {
+            let error_message = error.to_string();
+            match client.status().await {
+                Ok(status) => {
+                    let readiness = map_engine_status_to_readiness(&status);
+                    if readiness.state == "failed" {
+                        if readiness.error_message.is_some() {
+                            return Ok(readiness);
+                        }
+                        return Ok(EngineReadinessDto {
+                            error_code: readiness
+                                .error_code
+                                .or_else(|| Some("ENGINE_ENSURE_STARTED_FAILED".to_string())),
+                            error_message: Some(error_message),
+                            ..readiness
+                        });
+                    }
+
+                    Ok(EngineReadinessDto::failed_from(
+                        &readiness,
+                        "ENGINE_ENSURE_STARTED_FAILED",
+                        error_message,
+                        true,
+                    ))
+                }
+                Err(status_error) => Ok(EngineReadinessDto::fallback_failed(format!(
+                    "{error}; then status query failed: {status_error}"
+                ))),
+            }
         }
     }
-
-    if status.current_model.is_none() {
-        let Some(default_model_id) = requested_model_id else {
-            let baseline = map_engine_status_to_readiness(&status);
-            return Ok(EngineReadinessDto::failed_from(
-                &baseline,
-                "DEFAULT_MODEL_REQUIRED",
-                "Startup policy must include default_model_id until engine-native ensure_started is available",
-                false,
-            ));
-        };
-
-        if let Err(error) = client.load_model(&default_model_id).await {
-            let baseline = map_engine_status_to_readiness(&status);
-            return Ok(EngineReadinessDto::failed_from(
-                &baseline,
-                "STARTUP_LOAD_MODEL_FAILED",
-                format!("Failed to load startup model '{default_model_id}': {error}"),
-                true,
-            ));
-        }
-
-        status = client
-            .status()
-            .await
-            .map_err(|error| format!("Failed to query engine status: {error}"))?;
-    }
-
-    let readiness = map_engine_status_to_readiness(&status);
-    if request.mode == StartupModeDto::DirectmlRequired
-        && readiness.active_backend.as_deref() != Some("directml")
-    {
-        return Ok(EngineReadinessDto::failed_from(
-            &readiness,
-            "DIRECTML_REQUIRED_UNAVAILABLE",
-            "directml_required startup policy requested but engine reported non-DirectML backend",
-            false,
-        ));
-    }
-
-    Ok(readiness)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smolpc_engine_client::LastStartupError;
     use smolpc_engine_core::inference::backend::{BackendStatus, InferenceBackend};
 
     fn sample_status() -> EngineStatus {
         EngineStatus {
             ok: true,
-            current_model: None,
-            generating: false,
-            backend_status: BackendStatus::default(),
-            attempt_id: None,
-            state: None,
-            state_since: None,
+            ready: false,
+            attempt_id: "startup-1".to_string(),
+            state: Some("starting".to_string()),
+            startup_phase: Some("starting".to_string()),
+            state_since: Some("2026-03-05T18:00:00Z".to_string()),
             active_backend: None,
             active_model_id: None,
             error_code: None,
             error_message: None,
             retryable: None,
-            ready: None,
-            startup_phase: None,
             last_error: None,
-            engine_api_version: None,
+            engine_api_version: "1.0.0".to_string(),
+            effective_mode: Some("auto".to_string()),
+            effective_startup_policy: Some(StartupPolicy::default()),
+            current_model: None,
+            generating: false,
+            backend_status: BackendStatus::default(),
         }
     }
 
@@ -300,7 +296,7 @@ mod tests {
     #[test]
     fn map_engine_status_prefers_canonical_contract_fields() {
         let mut status = sample_status();
-        status.attempt_id = Some("attempt-7".to_string());
+        status.attempt_id = "attempt-7".to_string();
         status.state = Some("loading_model".to_string());
         status.state_since = Some("2026-03-05T18:00:00Z".to_string());
         status.active_backend = Some("directml".to_string());
@@ -308,7 +304,7 @@ mod tests {
         status.error_code = Some("E_TEST".to_string());
         status.error_message = Some("boom".to_string());
         status.retryable = Some(false);
-        status.ready = Some(true);
+        status.ready = true;
         status.startup_phase = Some("ready".to_string());
         status.current_model = Some("legacy-model".to_string());
         status.backend_status.active_backend = Some(InferenceBackend::Cpu);
@@ -328,15 +324,24 @@ mod tests {
     }
 
     #[test]
-    fn map_engine_status_falls_back_to_legacy_aliases() {
+    fn map_engine_status_falls_back_to_last_error_payload() {
         let mut status = sample_status();
         status.current_model = Some("qwen2.5-coder-1.5b".to_string());
         status.backend_status.active_backend = Some(InferenceBackend::Cpu);
-        status.ready = Some(true);
-        status.last_error = Some("legacy error".to_string());
+        status.ready = true;
+        status.error_code = None;
+        status.error_message = None;
+        status.last_error = Some(LastStartupError {
+            attempt_id: "attempt-4".to_string(),
+            phase: "loading_model".to_string(),
+            code: "STARTUP_LOAD_MODEL_FAILED".to_string(),
+            message: "model missing".to_string(),
+            retryable: true,
+            at: "2026-03-05T18:00:00Z".to_string(),
+        });
 
         let readiness = map_engine_status_to_readiness(&status);
-        assert_eq!(readiness.state, "ready");
+        assert_eq!(readiness.state, "starting");
         assert_eq!(readiness.active_backend.as_deref(), Some("cpu"));
         assert_eq!(
             readiness.active_model_id.as_deref(),
@@ -344,20 +349,22 @@ mod tests {
         );
         assert_eq!(
             readiness.error_code.as_deref(),
-            Some("ENGINE_STATUS_LEGACY_ERROR")
+            Some("STARTUP_LOAD_MODEL_FAILED")
         );
-        assert_eq!(readiness.error_message.as_deref(), Some("legacy error"));
+        assert_eq!(readiness.error_message.as_deref(), Some("model missing"));
+        assert!(readiness.retryable);
     }
 
     #[test]
-    fn resolve_default_model_id_trims_and_validates() {
+    fn normalize_startup_policy_trims_and_validates() {
         let request = EnsureStartedRequestDto {
             mode: StartupModeDto::Auto,
             startup_policy: Some(StartupPolicyDto {
                 default_model_id: Some("  qwen3  ".to_string()),
             }),
         };
-        assert_eq!(resolve_default_model_id(&request).as_deref(), Some("qwen3"));
+        let normalized = normalize_startup_policy(&request);
+        assert_eq!(normalized.default_model_id.as_deref(), Some("qwen3"));
 
         let missing = EnsureStartedRequestDto {
             mode: StartupModeDto::Auto,
@@ -365,7 +372,8 @@ mod tests {
                 default_model_id: Some("  ".to_string()),
             }),
         };
-        assert!(resolve_default_model_id(&missing).is_none());
+        let normalized_missing = normalize_startup_policy(&missing);
+        assert!(normalized_missing.default_model_id.is_none());
     }
 
     #[test]
