@@ -214,6 +214,13 @@ fn find_genai_dll() -> Option<PathBuf> {
         }
     }
 
+    if let Some(path) = std::env::var_os("SMOLPC_ORT_DYLIB_DIR") {
+        let candidate = PathBuf::from(path).join("onnxruntime-genai.dll");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
     let mut candidates = Vec::new();
 
     if let Ok(exe) = std::env::current_exe() {

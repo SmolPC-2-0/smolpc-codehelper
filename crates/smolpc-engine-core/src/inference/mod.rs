@@ -52,6 +52,14 @@ pub fn init_onnx_runtime(resource_dir: Option<&Path>) -> Result<(), String> {
             log::info!("Initializing ONNX Runtime from: {}", dylib_path.display());
 
             #[cfg(target_os = "windows")]
+            {
+                // Keep GenAI lookup anchored to the exact ORT directory to avoid mixed DLL sets.
+                if let Some(parent) = dylib_path.parent() {
+                    std::env::set_var("SMOLPC_ORT_DYLIB_DIR", parent);
+                }
+            }
+
+            #[cfg(target_os = "windows")]
             preload_directml_dll(resource_dir, &dylib_path);
 
             match ort::init_from(dylib_path.to_string_lossy().to_string()) {

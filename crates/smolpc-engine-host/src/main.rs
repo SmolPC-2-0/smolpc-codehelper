@@ -527,9 +527,57 @@ impl EngineState {
 
         let force_override = parse_force_override();
         let forced_device_id = parse_dml_device_id_env();
-        let probe = self
+        let mut probe = self
             .wait_for_startup_probe(Duration::from_millis(STARTUP_PROBE_WAIT_MS))
             .await;
+        let probe_ready = self.startup_probe.lock().await.is_some();
+        if directml_required && !probe_ready {
+            log::warn!(
+                "Startup backend probe not ready within {}ms while loading '{}'; running on-demand probe",
+                STARTUP_PROBE_WAIT_MS,
+                model_id
+            );
+            probe = tokio::task::spawn_blocking(probe_backend_capabilities)
+                .await
+                .unwrap_or_else(|error| {
+                    log::warn!("On-demand backend probe task failed: {error}");
+                    BackendProbeResult::default()
+                });
+
+            {
+                let mut probe_guard = self.startup_probe.lock().await;
+                if probe_guard.is_none() {
+                    *probe_guard = Some(probe.clone());
+                    self.startup_probe_ready.notify_waiters();
+                }
+            }
+
+            {
+                let mut status = self.backend_status.lock().await;
+                status.available_backends = probe.available_backends.clone();
+                status.directml_probe_passed = Some(probe.directml_candidate.is_some());
+                status.directml_probe_error = if probe.directml_candidate.is_some() {
+                    None
+                } else {
+                    Some("No DirectML-capable adapter detected".to_string())
+                };
+                status.directml_probe_at = Some(Utc::now().to_rfc3339());
+                status.selected_device_id =
+                    probe.directml_candidate.as_ref().map(|c| c.device_id);
+                status.selected_device_name = probe
+                    .directml_candidate
+                    .as_ref()
+                    .map(|c| c.device_name.clone());
+                if status.selection_state.as_deref() == Some("pending") {
+                    status.selection_state = Some("ready".to_string());
+                    status.selection_reason = Some(if probe.directml_candidate.is_some() {
+                        "startup_probe_ready".to_string()
+                    } else {
+                        "startup_probe_cpu_only".to_string()
+                    });
+                }
+            }
+        }
 
         let mut available_backends = probe.available_backends.clone();
         if !available_backends.contains(&InferenceBackend::Cpu) {
