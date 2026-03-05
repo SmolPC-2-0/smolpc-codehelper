@@ -13,6 +13,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 const ENGINE_PROTOCOL_VERSION: &str = "1.0.0";
+const ENGINE_API_VERSION: &str = "1.0.0";
 const ENGINE_HOST_BASENAME: &str = "smolpc-engine-host";
 const SPAWN_LOCK_FILENAME: &str = "engine-spawn.lock";
 const SPAWN_LOCK_WAIT: Duration = Duration::from_secs(10);
@@ -21,6 +22,8 @@ const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
 const DML_DEVICE_ENV: &str = "SMOLPC_DML_DEVICE_ID";
 const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
 const SHARED_MODELS_DIR: &str = "models";
+const DEFAULT_WAIT_READY_TIMEOUT: Duration = Duration::from_secs(60);
+const DEFAULT_WAIT_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RuntimeModePreference {
@@ -36,6 +39,73 @@ impl RuntimeModePreference {
             Self::Auto => None,
             Self::Cpu => Some("cpu"),
             Self::Dml => Some("dml"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnsureStartedMode {
+    Auto,
+    DirectmlRequired,
+}
+
+impl Default for EnsureStartedMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, Default)]
+pub struct EnsureStartedPolicy {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_model_id: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Default)]
+pub struct EnsureStartedRequest {
+    #[serde(default)]
+    pub mode: EnsureStartedMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub startup_policy: Option<EnsureStartedPolicy>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct EnsureStartedResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub engine_api_version: Option<String>,
+    #[serde(default)]
+    pub attempt_id: Option<String>,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub ready: Option<bool>,
+    #[serde(default)]
+    pub startup_phase: Option<String>,
+    #[serde(default)]
+    pub active_backend: Option<String>,
+    #[serde(default)]
+    pub active_model_id: Option<String>,
+    #[serde(default)]
+    pub error_code: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
+    #[serde(default)]
+    pub retryable: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct WaitReadyOptions {
+    pub timeout: Duration,
+    pub poll_interval: Duration,
+}
+
+impl Default for WaitReadyOptions {
+    fn default() -> Self {
+        Self {
+            timeout: DEFAULT_WAIT_READY_TIMEOUT,
+            poll_interval: DEFAULT_WAIT_READY_POLL_INTERVAL,
         }
     }
 }
@@ -80,17 +150,105 @@ pub struct EngineConnectOptions {
 pub struct EngineMeta {
     pub ok: bool,
     pub protocol_version: String,
+    #[serde(default)]
+    pub engine_api_version: Option<String>,
     pub engine_version: String,
     pub pid: u32,
     pub busy: bool,
 }
 
+impl EngineMeta {
+    pub fn effective_engine_api_version(&self) -> &str {
+        self.engine_api_version
+            .as_deref()
+            .unwrap_or(&self.protocol_version)
+    }
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct EngineStatus {
     pub ok: bool,
+    #[serde(default)]
     pub current_model: Option<String>,
+    #[serde(default)]
     pub generating: bool,
+    #[serde(default)]
     pub backend_status: BackendStatus,
+    #[serde(default)]
+    pub engine_api_version: Option<String>,
+    #[serde(default)]
+    pub attempt_id: Option<String>,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub state_since: Option<String>,
+    #[serde(default)]
+    pub active_backend: Option<String>,
+    #[serde(default)]
+    pub active_model_id: Option<String>,
+    #[serde(default)]
+    pub error_code: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
+    #[serde(default)]
+    pub retryable: Option<bool>,
+    #[serde(default)]
+    pub ready: Option<bool>,
+    #[serde(default)]
+    pub startup_phase: Option<String>,
+    #[serde(default)]
+    pub last_error: Option<String>,
+}
+
+impl EngineStatus {
+    pub fn is_ready(&self) -> bool {
+        if self.ready == Some(true) {
+            return true;
+        }
+
+        if self
+            .state
+            .as_deref()
+            .is_some_and(|state| state.eq_ignore_ascii_case("ready"))
+        {
+            return true;
+        }
+
+        self.current_model.is_some()
+    }
+
+    pub fn is_failed(&self) -> bool {
+        if self
+            .state
+            .as_deref()
+            .is_some_and(|state| state.eq_ignore_ascii_case("failed"))
+        {
+            return true;
+        }
+
+        self.error_code.is_some() || self.error_message.is_some() || self.last_error.is_some()
+    }
+
+    pub fn failure_message(&self) -> Option<String> {
+        if let Some(code) = self.error_code.as_deref() {
+            let message = self
+                .error_message
+                .as_deref()
+                .or(self.last_error.as_deref())
+                .unwrap_or("Engine startup failed");
+            return Some(format!("{code}: {message}"));
+        }
+
+        self.error_message
+            .clone()
+            .or_else(|| self.last_error.clone())
+    }
+
+    pub fn effective_engine_api_version<'a>(&'a self, meta: &'a EngineMeta) -> &'a str {
+        self.engine_api_version
+            .as_deref()
+            .unwrap_or_else(|| meta.effective_engine_api_version())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -156,6 +314,76 @@ impl EngineClient {
             .await?;
         let response = ensure_success(response, "/engine/status").await?;
         Ok(response.json::<EngineStatus>().await?)
+    }
+
+    pub async fn ensure_started(
+        &self,
+        request: &EnsureStartedRequest,
+    ) -> Result<EnsureStartedResponse, EngineClientError> {
+        let response = self
+            .http
+            .post(self.url("/engine/ensure-started"))
+            .header(AUTHORIZATION, self.auth_header())
+            .header(CONTENT_TYPE, "application/json")
+            .body(serde_json::to_string(request)?)
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(EngineClientError::Message(
+                "Engine endpoint /engine/ensure-started is unavailable; upgrade engine host for startup contract support"
+                    .to_string(),
+            ));
+        }
+
+        let response = ensure_success(response, "/engine/ensure-started").await?;
+        Ok(response.json::<EnsureStartedResponse>().await?)
+    }
+
+    pub async fn wait_ready(
+        &self,
+        options: WaitReadyOptions,
+    ) -> Result<EngineStatus, EngineClientError> {
+        let timeout = options.timeout.max(Duration::from_millis(1));
+        let poll_interval = options
+            .poll_interval
+            .max(Duration::from_millis(50))
+            .min(Duration::from_secs(5));
+        let started = Instant::now();
+
+        loop {
+            let status = self.status().await?;
+
+            if status.is_ready() {
+                return Ok(status);
+            }
+
+            if status.is_failed() {
+                let message = status
+                    .failure_message()
+                    .unwrap_or_else(|| "Engine startup failed".to_string());
+                return Err(EngineClientError::Message(message));
+            }
+
+            if started.elapsed() >= timeout {
+                let state = status
+                    .state
+                    .clone()
+                    .or(status.startup_phase.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let detail = status
+                    .failure_message()
+                    .unwrap_or_else(|| "No additional error details".to_string());
+                return Err(EngineClientError::Message(format!(
+                    "Timed out waiting for engine readiness after {}s (state={}): {}",
+                    timeout.as_secs_f32(),
+                    state,
+                    detail
+                )));
+            }
+
+            tokio::time::sleep(poll_interval).await;
+        }
     }
 
     pub async fn load_model(&self, model_id: &str) -> Result<(), EngineClientError> {
@@ -564,6 +792,22 @@ fn protocol_major_matches(actual: &str, expected: &str) -> bool {
     let a = actual.split('.').next().unwrap_or(actual);
     let e = expected.split('.').next().unwrap_or(expected);
     a == e
+}
+
+pub fn version_major(version: &str) -> Option<u64> {
+    version
+        .trim()
+        .split('.')
+        .next()
+        .and_then(|major| major.parse::<u64>().ok())
+}
+
+pub fn engine_api_major_compatible(actual_version: &str, required_major: u64) -> bool {
+    version_major(actual_version).is_some_and(|major| major >= required_major)
+}
+
+pub fn expected_engine_api_major() -> Option<u64> {
+    version_major(ENGINE_API_VERSION)
 }
 
 fn parse_error_message(value: &serde_json::Value) -> Option<String> {
@@ -1031,6 +1275,81 @@ mod tests {
         };
         assert!(message.contains("SMOLPC_FORCE_EP=cpu"));
         assert!(message.contains("busy"));
+    }
+
+    #[test]
+    fn version_major_extracts_major_component() {
+        assert_eq!(version_major("2.3.4"), Some(2));
+        assert_eq!(version_major("10"), Some(10));
+        assert_eq!(version_major(""), None);
+        assert_eq!(version_major("beta"), None);
+    }
+
+    #[test]
+    fn engine_api_major_compatible_requires_equal_or_higher_major() {
+        assert!(engine_api_major_compatible("2.0.0", 2));
+        assert!(engine_api_major_compatible("3.1.9", 2));
+        assert!(!engine_api_major_compatible("1.9.9", 2));
+        assert!(!engine_api_major_compatible("unknown", 2));
+    }
+
+    #[test]
+    fn engine_status_readiness_prefers_contract_state_then_legacy_model() {
+        let ready_by_state = EngineStatus {
+            ok: true,
+            current_model: None,
+            generating: false,
+            backend_status: BackendStatus::default(),
+            engine_api_version: Some("1.0.0".to_string()),
+            attempt_id: Some("attempt-1".to_string()),
+            state: Some("ready".to_string()),
+            state_since: None,
+            active_backend: Some("directml".to_string()),
+            active_model_id: Some("model-a".to_string()),
+            error_code: None,
+            error_message: None,
+            retryable: None,
+            ready: Some(true),
+            startup_phase: Some("ready".to_string()),
+            last_error: None,
+        };
+        assert!(ready_by_state.is_ready());
+
+        let ready_by_legacy_model = EngineStatus {
+            state: Some("starting".to_string()),
+            ready: None,
+            current_model: Some("legacy-model".to_string()),
+            ..ready_by_state.clone()
+        };
+        assert!(ready_by_legacy_model.is_ready());
+    }
+
+    #[test]
+    fn engine_status_failure_message_prefers_error_code_and_message() {
+        let status = EngineStatus {
+            ok: true,
+            current_model: None,
+            generating: false,
+            backend_status: BackendStatus::default(),
+            engine_api_version: Some("1.0.0".to_string()),
+            attempt_id: Some("attempt-2".to_string()),
+            state: Some("failed".to_string()),
+            state_since: None,
+            active_backend: None,
+            active_model_id: None,
+            error_code: Some("MODEL_MISSING".to_string()),
+            error_message: Some("Default model file not found".to_string()),
+            retryable: Some(false),
+            ready: Some(false),
+            startup_phase: Some("loading_model".to_string()),
+            last_error: None,
+        };
+
+        assert!(status.is_failed());
+        assert_eq!(
+            status.failure_message().as_deref(),
+            Some("MODEL_MISSING: Default model file not found")
+        );
     }
 
     #[test]

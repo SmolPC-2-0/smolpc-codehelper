@@ -1,6 +1,7 @@
 mod benchmark;
 mod commands;
 mod hardware;
+mod launcher;
 mod security;
 
 use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_benchmark};
@@ -11,6 +12,8 @@ use commands::inference::{
     inference_cancel, inference_generate, is_generating, list_models, load_model,
     set_inference_runtime_mode, unload_model, InferenceState,
 };
+use commands::launcher::{launcher_launch_or_focus, launcher_list_apps};
+use launcher::orchestrator::LauncherState;
 #[allow(clippy::missing_panics_doc)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -29,6 +32,7 @@ pub fn run() {
         })
         .manage(HardwareCache::default())
         .manage(InferenceState::default())
+        .manage(LauncherState::default())
         .invoke_handler(tauri::generate_handler![
             read,
             write,
@@ -48,7 +52,9 @@ pub fn run() {
             get_current_model,
             check_model_exists,
             get_inference_backend_status,
-            set_inference_runtime_mode
+            set_inference_runtime_mode,
+            launcher_list_apps,
+            launcher_launch_or_focus
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
