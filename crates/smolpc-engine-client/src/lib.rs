@@ -43,56 +43,28 @@ impl RuntimeModePreference {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum EnsureStartedMode {
+pub enum StartupMode {
+    #[default]
     Auto,
     DirectmlRequired,
 }
 
-impl Default for EnsureStartedMode {
-    fn default() -> Self {
-        Self::Auto
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, Default)]
-pub struct EnsureStartedPolicy {
-    #[serde(skip_serializing_if = "Option::is_none")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct StartupPolicy {
     pub default_model_id: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, Default)]
-pub struct EnsureStartedRequest {
-    #[serde(default)]
-    pub mode: EnsureStartedMode,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub startup_policy: Option<EnsureStartedPolicy>,
-}
-
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct EnsureStartedResponse {
-    pub ok: bool,
-    #[serde(default)]
-    pub engine_api_version: Option<String>,
-    #[serde(default)]
-    pub attempt_id: Option<String>,
-    #[serde(default)]
-    pub state: Option<String>,
-    #[serde(default)]
-    pub ready: Option<bool>,
-    #[serde(default)]
-    pub startup_phase: Option<String>,
-    #[serde(default)]
-    pub active_backend: Option<String>,
-    #[serde(default)]
-    pub active_model_id: Option<String>,
-    #[serde(default)]
-    pub error_code: Option<String>,
-    #[serde(default)]
-    pub error_message: Option<String>,
-    #[serde(default)]
-    pub retryable: Option<bool>,
+pub struct LastStartupError {
+    pub attempt_id: String,
+    pub phase: String,
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
+    pub at: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -150,8 +122,8 @@ pub struct EngineConnectOptions {
 pub struct EngineMeta {
     pub ok: bool,
     pub protocol_version: String,
-    #[serde(default)]
-    pub engine_api_version: Option<String>,
+    #[serde(default = "default_engine_api_version")]
+    pub engine_api_version: String,
     pub engine_version: String,
     pub pid: u32,
     pub busy: bool,
@@ -159,9 +131,7 @@ pub struct EngineMeta {
 
 impl EngineMeta {
     pub fn effective_engine_api_version(&self) -> &str {
-        self.engine_api_version
-            .as_deref()
-            .unwrap_or(&self.protocol_version)
+        &self.engine_api_version
     }
 }
 
@@ -169,17 +139,13 @@ impl EngineMeta {
 pub struct EngineStatus {
     pub ok: bool,
     #[serde(default)]
-    pub current_model: Option<String>,
-    #[serde(default)]
-    pub generating: bool,
-    #[serde(default)]
-    pub backend_status: BackendStatus,
-    #[serde(default)]
-    pub engine_api_version: Option<String>,
-    #[serde(default)]
-    pub attempt_id: Option<String>,
+    pub ready: bool,
+    #[serde(default = "default_attempt_id")]
+    pub attempt_id: String,
     #[serde(default)]
     pub state: Option<String>,
+    #[serde(default)]
+    pub startup_phase: Option<String>,
     #[serde(default)]
     pub state_since: Option<String>,
     #[serde(default)]
@@ -193,16 +159,21 @@ pub struct EngineStatus {
     #[serde(default)]
     pub retryable: Option<bool>,
     #[serde(default)]
-    pub ready: Option<bool>,
+    pub last_error: Option<LastStartupError>,
+    #[serde(default = "default_engine_api_version")]
+    pub engine_api_version: String,
     #[serde(default)]
-    pub startup_phase: Option<String>,
+    pub effective_mode: Option<String>,
     #[serde(default)]
-    pub last_error: Option<String>,
+    pub effective_startup_policy: Option<StartupPolicy>,
+    pub current_model: Option<String>,
+    pub generating: bool,
+    pub backend_status: BackendStatus,
 }
 
 impl EngineStatus {
     pub fn is_ready(&self) -> bool {
-        if self.ready == Some(true) {
+        if self.ready {
             return true;
         }
 
@@ -230,24 +201,19 @@ impl EngineStatus {
     }
 
     pub fn failure_message(&self) -> Option<String> {
+        if let Some(last_error) = self.last_error.as_ref() {
+            return Some(format!("{}: {}", last_error.code, last_error.message));
+        }
+
         if let Some(code) = self.error_code.as_deref() {
             let message = self
                 .error_message
                 .as_deref()
-                .or(self.last_error.as_deref())
                 .unwrap_or("Engine startup failed");
             return Some(format!("{code}: {message}"));
         }
 
-        self.error_message
-            .clone()
-            .or_else(|| self.last_error.clone())
-    }
-
-    pub fn effective_engine_api_version<'a>(&'a self, meta: &'a EngineMeta) -> &'a str {
-        self.engine_api_version
-            .as_deref()
-            .unwrap_or_else(|| meta.effective_engine_api_version())
+        self.error_message.clone()
     }
 }
 
@@ -318,26 +284,76 @@ impl EngineClient {
 
     pub async fn ensure_started(
         &self,
-        request: &EnsureStartedRequest,
-    ) -> Result<EnsureStartedResponse, EngineClientError> {
+        mode: StartupMode,
+        startup_policy: StartupPolicy,
+    ) -> Result<EngineStatus, EngineClientError> {
         let response = self
             .http
             .post(self.url("/engine/ensure-started"))
             .header(AUTHORIZATION, self.auth_header())
             .header(CONTENT_TYPE, "application/json")
-            .body(serde_json::to_string(request)?)
+            .body(
+                serde_json::json!({
+                    "mode": mode,
+                    "startup_policy": startup_policy,
+                })
+                .to_string(),
+            )
             .send()
             .await?;
 
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(EngineClientError::Message(
-                "Engine endpoint /engine/ensure-started is unavailable; upgrade engine host for startup contract support"
-                    .to_string(),
-            ));
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        let parsed_payload = serde_json::from_str::<EngineStatus>(&body).ok();
+
+        if status.is_success() {
+            return parsed_payload.ok_or_else(|| {
+                EngineClientError::Message(
+                    "/engine/ensure-started returned success but payload was invalid".to_string(),
+                )
+            });
         }
 
-        let response = ensure_success(response, "/engine/ensure-started").await?;
-        Ok(response.json::<EnsureStartedResponse>().await?)
+        if let Some(payload) = parsed_payload {
+            let code = payload
+                .error_code
+                .clone()
+                .unwrap_or_else(|| "ENGINE_STARTUP_FAILED".to_string());
+            let message = payload.error_message.clone().unwrap_or_else(|| {
+                format!(
+                    "/engine/ensure-started failed with HTTP {}",
+                    status.as_u16()
+                )
+            });
+            return Err(EngineClientError::Message(format!(
+                "/engine/ensure-started failed with HTTP {} [{}]: {}",
+                status.as_u16(),
+                code,
+                message
+            )));
+        }
+
+        let detail = if body.trim().is_empty() {
+            None
+        } else if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
+            parse_error_message(&value).or_else(|| Some(value.to_string()))
+        } else {
+            Some(body)
+        };
+
+        let message = match detail {
+            Some(detail) => format!(
+                "/engine/ensure-started failed with HTTP {}: {}",
+                status.as_u16(),
+                detail
+            ),
+            None => format!(
+                "/engine/ensure-started failed with HTTP {}",
+                status.as_u16()
+            ),
+        };
+
+        Err(EngineClientError::Message(message))
     }
 
     pub async fn wait_ready(
@@ -583,6 +599,14 @@ impl EngineClient {
         Ok(host_metrics
             .unwrap_or_else(|| fallback_stream_metrics(started, emitted_chunks, first_chunk_at)))
     }
+}
+
+fn default_engine_api_version() -> String {
+    ENGINE_API_VERSION.to_string()
+}
+
+fn default_attempt_id() -> String {
+    "unknown".to_string()
 }
 
 async fn ensure_success(
@@ -1294,65 +1318,6 @@ mod tests {
     }
 
     #[test]
-    fn engine_status_readiness_prefers_contract_state_then_legacy_model() {
-        let ready_by_state = EngineStatus {
-            ok: true,
-            current_model: None,
-            generating: false,
-            backend_status: BackendStatus::default(),
-            engine_api_version: Some("1.0.0".to_string()),
-            attempt_id: Some("attempt-1".to_string()),
-            state: Some("ready".to_string()),
-            state_since: None,
-            active_backend: Some("directml".to_string()),
-            active_model_id: Some("model-a".to_string()),
-            error_code: None,
-            error_message: None,
-            retryable: None,
-            ready: Some(true),
-            startup_phase: Some("ready".to_string()),
-            last_error: None,
-        };
-        assert!(ready_by_state.is_ready());
-
-        let ready_by_legacy_model = EngineStatus {
-            state: Some("starting".to_string()),
-            ready: None,
-            current_model: Some("legacy-model".to_string()),
-            ..ready_by_state.clone()
-        };
-        assert!(ready_by_legacy_model.is_ready());
-    }
-
-    #[test]
-    fn engine_status_failure_message_prefers_error_code_and_message() {
-        let status = EngineStatus {
-            ok: true,
-            current_model: None,
-            generating: false,
-            backend_status: BackendStatus::default(),
-            engine_api_version: Some("1.0.0".to_string()),
-            attempt_id: Some("attempt-2".to_string()),
-            state: Some("failed".to_string()),
-            state_since: None,
-            active_backend: None,
-            active_model_id: None,
-            error_code: Some("MODEL_MISSING".to_string()),
-            error_message: Some("Default model file not found".to_string()),
-            retryable: Some(false),
-            ready: Some(false),
-            startup_phase: Some("loading_model".to_string()),
-            last_error: None,
-        };
-
-        assert!(status.is_failed());
-        assert_eq!(
-            status.failure_message().as_deref(),
-            Some("MODEL_MISSING: Default model file not found")
-        );
-    }
-
-    #[test]
     fn load_or_create_token_creates_private_file() {
         let unique = format!(
             "smolpc-engine-client-token-test-{}-{}",
@@ -1395,5 +1360,105 @@ mod tests {
 
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn startup_mode_serializes_as_contract_value() {
+        let serialized =
+            serde_json::to_string(&StartupMode::DirectmlRequired).expect("serialize startup mode");
+        assert_eq!(serialized, "\"directml_required\"");
+    }
+
+    #[test]
+    fn engine_status_parses_canonical_readiness_fields() {
+        let payload = serde_json::json!({
+            "ok": true,
+            "ready": true,
+            "attempt_id": "startup-1-1",
+            "state": "ready",
+            "startup_phase": "ready",
+            "state_since": "2026-03-05T18:45:00Z",
+            "active_backend": "cpu",
+            "active_model_id": "qwen2.5-coder-1.5b",
+            "error_code": null,
+            "error_message": null,
+            "retryable": null,
+            "last_error": null,
+            "engine_api_version": "1.0.0",
+            "current_model": "qwen2.5-coder-1.5b",
+            "generating": false,
+            "backend_status": {}
+        });
+
+        let status: EngineStatus =
+            serde_json::from_value(payload).expect("status payload should deserialize");
+        assert!(status.ready);
+        assert_eq!(status.attempt_id, "startup-1-1");
+        assert_eq!(status.state.as_deref(), Some("ready"));
+        assert_eq!(
+            status.active_model_id.as_deref(),
+            Some("qwen2.5-coder-1.5b")
+        );
+        assert_eq!(status.engine_api_version, "1.0.0");
+    }
+
+    #[test]
+    fn engine_status_keeps_legacy_payload_compatible() {
+        let payload = serde_json::json!({
+            "ok": true,
+            "current_model": null,
+            "generating": false,
+            "backend_status": {}
+        });
+        let status: EngineStatus =
+            serde_json::from_value(payload).expect("legacy payload should deserialize");
+        assert!(!status.ready);
+        assert_eq!(status.attempt_id, "unknown");
+        assert_eq!(status.engine_api_version, ENGINE_API_VERSION);
+        assert!(status.state.is_none());
+    }
+
+    #[test]
+    fn engine_status_readiness_prefers_ready_flag_and_state() {
+        let payload = serde_json::json!({
+            "ok": true,
+            "ready": true,
+            "attempt_id": "attempt-1",
+            "state": "ready",
+            "current_model": null,
+            "generating": false,
+            "backend_status": {}
+        });
+        let status: EngineStatus =
+            serde_json::from_value(payload).expect("status payload should deserialize");
+        assert!(status.is_ready());
+    }
+
+    #[test]
+    fn engine_status_failure_message_prefers_last_startup_error() {
+        let payload = serde_json::json!({
+            "ok": true,
+            "ready": false,
+            "attempt_id": "attempt-2",
+            "state": "failed",
+            "last_error": {
+                "attempt_id": "attempt-2",
+                "phase": "loading_model",
+                "code": "MODEL_MISSING",
+                "message": "Default model file missing",
+                "retryable": false,
+                "at": "2026-03-05T18:00:00Z"
+            },
+            "current_model": null,
+            "generating": false,
+            "backend_status": {}
+        });
+        let status: EngineStatus =
+            serde_json::from_value(payload).expect("status payload should deserialize");
+        assert!(status.is_failed());
+        assert_eq!(
+            status.failure_message().as_deref(),
+            Some("MODEL_MISSING: Default model file missing")
+        );
     }
 }

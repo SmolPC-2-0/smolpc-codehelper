@@ -2,8 +2,8 @@ use super::catalog;
 use super::types::{EngineApiGateInfo, LaunchAction, LauncherLaunchResult, LauncherManifestApp};
 use smolpc_engine_client::{
     connect_or_spawn, engine_api_major_compatible, version_major, EngineClient,
-    EngineConnectOptions, EngineMeta, EngineStatus, EnsureStartedRequest, RuntimeModePreference,
-    WaitReadyOptions,
+    EngineConnectOptions, EngineMeta, EngineStatus, RuntimeModePreference, StartupMode,
+    StartupPolicy, WaitReadyOptions,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -44,7 +44,7 @@ pub async fn launch_or_focus(
     let client = resolve_engine_client(app_handle, state).await?;
 
     client
-        .ensure_started(&EnsureStartedRequest::default())
+        .ensure_started(StartupMode::Auto, StartupPolicy::default())
         .await
         .map_err(|error| format!("Engine ensure_started failed: {error}"))?;
 
@@ -80,7 +80,7 @@ pub async fn launch_or_focus(
         app_id: app.app_id,
         action,
         readiness_state: ready_status.state.or(ready_status.startup_phase),
-        readiness_attempt_id: ready_status.attempt_id,
+        readiness_attempt_id: Some(ready_status.attempt_id),
         engine_api_gate: gate,
     })
 }
@@ -149,10 +149,16 @@ fn evaluate_engine_api_gate(
     meta: &EngineMeta,
     status: &EngineStatus,
 ) -> Result<EngineApiGateInfo, String> {
-    let (actual_version, source) = if let Some(version) = status.engine_api_version.as_deref() {
-        (version.to_string(), "status.engine_api_version".to_string())
-    } else if let Some(version) = meta.engine_api_version.as_deref() {
-        (version.to_string(), "meta.engine_api_version".to_string())
+    let (actual_version, source) = if !status.engine_api_version.trim().is_empty() {
+        (
+            status.engine_api_version.clone(),
+            "status.engine_api_version".to_string(),
+        )
+    } else if !meta.engine_api_version.trim().is_empty() {
+        (
+            meta.engine_api_version.clone(),
+            "meta.engine_api_version".to_string(),
+        )
     } else {
         (
             meta.protocol_version.clone(),
@@ -313,32 +319,34 @@ mod tests {
         }
     }
 
-    fn ready_status(engine_api_version: Option<&str>) -> EngineStatus {
+    fn ready_status(engine_api_version: &str) -> EngineStatus {
         EngineStatus {
             ok: true,
-            current_model: Some("qwen3-4b-instruct-2507".to_string()),
-            generating: false,
-            backend_status: Default::default(),
-            engine_api_version: engine_api_version.map(ToString::to_string),
-            attempt_id: Some("attempt-1".to_string()),
+            ready: true,
+            attempt_id: "attempt-1".to_string(),
             state: Some("ready".to_string()),
+            startup_phase: Some("ready".to_string()),
             state_since: None,
             active_backend: Some("directml".to_string()),
             active_model_id: Some("qwen3-4b-instruct-2507".to_string()),
             error_code: None,
             error_message: None,
             retryable: Some(true),
-            ready: Some(true),
-            startup_phase: Some("ready".to_string()),
             last_error: None,
+            engine_api_version: engine_api_version.to_string(),
+            effective_mode: Some("auto".to_string()),
+            effective_startup_policy: Some(StartupPolicy::default()),
+            current_model: Some("qwen3-4b-instruct-2507".to_string()),
+            generating: false,
+            backend_status: Default::default(),
         }
     }
 
-    fn meta_with_versions(engine_api_version: Option<&str>, protocol_version: &str) -> EngineMeta {
+    fn meta_with_versions(engine_api_version: &str, protocol_version: &str) -> EngineMeta {
         EngineMeta {
             ok: true,
             protocol_version: protocol_version.to_string(),
-            engine_api_version: engine_api_version.map(ToString::to_string),
+            engine_api_version: engine_api_version.to_string(),
             engine_version: "0.1.0".to_string(),
             pid: 1234,
             busy: false,
@@ -348,8 +356,8 @@ mod tests {
     #[test]
     fn evaluate_engine_api_gate_accepts_matching_major() {
         let app = app_with_required_major(1);
-        let meta = meta_with_versions(Some("1.2.0"), "1.0.0");
-        let status = ready_status(Some("1.1.0"));
+        let meta = meta_with_versions("1.2.0", "1.0.0");
+        let status = ready_status("1.1.0");
 
         let gate = evaluate_engine_api_gate(&app, &meta, &status).expect("compatible versions");
         assert_eq!(gate.required_major, Some(1));
@@ -360,8 +368,8 @@ mod tests {
     #[test]
     fn evaluate_engine_api_gate_rejects_incompatible_major() {
         let app = app_with_required_major(2);
-        let meta = meta_with_versions(Some("1.9.0"), "1.0.0");
-        let status = ready_status(Some("1.9.0"));
+        let meta = meta_with_versions("1.9.0", "1.0.0");
+        let status = ready_status("1.9.0");
 
         let error =
             evaluate_engine_api_gate(&app, &meta, &status).expect_err("lower major must fail");
@@ -371,8 +379,8 @@ mod tests {
     #[test]
     fn evaluate_engine_api_gate_uses_protocol_fallback_when_api_version_missing() {
         let app = app_with_required_major(1);
-        let meta = meta_with_versions(None, "1.0.0");
-        let status = ready_status(None);
+        let meta = meta_with_versions("", "1.0.0");
+        let status = ready_status("");
 
         let gate = evaluate_engine_api_gate(&app, &meta, &status)
             .expect("protocol fallback should still gate by major");
