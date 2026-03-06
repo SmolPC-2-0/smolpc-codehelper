@@ -40,16 +40,17 @@ if (Test-Path $appCargoPath) {
     }
 }
 
+$hostImportPattern = "(use\s+smolpc_engine_host\b|smolpc_engine_host::)"
 $hostImportMatches = @()
 if (Get-Command rg -ErrorAction SilentlyContinue) {
-    $rgMatches = rg --line-number --glob "*.rs" "smolpc_engine_host" "apps/codehelper/src-tauri/src"
+    $rgMatches = rg --line-number --glob "*.rs" $hostImportPattern "apps/codehelper/src-tauri/src"
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rgMatches)) {
         $hostImportMatches = @($rgMatches)
     }
 } else {
     $hostImportMatches = @(
         Get-ChildItem -Path "apps/codehelper/src-tauri/src" -Recurse -Filter "*.rs" |
-            Select-String -Pattern "smolpc_engine_host" |
+            Select-String -Pattern $hostImportPattern -CaseSensitive |
             ForEach-Object { "{0}:{1}:{2}" -f $_.Path, $_.LineNumber, $_.Line.Trim() }
     )
 }
