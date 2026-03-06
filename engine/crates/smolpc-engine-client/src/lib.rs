@@ -43,6 +43,43 @@ impl RuntimeModePreference {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeEnvOverrides {
+    pub runtime_mode: RuntimeModePreference,
+    pub dml_device_id: Option<i32>,
+}
+
+impl Default for RuntimeEnvOverrides {
+    fn default() -> Self {
+        Self {
+            runtime_mode: RuntimeModePreference::Auto,
+            dml_device_id: None,
+        }
+    }
+}
+
+fn parse_runtime_mode_override(value: &str) -> Option<RuntimeModePreference> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "cpu" => Some(RuntimeModePreference::Cpu),
+        "dml" | "directml" => Some(RuntimeModePreference::Dml),
+        _ => None,
+    }
+}
+
+pub fn read_runtime_env_overrides() -> RuntimeEnvOverrides {
+    let runtime_mode = std::env::var(FORCE_EP_ENV)
+        .ok()
+        .and_then(|value| parse_runtime_mode_override(&value))
+        .unwrap_or(RuntimeModePreference::Auto);
+    let dml_device_id = std::env::var(DML_DEVICE_ENV)
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok());
+    RuntimeEnvOverrides {
+        runtime_mode,
+        dml_device_id,
+    }
+}
+
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum StartupMode {
@@ -1213,6 +1250,117 @@ fn resolve_host_binary(options: &EngineConnectOptions) -> Result<PathBuf, Engine
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::{Mutex, OnceLock};
+
+    #[allow(unused_unsafe)]
+    fn set_env_var(name: &str, value: &str) {
+        unsafe {
+            std::env::set_var(name, value);
+        }
+    }
+
+    #[allow(unused_unsafe)]
+    fn remove_env_var(name: &str) {
+        unsafe {
+            std::env::remove_var(name);
+        }
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct RuntimeEnvGuard {
+        previous_force_ep: Option<String>,
+        previous_dml_device: Option<String>,
+    }
+
+    impl RuntimeEnvGuard {
+        fn capture() -> Self {
+            Self {
+                previous_force_ep: std::env::var(FORCE_EP_ENV).ok(),
+                previous_dml_device: std::env::var(DML_DEVICE_ENV).ok(),
+            }
+        }
+    }
+
+    impl Drop for RuntimeEnvGuard {
+        fn drop(&mut self) {
+            match self.previous_force_ep.as_deref() {
+                Some(value) => set_env_var(FORCE_EP_ENV, value),
+                None => remove_env_var(FORCE_EP_ENV),
+            }
+
+            match self.previous_dml_device.as_deref() {
+                Some(value) => set_env_var(DML_DEVICE_ENV, value),
+                None => remove_env_var(DML_DEVICE_ENV),
+            }
+        }
+    }
+
+    fn with_runtime_env(
+        force_ep: Option<&str>,
+        dml_device_id: Option<&str>,
+        test: impl FnOnce(),
+    ) {
+        let _lock = env_lock().lock().expect("env lock");
+        let _guard = RuntimeEnvGuard::capture();
+
+        match force_ep {
+            Some(value) => set_env_var(FORCE_EP_ENV, value),
+            None => remove_env_var(FORCE_EP_ENV),
+        }
+        match dml_device_id {
+            Some(value) => set_env_var(DML_DEVICE_ENV, value),
+            None => remove_env_var(DML_DEVICE_ENV),
+        }
+
+        test();
+    }
+
+    #[test]
+    fn runtime_env_overrides_default_when_unset() {
+        with_runtime_env(None, None, || {
+            assert_eq!(read_runtime_env_overrides(), RuntimeEnvOverrides::default());
+        });
+    }
+
+    #[test]
+    fn runtime_env_overrides_parse_force_ep_tokens() {
+        with_runtime_env(Some(" cpu "), None, || {
+            let overrides = read_runtime_env_overrides();
+            assert_eq!(overrides.runtime_mode, RuntimeModePreference::Cpu);
+        });
+
+        with_runtime_env(Some("DIRECTML"), None, || {
+            let overrides = read_runtime_env_overrides();
+            assert_eq!(overrides.runtime_mode, RuntimeModePreference::Dml);
+        });
+
+        with_runtime_env(Some("dml"), None, || {
+            let overrides = read_runtime_env_overrides();
+            assert_eq!(overrides.runtime_mode, RuntimeModePreference::Dml);
+        });
+
+        with_runtime_env(Some("unknown"), None, || {
+            let overrides = read_runtime_env_overrides();
+            assert_eq!(overrides.runtime_mode, RuntimeModePreference::Auto);
+        });
+    }
+
+    #[test]
+    fn runtime_env_overrides_parse_dml_device_id() {
+        with_runtime_env(None, Some("1"), || {
+            let overrides = read_runtime_env_overrides();
+            assert_eq!(overrides.dml_device_id, Some(1));
+        });
+
+        with_runtime_env(None, Some("abc"), || {
+            let overrides = read_runtime_env_overrides();
+            assert_eq!(overrides.dml_device_id, None);
+        });
+    }
 
     #[test]
     fn parse_error_message_extracts_nested_message() {
