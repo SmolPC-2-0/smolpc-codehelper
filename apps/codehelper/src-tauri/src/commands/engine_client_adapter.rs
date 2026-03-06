@@ -82,7 +82,15 @@ fn now_rfc3339() -> String {
 
 fn startup_mode_to_runtime_mode(mode: StartupModeDto) -> RuntimeModePreference {
     match mode {
-        StartupModeDto::Auto => RuntimeModePreference::Auto,
+        StartupModeDto::Auto => std::env::var("SMOLPC_FORCE_EP")
+            .ok()
+            .map(|value| value.trim().to_ascii_lowercase())
+            .and_then(|value| match value.as_str() {
+                "cpu" => Some(RuntimeModePreference::Cpu),
+                "dml" | "directml" => Some(RuntimeModePreference::Dml),
+                _ => None,
+            })
+            .unwrap_or(RuntimeModePreference::Auto),
         StartupModeDto::DirectmlRequired => RuntimeModePreference::Dml,
     }
 }
