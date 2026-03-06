@@ -62,7 +62,14 @@ fn parse_runtime_mode_override(value: &str) -> Option<RuntimeModePreference> {
     match value.trim().to_ascii_lowercase().as_str() {
         "cpu" => Some(RuntimeModePreference::Cpu),
         "dml" | "directml" => Some(RuntimeModePreference::Dml),
-        _ => None,
+        _ => {
+            log::warn!(
+                "Ignoring unsupported {} value '{}'; expected one of: cpu, dml, directml",
+                FORCE_EP_ENV,
+                value
+            );
+            None
+        }
     }
 }
 

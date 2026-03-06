@@ -288,6 +288,8 @@ struct ParsedArgs {
 }
 
 const STARTUP_PROBE_WAIT_MS: u64 = 1_500;
+/// Extended probe budget for DirectML startup.
+/// Worst-case total probe wait: STARTUP_PROBE_WAIT_MS + STARTUP_PROBE_RECOVERY_WAIT_MS.
 const STARTUP_PROBE_RECOVERY_WAIT_MS: u64 = 8_000;
 
 #[derive(Debug, Clone)]
@@ -765,6 +767,8 @@ impl EngineState {
                 .available_backends
                 .contains(&InferenceBackend::DirectML)
         {
+            // DirectML enumeration may still be in flight after the initial budget.
+            // If the probe has already settled, this returns immediately.
             probe = self
                 .wait_for_startup_probe(Duration::from_millis(STARTUP_PROBE_RECOVERY_WAIT_MS))
                 .await;
