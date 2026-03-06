@@ -40,8 +40,21 @@ if (Test-Path $appCargoPath) {
     }
 }
 
-$hostImportMatches = rg --line-number --glob "*.rs" "smolpc_engine_host" "apps/codehelper/src-tauri/src"
-if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($hostImportMatches)) {
+$hostImportMatches = @()
+if (Get-Command rg -ErrorAction SilentlyContinue) {
+    $rgMatches = rg --line-number --glob "*.rs" "smolpc_engine_host" "apps/codehelper/src-tauri/src"
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rgMatches)) {
+        $hostImportMatches = @($rgMatches)
+    }
+} else {
+    $hostImportMatches = @(
+        Get-ChildItem -Path "apps/codehelper/src-tauri/src" -Recurse -Filter "*.rs" |
+            Select-String -Pattern "smolpc_engine_host" |
+            ForEach-Object { "{0}:{1}:{2}" -f $_.Path, $_.LineNumber, $_.Line.Trim() }
+    )
+}
+
+if ($hostImportMatches.Count -gt 0) {
     Report-Violation "Direct smolpc_engine_host imports are not allowed in apps/codehelper/src-tauri/src"
     Write-Host $hostImportMatches
 }
