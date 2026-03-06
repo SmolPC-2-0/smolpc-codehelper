@@ -21,7 +21,21 @@ jobs:
       - name: Type + Svelte checks
         run: npm run check
       - name: NPM vulnerability audit (high+)
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --workspace apps/codehelper --omit=dev --audit-level=high
+
+  boundary-enforcement:
+    name: Boundary Enforcement
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '23'
+          cache: 'npm'
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Enforce repo boundaries
+        run: npm run boundary:check
 
   engine-tests-msrv:
     name: Engine Tests (Rust 1.88.0)

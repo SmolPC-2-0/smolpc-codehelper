@@ -18,9 +18,9 @@ dist-ssr
 .env
 .env.*
 !.env.example
-/src-tauri/target/
 /target/
-/src-tauri/gen/schemas
+/apps/codehelper/src-tauri/target/
+/apps/codehelper/src-tauri/gen/schemas
 /docs/.local_docs/
 .claude
 .claude/settings.local.json
@@ -28,12 +28,12 @@ dist-ssr
 # ONNX Runtime and models
 /ort-extracted/
 /onnxruntime-*.zip
-/src-tauri/models/
-/src-tauri/libs/*
-!/src-tauri/libs/README.md
-/src-tauri/*.dll
+/apps/codehelper/src-tauri/models/
+/apps/codehelper/src-tauri/libs/*
+!/apps/codehelper/src-tauri/libs/README.md
+/apps/codehelper/src-tauri/*.dll
 nul
 
 # Local/generated artifacts
 /cache_dir/
-/scripts/src-tauri/
+/apps/codehelper/scripts/src-tauri/

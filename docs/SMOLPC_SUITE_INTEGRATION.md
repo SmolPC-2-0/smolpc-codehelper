@@ -2,13 +2,13 @@
 
 This branch introduces a shared engine architecture with three crates:
 
-- `crates/smolpc-engine-core`
-- `crates/smolpc-engine-host`
-- `crates/smolpc-engine-client`
+- `engine/crates/smolpc-engine-core`
+- `engine/crates/smolpc-engine-host`
+- `engine/crates/smolpc-engine-client`
 
 ## CodeHelper Wiring
 
-`src-tauri/src/commands/inference.rs` now routes inference commands through `smolpc-engine-client`.
+`apps/codehelper/src-tauri/src/commands/inference.rs` routes inference commands through `smolpc-engine-client`.
 
 Frontend command names are unchanged:
 
@@ -89,8 +89,8 @@ Current model priority in registry:
 
 Tauri bundles `smolpc-engine-host` as a packaged resource via:
 
-- `src-tauri/tauri.conf.json -> bundle.resources` (`binaries/*`)
-- `src-tauri/binaries/` target-triple sidecar naming
+- `apps/codehelper/src-tauri/tauri.conf.json -> bundle.resources` (`binaries/*`)
+- `apps/codehelper/src-tauri/binaries/` target-triple sidecar naming
 
 Release workflow stages sidecar binaries before running `tauri-action`.
 
@@ -117,4 +117,4 @@ Additional status fields used by consumers/UI:
 ## Next Steps
 
 - Migrate Blender and LibreOffice to this client contract.
-- Replace remaining Ollama-specific benchmark path.
+- Reintroduce benchmarking on top of shared-engine contract (without app-local inference ownership).
