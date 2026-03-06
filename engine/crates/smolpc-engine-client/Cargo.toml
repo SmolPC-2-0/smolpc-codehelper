@@ -5,6 +5,9 @@ edition = "2021"
 rust-version = "1.88"
 license = "MIT"
 
+[features]
+test-utils = []
+
 [dependencies]
 smolpc-engine-core = { path = "../smolpc-engine-core" }
 serde = { workspace = true }

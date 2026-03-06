@@ -494,7 +494,7 @@ pub async fn is_generating(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::test_env::with_runtime_env;
+    use smolpc_engine_client::test_utils::with_runtime_env;
 
     #[test]
     fn apply_runtime_mode_rollback_restores_previous_config_and_clears_client() {

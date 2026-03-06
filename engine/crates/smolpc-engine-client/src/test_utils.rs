@@ -49,11 +49,7 @@ impl Drop for RuntimeEnvGuard {
     }
 }
 
-pub(super) fn with_runtime_env(
-    force_ep: Option<&str>,
-    dml_device_id: Option<&str>,
-    test: impl FnOnce(),
-) {
+pub fn with_runtime_env(force_ep: Option<&str>, dml_device_id: Option<&str>, test: impl FnOnce()) {
     let _lock = env_lock().lock().expect("env lock");
     let _guard = RuntimeEnvGuard::capture();
 

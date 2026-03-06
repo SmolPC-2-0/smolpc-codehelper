@@ -5,6 +5,3 @@ pub mod errors;
 pub mod hardware;
 pub mod inference;
 pub mod launcher;
-
-#[cfg(test)]
-mod test_env;

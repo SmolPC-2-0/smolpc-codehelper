@@ -261,8 +261,8 @@ pub async fn engine_ensure_started(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::test_env::with_runtime_env;
     use smolpc_engine_client::LastStartupError;
+    use smolpc_engine_client::test_utils::with_runtime_env;
     use smolpc_engine_core::inference::backend::{BackendStatus, InferenceBackend};
 
     fn sample_status() -> EngineStatus {
