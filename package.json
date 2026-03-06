@@ -1,55 +1,22 @@
 {
-	"name": "tauri2-svelte5-shadcn",
-	"private": true,
-	"version": "2.0.0",
-	"description": "A simple desktop application template combining Tauri 2 with Svelte 5 and shadcn-svelte with a basic ci/cd implemented.",
-	"author": {
-		"name": "Alysonhower Veras Vieira",
-		"email": "contato@alysonhower.dev"
-	},
-	"type": "module",
-	"scripts": {
-		"dev": "vite",
-		"build": "vite build",
-		"preview": "vite preview",
-		"check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
-		"format": "prettier --write .",
-		"lint": "prettier --check . && eslint .",
-		"tauri": "tauri",
-		"tauri:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-tauri-dev.ps1",
-		"tauri:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-tauri-dml.ps1",
-		"model:export:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/export-dml-model.ps1",
-		"model:setup:qwen3": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-qwen3-shared-model.ps1"
-	},
-	"devDependencies": {
-		"@eslint/compat": "^1.2.9",
-		"@lucide/svelte": "^0.511.0",
-		"@sveltejs/vite-plugin-svelte": "^5.0.3",
-		"@tauri-apps/cli": "^2.5.0",
-		"@tsconfig/svelte": "^5.0.4",
-		"eslint": "^9.27.0",
-		"eslint-config-prettier": "^10.1.5",
-		"eslint-plugin-svelte": "^3.8.1",
-		"prettier": "^3.5.3",
-		"prettier-plugin-svelte": "^3.4.0",
-		"prettier-plugin-tailwindcss": "^0.6.11",
-		"svelte": "^5.28.1",
-		"svelte-check": "^4.1.6",
-		"tailwind-variants": "^0.2.1",
-		"tw-animate-css": "^1.3.0",
-		"typescript": "~5.8.3",
-		"typescript-eslint": "^8.32.1",
-		"vite": "^6.3.5"
-	},
-	"dependencies": {
-		"@tailwindcss/vite": "^4.1.7",
-		"@tauri-apps/api": "^2.5.0",
-		"@types/dompurify": "^3.0.5",
-		"@types/node": "^22.15.19",
-		"clsx": "^2.1.1",
-		"dompurify": "^3.3.0",
-		"isomorphic-dompurify": "^2.33.0",
-		"tailwind-merge": "^3.3.0",
-		"tailwindcss": "^4.1.7"
-	}
+  "name": "smolpc-platform-migration",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/codehelper"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace apps/codehelper",
+    "build": "npm run build --workspace apps/codehelper",
+    "preview": "npm run preview --workspace apps/codehelper",
+    "check": "npm run check --workspace apps/codehelper",
+    "format": "npm run format --workspace apps/codehelper",
+    "lint": "npm run lint --workspace apps/codehelper",
+    "tauri": "npm run tauri --workspace apps/codehelper",
+    "tauri:dev": "npm run tauri:dev --workspace apps/codehelper",
+    "tauri:dml": "npm run tauri:dml --workspace apps/codehelper",
+    "model:export:dml": "npm run model:export:dml --workspace apps/codehelper",
+    "model:setup:qwen3": "npm run model:setup:qwen3 --workspace apps/codehelper",
+    "boundary:check": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-boundaries.ps1"
+  }
 }

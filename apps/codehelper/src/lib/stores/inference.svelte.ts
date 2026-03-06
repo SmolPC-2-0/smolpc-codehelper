@@ -1,0 +1,444 @@
+/**
+ * Inference store for shared engine startup/readiness and text generation.
+ */
+import { invoke, Channel } from '@tauri-apps/api/core';
+import type {
+	AvailableModel,
+	BackendStatus,
+	EngineReadinessDto,
+	EngineReadinessState,
+	EnsureStartedRequestDto,
+	GenerationConfig,
+	GenerationMetrics,
+	GenerationResult,
+	InferenceRuntimeMode,
+	InferenceStatus,
+	StartupModeDto
+} from '$lib/types/inference';
+
+const READINESS_STATES: ReadonlySet<string> = new Set([
+	'idle',
+	'starting',
+	'probing',
+	'resolving_assets',
+	'loading_model',
+	'ready',
+	'failed'
+]);
+
+const DIAGNOSTICS_RUNTIME_MODE_CONTROLS =
+	import.meta.env.DEV && import.meta.env.VITE_ENABLE_RUNTIME_MODE_CONTROLS === '1';
+
+// State
+let readiness = $state<EngineReadinessDto | null>(null);
+let isGenerating = $state(false);
+let error = $state<string | null>(null);
+let availableModels = $state<AvailableModel[]>([]);
+let lastResult = $state<GenerationResult | null>(null);
+let lastMetrics = $state<GenerationMetrics | null>(null);
+let backendStatus = $state<BackendStatus | null>(null);
+let runtimeMode = $state<InferenceRuntimeMode>('auto');
+
+function normalizeBackendName(raw: string | null | undefined): string | null {
+	if (!raw) {
+		return null;
+	}
+	const normalized = raw.toLowerCase().replaceAll('_', '');
+	if (normalized === 'directml') {
+		return 'directml';
+	}
+	if (normalized === 'cpu') {
+		return 'cpu';
+	}
+	return raw.toLowerCase();
+}
+
+function normalizeRuntimeMode(raw: string | null | undefined): InferenceRuntimeMode {
+	if (!raw) {
+		return 'auto';
+	}
+	const normalized = raw.toLowerCase().replaceAll('_', '');
+	if (normalized === 'directml' || normalized === 'dml') {
+		return 'dml';
+	}
+	if (normalized === 'cpu') {
+		return 'cpu';
+	}
+	return 'auto';
+}
+
+function normalizeReadinessState(raw: string | null | undefined): EngineReadinessState {
+	const normalized = raw?.trim().toLowerCase() ?? '';
+	if (READINESS_STATES.has(normalized)) {
+		return normalized as EngineReadinessState;
+	}
+	return 'failed';
+}
+
+function normalizeReadiness(dto: EngineReadinessDto): EngineReadinessDto {
+	return {
+		attempt_id: dto.attempt_id,
+		state: normalizeReadinessState(dto.state),
+		state_since: dto.state_since,
+		active_backend: normalizeBackendName(dto.active_backend),
+		active_model_id: dto.active_model_id ?? null,
+		error_code: dto.error_code ?? null,
+		error_message: dto.error_message ?? null,
+		retryable: Boolean(dto.retryable)
+	};
+}
+
+function buildEnsureStartedRequest(
+	mode: StartupModeDto,
+	defaultModelId: string | null = null
+): EnsureStartedRequestDto {
+	const modelId = defaultModelId?.trim();
+	return {
+		mode,
+		startup_policy: modelId ? { default_model_id: modelId } : null
+	};
+}
+
+function defaultStartupRequest(defaultModelId: string | null = null): EnsureStartedRequestDto {
+	return buildEnsureStartedRequest('auto', defaultModelId);
+}
+
+function isReadyState(value: EngineReadinessDto | null): boolean {
+	return value?.state === 'ready';
+}
+
+export const inferenceStore = {
+	// Getters
+	get readiness() {
+		return readiness;
+	},
+	get isReady() {
+		return isReadyState(readiness);
+	},
+	get isLoaded() {
+		return isReadyState(readiness);
+	},
+	get currentModel() {
+		return readiness?.active_model_id ?? null;
+	},
+	get isGenerating() {
+		return isGenerating;
+	},
+	get error() {
+		return error;
+	},
+	get availableModels() {
+		return availableModels;
+	},
+	get lastResult() {
+		return lastResult;
+	},
+	get lastMetrics() {
+		return lastMetrics;
+	},
+	get runtimeMode() {
+		return runtimeMode;
+	},
+	get runtimeModeControlsEnabled() {
+		return DIAGNOSTICS_RUNTIME_MODE_CONTROLS;
+	},
+
+	// Get status object for display
+	get status(): InferenceStatus {
+		return {
+			readiness,
+			readinessState: readiness?.state ?? 'unknown',
+			isReady: isReadyState(readiness),
+			isLoaded: isReadyState(readiness),
+			currentModel: readiness?.active_model_id ?? null,
+			isGenerating,
+			error,
+			startupErrorCode: readiness?.error_code ?? null,
+			startupErrorMessage: readiness?.error_message ?? null,
+			startupRetryable: readiness?.retryable ?? false,
+			activeBackend: normalizeBackendName(readiness?.active_backend) ?? normalizeBackendName(backendStatus?.active_backend),
+			runtimeEngine: backendStatus?.runtime_engine ?? null,
+			activeModelPath: backendStatus?.active_model_path ?? null,
+			selectionState: backendStatus?.selection_state ?? null,
+			selectionReason: backendStatus?.selection_reason ?? null,
+			selectedDeviceName: backendStatus?.selected_device_name ?? null,
+			runtimeMode,
+			dmlGateState: backendStatus?.dml_gate_state ?? null,
+			dmlGateReason: backendStatus?.dml_gate_reason ?? null
+		};
+	},
+
+	// Actions
+
+	/**
+	 * List available models from engine registry.
+	 */
+	async listModels(): Promise<void> {
+		try {
+			const models = await invoke<AvailableModel[]>('list_models');
+			availableModels = models;
+		} catch (e) {
+			error = String(e);
+			console.error('Failed to list models:', e);
+		}
+	},
+
+	/**
+	 * Blocking startup handshake from app perspective.
+	 */
+	async ensureStarted(
+		request: EnsureStartedRequestDto = defaultStartupRequest()
+	): Promise<EngineReadinessDto | null> {
+		error = null;
+		try {
+			const payload = await invoke<EngineReadinessDto>('engine_ensure_started', { request });
+			readiness = normalizeReadiness(payload);
+			if (readiness.state === 'failed') {
+				error = readiness.error_message ?? 'Engine startup failed';
+			}
+			await this.refreshBackendStatus();
+			return readiness;
+		} catch (e) {
+			error = String(e);
+			console.error('Engine startup handshake failed:', e);
+			return null;
+		}
+	},
+
+	/**
+	 * Poll readiness status from engine adapter.
+	 */
+	async refreshReadiness(): Promise<void> {
+		try {
+			const payload = await invoke<EngineReadinessDto>('engine_status');
+			readiness = normalizeReadiness(payload);
+			if (readiness.state !== 'failed') {
+				return;
+			}
+			error = readiness.error_message ?? error;
+		} catch (e) {
+			console.warn('Failed to refresh readiness status:', e);
+		}
+	},
+
+	/**
+	 * Backward-compatible status sync wrapper.
+	 */
+	async syncStatus(): Promise<void> {
+		await this.refreshReadiness();
+		await this.refreshBackendStatus();
+	},
+
+	/**
+	 * Load a model by ID.
+	 */
+	async loadModel(modelId: string): Promise<boolean> {
+		error = null;
+		try {
+			await invoke('load_model', { modelId });
+			await this.syncStatus();
+			return this.isReady;
+		} catch (e) {
+			error = String(e);
+			console.error('Failed to load model:', e);
+			return false;
+		}
+	},
+
+	/**
+	 * Unload the current model.
+	 */
+	async unloadModel(): Promise<void> {
+		try {
+			await invoke('unload_model');
+			await this.syncStatus();
+		} catch (e) {
+			error = String(e);
+			console.error('Failed to unload model:', e);
+		}
+	},
+
+	/**
+	 * Generate text from a prompt (blocking, returns full result).
+	 */
+	async generate(prompt: string): Promise<GenerationResult | null> {
+		if (!this.isReady) {
+			error = 'Engine is not ready';
+			return null;
+		}
+
+		if (isGenerating) {
+			error = 'Generation already in progress';
+			return null;
+		}
+
+		isGenerating = true;
+		error = null;
+
+		try {
+			const result = await invoke<GenerationResult>('generate_text', { prompt });
+			lastResult = result;
+			return result;
+		} catch (e) {
+			error = String(e);
+			console.error('Generation failed:', e);
+			return null;
+		} finally {
+			await this.syncStatus();
+			isGenerating = false;
+		}
+	},
+
+	/**
+	 * Generate text with streaming output via Tauri Channel.
+	 */
+	async generateStream(
+		prompt: string,
+		onToken: (token: string) => void,
+		config?: Partial<GenerationConfig>
+	): Promise<GenerationMetrics | null> {
+		if (!this.isReady) {
+			error = 'Engine is not ready';
+			return null;
+		}
+
+		if (isGenerating) {
+			error = 'Generation already in progress';
+			return null;
+		}
+
+		isGenerating = true;
+		error = null;
+		lastMetrics = null;
+
+		try {
+			const onTokenChannel = new Channel<string>();
+			onTokenChannel.onmessage = onToken;
+
+			const fullConfig: GenerationConfig | undefined = config
+				? {
+						max_length: config.max_length ?? 2048,
+						temperature: config.temperature ?? 0.7,
+						top_k: config.top_k ?? 40,
+						top_p: config.top_p ?? 0.9,
+						repetition_penalty: config.repetition_penalty ?? 1.1,
+						repetition_penalty_last_n: config.repetition_penalty_last_n ?? 64
+					}
+				: undefined;
+
+			const metrics = await invoke<GenerationMetrics>('inference_generate', {
+				prompt,
+				config: fullConfig,
+				onToken: onTokenChannel
+			});
+
+			lastMetrics = metrics;
+			return metrics;
+		} catch (e) {
+			const message = String(e);
+			if (
+				message.includes('INFERENCE_GENERATION_CANCELLED') ||
+				message.includes('Generation cancelled')
+			) {
+				return null;
+			}
+
+			error = message;
+			console.error('Streaming generation failed:', e);
+			return null;
+		} finally {
+			await this.syncStatus();
+			isGenerating = false;
+		}
+	},
+
+	/**
+	 * Cancel the current generation.
+	 */
+	async cancel(): Promise<void> {
+		if (!isGenerating) {
+			return;
+		}
+
+		try {
+			await invoke('inference_cancel');
+		} catch (e) {
+			console.error('Failed to cancel generation:', e);
+		}
+	},
+
+	/**
+	 * Check if a specific model exists.
+	 */
+	async checkModelExists(modelId: string): Promise<boolean> {
+		try {
+			return await invoke<boolean>('check_model_exists', { modelId });
+		} catch (e) {
+			console.error('Failed to check model:', e);
+			return false;
+		}
+	},
+
+	/**
+	 * Refresh backend/runtime diagnostics from shared engine host.
+	 */
+	async refreshBackendStatus(): Promise<void> {
+		try {
+			const status = await invoke<BackendStatus>('get_inference_backend_status');
+			backendStatus = status;
+			runtimeMode = normalizeRuntimeMode(status.force_override);
+		} catch (e) {
+			console.warn('Failed to fetch backend status:', e);
+		}
+	},
+
+	/**
+	 * Retry startup using the same startup contract call.
+	 */
+	async retryStartup(defaultModelId: string | null = null): Promise<EngineReadinessDto | null> {
+		return this.ensureStarted(defaultStartupRequest(defaultModelId));
+	},
+
+	/**
+	 * Diagnostics-only runtime mode switch.
+	 */
+	async setRuntimeMode(
+		mode: InferenceRuntimeMode,
+		modelId: string | null = null
+	): Promise<boolean> {
+		if (!DIAGNOSTICS_RUNTIME_MODE_CONTROLS) {
+			error =
+				'Runtime mode override is diagnostics-only. Enable VITE_ENABLE_RUNTIME_MODE_CONTROLS=1 for local diagnostics.';
+			return false;
+		}
+
+		if (isGenerating) {
+			error = 'Cannot switch runtime mode while generation is in progress';
+			return false;
+		}
+
+		error = null;
+		try {
+			const status = await invoke<BackendStatus>('set_inference_runtime_mode', {
+				mode,
+				modelId
+			});
+			backendStatus = status;
+			runtimeMode = normalizeRuntimeMode(status.force_override);
+			await this.syncStatus();
+			return true;
+		} catch (e) {
+			error = String(e);
+			console.error('Failed to switch runtime mode:', e);
+			await this.refreshBackendStatus();
+			return false;
+		}
+	},
+
+	/**
+	 * Clear non-readiness error state.
+	 */
+	clearError(): void {
+		error = null;
+	}
+};
