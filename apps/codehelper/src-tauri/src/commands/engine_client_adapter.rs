@@ -261,6 +261,7 @@ pub async fn engine_ensure_started(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::test_env::with_runtime_env;
     use smolpc_engine_client::LastStartupError;
     use smolpc_engine_core::inference::backend::{BackendStatus, InferenceBackend};
 
@@ -324,6 +325,34 @@ mod tests {
             ),
             RuntimeModePreference::Dml
         );
+    }
+
+    #[test]
+    fn startup_mode_to_runtime_mode_reads_runtime_env_overrides() {
+        with_runtime_env(Some(" directml "), None, || {
+            assert_eq!(
+                startup_mode_to_runtime_mode(StartupModeDto::Auto),
+                RuntimeModePreference::Dml
+            );
+        });
+
+        with_runtime_env(Some("cpu"), None, || {
+            assert_eq!(
+                startup_mode_to_runtime_mode(StartupModeDto::Auto),
+                RuntimeModePreference::Cpu
+            );
+            assert_eq!(
+                startup_mode_to_runtime_mode(StartupModeDto::DirectmlRequired),
+                RuntimeModePreference::Dml
+            );
+        });
+
+        with_runtime_env(Some("unknown"), None, || {
+            assert_eq!(
+                startup_mode_to_runtime_mode(StartupModeDto::Auto),
+                RuntimeModePreference::Auto
+            );
+        });
     }
 
     #[test]
