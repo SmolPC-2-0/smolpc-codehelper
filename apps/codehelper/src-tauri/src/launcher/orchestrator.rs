@@ -1,9 +1,9 @@
 use super::catalog;
 use super::types::{EngineApiGateInfo, LaunchAction, LauncherLaunchResult, LauncherManifestApp};
 use smolpc_engine_client::{
-    connect_or_spawn, engine_api_major_compatible, version_major, EngineClient,
-    EngineConnectOptions, EngineMeta, EngineStatus, RuntimeModePreference, StartupMode,
-    StartupPolicy, WaitReadyOptions,
+    connect_or_spawn, engine_api_major_compatible, read_runtime_env_overrides, version_major,
+    EngineClient, EngineConnectOptions, EngineMeta, EngineStatus, StartupMode, StartupPolicy,
+    WaitReadyOptions,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -121,6 +121,7 @@ async fn resolve_engine_client(
         .resource_dir()
         .ok()
         .or_else(|| Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))));
+    let runtime_overrides = read_runtime_env_overrides();
     let options = EngineConnectOptions {
         port: std::env::var("SMOLPC_ENGINE_PORT")
             .ok()
@@ -132,8 +133,8 @@ async fn resolve_engine_client(
         resource_dir,
         models_dir: None,
         host_binary: resolve_host_binary_path(),
-        runtime_mode: RuntimeModePreference::Auto,
-        dml_device_id: None,
+        runtime_mode: runtime_overrides.runtime_mode,
+        dml_device_id: runtime_overrides.dml_device_id,
         force_respawn: false,
     };
 

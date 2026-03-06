@@ -1,5 +1,6 @@
 use smolpc_engine_client::{
-    connect_or_spawn, EngineClient, EngineConnectOptions, RuntimeModePreference,
+    connect_or_spawn, read_runtime_env_overrides, EngineClient, EngineConnectOptions,
+    RuntimeModePreference,
 };
 use smolpc_engine_core::inference::backend::BackendStatus;
 use smolpc_engine_core::models::registry::ModelDefinition;
@@ -23,21 +24,10 @@ struct RuntimeClientConfig {
 
 impl Default for RuntimeClientConfig {
     fn default() -> Self {
-        let runtime_mode = std::env::var("SMOLPC_FORCE_EP")
-            .ok()
-            .map(|value| value.trim().to_ascii_lowercase())
-            .and_then(|value| match value.as_str() {
-                "cpu" => Some(RuntimeModePreference::Cpu),
-                "dml" | "directml" => Some(RuntimeModePreference::Dml),
-                _ => None,
-            })
-            .unwrap_or(RuntimeModePreference::Auto);
-        let dml_device_id = std::env::var("SMOLPC_DML_DEVICE_ID")
-            .ok()
-            .and_then(|value| value.parse::<i32>().ok());
+        let runtime_overrides = read_runtime_env_overrides();
         Self {
-            runtime_mode,
-            dml_device_id,
+            runtime_mode: runtime_overrides.runtime_mode,
+            dml_device_id: runtime_overrides.dml_device_id,
         }
     }
 }
@@ -504,6 +494,73 @@ pub async fn is_generating(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    #[allow(unused_unsafe)]
+    fn set_env_var(name: &str, value: &str) {
+        unsafe {
+            std::env::set_var(name, value);
+        }
+    }
+
+    #[allow(unused_unsafe)]
+    fn remove_env_var(name: &str) {
+        unsafe {
+            std::env::remove_var(name);
+        }
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct RuntimeEnvGuard {
+        previous_force_ep: Option<String>,
+        previous_dml_device: Option<String>,
+    }
+
+    impl RuntimeEnvGuard {
+        fn capture() -> Self {
+            Self {
+                previous_force_ep: std::env::var("SMOLPC_FORCE_EP").ok(),
+                previous_dml_device: std::env::var("SMOLPC_DML_DEVICE_ID").ok(),
+            }
+        }
+    }
+
+    impl Drop for RuntimeEnvGuard {
+        fn drop(&mut self) {
+            match self.previous_force_ep.as_deref() {
+                Some(value) => set_env_var("SMOLPC_FORCE_EP", value),
+                None => remove_env_var("SMOLPC_FORCE_EP"),
+            }
+            match self.previous_dml_device.as_deref() {
+                Some(value) => set_env_var("SMOLPC_DML_DEVICE_ID", value),
+                None => remove_env_var("SMOLPC_DML_DEVICE_ID"),
+            }
+        }
+    }
+
+    fn with_runtime_env(
+        force_ep: Option<&str>,
+        dml_device_id: Option<&str>,
+        test: impl FnOnce(),
+    ) {
+        let _lock = env_lock().lock().expect("env lock");
+        let _guard = RuntimeEnvGuard::capture();
+
+        match force_ep {
+            Some(value) => set_env_var("SMOLPC_FORCE_EP", value),
+            None => remove_env_var("SMOLPC_FORCE_EP"),
+        }
+        match dml_device_id {
+            Some(value) => set_env_var("SMOLPC_DML_DEVICE_ID", value),
+            None => remove_env_var("SMOLPC_DML_DEVICE_ID"),
+        }
+
+        test();
+    }
 
     #[test]
     fn apply_runtime_mode_rollback_restores_previous_config_and_clears_client() {
@@ -533,5 +590,23 @@ mod tests {
 
         assert!(message.contains("Runtime mode switch failed: switch connect failed."));
         assert!(message.contains("Rollback to 'dml' also failed: reconnect failed"));
+    }
+
+    #[test]
+    fn runtime_client_config_default_reads_env_overrides() {
+        with_runtime_env(Some("directml"), Some("1"), || {
+            let config = RuntimeClientConfig::default();
+            assert_eq!(config.runtime_mode, RuntimeModePreference::Dml);
+            assert_eq!(config.dml_device_id, Some(1));
+        });
+    }
+
+    #[test]
+    fn runtime_client_config_default_falls_back_for_invalid_env_values() {
+        with_runtime_env(Some("unknown"), Some("abc"), || {
+            let config = RuntimeClientConfig::default();
+            assert_eq!(config.runtime_mode, RuntimeModePreference::Auto);
+            assert_eq!(config.dml_device_id, None);
+        });
     }
 }
