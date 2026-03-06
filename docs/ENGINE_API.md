@@ -12,10 +12,35 @@ Default base URL: `http://127.0.0.1:19432`
   - Returns `{ "ok": true }`
 
 - `GET /engine/meta`
-  - Returns protocol and runtime metadata.
+  - Returns protocol/runtime metadata, including:
+    - `protocol_version`
+    - `engine_api_version`
+    - `engine_version`
+    - `pid`
+    - `busy`
 
 - `GET /engine/status`
-  - Returns loaded model, generation activity, and backend status.
+  - Returns canonical readiness fields plus compatibility aliases/diagnostics.
+  - Canonical readiness fields:
+    - `attempt_id`
+    - `state`
+    - `state_since`
+    - `active_backend`
+    - `active_model_id`
+    - `error_code`
+    - `error_message`
+    - `retryable`
+  - Compatibility aliases:
+    - `ready`
+    - `startup_phase`
+    - `last_error`
+  - Metadata:
+    - `engine_api_version`
+    - `engine_version`
+  - Legacy compatibility fields are still included:
+    - `current_model`
+    - `generating`
+    - `backend_status`
   - `backend_status.active_backend` and `backend_status.active_artifact_backend` are serialized as:
     - `cpu`
     - `directml`
@@ -26,6 +51,20 @@ Default base URL: `http://127.0.0.1:19432`
       - Examples: `default_directml_candidate`, `persisted_decision`, `forced_override`, `directml_initialization_failed`, `runtime_failure_fallback`
     - `backend_status.selected_device_id`: active or candidate DirectML device id
     - `backend_status.selected_device_name`: active or candidate DirectML device name
+
+- `POST /engine/ensure-started`
+  - Body:
+    - `{ "mode": "auto", "startup_policy": { "default_model_id": "..." } }`
+  - `mode`:
+    - `auto`
+    - `directml_required`
+  - Blocking single-flight startup handshake.
+  - Returns:
+    - `200` when ready
+    - `503` when startup fails (structured readiness error fields populated)
+    - `409` with `error_code=STARTUP_POLICY_CONFLICT` when already ready under a different effective mode/policy.
+  - Effective default model precedence:
+    - request `startup_policy.default_model_id` > env/config (`SMOLPC_ENGINE_DEFAULT_MODEL_ID` or `SMOLPC_DEFAULT_MODEL_ID`) > built-in model default.
 
 - `POST /engine/load`
   - Body: `{ "model_id": "qwen3-4b-instruct-2507" }`

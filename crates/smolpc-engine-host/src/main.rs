@@ -34,6 +34,11 @@ use tokio::time::{sleep, timeout};
 
 type ApiError = (StatusCode, Json<ErrorResponse>);
 
+const ENGINE_PROTOCOL_VERSION: &str = "1.0.0";
+const ENGINE_API_VERSION: &str = "1.0.0";
+const ENGINE_DEFAULT_MODEL_ENV: &str = "SMOLPC_ENGINE_DEFAULT_MODEL_ID";
+const LEGACY_DEFAULT_MODEL_ENV: &str = "SMOLPC_DEFAULT_MODEL_ID";
+
 #[derive(Debug, serde::Serialize)]
 struct ErrorResponse {
     error: String,
@@ -52,6 +57,203 @@ struct UnloadRequest {
 #[derive(Debug, serde::Deserialize)]
 struct CheckModelRequest {
     model_id: String,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+enum StartupMode {
+    #[default]
+    Auto,
+    DirectmlRequired,
+}
+
+impl StartupMode {
+    fn requires_directml(self) -> bool {
+        matches!(self, Self::DirectmlRequired)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+struct StartupPolicy {
+    default_model_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct EnsureStartedRequest {
+    #[serde(default)]
+    mode: StartupMode,
+    #[serde(default)]
+    startup_policy: StartupPolicy,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+enum ReadinessState {
+    #[default]
+    Idle,
+    Starting,
+    ResolvingAssets,
+    Probing,
+    LoadingModel,
+    Ready,
+    Failed,
+}
+
+impl ReadinessState {
+    fn ordinal(self) -> u8 {
+        match self {
+            Self::Idle => 0,
+            Self::Starting => 1,
+            Self::ResolvingAssets => 2,
+            Self::Probing => 3,
+            Self::LoadingModel => 4,
+            Self::Ready => 5,
+            Self::Failed => 6,
+        }
+    }
+
+    fn is_starting(self) -> bool {
+        matches!(
+            self,
+            Self::Starting | Self::ResolvingAssets | Self::Probing | Self::LoadingModel
+        )
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+struct LastStartupError {
+    attempt_id: String,
+    phase: ReadinessState,
+    code: String,
+    message: String,
+    retryable: bool,
+    at: String,
+}
+
+#[derive(Debug, Clone)]
+struct StartupReadiness {
+    attempt_id: String,
+    state: ReadinessState,
+    state_since: String,
+    effective_mode: StartupMode,
+    effective_startup_policy: StartupPolicy,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    retryable: Option<bool>,
+    last_error: Option<LastStartupError>,
+}
+
+impl Default for StartupReadiness {
+    fn default() -> Self {
+        Self {
+            attempt_id: "idle".to_string(),
+            state: ReadinessState::Idle,
+            state_since: Utc::now().to_rfc3339(),
+            effective_mode: StartupMode::Auto,
+            effective_startup_policy: StartupPolicy::default(),
+            error_code: None,
+            error_message: None,
+            retryable: None,
+            last_error: None,
+        }
+    }
+}
+
+impl StartupReadiness {
+    fn transition(&mut self, next: ReadinessState) {
+        if next.ordinal() >= self.state.ordinal() || matches!(self.state, ReadinessState::Ready) {
+            self.state = next;
+            self.state_since = Utc::now().to_rfc3339();
+        }
+    }
+
+    fn begin_attempt(
+        &mut self,
+        attempt_id: String,
+        mode: StartupMode,
+        startup_policy: StartupPolicy,
+    ) {
+        self.attempt_id = attempt_id;
+        self.state = ReadinessState::Starting;
+        self.state_since = Utc::now().to_rfc3339();
+        self.effective_mode = mode;
+        self.effective_startup_policy = startup_policy;
+        self.error_code = None;
+        self.error_message = None;
+        self.retryable = None;
+    }
+
+    fn mark_failed(&mut self, phase: ReadinessState, code: &str, message: String, retryable: bool) {
+        self.state = ReadinessState::Failed;
+        self.state_since = Utc::now().to_rfc3339();
+        self.error_code = Some(code.to_string());
+        self.error_message = Some(message.clone());
+        self.retryable = Some(retryable);
+        self.last_error = Some(LastStartupError {
+            attempt_id: self.attempt_id.clone(),
+            phase,
+            code: code.to_string(),
+            message,
+            retryable,
+            at: Utc::now().to_rfc3339(),
+        });
+    }
+
+    fn mark_ready(&mut self) {
+        self.state = ReadinessState::Ready;
+        self.state_since = Utc::now().to_rfc3339();
+        self.error_code = None;
+        self.error_message = None;
+        self.retryable = None;
+        self.last_error = None;
+    }
+
+    fn mark_idle(&mut self) {
+        self.state = ReadinessState::Idle;
+        self.state_since = Utc::now().to_rfc3339();
+        self.error_code = None;
+        self.error_message = None;
+        self.retryable = None;
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct ReadinessPayload {
+    ok: bool,
+    ready: bool,
+    attempt_id: String,
+    state: ReadinessState,
+    startup_phase: ReadinessState,
+    state_since: String,
+    active_backend: Option<InferenceBackend>,
+    active_model_id: Option<String>,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    retryable: Option<bool>,
+    last_error: Option<LastStartupError>,
+    engine_version: &'static str,
+    engine_api_version: &'static str,
+    effective_mode: StartupMode,
+    effective_startup_policy: StartupPolicy,
+    current_model: Option<String>,
+    generating: bool,
+    backend_status: BackendStatus,
+}
+
+#[derive(Debug, Clone)]
+struct StartupError {
+    phase: ReadinessState,
+    code: &'static str,
+    message: String,
+    retryable: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EnsureStartedOutcome {
+    Ready,
+    Failed,
+    Conflict,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -124,6 +326,96 @@ fn default_data_dir() -> PathBuf {
         return path.join("SmolPC").join("engine");
     }
     PathBuf::from(".smolpc-engine")
+}
+
+fn normalize_non_empty(value: Option<String>) -> Option<String> {
+    value.and_then(|candidate| {
+        let trimmed = candidate.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
+fn env_default_model_id() -> Option<String> {
+    normalize_non_empty(std::env::var(ENGINE_DEFAULT_MODEL_ENV).ok())
+        .or_else(|| normalize_non_empty(std::env::var(LEGACY_DEFAULT_MODEL_ENV).ok()))
+}
+
+fn built_in_default_model_id() -> Option<String> {
+    ModelRegistry::available_models()
+        .into_iter()
+        .next()
+        .map(|m| m.id)
+}
+
+fn resolve_default_model_id_with_sources(
+    request_model_id: Option<String>,
+    config_model_id: Option<String>,
+    built_in_model_id: Option<String>,
+) -> Result<String, StartupError> {
+    if let Some(request_model) = normalize_non_empty(request_model_id) {
+        return Ok(request_model);
+    }
+    if let Some(config_model) = normalize_non_empty(config_model_id) {
+        return Ok(config_model);
+    }
+    if let Some(built_in_model) = normalize_non_empty(built_in_model_id) {
+        return Ok(built_in_model);
+    }
+    Err(StartupError {
+        phase: ReadinessState::ResolvingAssets,
+        code: "STARTUP_DEFAULT_MODEL_INVALID",
+        message: "No default model is configured or registered".to_string(),
+        retryable: false,
+    })
+}
+
+fn resolve_default_model_id(startup_policy: &StartupPolicy) -> Result<String, StartupError> {
+    resolve_default_model_id_with_sources(
+        startup_policy.default_model_id.clone(),
+        env_default_model_id(),
+        built_in_default_model_id(),
+    )
+}
+
+fn classify_startup_model_error(error: &str) -> StartupError {
+    let lowered = error.to_ascii_lowercase();
+    if lowered.contains("unknown model id") {
+        return StartupError {
+            phase: ReadinessState::LoadingModel,
+            code: "STARTUP_DEFAULT_MODEL_INVALID",
+            message: error.to_string(),
+            retryable: false,
+        };
+    }
+    if lowered.contains("not found")
+        || lowered.contains("missing")
+        || lowered.contains("artifact is incomplete")
+    {
+        return StartupError {
+            phase: ReadinessState::LoadingModel,
+            code: "STARTUP_MODEL_ASSET_MISSING",
+            message: error.to_string(),
+            retryable: false,
+        };
+    }
+    if lowered.contains("requires directml backend") || lowered.contains("directml") {
+        return StartupError {
+            phase: ReadinessState::LoadingModel,
+            code: "STARTUP_DML_REQUIRED_UNAVAILABLE",
+            message: error.to_string(),
+            retryable: false,
+        };
+    }
+    StartupError {
+        phase: ReadinessState::LoadingModel,
+        code: "STARTUP_MODEL_LOAD_FAILED",
+        message: error.to_string(),
+        retryable: true,
+    }
 }
 
 fn parse_args() -> ParsedArgs {
@@ -346,9 +638,17 @@ struct EngineState {
     backend_store: Arc<Mutex<Option<BackendStore>>>,
     startup_probe: Arc<Mutex<Option<BackendProbeResult>>>,
     startup_probe_ready: Arc<Notify>,
+    readiness: Arc<Mutex<StartupReadiness>>,
+    startup_terminal: Arc<Notify>,
+    startup_attempt_seq: AtomicU64,
 }
 
 impl EngineState {
+    fn next_attempt_id(&self) -> String {
+        let attempt = self.startup_attempt_seq.fetch_add(1, Ordering::SeqCst) + 1;
+        format!("startup-{}-{attempt}", epoch_ms())
+    }
+
     fn new(args: &ParsedArgs) -> Self {
         let store_path = match backend_store_path(&args.data_dir) {
             Ok(path) => Some(path),
@@ -391,6 +691,9 @@ impl EngineState {
             backend_store: Arc::new(Mutex::new(backend_store)),
             startup_probe: Arc::new(Mutex::new(None)),
             startup_probe_ready: Arc::new(Notify::new()),
+            readiness: Arc::new(Mutex::new(StartupReadiness::default())),
+            startup_terminal: Arc::new(Notify::new()),
+            startup_attempt_seq: AtomicU64::new(0),
         }
     }
 
@@ -483,6 +786,221 @@ impl EngineState {
         }
     }
 
+    async fn transition_readiness(&self, next: ReadinessState) {
+        let mut readiness = self.readiness.lock().await;
+        readiness.transition(next);
+    }
+
+    async fn mark_readiness_failed(&self, error: StartupError) {
+        let mut readiness = self.readiness.lock().await;
+        readiness.mark_failed(error.phase, error.code, error.message, error.retryable);
+    }
+
+    async fn mark_readiness_ready(&self) {
+        let mut readiness = self.readiness.lock().await;
+        readiness.mark_ready();
+    }
+
+    async fn mark_readiness_idle_after_unload(&self) {
+        let mut readiness = self.readiness.lock().await;
+        if readiness.state.is_starting() {
+            return;
+        }
+        readiness.mark_idle();
+    }
+
+    async fn mark_ready_after_external_load(&self, model_id: String) {
+        let mut readiness = self.readiness.lock().await;
+        if readiness.state.is_starting() {
+            return;
+        }
+        if readiness.state != ReadinessState::Ready {
+            readiness.begin_attempt(
+                self.next_attempt_id(),
+                StartupMode::Auto,
+                StartupPolicy {
+                    default_model_id: Some(model_id.clone()),
+                },
+            );
+        } else {
+            readiness.effective_mode = StartupMode::Auto;
+            readiness.effective_startup_policy = StartupPolicy {
+                default_model_id: Some(model_id.clone()),
+            };
+        }
+        readiness.mark_ready();
+    }
+
+    async fn current_readiness_payload(
+        &self,
+        ok: bool,
+        override_error: Option<StartupError>,
+    ) -> ReadinessPayload {
+        let readiness = self.readiness.lock().await.clone();
+        let current_model = self.current_model.lock().await.clone();
+        let backend_status = self.backend_status.lock().await.clone();
+        let active_backend = backend_status.active_backend;
+        let active_model_id = current_model.clone();
+        let ready = readiness.state == ReadinessState::Ready
+            && active_backend.is_some()
+            && active_model_id.is_some();
+
+        let (error_code, error_message, retryable, last_error) = match override_error {
+            Some(error) => {
+                let stamped = LastStartupError {
+                    attempt_id: readiness.attempt_id.clone(),
+                    phase: error.phase,
+                    code: error.code.to_string(),
+                    message: error.message.clone(),
+                    retryable: error.retryable,
+                    at: Utc::now().to_rfc3339(),
+                };
+                (
+                    Some(error.code.to_string()),
+                    Some(error.message),
+                    Some(error.retryable),
+                    Some(stamped),
+                )
+            }
+            None => (
+                readiness.error_code.clone(),
+                readiness.error_message.clone(),
+                readiness.retryable,
+                readiness.last_error.clone(),
+            ),
+        };
+
+        ReadinessPayload {
+            ok,
+            ready,
+            attempt_id: readiness.attempt_id,
+            state: readiness.state,
+            startup_phase: readiness.state,
+            state_since: readiness.state_since,
+            active_backend,
+            active_model_id,
+            error_code,
+            error_message,
+            retryable,
+            last_error,
+            engine_version: env!("CARGO_PKG_VERSION"),
+            engine_api_version: ENGINE_API_VERSION,
+            effective_mode: readiness.effective_mode,
+            effective_startup_policy: readiness.effective_startup_policy,
+            current_model,
+            generating: self.generating.load(Ordering::SeqCst),
+            backend_status,
+        }
+    }
+
+    async fn run_startup_attempt(
+        &self,
+        mode: StartupMode,
+        default_model_id: String,
+    ) -> Result<(), StartupError> {
+        self.transition_readiness(ReadinessState::ResolvingAssets)
+            .await;
+        if ModelRegistry::get_model(&default_model_id).is_none() {
+            return Err(StartupError {
+                phase: ReadinessState::LoadingModel,
+                code: "STARTUP_DEFAULT_MODEL_INVALID",
+                message: format!("Unknown default model id '{}'", default_model_id),
+                retryable: false,
+            });
+        }
+
+        self.transition_readiness(ReadinessState::Probing).await;
+        let probe = self
+            .wait_for_startup_probe(Duration::from_millis(STARTUP_PROBE_WAIT_MS))
+            .await;
+        let has_directml = probe
+            .available_backends
+            .contains(&InferenceBackend::DirectML);
+        if mode.requires_directml() && !has_directml {
+            return Err(StartupError {
+                phase: ReadinessState::Probing,
+                code: "STARTUP_DML_REQUIRED_UNAVAILABLE",
+                message: "DirectML adapter is required but unavailable.".to_string(),
+                retryable: false,
+            });
+        }
+
+        self.transition_readiness(ReadinessState::LoadingModel)
+            .await;
+        self.load_model(default_model_id, mode)
+            .await
+            .map_err(|error| classify_startup_model_error(&error))?;
+        self.mark_readiness_ready().await;
+        Ok(())
+    }
+
+    async fn ensure_started(
+        &self,
+        mode: StartupMode,
+        startup_policy: StartupPolicy,
+    ) -> EnsureStartedOutcome {
+        let default_model_id = match resolve_default_model_id(&startup_policy) {
+            Ok(model_id) => model_id,
+            Err(error) => {
+                let mut readiness = self.readiness.lock().await;
+                readiness.begin_attempt(self.next_attempt_id(), mode, startup_policy);
+                readiness.mark_failed(error.phase, error.code, error.message, error.retryable);
+                drop(readiness);
+                self.startup_terminal.notify_waiters();
+                return EnsureStartedOutcome::Failed;
+            }
+        };
+        let effective_startup_policy = StartupPolicy {
+            default_model_id: Some(default_model_id.clone()),
+        };
+
+        let mut readiness = self.readiness.lock().await;
+        match readiness.state {
+            ReadinessState::Ready => {
+                let matches_policy = readiness.effective_mode == mode
+                    && readiness.effective_startup_policy == effective_startup_policy;
+                return if matches_policy {
+                    EnsureStartedOutcome::Ready
+                } else {
+                    EnsureStartedOutcome::Conflict
+                };
+            }
+            state if state.is_starting() => {
+                let joined = self.startup_terminal.notified();
+                drop(readiness);
+                joined.await;
+                let terminal = self.readiness.lock().await.state;
+                return if terminal == ReadinessState::Ready {
+                    EnsureStartedOutcome::Ready
+                } else {
+                    EnsureStartedOutcome::Failed
+                };
+            }
+            ReadinessState::Idle | ReadinessState::Failed => {
+                readiness.begin_attempt(
+                    self.next_attempt_id(),
+                    mode,
+                    effective_startup_policy.clone(),
+                );
+            }
+            ReadinessState::Starting
+            | ReadinessState::ResolvingAssets
+            | ReadinessState::Probing
+            | ReadinessState::LoadingModel => {}
+        }
+        drop(readiness);
+
+        let outcome = match self.run_startup_attempt(mode, default_model_id).await {
+            Ok(()) => EnsureStartedOutcome::Ready,
+            Err(error) => {
+                self.mark_readiness_failed(error).await;
+                EnsureStartedOutcome::Failed
+            }
+        };
+        self.startup_terminal.notify_waiters();
+        outcome
+    }
+
     fn begin_generation(&self) -> Result<(GenerationPermit, Arc<AtomicBool>), String> {
         if self
             .generating
@@ -503,11 +1021,12 @@ impl EngineState {
         ))
     }
 
-    async fn load_model(&self, model_id: String) -> Result<(), String> {
+    async fn load_model(&self, model_id: String, startup_mode: StartupMode) -> Result<(), String> {
         if self.generating.load(Ordering::SeqCst) {
             return Err("Cannot load or unload model while generation is in progress".to_string());
         }
-        let directml_required = model_requires_directml(&model_id);
+        let directml_required =
+            model_requires_directml(&model_id) || startup_mode.requires_directml();
         let model_def = ModelRegistry::get_model(&model_id)
             .ok_or_else(|| format!("Unknown model ID: {}", model_id))?;
         let cpu_spec =
@@ -859,6 +1378,8 @@ impl EngineState {
         status.runtime_engine = None;
         status.selection_state = Some("ready".to_string());
         status.selection_reason = Some("model_unloaded".to_string());
+        drop(status);
+        self.mark_readiness_idle_after_unload().await;
         Ok(())
     }
 
@@ -1257,7 +1778,8 @@ async fn meta(
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
     Ok(Json(serde_json::json!({
         "ok": true,
-        "protocol_version": "1.0.0",
+        "protocol_version": ENGINE_PROTOCOL_VERSION,
+        "engine_api_version": ENGINE_API_VERSION,
         "engine_version": env!("CARGO_PKG_VERSION"),
         "pid": std::process::id(),
         "busy": state.engine.generating.load(Ordering::SeqCst),
@@ -1270,14 +1792,41 @@ async fn status(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     auth(&headers, &state.token)?;
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
-    let current_model = state.engine.current_model.lock().await.clone();
-    let backend_status = state.engine.backend_status.lock().await.clone();
-    Ok(Json(serde_json::json!({
-        "ok": true,
-        "current_model": current_model,
-        "generating": state.engine.generating.load(Ordering::SeqCst),
-        "backend_status": backend_status,
-    })))
+    let payload = state.engine.current_readiness_payload(true, None).await;
+    Ok(Json(serde_json::json!(payload)))
+}
+
+async fn ensure_started(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<EnsureStartedRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+
+    let outcome = state
+        .engine
+        .ensure_started(req.mode, req.startup_policy.clone())
+        .await;
+    let (http_status, ok, override_error) = match outcome {
+        EnsureStartedOutcome::Ready => (StatusCode::OK, true, None),
+        EnsureStartedOutcome::Failed => (StatusCode::SERVICE_UNAVAILABLE, false, None),
+        EnsureStartedOutcome::Conflict => (
+            StatusCode::CONFLICT,
+            false,
+            Some(StartupError {
+                phase: ReadinessState::Ready,
+                code: "STARTUP_POLICY_CONFLICT",
+                message: "Engine is already ready under a different startup mode/policy. Perform explicit shutdown and restart.".to_string(),
+                retryable: false,
+            }),
+        ),
+    };
+    let payload = state
+        .engine
+        .current_readiness_payload(ok, override_error)
+        .await;
+    Ok((http_status, Json(payload)).into_response())
 }
 
 async fn load(
@@ -1287,12 +1836,20 @@ async fn load(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     auth(&headers, &state.token)?;
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
-    state.engine.load_model(req.model_id).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse { error: e }),
-        )
-    })?;
+    state
+        .engine
+        .load_model(req.model_id.clone(), StartupMode::Auto)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: e }),
+            )
+        })?;
+    state
+        .engine
+        .mark_ready_after_external_load(req.model_id)
+        .await;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -1594,6 +2151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/engine/health", get(health))
         .route("/engine/meta", get(meta))
         .route("/engine/status", get(status))
+        .route("/engine/ensure-started", post(ensure_started))
         .route("/engine/load", post(load))
         .route("/engine/unload", post(unload))
         .route("/engine/cancel", post(cancel))
@@ -1675,5 +2233,50 @@ mod tests {
 
         assert_eq!(dml_selected, dml.display().to_string());
         assert_eq!(cpu_selected, cpu.display().to_string());
+    }
+
+    #[test]
+    fn resolve_default_model_id_prefers_request_then_config_then_builtin() {
+        let selected = resolve_default_model_id_with_sources(
+            Some("request-model".to_string()),
+            Some("config-model".to_string()),
+            Some("built-in-model".to_string()),
+        )
+        .expect("request model should win");
+        assert_eq!(selected, "request-model");
+
+        let selected = resolve_default_model_id_with_sources(
+            None,
+            Some("config-model".to_string()),
+            Some("built-in-model".to_string()),
+        )
+        .expect("config model should win when request missing");
+        assert_eq!(selected, "config-model");
+
+        let selected =
+            resolve_default_model_id_with_sources(None, None, Some("built-in-model".to_string()))
+                .expect("built-in model should be used as final fallback");
+        assert_eq!(selected, "built-in-model");
+    }
+
+    #[test]
+    fn classify_startup_model_error_flags_unknown_model_as_non_retryable() {
+        let classified = classify_startup_model_error("Unknown model ID: bad-model");
+        assert_eq!(classified.code, "STARTUP_DEFAULT_MODEL_INVALID");
+        assert!(!classified.retryable);
+    }
+
+    #[test]
+    fn classify_startup_model_error_flags_missing_assets_as_non_retryable() {
+        let classified =
+            classify_startup_model_error("Model file for backend 'cpu' not found: C:/models/x");
+        assert_eq!(classified.code, "STARTUP_MODEL_ASSET_MISSING");
+        assert!(!classified.retryable);
+    }
+
+    #[test]
+    fn startup_mode_directml_required_sets_directml_gate() {
+        assert!(StartupMode::DirectmlRequired.requires_directml());
+        assert!(!StartupMode::Auto.requires_directml());
     }
 }

@@ -57,12 +57,28 @@ fn parse_runtime_mode(mode: &str) -> Result<RuntimeModePreference, String> {
     }
 }
 
-fn runtime_mode_label(mode: RuntimeModePreference) -> &'static str {
+pub(super) fn runtime_mode_label(mode: RuntimeModePreference) -> &'static str {
     match mode {
         RuntimeModePreference::Auto => "auto",
         RuntimeModePreference::Cpu => "cpu",
         RuntimeModePreference::Dml => "dml",
     }
+}
+
+pub(super) async fn apply_runtime_mode_preference(
+    state: &InferenceState,
+    runtime_mode: RuntimeModePreference,
+) -> bool {
+    let mut runtime_config = state.runtime_config.lock().await;
+    if runtime_config.runtime_mode == runtime_mode {
+        return false;
+    }
+
+    runtime_config.runtime_mode = runtime_mode;
+    drop(runtime_config);
+
+    *state.client.lock().await = None;
+    true
 }
 
 fn apply_runtime_mode_rollback<T>(
@@ -88,7 +104,7 @@ fn format_runtime_mode_switch_failure(
     }
 }
 
-async fn resolve_client(
+pub(super) async fn resolve_client(
     app_handle: &tauri::AppHandle,
     state: &InferenceState,
     force_respawn: bool,

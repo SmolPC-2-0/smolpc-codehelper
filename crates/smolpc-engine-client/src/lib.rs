@@ -13,6 +13,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 const ENGINE_PROTOCOL_VERSION: &str = "1.0.0";
+const ENGINE_API_VERSION: &str = "1.0.0";
 const ENGINE_HOST_BASENAME: &str = "smolpc-engine-host";
 const SPAWN_LOCK_FILENAME: &str = "engine-spawn.lock";
 const SPAWN_LOCK_WAIT: Duration = Duration::from_secs(10);
@@ -38,6 +39,30 @@ impl RuntimeModePreference {
             Self::Dml => Some("dml"),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum StartupMode {
+    #[default]
+    Auto,
+    DirectmlRequired,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct StartupPolicy {
+    pub default_model_id: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct LastStartupError {
+    pub attempt_id: String,
+    pub phase: String,
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
+    pub at: String,
 }
 
 struct SpawnLockGuard {
@@ -80,6 +105,8 @@ pub struct EngineConnectOptions {
 pub struct EngineMeta {
     pub ok: bool,
     pub protocol_version: String,
+    #[serde(default = "default_engine_api_version")]
+    pub engine_api_version: String,
     pub engine_version: String,
     pub pid: u32,
     pub busy: bool,
@@ -88,6 +115,34 @@ pub struct EngineMeta {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct EngineStatus {
     pub ok: bool,
+    #[serde(default)]
+    pub ready: bool,
+    #[serde(default = "default_attempt_id")]
+    pub attempt_id: String,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub startup_phase: Option<String>,
+    #[serde(default)]
+    pub state_since: Option<String>,
+    #[serde(default)]
+    pub active_backend: Option<String>,
+    #[serde(default)]
+    pub active_model_id: Option<String>,
+    #[serde(default)]
+    pub error_code: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
+    #[serde(default)]
+    pub retryable: Option<bool>,
+    #[serde(default)]
+    pub last_error: Option<LastStartupError>,
+    #[serde(default = "default_engine_api_version")]
+    pub engine_api_version: String,
+    #[serde(default)]
+    pub effective_mode: Option<String>,
+    #[serde(default)]
+    pub effective_startup_policy: Option<StartupPolicy>,
     pub current_model: Option<String>,
     pub generating: bool,
     pub backend_status: BackendStatus,
@@ -156,6 +211,80 @@ impl EngineClient {
             .await?;
         let response = ensure_success(response, "/engine/status").await?;
         Ok(response.json::<EngineStatus>().await?)
+    }
+
+    pub async fn ensure_started(
+        &self,
+        mode: StartupMode,
+        startup_policy: StartupPolicy,
+    ) -> Result<EngineStatus, EngineClientError> {
+        let response = self
+            .http
+            .post(self.url("/engine/ensure-started"))
+            .header(AUTHORIZATION, self.auth_header())
+            .header(CONTENT_TYPE, "application/json")
+            .body(
+                serde_json::json!({
+                    "mode": mode,
+                    "startup_policy": startup_policy,
+                })
+                .to_string(),
+            )
+            .send()
+            .await?;
+
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        let parsed_payload = serde_json::from_str::<EngineStatus>(&body).ok();
+
+        if status.is_success() {
+            return parsed_payload.ok_or_else(|| {
+                EngineClientError::Message(
+                    "/engine/ensure-started returned success but payload was invalid".to_string(),
+                )
+            });
+        }
+
+        if let Some(payload) = parsed_payload {
+            let code = payload
+                .error_code
+                .clone()
+                .unwrap_or_else(|| "ENGINE_STARTUP_FAILED".to_string());
+            let message = payload.error_message.clone().unwrap_or_else(|| {
+                format!(
+                    "/engine/ensure-started failed with HTTP {}",
+                    status.as_u16()
+                )
+            });
+            return Err(EngineClientError::Message(format!(
+                "/engine/ensure-started failed with HTTP {} [{}]: {}",
+                status.as_u16(),
+                code,
+                message
+            )));
+        }
+
+        let detail = if body.trim().is_empty() {
+            None
+        } else if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
+            parse_error_message(&value).or_else(|| Some(value.to_string()))
+        } else {
+            Some(body)
+        };
+
+        let message = match detail {
+            Some(detail) => format!(
+                "/engine/ensure-started failed with HTTP {}: {}",
+                status.as_u16(),
+                detail
+            ),
+            None => format!(
+                "/engine/ensure-started failed with HTTP {}",
+                status.as_u16()
+            ),
+        };
+
+        Err(EngineClientError::Message(message))
     }
 
     pub async fn load_model(&self, model_id: &str) -> Result<(), EngineClientError> {
@@ -355,6 +484,14 @@ impl EngineClient {
         Ok(host_metrics
             .unwrap_or_else(|| fallback_stream_metrics(started, emitted_chunks, first_chunk_at)))
     }
+}
+
+fn default_engine_api_version() -> String {
+    ENGINE_API_VERSION.to_string()
+}
+
+fn default_attempt_id() -> String {
+    "unknown".to_string()
 }
 
 async fn ensure_success(
@@ -1076,5 +1213,61 @@ mod tests {
 
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn startup_mode_serializes_as_contract_value() {
+        let serialized =
+            serde_json::to_string(&StartupMode::DirectmlRequired).expect("serialize startup mode");
+        assert_eq!(serialized, "\"directml_required\"");
+    }
+
+    #[test]
+    fn engine_status_parses_canonical_readiness_fields() {
+        let payload = serde_json::json!({
+            "ok": true,
+            "ready": true,
+            "attempt_id": "startup-1-1",
+            "state": "ready",
+            "startup_phase": "ready",
+            "state_since": "2026-03-05T18:45:00Z",
+            "active_backend": "cpu",
+            "active_model_id": "qwen2.5-coder-1.5b",
+            "error_code": null,
+            "error_message": null,
+            "retryable": null,
+            "last_error": null,
+            "engine_api_version": "1.0.0",
+            "current_model": "qwen2.5-coder-1.5b",
+            "generating": false,
+            "backend_status": {}
+        });
+
+        let status: EngineStatus =
+            serde_json::from_value(payload).expect("status payload should deserialize");
+        assert!(status.ready);
+        assert_eq!(status.attempt_id, "startup-1-1");
+        assert_eq!(status.state.as_deref(), Some("ready"));
+        assert_eq!(
+            status.active_model_id.as_deref(),
+            Some("qwen2.5-coder-1.5b")
+        );
+        assert_eq!(status.engine_api_version, "1.0.0");
+    }
+
+    #[test]
+    fn engine_status_keeps_legacy_payload_compatible() {
+        let payload = serde_json::json!({
+            "ok": true,
+            "current_model": null,
+            "generating": false,
+            "backend_status": {}
+        });
+        let status: EngineStatus =
+            serde_json::from_value(payload).expect("legacy payload should deserialize");
+        assert!(!status.ready);
+        assert_eq!(status.attempt_id, "unknown");
+        assert_eq!(status.engine_api_version, ENGINE_API_VERSION);
+        assert!(status.state.is_none());
     }
 }
