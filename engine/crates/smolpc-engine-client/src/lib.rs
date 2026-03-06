@@ -21,8 +21,8 @@ const ENGINE_HOST_BASENAME: &str = "smolpc-engine-host";
 const SPAWN_LOCK_FILENAME: &str = "engine-spawn.lock";
 const SPAWN_LOCK_WAIT: Duration = Duration::from_secs(10);
 const SPAWN_LOCK_STALE_AGE: Duration = Duration::from_secs(30);
-const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
-const DML_DEVICE_ENV: &str = "SMOLPC_DML_DEVICE_ID";
+pub(crate) const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
+pub(crate) const DML_DEVICE_ENV: &str = "SMOLPC_DML_DEVICE_ID";
 const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
 const SHARED_MODELS_DIR: &str = "models";
 const DEFAULT_WAIT_READY_TIMEOUT: Duration = Duration::from_secs(60);
@@ -81,9 +81,20 @@ pub fn read_runtime_env_overrides() -> RuntimeEnvOverrides {
         .ok()
         .and_then(|value| parse_runtime_mode_override(&value))
         .unwrap_or(RuntimeModePreference::Auto);
-    let dml_device_id = std::env::var(DML_DEVICE_ENV)
-        .ok()
-        .and_then(|value| value.parse::<i32>().ok());
+    let dml_device_id = match std::env::var(DML_DEVICE_ENV) {
+        Ok(value) => match value.parse::<i32>() {
+            Ok(parsed) => Some(parsed),
+            Err(_) => {
+                log::warn!(
+                    "Ignoring invalid {} value '{}'; expected a signed integer",
+                    DML_DEVICE_ENV,
+                    value
+                );
+                None
+            }
+        },
+        Err(_) => None,
+    };
     RuntimeEnvOverrides {
         runtime_mode,
         dml_device_id,

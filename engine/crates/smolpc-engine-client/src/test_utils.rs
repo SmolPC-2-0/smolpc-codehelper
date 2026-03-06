@@ -1,7 +1,6 @@
 use std::sync::{Mutex, OnceLock};
 
-const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
-const DML_DEVICE_ENV: &str = "SMOLPC_DML_DEVICE_ID";
+use super::{DML_DEVICE_ENV, FORCE_EP_ENV};
 
 #[allow(unused_unsafe)]
 fn set_env_var(name: &str, value: &str) {
@@ -50,7 +49,7 @@ impl Drop for RuntimeEnvGuard {
 }
 
 pub fn with_runtime_env(force_ep: Option<&str>, dml_device_id: Option<&str>, test: impl FnOnce()) {
-    let _lock = env_lock().lock().expect("env lock");
+    let _lock = env_lock().lock().unwrap_or_else(|error| error.into_inner());
     let _guard = RuntimeEnvGuard::capture();
 
     match force_ep {
