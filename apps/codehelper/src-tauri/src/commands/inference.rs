@@ -23,9 +23,21 @@ struct RuntimeClientConfig {
 
 impl Default for RuntimeClientConfig {
     fn default() -> Self {
+        let runtime_mode = std::env::var("SMOLPC_FORCE_EP")
+            .ok()
+            .map(|value| value.trim().to_ascii_lowercase())
+            .and_then(|value| match value.as_str() {
+                "cpu" => Some(RuntimeModePreference::Cpu),
+                "dml" | "directml" => Some(RuntimeModePreference::Dml),
+                _ => None,
+            })
+            .unwrap_or(RuntimeModePreference::Auto);
+        let dml_device_id = std::env::var("SMOLPC_DML_DEVICE_ID")
+            .ok()
+            .and_then(|value| value.parse::<i32>().ok());
         Self {
-            runtime_mode: RuntimeModePreference::Auto,
-            dml_device_id: None,
+            runtime_mode,
+            dml_device_id,
         }
     }
 }
