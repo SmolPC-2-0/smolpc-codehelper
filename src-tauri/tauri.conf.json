@@ -36,7 +36,8 @@
     ],
     "resources": [
       "libs/*",
-      "binaries/*"
+      "binaries/*",
+      "resources/launcher/*"
     ]
   }
 }

@@ -22,6 +22,8 @@ const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
 const DML_DEVICE_ENV: &str = "SMOLPC_DML_DEVICE_ID";
 const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
 const SHARED_MODELS_DIR: &str = "models";
+const DEFAULT_WAIT_READY_TIMEOUT: Duration = Duration::from_secs(60);
+const DEFAULT_WAIT_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RuntimeModePreference {
@@ -63,6 +65,21 @@ pub struct LastStartupError {
     pub message: String,
     pub retryable: bool,
     pub at: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct WaitReadyOptions {
+    pub timeout: Duration,
+    pub poll_interval: Duration,
+}
+
+impl Default for WaitReadyOptions {
+    fn default() -> Self {
+        Self {
+            timeout: DEFAULT_WAIT_READY_TIMEOUT,
+            poll_interval: DEFAULT_WAIT_READY_POLL_INTERVAL,
+        }
+    }
 }
 
 struct SpawnLockGuard {
@@ -112,6 +129,12 @@ pub struct EngineMeta {
     pub busy: bool,
 }
 
+impl EngineMeta {
+    pub fn effective_engine_api_version(&self) -> &str {
+        &self.engine_api_version
+    }
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct EngineStatus {
     pub ok: bool,
@@ -146,6 +169,52 @@ pub struct EngineStatus {
     pub current_model: Option<String>,
     pub generating: bool,
     pub backend_status: BackendStatus,
+}
+
+impl EngineStatus {
+    pub fn is_ready(&self) -> bool {
+        if self.ready {
+            return true;
+        }
+
+        if self
+            .state
+            .as_deref()
+            .is_some_and(|state| state.eq_ignore_ascii_case("ready"))
+        {
+            return true;
+        }
+
+        self.current_model.is_some()
+    }
+
+    pub fn is_failed(&self) -> bool {
+        if self
+            .state
+            .as_deref()
+            .is_some_and(|state| state.eq_ignore_ascii_case("failed"))
+        {
+            return true;
+        }
+
+        self.error_code.is_some() || self.error_message.is_some() || self.last_error.is_some()
+    }
+
+    pub fn failure_message(&self) -> Option<String> {
+        if let Some(last_error) = self.last_error.as_ref() {
+            return Some(format!("{}: {}", last_error.code, last_error.message));
+        }
+
+        if let Some(code) = self.error_code.as_deref() {
+            let message = self
+                .error_message
+                .as_deref()
+                .unwrap_or("Engine startup failed");
+            return Some(format!("{code}: {message}"));
+        }
+
+        self.error_message.clone()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -285,6 +354,52 @@ impl EngineClient {
         };
 
         Err(EngineClientError::Message(message))
+    }
+
+    pub async fn wait_ready(
+        &self,
+        options: WaitReadyOptions,
+    ) -> Result<EngineStatus, EngineClientError> {
+        let timeout = options.timeout.max(Duration::from_millis(1));
+        let poll_interval = options
+            .poll_interval
+            .max(Duration::from_millis(50))
+            .min(Duration::from_secs(5));
+        let started = Instant::now();
+
+        loop {
+            let status = self.status().await?;
+
+            if status.is_ready() {
+                return Ok(status);
+            }
+
+            if status.is_failed() {
+                let message = status
+                    .failure_message()
+                    .unwrap_or_else(|| "Engine startup failed".to_string());
+                return Err(EngineClientError::Message(message));
+            }
+
+            if started.elapsed() >= timeout {
+                let state = status
+                    .state
+                    .clone()
+                    .or(status.startup_phase.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let detail = status
+                    .failure_message()
+                    .unwrap_or_else(|| "No additional error details".to_string());
+                return Err(EngineClientError::Message(format!(
+                    "Timed out waiting for engine readiness after {}s (state={}): {}",
+                    timeout.as_secs_f32(),
+                    state,
+                    detail
+                )));
+            }
+
+            tokio::time::sleep(poll_interval).await;
+        }
     }
 
     pub async fn load_model(&self, model_id: &str) -> Result<(), EngineClientError> {
@@ -701,6 +816,22 @@ fn protocol_major_matches(actual: &str, expected: &str) -> bool {
     let a = actual.split('.').next().unwrap_or(actual);
     let e = expected.split('.').next().unwrap_or(expected);
     a == e
+}
+
+pub fn version_major(version: &str) -> Option<u64> {
+    version
+        .trim()
+        .split('.')
+        .next()
+        .and_then(|major| major.parse::<u64>().ok())
+}
+
+pub fn engine_api_major_compatible(actual_version: &str, required_major: u64) -> bool {
+    version_major(actual_version).is_some_and(|major| major >= required_major)
+}
+
+pub fn expected_engine_api_major() -> Option<u64> {
+    version_major(ENGINE_API_VERSION)
 }
 
 fn parse_error_message(value: &serde_json::Value) -> Option<String> {
@@ -1171,6 +1302,22 @@ mod tests {
     }
 
     #[test]
+    fn version_major_extracts_major_component() {
+        assert_eq!(version_major("2.3.4"), Some(2));
+        assert_eq!(version_major("10"), Some(10));
+        assert_eq!(version_major(""), None);
+        assert_eq!(version_major("beta"), None);
+    }
+
+    #[test]
+    fn engine_api_major_compatible_requires_equal_or_higher_major() {
+        assert!(engine_api_major_compatible("2.0.0", 2));
+        assert!(engine_api_major_compatible("3.1.9", 2));
+        assert!(!engine_api_major_compatible("1.9.9", 2));
+        assert!(!engine_api_major_compatible("unknown", 2));
+    }
+
+    #[test]
     fn load_or_create_token_creates_private_file() {
         let unique = format!(
             "smolpc-engine-client-token-test-{}-{}",
@@ -1269,5 +1416,49 @@ mod tests {
         assert_eq!(status.attempt_id, "unknown");
         assert_eq!(status.engine_api_version, ENGINE_API_VERSION);
         assert!(status.state.is_none());
+    }
+
+    #[test]
+    fn engine_status_readiness_prefers_ready_flag_and_state() {
+        let payload = serde_json::json!({
+            "ok": true,
+            "ready": true,
+            "attempt_id": "attempt-1",
+            "state": "ready",
+            "current_model": null,
+            "generating": false,
+            "backend_status": {}
+        });
+        let status: EngineStatus =
+            serde_json::from_value(payload).expect("status payload should deserialize");
+        assert!(status.is_ready());
+    }
+
+    #[test]
+    fn engine_status_failure_message_prefers_last_startup_error() {
+        let payload = serde_json::json!({
+            "ok": true,
+            "ready": false,
+            "attempt_id": "attempt-2",
+            "state": "failed",
+            "last_error": {
+                "attempt_id": "attempt-2",
+                "phase": "loading_model",
+                "code": "MODEL_MISSING",
+                "message": "Default model file missing",
+                "retryable": false,
+                "at": "2026-03-05T18:00:00Z"
+            },
+            "current_model": null,
+            "generating": false,
+            "backend_status": {}
+        });
+        let status: EngineStatus =
+            serde_json::from_value(payload).expect("status payload should deserialize");
+        assert!(status.is_failed());
+        assert_eq!(
+            status.failure_message().as_deref(),
+            Some("MODEL_MISSING: Default model file missing")
+        );
     }
 }
