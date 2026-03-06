@@ -12,14 +12,17 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
+
 const ENGINE_PROTOCOL_VERSION: &str = "1.0.0";
 const ENGINE_API_VERSION: &str = "1.0.0";
 const ENGINE_HOST_BASENAME: &str = "smolpc-engine-host";
 const SPAWN_LOCK_FILENAME: &str = "engine-spawn.lock";
 const SPAWN_LOCK_WAIT: Duration = Duration::from_secs(10);
 const SPAWN_LOCK_STALE_AGE: Duration = Duration::from_secs(30);
-const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
-const DML_DEVICE_ENV: &str = "SMOLPC_DML_DEVICE_ID";
+pub(crate) const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
+pub(crate) const DML_DEVICE_ENV: &str = "SMOLPC_DML_DEVICE_ID";
 const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
 const SHARED_MODELS_DIR: &str = "models";
 const DEFAULT_WAIT_READY_TIMEOUT: Duration = Duration::from_secs(60);
@@ -40,6 +43,61 @@ impl RuntimeModePreference {
             Self::Cpu => Some("cpu"),
             Self::Dml => Some("dml"),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeEnvOverrides {
+    pub runtime_mode: RuntimeModePreference,
+    pub dml_device_id: Option<i32>,
+}
+
+impl Default for RuntimeEnvOverrides {
+    fn default() -> Self {
+        Self {
+            runtime_mode: RuntimeModePreference::Auto,
+            dml_device_id: None,
+        }
+    }
+}
+
+fn parse_runtime_mode_override(value: &str) -> Option<RuntimeModePreference> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "cpu" => Some(RuntimeModePreference::Cpu),
+        "dml" | "directml" => Some(RuntimeModePreference::Dml),
+        _ => {
+            log::warn!(
+                "Ignoring unsupported {} value '{}'; expected one of: cpu, dml, directml",
+                FORCE_EP_ENV,
+                value
+            );
+            None
+        }
+    }
+}
+
+pub fn read_runtime_env_overrides() -> RuntimeEnvOverrides {
+    let runtime_mode = std::env::var(FORCE_EP_ENV)
+        .ok()
+        .and_then(|value| parse_runtime_mode_override(&value))
+        .unwrap_or(RuntimeModePreference::Auto);
+    let dml_device_id = match std::env::var(DML_DEVICE_ENV) {
+        Ok(value) => match value.parse::<i32>() {
+            Ok(parsed) => Some(parsed),
+            Err(_) => {
+                log::warn!(
+                    "Ignoring invalid {} value '{}'; expected a signed integer",
+                    DML_DEVICE_ENV,
+                    value
+                );
+                None
+            }
+        },
+        Err(_) => None,
+    };
+    RuntimeEnvOverrides {
+        runtime_mode,
+        dml_device_id,
     }
 }
 
@@ -1212,7 +1270,51 @@ fn resolve_host_binary(options: &EngineConnectOptions) -> Result<PathBuf, Engine
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::with_runtime_env;
     use std::fs;
+
+    #[test]
+    fn runtime_env_overrides_default_when_unset() {
+        with_runtime_env(None, None, || {
+            assert_eq!(read_runtime_env_overrides(), RuntimeEnvOverrides::default());
+        });
+    }
+
+    #[test]
+    fn runtime_env_overrides_parse_force_ep_tokens() {
+        with_runtime_env(Some(" cpu "), None, || {
+            let overrides = read_runtime_env_overrides();
+            assert_eq!(overrides.runtime_mode, RuntimeModePreference::Cpu);
+        });
+
+        with_runtime_env(Some("DIRECTML"), None, || {
+            let overrides = read_runtime_env_overrides();
+            assert_eq!(overrides.runtime_mode, RuntimeModePreference::Dml);
+        });
+
+        with_runtime_env(Some("dml"), None, || {
+            let overrides = read_runtime_env_overrides();
+            assert_eq!(overrides.runtime_mode, RuntimeModePreference::Dml);
+        });
+
+        with_runtime_env(Some("unknown"), None, || {
+            let overrides = read_runtime_env_overrides();
+            assert_eq!(overrides.runtime_mode, RuntimeModePreference::Auto);
+        });
+    }
+
+    #[test]
+    fn runtime_env_overrides_parse_dml_device_id() {
+        with_runtime_env(None, Some("1"), || {
+            let overrides = read_runtime_env_overrides();
+            assert_eq!(overrides.dml_device_id, Some(1));
+        });
+
+        with_runtime_env(None, Some("abc"), || {
+            let overrides = read_runtime_env_overrides();
+            assert_eq!(overrides.dml_device_id, None);
+        });
+    }
 
     #[test]
     fn parse_error_message_extracts_nested_message() {

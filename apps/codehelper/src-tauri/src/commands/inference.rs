@@ -1,5 +1,6 @@
 use smolpc_engine_client::{
-    connect_or_spawn, EngineClient, EngineConnectOptions, RuntimeModePreference,
+    connect_or_spawn, read_runtime_env_overrides, EngineClient, EngineConnectOptions,
+    RuntimeModePreference,
 };
 use smolpc_engine_core::inference::backend::BackendStatus;
 use smolpc_engine_core::models::registry::ModelDefinition;
@@ -23,9 +24,10 @@ struct RuntimeClientConfig {
 
 impl Default for RuntimeClientConfig {
     fn default() -> Self {
+        let runtime_overrides = read_runtime_env_overrides();
         Self {
-            runtime_mode: RuntimeModePreference::Auto,
-            dml_device_id: None,
+            runtime_mode: runtime_overrides.runtime_mode,
+            dml_device_id: runtime_overrides.dml_device_id,
         }
     }
 }
@@ -492,6 +494,7 @@ pub async fn is_generating(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smolpc_engine_client::test_utils::with_runtime_env;
 
     #[test]
     fn apply_runtime_mode_rollback_restores_previous_config_and_clears_client() {
@@ -521,5 +524,23 @@ mod tests {
 
         assert!(message.contains("Runtime mode switch failed: switch connect failed."));
         assert!(message.contains("Rollback to 'dml' also failed: reconnect failed"));
+    }
+
+    #[test]
+    fn runtime_client_config_default_reads_env_overrides() {
+        with_runtime_env(Some("directml"), Some("1"), || {
+            let config = RuntimeClientConfig::default();
+            assert_eq!(config.runtime_mode, RuntimeModePreference::Dml);
+            assert_eq!(config.dml_device_id, Some(1));
+        });
+    }
+
+    #[test]
+    fn runtime_client_config_default_falls_back_for_invalid_env_values() {
+        with_runtime_env(Some("unknown"), Some("abc"), || {
+            let config = RuntimeClientConfig::default();
+            assert_eq!(config.runtime_mode, RuntimeModePreference::Auto);
+            assert_eq!(config.dml_device_id, None);
+        });
     }
 }

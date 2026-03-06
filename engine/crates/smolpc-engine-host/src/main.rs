@@ -288,6 +288,9 @@ struct ParsedArgs {
 }
 
 const STARTUP_PROBE_WAIT_MS: u64 = 1_500;
+/// Extended probe budget for DirectML startup.
+/// Worst-case total probe wait: STARTUP_PROBE_WAIT_MS + STARTUP_PROBE_RECOVERY_WAIT_MS.
+const STARTUP_PROBE_RECOVERY_WAIT_MS: u64 = 8_000;
 
 #[derive(Debug, Clone)]
 struct DirectMlCandidate {
@@ -752,6 +755,27 @@ impl EngineState {
         self.startup_probe.lock().await.clone().unwrap_or_default()
     }
 
+    async fn wait_for_startup_probe_with_recovery(
+        &self,
+        require_directml: bool,
+    ) -> BackendProbeResult {
+        let mut probe = self
+            .wait_for_startup_probe(Duration::from_millis(STARTUP_PROBE_WAIT_MS))
+            .await;
+        if require_directml
+            && !probe
+                .available_backends
+                .contains(&InferenceBackend::DirectML)
+        {
+            // DirectML enumeration may still be in flight after the initial budget.
+            // If the probe has already settled, this returns immediately.
+            probe = self
+                .wait_for_startup_probe(Duration::from_millis(STARTUP_PROBE_RECOVERY_WAIT_MS))
+                .await;
+        }
+        probe
+    }
+
     async fn lookup_backend_record(
         &self,
         key: &BackendDecisionKey,
@@ -911,7 +935,7 @@ impl EngineState {
 
         self.transition_readiness(ReadinessState::Probing).await;
         let probe = self
-            .wait_for_startup_probe(Duration::from_millis(STARTUP_PROBE_WAIT_MS))
+            .wait_for_startup_probe_with_recovery(mode.requires_directml())
             .await;
         let has_directml = probe
             .available_backends
@@ -1047,7 +1071,7 @@ impl EngineState {
         let force_override = parse_force_override();
         let forced_device_id = parse_dml_device_id_env();
         let probe = self
-            .wait_for_startup_probe(Duration::from_millis(STARTUP_PROBE_WAIT_MS))
+            .wait_for_startup_probe_with_recovery(directml_required)
             .await;
 
         let mut available_backends = probe.available_backends.clone();

@@ -1,6 +1,8 @@
 use super::inference::{apply_runtime_mode_preference, resolve_client, InferenceState};
 use chrono::Utc;
-use smolpc_engine_client::{EngineStatus, RuntimeModePreference, StartupMode, StartupPolicy};
+use smolpc_engine_client::{
+    read_runtime_env_overrides, EngineStatus, RuntimeModePreference, StartupMode, StartupPolicy,
+};
 
 const CONTRACT_STATES: [&str; 7] = [
     "idle",
@@ -80,11 +82,21 @@ fn now_rfc3339() -> String {
     Utc::now().to_rfc3339()
 }
 
-fn startup_mode_to_runtime_mode(mode: StartupModeDto) -> RuntimeModePreference {
+fn startup_mode_to_runtime_mode_with_auto_preference(
+    mode: StartupModeDto,
+    auto_preference: RuntimeModePreference,
+) -> RuntimeModePreference {
     match mode {
-        StartupModeDto::Auto => RuntimeModePreference::Auto,
+        StartupModeDto::Auto => auto_preference,
         StartupModeDto::DirectmlRequired => RuntimeModePreference::Dml,
     }
+}
+
+fn startup_mode_to_runtime_mode(mode: StartupModeDto) -> RuntimeModePreference {
+    startup_mode_to_runtime_mode_with_auto_preference(
+        mode,
+        read_runtime_env_overrides().runtime_mode,
+    )
 }
 
 fn startup_mode_to_engine_mode(mode: StartupModeDto) -> StartupMode {
@@ -250,6 +262,7 @@ pub async fn engine_ensure_started(
 mod tests {
     use super::*;
     use smolpc_engine_client::LastStartupError;
+    use smolpc_engine_client::test_utils::with_runtime_env;
     use smolpc_engine_core::inference::backend::{BackendStatus, InferenceBackend};
 
     fn sample_status() -> EngineStatus {
@@ -278,13 +291,68 @@ mod tests {
     #[test]
     fn startup_mode_maps_to_runtime_mode() {
         assert_eq!(
-            startup_mode_to_runtime_mode(StartupModeDto::Auto),
+            startup_mode_to_runtime_mode_with_auto_preference(
+                StartupModeDto::Auto,
+                RuntimeModePreference::Auto
+            ),
             RuntimeModePreference::Auto
         );
         assert_eq!(
-            startup_mode_to_runtime_mode(StartupModeDto::DirectmlRequired),
+            startup_mode_to_runtime_mode_with_auto_preference(
+                StartupModeDto::Auto,
+                RuntimeModePreference::Cpu
+            ),
+            RuntimeModePreference::Cpu
+        );
+        assert_eq!(
+            startup_mode_to_runtime_mode_with_auto_preference(
+                StartupModeDto::Auto,
+                RuntimeModePreference::Dml
+            ),
             RuntimeModePreference::Dml
         );
+        assert_eq!(
+            startup_mode_to_runtime_mode_with_auto_preference(
+                StartupModeDto::DirectmlRequired,
+                RuntimeModePreference::Auto
+            ),
+            RuntimeModePreference::Dml
+        );
+        assert_eq!(
+            startup_mode_to_runtime_mode_with_auto_preference(
+                StartupModeDto::DirectmlRequired,
+                RuntimeModePreference::Cpu
+            ),
+            RuntimeModePreference::Dml
+        );
+    }
+
+    #[test]
+    fn startup_mode_to_runtime_mode_reads_runtime_env_overrides() {
+        with_runtime_env(Some(" directml "), None, || {
+            assert_eq!(
+                startup_mode_to_runtime_mode(StartupModeDto::Auto),
+                RuntimeModePreference::Dml
+            );
+        });
+
+        with_runtime_env(Some("cpu"), None, || {
+            assert_eq!(
+                startup_mode_to_runtime_mode(StartupModeDto::Auto),
+                RuntimeModePreference::Cpu
+            );
+            assert_eq!(
+                startup_mode_to_runtime_mode(StartupModeDto::DirectmlRequired),
+                RuntimeModePreference::Dml
+            );
+        });
+
+        with_runtime_env(Some("unknown"), None, || {
+            assert_eq!(
+                startup_mode_to_runtime_mode(StartupModeDto::Auto),
+                RuntimeModePreference::Auto
+            );
+        });
     }
 
     #[test]
