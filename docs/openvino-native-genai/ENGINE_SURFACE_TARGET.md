@@ -1,20 +1,21 @@
 # Engine Surface Target
 
-Checked on: 2026-03-09
-Purpose: define the target engine status and model-readiness contract for the native OpenVINO rollout.
-
-This file describes the target Phase 0 contract. It does not claim the current implementation already matches it.
+Checked on: 2026-03-10
+Purpose: define the target engine status and model-readiness contract for the native OpenVINO rollout, and record the implemented branch baseline that the remaining Phase 1 work should assume.
 
 ## Principles
 
 - status is lane-based, not DML-specific
 - readiness is reported independently for `openvino_npu`, `directml`, and `cpu`
 - startup probe and model preflight are separate states
-- temporary fallback must be distinguishable from persisted selection
+- temporary fallback is distinguishable from persisted selection
+- `engine-host` remains the only selector, probe owner, and persistence owner
 
-## Target `GET /engine/status`
+## Implemented Baseline (2026-03-10)
 
-Top-level backend surface:
+### `GET /engine/status`
+
+Top-level fields now implemented:
 
 - `active_backend`
 - `active_artifact_backend`
@@ -27,14 +28,21 @@ Top-level backend surface:
   - `temporary_fallback`
 - `available_backends`
 - `selected_device`
+- `selection_fingerprint`
+- `decision_key`
+- `last_decision`
+- `runtime_bundles`
+- `failure_counters`
+- `force_override`
+- `store_path`
 
-Lane readiness surface:
+Current lane surface:
 
 - `backend_status.lanes.openvino_npu`
 - `backend_status.lanes.directml`
 - `backend_status.lanes.cpu`
 
-Each lane should expose:
+Each implemented lane now exposes:
 
 - `detected`
 - `bundle_ready`
@@ -58,22 +66,43 @@ Each lane should expose:
   - `unknown`
   - `cold`
   - `warm`
+- `device_id`
+- `device_name`
 
-## Target `POST /engine/check-model`
+Current truthfulness limits:
 
-Do not return a single boolean.
+- `directml` startup detection is implemented now
+- `directml` preflight is only reported after an actual DirectML load attempt
+- `openvino_npu` bundle/artifact readiness is reported now
+- `openvino_npu` startup-probe truth is reported now (`detected`, `device_name`, `driver_version`, `startup_probe_state`, `last_failure_class`)
+- `runtime_engine` currently emits `ort_cpu` or `genai_dml`; `ov_genai_npu` is not emitted yet
+- preflight state plumbing exists, but the current branch bottoms out at `runtime_unavailable` because native OpenVINO activation is not implemented yet
 
-Return readiness by lane, for example:
+### `POST /engine/check-model`
+
+Implemented now:
+
+- response is lane-based and no longer returns a single boolean
+- primary app-facing readiness surfaces are:
+  - HTTP `POST /engine/check-model`
+  - `EngineClient::check_model_readiness()`
+  - Tauri command `check_model_readiness(model_id)`
+- compatibility shims are:
+  - `EngineClient::check_model_exists()`
+  - Tauri command `check_model_exists(model_id)`
+  - these return `true` only when at least one lane has `ready = true`
+  - new callers should prefer the readiness API above
+- current shape:
 
 ```json
 {
   "model_id": "qwen2.5-coder-1.5b",
   "lanes": {
     "openvino_npu": {
-      "artifact_ready": true,
+      "artifact_ready": false,
       "bundle_ready": true,
       "ready": false,
-      "reason": "preflight_not_run"
+      "reason": "artifact_missing"
     },
     "directml": {
       "artifact_ready": true,
@@ -91,9 +120,63 @@ Return readiness by lane, for example:
 }
 ```
 
+Current reason codes include:
+
+- `ready`
+- `unknown_model`
+- `artifact_missing`
+- `artifact_invalid`
+- `artifact_incomplete`
+- `startup_probe_pending`
+- `startup_probe_failed`
+- `runtime_unavailable`
+- `directml_candidate_missing`
+- runtime-bundle validation failure codes such as `missing_root`, `directml_missing`, `openvino_npu_plugin_missing`
+- blocking OpenVINO startup-probe failure classes such as `no_npu_hardware`, `openvino_npu_driver_missing`, and `openvino_npu_plugin_unavailable`
+
+Current implemented reason semantics:
+
+- `cpu`
+  - `ready` when artifact and ORT bundle are both ready
+  - `artifact_missing` when the CPU artifact is incomplete
+  - otherwise the current ORT bundle failure code
+- `directml`
+  - `artifact_missing` when the DirectML artifact is incomplete
+  - then the DirectML bundle failure code
+  - then `startup_probe_pending` before the startup probe finishes
+  - then `directml_candidate_missing` when the probe finished without a DirectML-capable adapter
+  - otherwise `ready`
+- `openvino_npu`
+  - `artifact_missing` when the OpenVINO manifest is missing
+  - `artifact_invalid` or `artifact_incomplete` when the OpenVINO manifest exists but is not usable
+  - then the OpenVINO bundle failure code
+  - then `startup_probe_pending` while the async OpenVINO startup probe is still running
+  - then a blocking OpenVINO startup-probe failure class when the startup probe completed but the lane is unusable
+  - then `startup_probe_failed` if the startup probe completed without a usable result but also without a blocking classified failure
+  - then `runtime_unavailable`
+  - `ready` remains `false` in the current branch because native OpenVINO activation is not implemented yet
+
+## Remaining Target For The Rest Of Phase 1
+
+### `GET /engine/status`
+
+The remaining Phase 1 work still needs to make the implemented baseline fully match the final target by adding:
+
+- truthful `openvino_npu.preflight_state`
+- real `runtime_engine=ov_genai_npu`
+- actual lane selection order `openvino_npu -> directml -> cpu`
+
+### `POST /engine/check-model`
+
+The remaining Phase 1 work still needs:
+
+- `openvino_npu.ready=true` when startup probe and preflight both pass
+- `reason=preflight_not_run`, `timeout`, and other OpenVINO-specific readiness reasons once a native OpenVINO runtime exists
+- readiness that reflects OpenVINO model-preflight truth, not only bundle/artifact truth
+
 ## Failure-Class Vocabulary
 
-OpenVINO:
+OpenVINO current + target vocabulary:
 
 - `no_npu_hardware`
 - `openvino_bundle_missing`
@@ -106,24 +189,24 @@ OpenVINO:
 - `openvino_npu_compile_failed`
 - `openvino_npu_runtime_failed`
 
-DirectML:
+DirectML current + target vocabulary:
 
 - `directml_candidate_missing`
 - `directml_artifact_missing`
 - `directml_initialization_failed`
 - `directml_runtime_failed`
 
-CPU:
+CPU current + target vocabulary:
 
-- `cpu_artifact_missing`
-- `cpu_initialization_failed`
+- `artifact_missing`
+- ORT runtime-bundle validation failure codes when the CPU lane bundle is incomplete
 
 ## Persistence Rules Visible In Status
 
-- temporary fallbacks must be visible as temporary
-- timeout-based fallbacks must not be reported as persisted winners
-- persisted records should reference the selection fingerprint, not just the backend id
+- `decision_persistence_state=temporary_fallback` means the active backend is a temporary fallback and the host did not replace a prior good persisted decision
+- `lanes.<lane>.persisted_eligibility=true` identifies which lane is currently persisted for the active selection fingerprint
+- `selection_fingerprint` and `decision_key` now reference the full persisted fingerprint, not just the backend id
 
 ## Implementation Boundary
 
-This contract should be implemented before launcher/app integration for the native OpenVINO lane proceeds.
+The lane-based surface, fingerprinted persistence contract, and OpenVINO startup-probe surfaces are now implemented on this branch. The next planner session should stay focused on native OpenVINO activation, live selection, and model/catalog migration rather than reopening the status or persistence schema unless testing finds a regression.

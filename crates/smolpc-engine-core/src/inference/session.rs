@@ -97,6 +97,12 @@ impl InferenceSession {
                     return Err("DirectML backend is only supported on Windows".to_string());
                 }
             }
+            InferenceBackend::OpenVinoNpu => {
+                return Err(
+                    "InferenceSession does not support openvino_npu; use the native OpenVINO runtime path"
+                        .to_string(),
+                );
+            }
         };
 
         let session = builder

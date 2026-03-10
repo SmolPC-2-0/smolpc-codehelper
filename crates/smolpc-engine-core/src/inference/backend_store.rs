@@ -11,13 +11,13 @@ use windows_sys::Win32::Storage::FileSystem::{
     MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
 };
 
-const BACKEND_STORE_VERSION: u32 = 1;
-const BACKEND_STORE_FILENAME: &str = "backend_decisions.v1.json";
+const BACKEND_STORE_VERSION: u32 = 2;
+const BACKEND_STORE_FILENAME: &str = "backend_decisions.v2.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BackendDecisionRecord {
     pub key: BackendDecisionKey,
-    pub decision: BackendDecision,
+    pub persisted_decision: Option<BackendDecision>,
     pub failure_counters: FailureCounters,
     pub updated_at: String,
 }
@@ -77,22 +77,6 @@ impl BackendStore {
 
     pub fn upsert(&mut self, record: BackendDecisionRecord) {
         self.file.records.insert(record.key.fingerprint(), record);
-    }
-
-    pub fn remove_stale_for_model(&mut self, key: &BackendDecisionKey) -> usize {
-        let keep = key.fingerprint();
-        let mut removed = 0usize;
-
-        self.file.records.retain(|fingerprint, record| {
-            let stale = record.key.model_id == key.model_id && *fingerprint != keep;
-            if stale {
-                removed += 1;
-                return false;
-            }
-            true
-        });
-
-        removed
     }
 
     pub fn persist(&self) -> Result<(), String> {
@@ -174,13 +158,35 @@ mod tests {
     use crate::inference::backend::{DecisionReason, InferenceBackend};
     use tempfile::tempdir;
 
+    fn decision_key(driver_version: &str) -> BackendDecisionKey {
+        BackendDecisionKey {
+            model_id: "qwen2.5-coder-1.5b".to_string(),
+            model_artifact_fingerprint: Some("artifact-v1".to_string()),
+            app_version: "2.2.0".to_string(),
+            selector_engine_id: "engine_host".to_string(),
+            ort_runtime_version: Some("2.0.0-rc.11".to_string()),
+            ort_bundle_fingerprint: Some("ort-bundle-v1".to_string()),
+            openvino_runtime_version: Some("2026.0.0".to_string()),
+            openvino_genai_version: Some("2026.0.0".to_string()),
+            openvino_tokenizers_version: Some("2026.0.0".to_string()),
+            openvino_bundle_fingerprint: Some("openvino-bundle-v1".to_string()),
+            gpu_adapter_identity: Some("intel:arc:a370m".to_string()),
+            gpu_driver_version: Some(driver_version.to_string()),
+            gpu_device_id: Some(0),
+            npu_adapter_identity: Some("intel:npu".to_string()),
+            npu_driver_version: Some("32.0.100.3104".to_string()),
+            selection_profile: Some("default".to_string()),
+        }
+    }
+
     fn decision_record(
         key: BackendDecisionKey,
-        backend: InferenceBackend,
+        backend: Option<InferenceBackend>,
     ) -> BackendDecisionRecord {
         BackendDecisionRecord {
             key,
-            decision: BackendDecision::new(backend, DecisionReason::DefaultCpu, None),
+            persisted_decision: backend
+                .map(|selected| BackendDecision::new(selected, DecisionReason::DefaultCpu, None)),
             failure_counters: FailureCounters::default(),
             updated_at: Utc::now().to_rfc3339(),
         }
@@ -192,46 +198,59 @@ mod tests {
         let path = dir.path().join("backend_store.json");
 
         let mut store = BackendStore::load(&path).expect("load");
-        let key = BackendDecisionKey {
-            model_id: "qwen2.5-coder-1.5b".to_string(),
-            adapter_identity: "intel:arc".to_string(),
-            driver_version: "31.0.101.5522".to_string(),
-            app_version: "2.2.0".to_string(),
-            ort_version: "1.23".to_string(),
-            directml_device_id: None,
-        };
-        store.upsert(decision_record(key.clone(), InferenceBackend::Cpu));
+        let key = decision_key("31.0.101.5522");
+        store.upsert(decision_record(key.clone(), Some(InferenceBackend::Cpu)));
         store.persist().expect("persist");
 
         let reloaded = BackendStore::load(&path).expect("reload");
         let record = reloaded.get(&key).expect("record should exist");
-        assert_eq!(record.decision.backend, InferenceBackend::Cpu);
+        assert_eq!(
+            record
+                .persisted_decision
+                .as_ref()
+                .expect("persisted decision")
+                .backend,
+            InferenceBackend::Cpu
+        );
     }
 
     #[test]
-    fn remove_stale_for_model_keeps_only_current_fingerprint() {
+    fn multiple_records_for_same_model_are_retained_when_fingerprints_differ() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("backend_store.json");
         let mut store = BackendStore::load(&path).expect("load");
 
-        let key_a = BackendDecisionKey {
-            model_id: "qwen2.5-coder-1.5b".to_string(),
-            adapter_identity: "intel:arc".to_string(),
-            driver_version: "31.0.101.5522".to_string(),
-            app_version: "2.2.0".to_string(),
-            ort_version: "1.23".to_string(),
-            directml_device_id: None,
-        };
-        let mut key_b = key_a.clone();
-        key_b.driver_version = "31.0.101.5590".to_string();
+        let key_a = decision_key("31.0.101.5522");
+        let key_b = decision_key("31.0.101.5590");
 
-        store.upsert(decision_record(key_a.clone(), InferenceBackend::Cpu));
-        store.upsert(decision_record(key_b.clone(), InferenceBackend::DirectML));
+        store.upsert(decision_record(key_a.clone(), Some(InferenceBackend::Cpu)));
+        store.upsert(decision_record(key_b.clone(), Some(InferenceBackend::DirectML)));
+        store.persist().expect("persist");
 
-        let removed = store.remove_stale_for_model(&key_b);
-        assert_eq!(removed, 1);
-        assert!(store.get(&key_b).is_some());
-        assert!(store.get(&key_a).is_none());
+        let reloaded = BackendStore::load(&path).expect("reload");
+        assert!(reloaded.get(&key_a).is_some());
+        assert!(reloaded.get(&key_b).is_some());
+        assert_ne!(key_a.fingerprint(), key_b.fingerprint());
+    }
+
+    #[test]
+    fn records_can_persist_failure_counters_without_persisted_winner() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("backend_store.json");
+        let mut store = BackendStore::load(&path).expect("load");
+        let key = decision_key("31.0.101.5522");
+        let mut record = decision_record(key.clone(), None);
+        record
+            .failure_counters
+            .record_directml_failure(crate::inference::backend::DirectMLFailureStage::Init, "init");
+
+        store.upsert(record);
+        store.persist().expect("persist");
+
+        let reloaded = BackendStore::load(&path).expect("reload");
+        let record = reloaded.get(&key).expect("record should exist");
+        assert!(record.persisted_decision.is_none());
+        assert_eq!(record.failure_counters.directml_init_failures, 1);
     }
 
     #[test]
@@ -241,14 +260,7 @@ mod tests {
         fs::write(&path, "{not-json").expect("write invalid json");
 
         let store = BackendStore::load(&path).expect("load");
-        let key = BackendDecisionKey {
-            model_id: "qwen2.5-coder-1.5b".to_string(),
-            adapter_identity: "intel:arc".to_string(),
-            driver_version: "31.0.101.5522".to_string(),
-            app_version: "2.2.0".to_string(),
-            ort_version: "1.23".to_string(),
-            directml_device_id: None,
-        };
+        let key = decision_key("31.0.101.5522");
         assert!(store.get(&key).is_none());
     }
 }

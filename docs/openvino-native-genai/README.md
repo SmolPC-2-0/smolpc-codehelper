@@ -1,9 +1,28 @@
 # Native OpenVINO GenAI Plan Pack
 
-Checked on: 2026-03-09
-Scope: Windows x64 only, planning/docs only, weak Intel laptops are the primary KPI.
+Checked on: 2026-03-10
+Scope: Windows x64 only, canonical planning + contract docs, weak Intel laptops are the primary KPI.
 
 This folder is the canonical plan pack for the SmolPC Intel acceleration path.
+
+## Implementation Status
+
+As of 2026-03-10, this branch is beyond the Phase 0 prerequisite baseline and has most of the OpenVINO bring-up scaffolding wired:
+
+- selection persistence is keyed by full fingerprint and keeps multiple records per model
+- `GET /engine/status` is lane-based instead of DML-only
+- `POST /engine/check-model` reports readiness by lane instead of a single boolean
+- `openvino_npu/manifest.json` inspection and artifact validation are implemented
+- an async OpenVINO startup probe classifies hardware, device visibility, driver version, and startup failure class
+- model load now applies the OpenVINO preflight budget and `temporary_fallback` status plumbing before falling through to `directml` or `cpu`
+
+Still pending for the remaining Phase 1 / Phase 1b work:
+
+- native `openvino_npu` runtime activation and `runtime_engine=ov_genai_npu`
+- successful OpenVINO compile and first-token preflight
+- automatic live selection order `openvino_npu -> directml -> cpu`
+- lane-specific manifest rollout and default catalog migration away from `qwen3-4b-instruct-2507`
+- workload tuning, cache policy, and prompt-default calibration
 
 ## Final Decision
 
@@ -43,14 +62,14 @@ This pack is intentionally structured for short-lived, focused implementation-pl
 
 Recommended planning boundaries:
 
-1. runtime loading and lane isolation
-2. probe, preflight, timeout, and fallback semantics
-3. persistence fingerprint and cache invalidation
-4. engine status and `/engine/check-model` contract
-5. model manifests, artifact layout, and default catalog migration
-6. native OpenVINO runtime adapter implementation
+1. native OpenVINO runtime adapter implementation and successful activation
+2. automatic selector handoff to `openvino_npu -> directml -> cpu` after successful OpenVINO preflight
+3. model manifests, artifact layout, and default catalog migration
+4. workload tuning, cache policy, and prompt-default calibration
 
 Each future Codex session should take one workstream or one subsection of a phase, produce an implementation plan for that slice only, and stop before broad execution planning.
+
+Planner and implementer prompts should explicitly require small, frequent checkpoint commits. Do not carry a large dirty worktree across sessions when the work can be split into coherent checkpoints.
 
 ## Removed Assumptions
 

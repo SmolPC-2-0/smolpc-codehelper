@@ -7,12 +7,14 @@ pub const DIRECTML_MAX_TTFT_REGRESSION_RATIO: f64 = 1.15;
 pub const DIRECTML_DEMOTION_THRESHOLD: u32 = 3;
 pub const ORT_CRATE_VERSION: &str = "2.0.0-rc.11";
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum InferenceBackend {
     Cpu,
     #[serde(rename = "directml")]
     DirectML,
+    #[serde(rename = "openvino_npu")]
+    OpenVinoNpu,
 }
 
 impl InferenceBackend {
@@ -20,6 +22,7 @@ impl InferenceBackend {
         match self {
             Self::Cpu => "cpu",
             Self::DirectML => "directml",
+            Self::OpenVinoNpu => "openvino_npu",
         }
     }
 }
@@ -55,6 +58,16 @@ pub enum DecisionReason {
         alias = "direct_m_l_preflight_failed"
     )]
     DirectMLPreflightFailed,
+    #[serde(rename = "no_openvino_candidate")]
+    NoOpenVinoCandidate,
+    #[serde(rename = "openvino_startup_probe_pending")]
+    OpenVinoStartupProbePending,
+    #[serde(rename = "openvino_preflight_failed")]
+    OpenVinoPreflightFailed,
+    #[serde(rename = "openvino_preflight_timeout")]
+    OpenVinoPreflightTimeout,
+    #[serde(rename = "openvino_runtime_unavailable")]
+    OpenVinoRuntimeUnavailable,
     RuntimeFailureFallback,
     DemotedAfterFailures,
 }
@@ -62,28 +75,60 @@ pub enum DecisionReason {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BackendDecisionKey {
     pub model_id: String,
-    pub adapter_identity: String,
-    pub driver_version: String,
-    pub app_version: String,
-    pub ort_version: String,
     #[serde(default)]
-    pub directml_device_id: Option<i32>,
+    pub model_artifact_fingerprint: Option<String>,
+    pub app_version: String,
+    pub selector_engine_id: String,
+    #[serde(default)]
+    pub ort_runtime_version: Option<String>,
+    #[serde(default)]
+    pub ort_bundle_fingerprint: Option<String>,
+    #[serde(default)]
+    pub openvino_runtime_version: Option<String>,
+    #[serde(default)]
+    pub openvino_genai_version: Option<String>,
+    #[serde(default)]
+    pub openvino_tokenizers_version: Option<String>,
+    #[serde(default)]
+    pub openvino_bundle_fingerprint: Option<String>,
+    #[serde(default)]
+    pub gpu_adapter_identity: Option<String>,
+    #[serde(default)]
+    pub gpu_driver_version: Option<String>,
+    #[serde(default)]
+    pub gpu_device_id: Option<i32>,
+    #[serde(default)]
+    pub npu_adapter_identity: Option<String>,
+    #[serde(default)]
+    pub npu_driver_version: Option<String>,
+    #[serde(default)]
+    pub selection_profile: Option<String>,
 }
 
 impl BackendDecisionKey {
     pub fn fingerprint(&self) -> String {
-        let directml_device_id = self
-            .directml_device_id
+        let gpu_device_id = self
+            .gpu_device_id
             .map(|id| id.to_string())
-            .unwrap_or_else(|| "auto".to_string());
+            .unwrap_or_else(|| "none".to_string());
         format!(
-            "{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             self.model_id,
-            self.adapter_identity,
-            self.driver_version,
+            self.model_artifact_fingerprint.as_deref().unwrap_or("none"),
             self.app_version,
-            self.ort_version,
-            directml_device_id
+            self.selector_engine_id,
+            self.ort_runtime_version.as_deref().unwrap_or("none"),
+            self.ort_bundle_fingerprint.as_deref().unwrap_or("none"),
+            self.openvino_runtime_version.as_deref().unwrap_or("none"),
+            self.openvino_genai_version.as_deref().unwrap_or("none"),
+            self.openvino_tokenizers_version.as_deref().unwrap_or("none"),
+            self.openvino_bundle_fingerprint.as_deref().unwrap_or("none"),
+            self.gpu_adapter_identity.as_deref().unwrap_or("none"),
+            self.gpu_driver_version.as_deref().unwrap_or("none"),
+            gpu_device_id,
+            self.npu_adapter_identity.as_deref().unwrap_or("none"),
+            self.npu_driver_version.as_deref().unwrap_or("none"),
+            self.selection_profile.as_deref().unwrap_or("none")
         )
         .to_ascii_lowercase()
     }
@@ -206,6 +251,126 @@ impl BackendDecision {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BackendSelectionState {
+    Pending,
+    Ready,
+    Fallback,
+    Error,
+}
+
+impl Default for BackendSelectionState {
+    fn default() -> Self {
+        Self::Pending
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionPersistenceState {
+    None,
+    Persisted,
+    TemporaryFallback,
+}
+
+impl Default for DecisionPersistenceState {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LaneStartupProbeState {
+    NotStarted,
+    Ready,
+    Error,
+}
+
+impl Default for LaneStartupProbeState {
+    fn default() -> Self {
+        Self::NotStarted
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LanePreflightState {
+    NotStarted,
+    Pending,
+    Ready,
+    Timeout,
+    Error,
+}
+
+impl Default for LanePreflightState {
+    fn default() -> Self {
+        Self::NotStarted
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LaneCacheState {
+    Unknown,
+    Cold,
+    Warm,
+}
+
+impl Default for LaneCacheState {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BackendSelectedDevice {
+    pub backend: InferenceBackend,
+    pub device_id: Option<i32>,
+    pub device_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct BackendRuntimeBundleStatus {
+    pub root: Option<String>,
+    pub fingerprint: Option<String>,
+    pub validated: bool,
+    pub failure: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct BackendRuntimeBundlesStatus {
+    pub load_mode: Option<String>,
+    pub ort: BackendRuntimeBundleStatus,
+    pub directml: BackendRuntimeBundleStatus,
+    pub openvino: BackendRuntimeBundleStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct BackendLaneStatus {
+    pub detected: bool,
+    pub bundle_ready: bool,
+    pub artifact_ready: bool,
+    pub startup_probe_state: LaneStartupProbeState,
+    pub preflight_state: LanePreflightState,
+    pub persisted_eligibility: bool,
+    pub last_failure_class: Option<String>,
+    pub last_failure_message: Option<String>,
+    pub driver_version: Option<String>,
+    pub runtime_version: Option<String>,
+    pub cache_state: LaneCacheState,
+    pub device_id: Option<i32>,
+    pub device_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct BackendLaneStatuses {
+    pub openvino_npu: BackendLaneStatus,
+    pub directml: BackendLaneStatus,
+    pub cpu: BackendLaneStatus,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(default)]
 pub struct BackendStatus {
@@ -213,32 +378,63 @@ pub struct BackendStatus {
     pub active_model_path: Option<String>,
     pub active_artifact_backend: Option<InferenceBackend>,
     pub runtime_engine: Option<String>,
-    pub runtime_load_mode: Option<String>,
     pub available_backends: Vec<InferenceBackend>,
-    pub selection_state: Option<String>,
+    pub selected_device: Option<BackendSelectedDevice>,
+    pub selection_state: Option<BackendSelectionState>,
     pub selection_reason: Option<String>,
-    pub selected_device_id: Option<i32>,
-    pub selected_device_name: Option<String>,
-    pub dml_gate_state: Option<String>,
-    pub dml_gate_reason: Option<String>,
+    pub decision_persistence_state: DecisionPersistenceState,
+    pub selection_fingerprint: Option<String>,
     pub decision_key: Option<BackendDecisionKey>,
     pub last_decision: Option<BackendDecision>,
-    pub directml_probe_passed: Option<bool>,
-    pub directml_probe_error: Option<String>,
-    pub directml_probe_at: Option<String>,
-    pub ort_bundle_root: Option<String>,
-    pub ort_bundle_fingerprint: Option<String>,
-    pub ort_bundle_validated: Option<bool>,
-    pub ort_bundle_failure: Option<String>,
-    pub directml_bundle_validated: Option<bool>,
-    pub directml_bundle_failure: Option<String>,
-    pub openvino_bundle_root: Option<String>,
-    pub openvino_bundle_fingerprint: Option<String>,
-    pub openvino_bundle_validated: Option<bool>,
-    pub openvino_bundle_failure: Option<String>,
+    pub runtime_bundles: BackendRuntimeBundlesStatus,
+    pub lanes: BackendLaneStatuses,
     pub failure_counters: FailureCounters,
     pub force_override: Option<InferenceBackend>,
     pub store_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelLaneReadiness {
+    pub artifact_ready: bool,
+    pub bundle_ready: bool,
+    pub ready: bool,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ModelLaneReadinessByBackend {
+    pub openvino_npu: ModelLaneReadiness,
+    pub directml: ModelLaneReadiness,
+    pub cpu: ModelLaneReadiness,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CheckModelResponse {
+    pub model_id: String,
+    pub lanes: ModelLaneReadinessByBackend,
+}
+
+impl CheckModelResponse {
+    pub fn any_ready(&self) -> bool {
+        self.lanes.openvino_npu.ready || self.lanes.directml.ready || self.lanes.cpu.ready
+    }
+
+    pub fn any_artifact_ready(&self) -> bool {
+        self.lanes.openvino_npu.artifact_ready
+            || self.lanes.directml.artifact_ready
+            || self.lanes.cpu.artifact_ready
+    }
+}
+
+impl Default for ModelLaneReadiness {
+    fn default() -> Self {
+        Self {
+            artifact_ready: false,
+            bundle_ready: false,
+            ready: false,
+            reason: "not_ready".to_string(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -261,18 +457,41 @@ mod tests {
         }
     }
 
-    #[test]
-    fn decision_key_fingerprint_changes_when_driver_changes() {
-        let key_a = BackendDecisionKey {
+    fn decision_key() -> BackendDecisionKey {
+        BackendDecisionKey {
             model_id: "qwen2.5-coder-1.5b".to_string(),
-            adapter_identity: "intel:arc".to_string(),
-            driver_version: "31.0.101.5522".to_string(),
+            model_artifact_fingerprint: Some("artifact-v1".to_string()),
             app_version: "2.2.0".to_string(),
-            ort_version: "1.23".to_string(),
-            directml_device_id: None,
-        };
+            selector_engine_id: "engine_host".to_string(),
+            ort_runtime_version: Some("2.0.0-rc.11".to_string()),
+            ort_bundle_fingerprint: Some("ort-bundle-v1".to_string()),
+            openvino_runtime_version: Some("2026.0.0".to_string()),
+            openvino_genai_version: Some("2026.0.0".to_string()),
+            openvino_tokenizers_version: Some("2026.0.0".to_string()),
+            openvino_bundle_fingerprint: Some("openvino-bundle-v1".to_string()),
+            gpu_adapter_identity: Some("intel:arc:a370m".to_string()),
+            gpu_driver_version: Some("31.0.101.5522".to_string()),
+            gpu_device_id: Some(0),
+            npu_adapter_identity: Some("intel:npu".to_string()),
+            npu_driver_version: Some("32.0.100.3104".to_string()),
+            selection_profile: Some("default".to_string()),
+        }
+    }
+
+    #[test]
+    fn decision_key_fingerprint_changes_when_gpu_driver_changes() {
+        let key_a = decision_key();
         let mut key_b = key_a.clone();
-        key_b.driver_version = "31.0.101.5590".to_string();
+        key_b.gpu_driver_version = Some("31.0.101.5590".to_string());
+
+        assert_ne!(key_a.fingerprint(), key_b.fingerprint());
+    }
+
+    #[test]
+    fn decision_key_fingerprint_changes_when_openvino_bundle_changes() {
+        let key_a = decision_key();
+        let mut key_b = key_a.clone();
+        key_b.openvino_bundle_fingerprint = Some("openvino-bundle-v2".to_string());
 
         assert_ne!(key_a.fingerprint(), key_b.fingerprint());
     }
@@ -346,5 +565,90 @@ mod tests {
         let serialized = serde_json::to_string(&InferenceBackend::DirectML)
             .expect("directml backend should serialize");
         assert_eq!(serialized, "\"directml\"");
+    }
+
+    #[test]
+    fn openvino_backend_serializes_with_lane_name() {
+        let serialized = serde_json::to_string(&InferenceBackend::OpenVinoNpu)
+            .expect("openvino_npu backend should serialize");
+        assert_eq!(serialized, "\"openvino_npu\"");
+    }
+
+    #[test]
+    fn backend_status_serializes_lane_based_surface() {
+        let status = BackendStatus {
+            selection_state: Some(BackendSelectionState::Fallback),
+            decision_persistence_state: DecisionPersistenceState::TemporaryFallback,
+            lanes: BackendLaneStatuses {
+                directml: BackendLaneStatus {
+                    startup_probe_state: LaneStartupProbeState::Error,
+                    preflight_state: LanePreflightState::Error,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let value = serde_json::to_value(&status).expect("status should serialize");
+        assert_eq!(value["decision_persistence_state"], "temporary_fallback");
+        assert!(value["lanes"]["directml"].is_object());
+        assert!(value.get("dml_gate_state").is_none());
+        assert!(value.get("selected_device_id").is_none());
+    }
+
+    #[test]
+    fn check_model_response_any_ready_requires_a_ready_lane() {
+        let response = CheckModelResponse {
+            model_id: "qwen2.5-coder-1.5b".to_string(),
+            lanes: ModelLaneReadinessByBackend {
+                openvino_npu: ModelLaneReadiness {
+                    artifact_ready: true,
+                    bundle_ready: true,
+                    ready: false,
+                    reason: "startup_probe_not_run".to_string(),
+                },
+                directml: ModelLaneReadiness {
+                    artifact_ready: true,
+                    bundle_ready: true,
+                    ready: true,
+                    reason: "ready".to_string(),
+                },
+                cpu: ModelLaneReadiness::default(),
+            },
+        };
+
+        assert!(response.any_ready());
+        assert!(response.any_artifact_ready());
+    }
+
+    #[test]
+    fn check_model_response_any_ready_is_false_when_only_artifacts_exist() {
+        let response = CheckModelResponse {
+            model_id: "qwen2.5-coder-1.5b".to_string(),
+            lanes: ModelLaneReadinessByBackend {
+                openvino_npu: ModelLaneReadiness {
+                    artifact_ready: true,
+                    bundle_ready: true,
+                    ready: false,
+                    reason: "startup_probe_not_run".to_string(),
+                },
+                directml: ModelLaneReadiness {
+                    artifact_ready: true,
+                    bundle_ready: false,
+                    ready: false,
+                    reason: "directml_missing".to_string(),
+                },
+                cpu: ModelLaneReadiness {
+                    artifact_ready: true,
+                    bundle_ready: false,
+                    ready: false,
+                    reason: "ort_core_missing".to_string(),
+                },
+            },
+        };
+
+        assert!(!response.any_ready());
+        assert!(response.any_artifact_ready());
     }
 }

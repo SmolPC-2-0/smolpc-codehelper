@@ -1,5 +1,6 @@
 use libloading::{Library, Symbol};
 use serde::{Deserialize, Serialize};
+use std::ffi::{c_char, CStr};
 use std::collections::hash_map::{DefaultHasher, HashMap};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -271,6 +272,14 @@ pub struct OpenVinoRuntimeHandle {
     _support_libs: Vec<RetainedLibrary>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct OpenVinoDeviceProbe {
+    pub available_devices: Vec<String>,
+    pub npu_device_name: Option<String>,
+    pub full_device_name: Option<String>,
+    pub driver_version: Option<String>,
+}
+
 #[derive(Clone)]
 enum CachedOrtInit {
     Success(OrtRuntimeHandle),
@@ -461,6 +470,238 @@ impl OpenVinoRuntimeLoader {
             .insert(fingerprint, CachedOpenVinoInit::Success(handle.clone()));
         Ok(handle)
     }
+
+    pub fn probe_npu_device(bundle: &OpenVinoRuntimeBundle) -> Result<OpenVinoDeviceProbe, String> {
+        Self::ensure_initialized(bundle)?;
+        let capi = OpenVinoCapi::load(&bundle.openvino_c_dll)?;
+        unsafe { capi.probe_npu_device() }
+    }
+}
+
+#[repr(C)]
+struct OvCore {
+    _private: [u8; 0],
+}
+
+#[repr(C)]
+struct OvAvailableDevices {
+    devices: *mut *mut c_char,
+    size: usize,
+}
+
+type OvCoreCreate = unsafe extern "C" fn(*mut *mut OvCore) -> i32;
+type OvCoreFree = unsafe extern "C" fn(*mut OvCore);
+type OvCoreGetAvailableDevices = unsafe extern "C" fn(*const OvCore, *mut OvAvailableDevices) -> i32;
+type OvAvailableDevicesFree = unsafe extern "C" fn(*mut OvAvailableDevices);
+type OvCoreGetProperty =
+    unsafe extern "C" fn(*const OvCore, *const c_char, *const c_char, *mut *mut c_char) -> i32;
+type OvGetErrorInfo = unsafe extern "C" fn(i32) -> *const c_char;
+type OvGetLastErrMsg = unsafe extern "C" fn() -> *const c_char;
+type OvFree = unsafe extern "C" fn(*const c_char);
+
+struct OpenVinoCapi {
+    _lib: RetainedLibrary,
+    core_create: OvCoreCreate,
+    core_free: OvCoreFree,
+    core_get_available_devices: OvCoreGetAvailableDevices,
+    available_devices_free: OvAvailableDevicesFree,
+    core_get_property: OvCoreGetProperty,
+    get_error_info: OvGetErrorInfo,
+    get_last_err_msg: OvGetLastErrMsg,
+    free: OvFree,
+}
+
+impl OpenVinoCapi {
+    fn load(path: &Path) -> Result<Self, String> {
+        let lib = RetainedLibrary::load(path)?;
+        Ok(Self {
+            core_create: unsafe { lib.get(b"ov_core_create\0")? },
+            core_free: unsafe { lib.get(b"ov_core_free\0")? },
+            core_get_available_devices: unsafe { lib.get(b"ov_core_get_available_devices\0")? },
+            available_devices_free: unsafe { lib.get(b"ov_available_devices_free\0")? },
+            core_get_property: unsafe { lib.get(b"ov_core_get_property\0")? },
+            get_error_info: unsafe { lib.get(b"ov_get_error_info\0")? },
+            get_last_err_msg: unsafe { lib.get(b"ov_get_last_err_msg\0")? },
+            free: unsafe { lib.get(b"ov_free\0")? },
+            _lib: lib,
+        })
+    }
+
+    unsafe fn probe_npu_device(&self) -> Result<OpenVinoDeviceProbe, String> {
+        let mut core: *mut OvCore = std::ptr::null_mut();
+        self.check_status((self.core_create)(&mut core), "ov_core_create")?;
+        let core_guard = OvCoreGuard {
+            core,
+            free: self.core_free,
+        };
+
+        let mut devices = OvAvailableDevices {
+            devices: std::ptr::null_mut(),
+            size: 0,
+        };
+        self.check_status(
+            (self.core_get_available_devices)(core_guard.core, &mut devices),
+            "ov_core_get_available_devices",
+        )?;
+        let devices_guard = OvAvailableDevicesGuard {
+            devices: &mut devices,
+            free: self.available_devices_free,
+        };
+
+        let available_devices = Self::collect_devices(devices_guard.devices)?;
+        let npu_device_name = available_devices
+            .iter()
+            .find(|device| {
+                device.eq_ignore_ascii_case("NPU")
+                    || device.to_ascii_uppercase().starts_with("NPU.")
+            })
+            .cloned();
+
+        let mut probe = OpenVinoDeviceProbe {
+            available_devices,
+            npu_device_name: npu_device_name.clone(),
+            ..Default::default()
+        };
+
+        if let Some(device_name) = npu_device_name {
+            probe.full_device_name = self
+                .get_property(core_guard.core, &device_name, "FULL_DEVICE_NAME")
+                .ok();
+            probe.driver_version = self
+                .get_property(core_guard.core, &device_name, "NPU_DRIVER_VERSION")
+                .ok();
+        }
+
+        Ok(probe)
+    }
+
+    unsafe fn collect_devices(devices: &OvAvailableDevices) -> Result<Vec<String>, String> {
+        if devices.size == 0 {
+            return Ok(Vec::new());
+        }
+        if devices.devices.is_null() {
+            return Err("OpenVINO returned a null available_devices buffer".to_string());
+        }
+
+        let items = std::slice::from_raw_parts(devices.devices, devices.size);
+        let mut collected = Vec::with_capacity(devices.size);
+        for item in items {
+            if item.is_null() {
+                continue;
+            }
+            collected.push(c_string_to_string(*item));
+        }
+        Ok(collected)
+    }
+
+    unsafe fn get_property(
+        &self,
+        core: *const OvCore,
+        device_name: &str,
+        property_key: &str,
+    ) -> Result<String, String> {
+        let property_label = property_key.to_string();
+        let device_name = to_c_string(device_name)?;
+        let property_key = to_c_string(property_key)?;
+        let mut property_value: *mut c_char = std::ptr::null_mut();
+        self.check_status(
+            (self.core_get_property)(
+                core,
+                device_name.as_ptr(),
+                property_key.as_ptr(),
+                &mut property_value,
+            ),
+            "ov_core_get_property",
+        )?;
+        let value_guard = OvStringGuard {
+            value: property_value,
+            free: self.free,
+        };
+
+        if value_guard.value.is_null() {
+            return Err(format!(
+                "OpenVINO property '{property_label}' returned a null string"
+            ));
+        }
+
+        Ok(c_string_to_string(value_guard.value))
+    }
+
+    unsafe fn check_status(&self, status: i32, operation: &str) -> Result<(), String> {
+        if status == 0 {
+            return Ok(());
+        }
+
+        let mut details = String::new();
+        let error_info = (self.get_error_info)(status);
+        if !error_info.is_null() {
+            details.push_str(&c_string_to_string(error_info));
+        }
+        let last_error = (self.get_last_err_msg)();
+        if !last_error.is_null() {
+            let last_error = c_string_to_string(last_error);
+            if !last_error.is_empty() {
+                if !details.is_empty() {
+                    details.push_str(": ");
+                }
+                details.push_str(&last_error);
+            }
+        }
+        if details.is_empty() {
+            details = format!("OpenVINO status code {status}");
+        }
+
+        Err(format!("{operation} failed: {details}"))
+    }
+}
+
+struct OvCoreGuard {
+    core: *mut OvCore,
+    free: OvCoreFree,
+}
+
+impl Drop for OvCoreGuard {
+    fn drop(&mut self) {
+        if !self.core.is_null() {
+            unsafe { (self.free)(self.core) };
+        }
+    }
+}
+
+struct OvAvailableDevicesGuard<'a> {
+    devices: &'a mut OvAvailableDevices,
+    free: OvAvailableDevicesFree,
+}
+
+impl Drop for OvAvailableDevicesGuard<'_> {
+    fn drop(&mut self) {
+        unsafe { (self.free)(self.devices as *mut OvAvailableDevices) };
+    }
+}
+
+struct OvStringGuard {
+    value: *mut c_char,
+    free: OvFree,
+}
+
+impl Drop for OvStringGuard {
+    fn drop(&mut self) {
+        if !self.value.is_null() {
+            unsafe { (self.free)(self.value) };
+        }
+    }
+}
+
+fn to_c_string(value: &str) -> Result<std::ffi::CString, String> {
+    std::ffi::CString::new(value)
+        .map_err(|_| format!("CString conversion rejected embedded NUL in '{value}'"))
+}
+
+fn c_string_to_string(value: *const c_char) -> String {
+    unsafe { CStr::from_ptr(value) }
+        .to_string_lossy()
+        .trim()
+        .to_string()
 }
 
 fn compute_bundle_inventory_hash(

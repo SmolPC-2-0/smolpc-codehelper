@@ -37,3 +37,4 @@ nul
 # Local/generated artifacts
 /cache_dir/
 /scripts/src-tauri/
+/tmp/

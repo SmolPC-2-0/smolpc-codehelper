@@ -31,9 +31,9 @@ pub use genai::GenAiDirectMlGenerator;
 pub use generator::Generator;
 pub use runtime_adapter::InferenceRuntimeAdapter;
 pub use runtime_loading::{
-    BundleValidationFailureClass, OpenVinoRuntimeBundle, OpenVinoRuntimeLoader, OrtRuntimeBundle,
-    OrtRuntimeLoader, RequiredRuntimeFile, RuntimeBundleFingerprint, RuntimeFamily,
-    RuntimeVersionMetadata,
+    BundleValidationFailureClass, OpenVinoDeviceProbe, OpenVinoRuntimeBundle,
+    OpenVinoRuntimeLoader, OrtRuntimeBundle, OrtRuntimeLoader, RequiredRuntimeFile,
+    RuntimeBundleFingerprint, RuntimeFamily, RuntimeVersionMetadata,
 };
 pub use session::InferenceSession;
 pub use tokenizer::TokenizerWrapper;

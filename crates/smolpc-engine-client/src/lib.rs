@@ -3,7 +3,7 @@ use rand::distributions::{Alphanumeric, DistString};
 use rand::rngs::OsRng;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use reqwest::Client;
-use smolpc_engine_core::inference::backend::BackendStatus;
+use smolpc_engine_core::inference::backend::{BackendStatus, CheckModelResponse};
 use smolpc_engine_core::models::registry::ModelDefinition;
 use smolpc_engine_core::{GenerationConfig, GenerationMetrics, GenerationResult};
 use std::fs::OpenOptions;
@@ -195,7 +195,11 @@ impl EngineClient {
         Ok(())
     }
 
-    pub async fn check_model_exists(&self, model_id: &str) -> Result<bool, EngineClientError> {
+    /// Returns the full lane-based readiness response for a model.
+    pub async fn check_model_readiness(
+        &self,
+        model_id: &str,
+    ) -> Result<CheckModelResponse, EngineClientError> {
         let response = self
             .http
             .post(self.url("/engine/check-model"))
@@ -205,11 +209,14 @@ impl EngineClient {
             .send()
             .await?;
         let response = ensure_success(response, "/engine/check-model").await?;
-        let value = response.json::<serde_json::Value>().await?;
-        Ok(value
-            .get("exists")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false))
+        Ok(response.json::<CheckModelResponse>().await?)
+    }
+
+    /// Compatibility shim for older callers.
+    ///
+    /// Prefer `check_model_readiness()` for new code.
+    pub async fn check_model_exists(&self, model_id: &str) -> Result<bool, EngineClientError> {
+        Ok(self.check_model_readiness(model_id).await?.any_ready())
     }
 
     pub async fn list_models(&self) -> Result<Vec<ModelDefinition>, EngineClientError> {

@@ -1,7 +1,7 @@
 use smolpc_engine_client::{
     connect_or_spawn, EngineClient, EngineConnectOptions, RuntimeModePreference,
 };
-use smolpc_engine_core::inference::backend::BackendStatus;
+use smolpc_engine_core::inference::backend::{BackendStatus, CheckModelResponse};
 use smolpc_engine_core::models::registry::ModelDefinition;
 use smolpc_engine_core::{GenerationConfig, GenerationMetrics, GenerationResult};
 use std::path::PathBuf;
@@ -460,16 +460,32 @@ pub async fn set_inference_runtime_mode(
 }
 
 #[tauri::command]
+pub async fn check_model_readiness(
+    model_id: String,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, InferenceState>,
+) -> Result<CheckModelResponse, String> {
+    let client = resolve_client(&app_handle, &state, false).await?;
+    client
+        .check_model_readiness(&model_id)
+        .await
+        .map_err(|e| format!("Failed to check model readiness: {e}"))
+}
+
+/// Compatibility shim for older callers.
+///
+/// Prefer `check_model_readiness` for new code so lane detail is not lost.
+#[tauri::command]
 pub async fn check_model_exists(
     model_id: String,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<bool, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
-    client
-        .check_model_exists(&model_id)
-        .await
-        .map_err(|e| format!("Failed to check model availability: {e}"))
+    Ok(
+        check_model_readiness(model_id, app_handle, state)
+            .await?
+            .any_ready(),
+    )
 }
 
 #[tauri::command]

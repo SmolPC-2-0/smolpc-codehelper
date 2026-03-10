@@ -11,7 +11,9 @@ import type {
 	AvailableModel,
 	InferenceStatus,
 	BackendStatus,
-	InferenceRuntimeMode
+	CheckModelResponse,
+	InferenceRuntimeMode,
+	InferenceBackend
 } from '$lib/types/inference';
 
 // State
@@ -25,7 +27,7 @@ let lastMetrics = $state<GenerationMetrics | null>(null);
 let backendStatus = $state<BackendStatus | null>(null);
 let runtimeMode = $state<InferenceRuntimeMode>('auto');
 
-function normalizeBackendName(raw: string | null | undefined): string | null {
+function normalizeBackendName(raw: string | null | undefined): InferenceBackend | null {
 	if (!raw) {
 		return null;
 	}
@@ -36,7 +38,10 @@ function normalizeBackendName(raw: string | null | undefined): string | null {
 	if (normalized === 'cpu') {
 		return 'cpu';
 	}
-	return raw.toLowerCase();
+	if (normalized === 'openvinonpu') {
+		return 'openvino_npu';
+	}
+	return null;
 }
 
 function normalizeRuntimeMode(raw: string | null | undefined): InferenceRuntimeMode {
@@ -88,14 +93,16 @@ export const inferenceStore = {
 			isGenerating,
 			error,
 			activeBackend: normalizeBackendName(backendStatus?.active_backend),
+			activeArtifactBackend: normalizeBackendName(backendStatus?.active_artifact_backend),
 			runtimeEngine: backendStatus?.runtime_engine ?? null,
 			activeModelPath: backendStatus?.active_model_path ?? null,
 			selectionState: backendStatus?.selection_state ?? null,
 			selectionReason: backendStatus?.selection_reason ?? null,
-			selectedDeviceName: backendStatus?.selected_device_name ?? null,
+			decisionPersistenceState: backendStatus?.decision_persistence_state ?? null,
+			selectedDeviceName: backendStatus?.selected_device?.device_name ?? null,
 			runtimeMode,
-			dmlGateState: backendStatus?.dml_gate_state ?? null,
-			dmlGateReason: backendStatus?.dml_gate_reason ?? null
+			directmlPreflightState: backendStatus?.lanes.directml.preflight_state ?? null,
+			directmlFailureClass: backendStatus?.lanes.directml.last_failure_class ?? null
 		};
 	},
 
@@ -272,15 +279,31 @@ export const inferenceStore = {
 	},
 
 	/**
-	 * Check if a specific model exists
+	 * Fetch lane-based readiness for a specific model.
+	 */
+	async checkModelReadiness(modelId: string): Promise<CheckModelResponse | null> {
+		try {
+			return await invoke<CheckModelResponse>('check_model_readiness', { modelId });
+		} catch (e) {
+			console.error('Failed to check model readiness:', e);
+			return null;
+		}
+	},
+
+	/**
+	 * @deprecated Prefer checkModelReadiness() for lane detail.
+	 * Compatibility wrapper that returns true when at least one lane is actually ready.
 	 */
 	async checkModelExists(modelId: string): Promise<boolean> {
-		try {
-			return await invoke<boolean>('check_model_exists', { modelId });
-		} catch (e) {
-			console.error('Failed to check model:', e);
+		const readiness = await this.checkModelReadiness(modelId);
+		if (!readiness) {
 			return false;
 		}
+		return (
+			readiness.lanes.openvino_npu.ready ||
+			readiness.lanes.directml.ready ||
+			readiness.lanes.cpu.ready
+		);
 	},
 
 	/**

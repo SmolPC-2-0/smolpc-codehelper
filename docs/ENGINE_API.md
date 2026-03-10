@@ -1,6 +1,6 @@
 # SmolPC Engine HTTP API (v1)
 
-> Status note (2026-03-09): this document describes the current implemented engine API, which is still DML-centric. The target per-lane readiness contract for the native OpenVINO rollout is defined in `docs/openvino-native-genai/ENGINE_SURFACE_TARGET.md`.
+> Status note (2026-03-10): this document describes the current implemented API on this branch. The engine status and model-readiness surface are now lane-based, and the OpenVINO artifact/startup-probe scaffolding is wired. Native `openvino_npu` activation is still not implemented, so successful OpenVINO selection does not happen yet.
 
 All endpoints are localhost-only and require a bearer token:
 
@@ -17,25 +17,72 @@ Default base URL: `http://127.0.0.1:19432`
   - Returns protocol and runtime metadata.
 
 - `GET /engine/status`
-  - Returns loaded model, generation activity, and backend status.
-  - `backend_status.active_backend` and `backend_status.active_artifact_backend` are serialized as:
+  - Returns loaded model, generation activity, and lane-based backend status.
+  - `backend_status.active_backend` and `backend_status.active_artifact_backend` serialize as:
     - `cpu`
     - `directml`
-  - Selector/runtime diagnostics:
-    - `backend_status.available_backends`: detected candidates on this machine (`cpu`, optional `directml`)
+    - `openvino_npu`
+    - `null`
+  - Top-level backend fields:
+    - `backend_status.runtime_engine`
+      - Current implemented values: `ort_cpu`, `genai_dml`, `null`
+      - Reserved for future OpenVINO lane: `ov_genai_npu`
     - `backend_status.selection_state`: `pending | ready | fallback | error`
-    - `backend_status.selection_reason`: host-side reason code for latest backend decision
-      - Examples: `default_directml_candidate`, `persisted_decision`, `forced_override`, `directml_initialization_failed`, `runtime_failure_fallback`
-    - `backend_status.selected_device_id`: active or candidate DirectML device id
-    - `backend_status.selected_device_name`: active or candidate DirectML device name
-    - Runtime bundle validation:
-      - `backend_status.runtime_load_mode`: `production | development`
-      - `backend_status.ort_bundle_root`, `backend_status.ort_bundle_fingerprint`
-      - `backend_status.ort_bundle_validated`, `backend_status.ort_bundle_failure`
-      - `backend_status.directml_bundle_validated`, `backend_status.directml_bundle_failure`
-      - `backend_status.openvino_bundle_root`, `backend_status.openvino_bundle_fingerprint`
-      - `backend_status.openvino_bundle_validated`, `backend_status.openvino_bundle_failure`
-      - These fields mean file inventory validation only. Runtime initialization remains lazy and is not implied by `*_bundle_validated`.
+    - `backend_status.selection_reason`: host-side reason code for the latest backend decision
+    - `backend_status.decision_persistence_state`: `none | persisted | temporary_fallback`
+    - `backend_status.available_backends`: currently detected lanes on this machine
+    - `backend_status.selected_device`
+      - Shape: `{ "backend": "directml", "device_id": 0, "device_name": "..." }`
+      - Present for the active or candidate DirectML device when known
+    - `backend_status.selection_fingerprint`
+      - Opaque full selection fingerprint for the current model load
+    - `backend_status.decision_key`
+      - Current fields:
+        - `model_id`
+        - `model_artifact_fingerprint`
+        - `app_version`
+        - `selector_engine_id`
+        - `ort_runtime_version`
+        - `ort_bundle_fingerprint`
+        - `openvino_runtime_version`
+        - `openvino_genai_version`
+        - `openvino_tokenizers_version`
+        - `openvino_bundle_fingerprint`
+        - `gpu_adapter_identity`
+        - `gpu_driver_version`
+        - `gpu_device_id`
+        - `npu_adapter_identity`
+        - `npu_driver_version`
+        - `selection_profile`
+    - `backend_status.last_decision`
+    - `backend_status.failure_counters`
+    - `backend_status.force_override`
+    - `backend_status.store_path`
+  - Runtime bundle validation is now grouped under `backend_status.runtime_bundles`:
+    - `load_mode`: `production | development`
+    - `ort`, `directml`, `openvino`
+      - Each contains `root`, `fingerprint`, `validated`, `failure`
+    - These fields still mean file inventory validation only. Runtime initialization remains lazy.
+  - Lane readiness is now grouped under `backend_status.lanes.openvino_npu`, `backend_status.lanes.directml`, and `backend_status.lanes.cpu`
+    - Each lane currently exposes:
+      - `detected`
+      - `bundle_ready`
+      - `artifact_ready`
+      - `startup_probe_state`: `not_started | ready | error`
+      - `preflight_state`: `not_started | pending | ready | timeout | error`
+      - `persisted_eligibility`
+      - `last_failure_class`
+      - `last_failure_message`
+      - `driver_version`
+      - `runtime_version`
+      - `cache_state`: `unknown | cold | warm`
+      - `device_id`
+      - `device_name`
+  - Current implementation notes:
+    - `directml` lane startup detection is implemented.
+    - `directml` lane preflight becomes `ready` only after a successful DirectML model load.
+    - `openvino_npu` lane bundle/artifact readiness and startup-probe truth are reported now.
+    - `openvino_npu` preflight state plumbing exists, but native OpenVINO activation is still unavailable, so `runtime_engine` remains `ort_cpu` or `genai_dml`.
 
 - `POST /engine/load`
   - Body: `{ "model_id": "qwen3-4b-instruct-2507" }`
@@ -48,7 +95,76 @@ Default base URL: `http://127.0.0.1:19432`
 
 - `POST /engine/check-model`
   - Body: `{ "model_id": "qwen3-4b-instruct-2507" }`
-  - Returns `{ "exists": true | false }`
+  - Returns lane readiness, not a single boolean:
+  - Primary programmatic readiness surfaces:
+    - HTTP: `POST /engine/check-model`
+    - Rust client: `EngineClient::check_model_readiness()`
+    - Tauri: `check_model_readiness(model_id)`
+  - Compatibility shims:
+    - Rust client: `EngineClient::check_model_exists()`
+    - Tauri: `check_model_exists(model_id)`
+    - These return `true` only when at least one lane has `ready = true`
+    - Artifact presence alone is not enough
+    - New callers should prefer the readiness API above
+
+```json
+{
+  "model_id": "qwen2.5-coder-1.5b",
+  "lanes": {
+    "openvino_npu": {
+      "artifact_ready": false,
+      "bundle_ready": true,
+      "ready": false,
+      "reason": "artifact_missing"
+    },
+    "directml": {
+      "artifact_ready": true,
+      "bundle_ready": true,
+      "ready": true,
+      "reason": "ready"
+    },
+    "cpu": {
+      "artifact_ready": true,
+      "bundle_ready": true,
+      "ready": true,
+      "reason": "ready"
+    }
+  }
+}
+```
+
+  - Current reason values include:
+    - `ready`
+    - `unknown_model`
+    - `artifact_missing`
+    - `artifact_invalid`
+    - `artifact_incomplete`
+    - `startup_probe_pending`
+    - `startup_probe_failed`
+    - `runtime_unavailable`
+    - `directml_candidate_missing`
+    - bundle validation failure codes such as `missing_root`, `directml_missing`, `openvino_npu_plugin_missing`
+    - blocking OpenVINO startup-probe failure classes such as `no_npu_hardware`, `openvino_npu_driver_missing`, and `openvino_npu_plugin_unavailable`
+  - Current implemented reason precedence:
+    - `cpu`
+      - `ready` when CPU artifact and ORT bundle are both ready
+      - `artifact_missing` when CPU artifact is incomplete
+      - otherwise the current ORT bundle failure code
+    - `directml`
+      - `artifact_missing` when the DirectML artifact is incomplete
+      - then the DirectML bundle failure code when the runtime bundle is not ready
+      - then `startup_probe_pending` before the startup probe completes
+      - then `directml_candidate_missing` when the startup probe completed without a DirectML-capable adapter
+      - otherwise `ready`
+    - `openvino_npu`
+      - `artifact_missing` when `openvino_npu/manifest.json` is absent
+      - `artifact_invalid` or `artifact_incomplete` when the manifest exists but is not usable
+      - then the current OpenVINO bundle failure code when the bundle is incomplete
+      - then `startup_probe_pending` while the async OpenVINO startup probe is still running
+      - then a blocking OpenVINO startup-probe failure class when the startup probe completed but the lane is unusable
+      - then `startup_probe_failed` if the startup probe completed without a usable result but without a classified blocking failure
+      - then `runtime_unavailable`
+      - `openvino_npu.ready` remains `false` in the current branch because native OpenVINO activation is not implemented yet
 
 - `POST /engine/shutdown`
   - Graceful daemon shutdown.
@@ -94,26 +210,38 @@ Default base URL: `http://127.0.0.1:19432`
 
 ## Backend Selection Policy (Windows)
 
-- Host starts an async startup probe and ranks DirectML candidates (discrete-first, then higher VRAM).
-- Host resolves runtime bundles during startup, but ORT/DirectML runtime initialization is lazy and only occurs when an ORT-backed lane is selected.
-- On model load, host waits up to ~1.5s for probe completion; if probe is still pending, load continues with safe defaults.
-- Default auto policy is capability-first:
-  - Prefer DirectML when available and DirectML GenAI bundle exists:
-    - `dml/model.onnx`
-    - `dml/genai_config.json`
-    - `dml/tokenizer.json`
-  - Fallback to CPU when DirectML init/runtime fails.
+- `engine-host` remains the sole selector, probe owner, fallback owner, and persistence owner.
+- Current implemented automatic selection is still `directml -> cpu`.
+- `engine-host` already runs async DirectML and OpenVINO startup probes and folds those results into lane status.
+- `openvino_npu` is present in status and readiness surfaces now, but it is not successfully selected or initialized yet.
 - Runtime loading policy:
   - production uses app-local absolute runtime bundle paths only
   - production does not fall back to `PATH`, bare DLL names, or user-installed ORT/OpenVINO copies
   - production uses restricted absolute-path DLL loading for runtime bundles
-  - dev can use explicit absolute bundle-root overrides (`SMOLPC_ORT_BUNDLE_ROOT`, `SMOLPC_OPENVINO_BUNDLE_ROOT`)
+  - development can use explicit absolute bundle-root overrides (`SMOLPC_ORT_BUNDLE_ROOT`, `SMOLPC_OPENVINO_BUNDLE_ROOT`)
 - Forced overrides for diagnostics:
-  - `SMOLPC_FORCE_EP=cpu|dml`
+  - `SMOLPC_FORCE_EP=cpu|dml|directml|openvino|openvino_npu`
   - `SMOLPC_DML_DEVICE_ID=<non-negative int>`
-  - invalid forced device ids now fail with explicit load error (`invalid_directml_device_id`)
+  - invalid forced device ids fail with explicit load error `invalid_directml_device_id`
 - Runtime failure handling:
-  - If DirectML fails during generation, host demotes to CPU for the current session/model and keeps serving requests without app restart.
+  - if DirectML fails during initialization or generation, host can fall back to CPU for the current load
+  - OpenVINO lane attempts can already mark the current load as `temporary_fallback`, but the current branch still resolves to `directml` or `cpu` because native activation is unavailable
+  - `backend_status.decision_persistence_state=temporary_fallback` means the current active backend is a fallback without overwriting a previously persisted eligible record
+  - repeated DirectML failures still demote to persisted CPU after the existing threshold is reached
+
+## Persistence Contract
+
+- Backend decisions are now stored in `inference/backend_decisions.v2.json`
+- Records are keyed by the full selection fingerprint, not one winner per model
+- Multiple records for the same model are retained when the fingerprint differs
+- Each record now stores:
+  - `key`
+  - `persisted_decision`
+  - `failure_counters`
+  - `updated_at`
+- `persisted_decision` may be `null`
+  - this is how the engine preserves failure counters for a fingerprint without poisoning a previous good persisted decision
+- Temporary fallbacks update status immediately and may update counters in the matching fingerprint record, but they do not overwrite an existing persisted eligible lane unless the host explicitly demotes that lane
 
 ## Protocol Compatibility
 
