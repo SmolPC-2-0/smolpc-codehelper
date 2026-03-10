@@ -20,8 +20,7 @@ use tauri::AppHandle;
 #[tauri::command]
 pub async fn read(path: String, app: AppHandle) -> Result<String, Error> {
     // Validate path is within allowed directories
-    let validated_path = security::validate_path(&path, &app)
-        .map_err(Error::Other)?;
+    let validated_path = security::validate_path(&path, &app).map_err(Error::Other)?;
 
     // Validate file size before reading
     security::validate_file_size(&validated_path)
@@ -29,7 +28,9 @@ pub async fn read(path: String, app: AppHandle) -> Result<String, Error> {
         .map_err(Error::Other)?;
 
     // Read file asynchronously
-    tokio::fs::read_to_string(&validated_path).await.map_err(Into::into)
+    tokio::fs::read_to_string(&validated_path)
+        .await
+        .map_err(Into::into)
 }
 
 /// Write content to a file with security validation

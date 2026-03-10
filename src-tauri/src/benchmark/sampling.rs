@@ -63,11 +63,10 @@ impl SamplingState {
 
     /// Record a sample (single lock acquisition for all metrics).
     pub fn record_sample(&self, ollama_cpu: f64, tauri_cpu: f64, system_cpu: f64, memory: f64) {
-        let mut data = self.inner.lock()
-            .unwrap_or_else(|poisoned| {
-                log::warn!("SamplingState mutex poisoned, recovering data");
-                poisoned.into_inner()
-            });
+        let mut data = self.inner.lock().unwrap_or_else(|poisoned| {
+            log::warn!("SamplingState mutex poisoned, recovering data");
+            poisoned.into_inner()
+        });
         data.cpu_ollama_samples.push(ollama_cpu);
         data.cpu_tauri_samples.push(tauri_cpu);
         data.cpu_system_samples.push(system_cpu);
@@ -79,7 +78,8 @@ impl SamplingState {
 
     /// Check if sampling should continue.
     pub fn is_active(&self) -> bool {
-        self.inner.lock()
+        self.inner
+            .lock()
             .unwrap_or_else(|poisoned| {
                 log::warn!("SamplingState mutex poisoned, recovering data");
                 poisoned.into_inner()
@@ -89,7 +89,8 @@ impl SamplingState {
 
     /// Signal the sampler to stop.
     pub fn stop(&self) {
-        self.inner.lock()
+        self.inner
+            .lock()
             .unwrap_or_else(|poisoned| {
                 log::warn!("SamplingState mutex poisoned, recovering data");
                 poisoned.into_inner()
@@ -99,11 +100,10 @@ impl SamplingState {
 
     /// Extract results, returning `None` if no samples were collected.
     pub fn into_results(self) -> Option<SamplingResults> {
-        let mut data = self.inner.lock()
-            .unwrap_or_else(|poisoned| {
-                log::warn!("SamplingState mutex poisoned, recovering data");
-                poisoned.into_inner()
-            });
+        let mut data = self.inner.lock().unwrap_or_else(|poisoned| {
+            log::warn!("SamplingState mutex poisoned, recovering data");
+            poisoned.into_inner()
+        });
 
         if data.cpu_ollama_samples.is_empty() || data.memory_samples.is_empty() {
             return None;
@@ -145,11 +145,12 @@ pub fn spawn_resource_sampler(
             sys.refresh_all();
             sys.refresh_cpu_all();
 
-            let ollama_data = sys.process(ollama_pid).map(|p| {
-                (f64::from(p.cpu_usage()), (p.memory() as f64) / BYTES_PER_MB)
-            });
+            let ollama_data = sys
+                .process(ollama_pid)
+                .map(|p| (f64::from(p.cpu_usage()), (p.memory() as f64) / BYTES_PER_MB));
 
-            let tauri_cpu = sys.process(tauri_pid)
+            let tauri_cpu = sys
+                .process(tauri_pid)
                 .map_or(0.0, |p| f64::from(p.cpu_usage()));
 
             let system_cpu = {

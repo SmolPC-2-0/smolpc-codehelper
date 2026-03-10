@@ -6,10 +6,7 @@ use ort::{ep, session::Session, value::Value};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if cfg!(target_os = "windows")
-        && std::env::var("ORT_PROBE_SKIP_PRELOAD")
-            .ok()
-            .as_deref()
-            != Some("1")
+        && std::env::var("ORT_PROBE_SKIP_PRELOAD").ok().as_deref() != Some("1")
     {
         let dml_path = std::path::PathBuf::from("libs").join("DirectML.dll");
         if dml_path.exists() {
@@ -160,7 +157,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ));
 
         for layer in 0..28 {
-            let zero: Array4<half::f16> = Array4::from_shape_vec((1, 2, 3, 128), vec![half::f16::from_f32(0.0); 1 * 2 * 3 * 128])?;
+            let zero: Array4<half::f16> = Array4::from_shape_vec(
+                (1, 2, 3, 128),
+                vec![half::f16::from_f32(0.0); 1 * 2 * 3 * 128],
+            )?;
             inputs.push((
                 format!("past_key_values.{layer}.key"),
                 ort::session::SessionInputValue::Owned(Value::from_array(zero.clone())?.into()),

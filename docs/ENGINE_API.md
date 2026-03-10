@@ -1,5 +1,7 @@
 # SmolPC Engine HTTP API (v1)
 
+> Status note (2026-03-09): this document describes the current implemented engine API, which is still DML-centric. The target per-lane readiness contract for the native OpenVINO rollout is defined in `docs/openvino-native-genai/ENGINE_SURFACE_TARGET.md`.
+
 All endpoints are localhost-only and require a bearer token:
 
 `Authorization: Bearer <token>`
@@ -26,6 +28,14 @@ Default base URL: `http://127.0.0.1:19432`
       - Examples: `default_directml_candidate`, `persisted_decision`, `forced_override`, `directml_initialization_failed`, `runtime_failure_fallback`
     - `backend_status.selected_device_id`: active or candidate DirectML device id
     - `backend_status.selected_device_name`: active or candidate DirectML device name
+    - Runtime bundle validation:
+      - `backend_status.runtime_load_mode`: `production | development`
+      - `backend_status.ort_bundle_root`, `backend_status.ort_bundle_fingerprint`
+      - `backend_status.ort_bundle_validated`, `backend_status.ort_bundle_failure`
+      - `backend_status.directml_bundle_validated`, `backend_status.directml_bundle_failure`
+      - `backend_status.openvino_bundle_root`, `backend_status.openvino_bundle_fingerprint`
+      - `backend_status.openvino_bundle_validated`, `backend_status.openvino_bundle_failure`
+      - These fields mean file inventory validation only. Runtime initialization remains lazy and is not implied by `*_bundle_validated`.
 
 - `POST /engine/load`
   - Body: `{ "model_id": "qwen3-4b-instruct-2507" }`
@@ -79,10 +89,13 @@ Default base URL: `http://127.0.0.1:19432`
 - Queue timeout: 60 seconds.
 - Queue full: HTTP 429.
 - Queue timeout: HTTP 504.
+- Model idle unload defaults to 300 seconds; set `SMOLPC_ENGINE_MODEL_IDLE_UNLOAD_SECS=0` to disable it.
+- Process idle exit is disabled by default; set `SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS=<seconds>` to opt into host shutdown after inactivity.
 
 ## Backend Selection Policy (Windows)
 
 - Host starts an async startup probe and ranks DirectML candidates (discrete-first, then higher VRAM).
+- Host resolves runtime bundles during startup, but ORT/DirectML runtime initialization is lazy and only occurs when an ORT-backed lane is selected.
 - On model load, host waits up to ~1.5s for probe completion; if probe is still pending, load continues with safe defaults.
 - Default auto policy is capability-first:
   - Prefer DirectML when available and DirectML GenAI bundle exists:
@@ -90,6 +103,11 @@ Default base URL: `http://127.0.0.1:19432`
     - `dml/genai_config.json`
     - `dml/tokenizer.json`
   - Fallback to CPU when DirectML init/runtime fails.
+- Runtime loading policy:
+  - production uses app-local absolute runtime bundle paths only
+  - production does not fall back to `PATH`, bare DLL names, or user-installed ORT/OpenVINO copies
+  - production uses restricted absolute-path DLL loading for runtime bundles
+  - dev can use explicit absolute bundle-root overrides (`SMOLPC_ORT_BUNDLE_ROOT`, `SMOLPC_OPENVINO_BUNDLE_ROOT`)
 - Forced overrides for diagnostics:
   - `SMOLPC_FORCE_EP=cpu|dml`
   - `SMOLPC_DML_DEVICE_ID=<non-negative int>`

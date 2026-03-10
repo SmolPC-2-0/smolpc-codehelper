@@ -2,12 +2,12 @@
 //!
 //! Identifies the inference process by memory usage after loading a model.
 
+use super::test_suite::SHORT_PROMPTS;
 use crate::commands::ollama::{OllamaConfig, OllamaMessage, OllamaRequest};
 use crate::hardware;
 use crate::hardware::types::CPUFeature;
-use super::test_suite::SHORT_PROMPTS;
-use sysinfo::System;
 use std::time::Duration;
+use sysinfo::System;
 
 /// Minimum memory (bytes) for inference process detection.
 /// Inference processes typically use 500MB+ (usually GBs) vs ~50-100MB for server/CLI.
@@ -32,7 +32,9 @@ impl HardwareSnapshot {
     pub async fn detect() -> Self {
         match hardware::detect_all().await {
             Ok(info) => {
-                let gpu_name = info.gpus.iter()
+                let gpu_name = info
+                    .gpus
+                    .iter()
                     .find(|g| g.device_type.eq_ignore_ascii_case("discrete"))
                     .or(info.gpus.first())
                     .map(|g| g.name.clone())
@@ -74,7 +76,10 @@ pub async fn warmup_and_find_process(
     client: &reqwest::Client,
     config: &OllamaConfig,
 ) -> Result<sysinfo::Pid, String> {
-    let warmup_prompt = SHORT_PROMPTS.first().copied().unwrap_or("What is a variable in Python?");
+    let warmup_prompt = SHORT_PROMPTS
+        .first()
+        .copied()
+        .unwrap_or("What is a variable in Python?");
 
     let request = OllamaRequest {
         model: model.to_string(),
@@ -104,12 +109,16 @@ pub async fn warmup_and_find_process(
     if !response.status().is_success() {
         return Err(format!(
             "Warmup failed with status {}: model '{}' may not be available",
-            response.status(), model
+            response.status(),
+            model
         ));
     }
 
     // Consume response body to ensure model is fully loaded
-    let _ = response.bytes().await.map_err(|e| format!("Failed to read warmup response: {e}"))?;
+    let _ = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read warmup response: {e}"))?;
 
     tokio::time::sleep(WARMUP_STABILIZATION_DELAY).await;
 
@@ -140,7 +149,12 @@ fn find_inference_process() -> Result<sysinfo::Pid, String> {
 
     log::debug!("Found {} Ollama process(es):", candidates.len());
     for (pid, mem, name) in &candidates {
-        log::debug!("  PID {}: {} ({:.1} MB)", pid, name, *mem as f64 / BYTES_PER_MB);
+        log::debug!(
+            "  PID {}: {} ({:.1} MB)",
+            pid,
+            name,
+            *mem as f64 / BYTES_PER_MB
+        );
     }
 
     // Sort by memory descending, select highest
@@ -156,7 +170,12 @@ fn find_inference_process() -> Result<sysinfo::Pid, String> {
         ));
     }
 
-    log::info!("Selected Ollama process: '{}' (PID {}, {:.1} MB)", name, pid, *mem as f64 / BYTES_PER_MB);
+    log::info!(
+        "Selected Ollama process: '{}' (PID {}, {:.1} MB)",
+        name,
+        pid,
+        *mem as f64 / BYTES_PER_MB
+    );
 
     // Warn if multiple high-memory processes detected
     if candidates.len() > 1 {

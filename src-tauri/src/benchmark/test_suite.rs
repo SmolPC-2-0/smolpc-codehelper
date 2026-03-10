@@ -101,6 +101,7 @@ pub fn get_test_suite() -> Vec<TestPrompt> {
 
 /// Get total number of tests (prompts × iterations)
 pub fn get_total_test_count(iterations: usize) -> usize {
-    let prompts_per_iteration = SHORT_PROMPTS.len() + MEDIUM_PROMPTS.len() + LONG_PROMPTS.len() + FOLLOW_UP_PROMPTS.len();
+    let prompts_per_iteration =
+        SHORT_PROMPTS.len() + MEDIUM_PROMPTS.len() + LONG_PROMPTS.len() + FOLLOW_UP_PROMPTS.len();
     prompts_per_iteration * iterations
 }

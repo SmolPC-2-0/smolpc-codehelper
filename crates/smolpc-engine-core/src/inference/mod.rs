@@ -17,6 +17,7 @@ pub mod generator;
 pub mod input_builder;
 pub mod kv_cache;
 pub mod runtime_adapter;
+pub mod runtime_loading;
 pub mod session;
 pub mod tokenizer;
 pub mod types;
@@ -24,155 +25,132 @@ pub mod types;
 #[cfg(test)]
 pub mod benchmark;
 
-// Re-export commonly used types
 pub use backend::InferenceBackend;
 #[cfg(target_os = "windows")]
 pub use genai::GenAiDirectMlGenerator;
 pub use generator::Generator;
 pub use runtime_adapter::InferenceRuntimeAdapter;
+pub use runtime_loading::{
+    BundleValidationFailureClass, OpenVinoRuntimeBundle, OpenVinoRuntimeLoader, OrtRuntimeBundle,
+    OrtRuntimeLoader, RequiredRuntimeFile, RuntimeBundleFingerprint, RuntimeFamily,
+    RuntimeVersionMetadata,
+};
 pub use session::InferenceSession;
 pub use tokenizer::TokenizerWrapper;
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
-static ORT_INIT: OnceLock<Result<(), String>> = OnceLock::new();
-
-/// Initialize ONNX Runtime with the bundled library.
-/// Must be called before any `ort` operations.
-///
-/// `resource_dir` is the Tauri resource directory (from `app.path().resource_dir()`).
-/// Pass `None` when running outside of Tauri (e.g., tests, CLI tools).
-///
-/// The result is cached — subsequent calls return the stored outcome without re-initializing.
 pub fn init_onnx_runtime(resource_dir: Option<&Path>) -> Result<(), String> {
-    ORT_INIT
-        .get_or_init(|| {
-            let dylib_path = find_onnxruntime_dylib(resource_dir);
-            log::info!("Initializing ONNX Runtime from: {}", dylib_path.display());
-
-            #[cfg(target_os = "windows")]
-            preload_directml_dll(resource_dir, &dylib_path);
-
-            match ort::init_from(dylib_path.to_string_lossy().to_string()) {
-                Ok(builder) => {
-                    if builder.commit() {
-                        log::info!("ONNX Runtime initialized successfully");
-                    } else {
-                        log::info!("ONNX Runtime already initialized");
-                    }
-                    Ok(())
-                }
-                Err(e) => Err(format!("Failed to initialize ONNX Runtime: {}", e)),
-            }
-        })
-        .clone()
+    let bundle = resolve_compat_ort_bundle(resource_dir);
+    OrtRuntimeLoader::ensure_initialized(&bundle).map(|_| ())
 }
 
-/// Find the ONNX Runtime library by searching several locations in priority order:
-/// 1. Tauri resource dir (production bundles)
-/// 2. Next to executable (Windows production, manual placement)
-/// 3. Local libs/ directory (development — relative to src-tauri/)
-/// 4. Legacy extracted path (backward compat with ort-extracted/)
-/// 5. Bare filename (system PATH / DYLD_LIBRARY_PATH fallback)
-fn find_onnxruntime_dylib(resource_dir: Option<&Path>) -> PathBuf {
-    #[cfg(target_os = "windows")]
-    let dylib_name = "onnxruntime.dll";
-    #[cfg(target_os = "macos")]
-    let dylib_name = "libonnxruntime.dylib";
-    #[cfg(target_os = "linux")]
-    let dylib_name = "libonnxruntime.so";
-
-    // 1. Tauri resource directory (production)
-    if let Some(res_dir) = resource_dir {
-        let path = res_dir.join("libs").join(dylib_name);
-        if path.exists() {
-            return path;
-        }
-    }
-
-    // 2. Next to executable (Windows production, or manual placement)
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            let path = exe_dir.join(dylib_name);
-            if path.exists() {
-                return path;
-            }
-        }
-    }
-
-    // 3. Local libs/ directory (development — relative to src-tauri/)
-    let dev_path = PathBuf::from("libs").join(dylib_name);
-    if dev_path.exists() {
-        return dev_path;
-    }
-
-    // 4. Legacy extracted path (backward compat)
-    let legacy_path =
-        PathBuf::from("../ort-extracted/onnxruntime-win-x64-1.22.1/lib").join(dylib_name);
-    if legacy_path.exists() {
-        return legacy_path;
-    }
-
-    // 5. Bare name — rely on system PATH / DYLD_LIBRARY_PATH
-    PathBuf::from(dylib_name)
-}
-
-#[cfg(target_os = "windows")]
-fn preload_directml_dll(resource_dir: Option<&Path>, ort_dylib_path: &Path) {
+fn resolve_compat_ort_bundle(resource_dir: Option<&Path>) -> OrtRuntimeBundle {
     let mut candidates = Vec::new();
-
-    if let Some(res_dir) = resource_dir {
-        candidates.push(res_dir.join("libs").join("DirectML.dll"));
+    if let Some(resource_dir) = resource_dir {
+        candidates.push(resource_dir.join("libs"));
     }
-
-    if let Some(parent) = ort_dylib_path.parent() {
-        candidates.push(parent.join("DirectML.dll"));
-    }
-
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            candidates.push(exe_dir.join("DirectML.dll"));
+            candidates.push(exe_dir.join("libs"));
+        }
+    }
+    if cfg!(debug_assertions) {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        if let Some(workspace_root) = manifest_dir.parent().and_then(|parent| parent.parent()) {
+            candidates.push(
+                workspace_root
+                    .join("apps")
+                    .join("codehelper")
+                    .join("src-tauri")
+                    .join("libs"),
+            );
+            candidates.push(workspace_root.join("src-tauri").join("libs"));
         }
     }
 
-    candidates.push(PathBuf::from("libs").join("DirectML.dll"));
-    let attempted_paths: Vec<String> = candidates
-        .iter()
-        .map(|candidate| candidate.display().to_string())
-        .collect();
-
-    let mut seen = std::collections::HashSet::new();
-    for candidate in candidates {
-        let key = candidate.to_string_lossy().to_string();
-        if !seen.insert(key) {
-            continue;
-        }
-        if !candidate.exists() {
-            continue;
-        }
-
-        // Keep the library loaded for process lifetime; ORT/DirectML expects it to stay resident.
-        match unsafe { libloading::Library::new(&candidate) } {
-            Ok(lib) => {
-                // SAFETY: DirectML/ORT expect this module to remain loaded for the process
-                // lifetime. We intentionally leak this handle so the DLL stays resident.
-                std::mem::forget(lib);
-                log::info!("Preloaded DirectML.dll from {}", candidate.display());
-                return;
-            }
-            Err(e) => {
-                log::debug!(
-                    "Failed to preload DirectML.dll from {}: {}",
-                    candidate.display(),
-                    e
-                );
-            }
-        }
+    let mut bundles = candidates
+        .into_iter()
+        .map(build_compat_ort_bundle)
+        .collect::<Vec<_>>();
+    if bundles.is_empty() {
+        return build_compat_ort_bundle(missing_runtime_root("libs"));
     }
+    bundles.sort_by_key(|bundle| {
+        (
+            if bundle.directml_validated() {
+                3
+            } else if bundle.genai_validated() {
+                2
+            } else if bundle.ort_validated() {
+                1
+            } else {
+                0
+            },
+            bundle.canonical_root.is_some(),
+        )
+    });
+    bundles.pop().expect("non-empty bundles")
+}
 
-    log::warn!(
-        "DirectML.dll preload failed from deterministic paths; DirectML backend may be unavailable. attempted_paths={:?}",
-        attempted_paths
+fn build_compat_ort_bundle(bundle_root: PathBuf) -> OrtRuntimeBundle {
+    let canonical_root = bundle_root.canonicalize().ok();
+    let onnxruntime_dll = bundle_root.join("onnxruntime.dll");
+    let providers_shared = bundle_root.join("onnxruntime_providers_shared.dll");
+    let genai_dll = bundle_root.join("onnxruntime-genai.dll");
+    let directml_dll = bundle_root.join("DirectML.dll");
+    let required_files = vec![
+        RequiredRuntimeFile::new("onnxruntime.dll", onnxruntime_dll.clone()),
+        RequiredRuntimeFile::new("onnxruntime_providers_shared.dll", providers_shared.clone()),
+        RequiredRuntimeFile::new("onnxruntime-genai.dll", genai_dll.clone()),
+        RequiredRuntimeFile::new("DirectML.dll", directml_dll.clone()),
+    ];
+    let version_metadata = vec![
+        RuntimeVersionMetadata::new("ort-crate", backend::ORT_CRATE_VERSION),
+        RuntimeVersionMetadata::new("ort-genai", "bundled"),
+    ];
+    let ort_validation_failure = if !bundle_root.exists() {
+        Some(BundleValidationFailureClass::MissingRoot)
+    } else if canonical_root.is_none() {
+        Some(BundleValidationFailureClass::CanonicalizationFailed)
+    } else if !onnxruntime_dll.exists() {
+        Some(BundleValidationFailureClass::OrtCoreMissing)
+    } else if !providers_shared.exists() {
+        Some(BundleValidationFailureClass::OrtProvidersSharedMissing)
+    } else {
+        None
+    };
+    let genai_validation_failure = ort_validation_failure
+        .or_else(|| (!genai_dll.exists()).then_some(BundleValidationFailureClass::OrtGenAiMissing));
+    let directml_validation_failure = genai_validation_failure.or_else(|| {
+        (!directml_dll.exists()).then_some(BundleValidationFailureClass::DirectMlMissing)
+    });
+    let fingerprint = RuntimeBundleFingerprint::new(
+        RuntimeFamily::Ort,
+        canonical_root.clone(),
+        &bundle_root,
+        &required_files,
+        &version_metadata,
     );
+
+    OrtRuntimeBundle {
+        bundle_root,
+        canonical_root,
+        onnxruntime_dll,
+        onnxruntime_providers_shared_dll: providers_shared,
+        onnxruntime_genai_dll: genai_dll,
+        directml_dll,
+        required_files,
+        version_metadata,
+        ort_validation_failure,
+        genai_validation_failure,
+        directml_validation_failure,
+        fingerprint,
+    }
+}
+
+fn missing_runtime_root(name: &str) -> PathBuf {
+    std::env::temp_dir()
+        .join("smolpc-runtime-missing")
+        .join(name)
 }

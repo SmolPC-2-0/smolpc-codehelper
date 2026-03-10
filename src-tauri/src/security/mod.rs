@@ -37,7 +37,11 @@ pub fn validate_path<P: AsRef<Path>>(path: P, app: &AppHandle) -> Result<PathBuf
 
     // Canonicalize path - resolves symlinks and normalizes .. components
     let canonical = std::fs::canonicalize(path).map_err(|e| {
-        log::warn!("Path canonicalization failed for '{}': {}", path.display(), e);
+        log::warn!(
+            "Path canonicalization failed for '{}': {}",
+            path.display(),
+            e
+        );
         format!("File not found or inaccessible: {e}")
     })?;
 
@@ -124,12 +128,10 @@ pub fn validate_content_size(content: &str) -> Result<(), String> {
 /// - Hostname is not localhost/127.0.0.1/::1
 pub fn validate_ollama_url(url_str: &str) -> Result<String, String> {
     // Parse URL with proper parser (not naive string matching)
-    let url = Url::parse(url_str)
-        .map_err(|e| format!("Invalid Ollama URL format: {e}"))?;
+    let url = Url::parse(url_str).map_err(|e| format!("Invalid Ollama URL format: {e}"))?;
 
     // Extract hostname for validation
-    let host = url.host_str()
-        .ok_or("Ollama URL must have a hostname")?;
+    let host = url.host_str().ok_or("Ollama URL must have a hostname")?;
 
     // Exact hostname matching (prevents bypass attacks)
     // Only localhost, 127.0.0.1, and ::1 are allowed

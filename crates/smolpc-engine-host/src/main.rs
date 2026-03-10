@@ -1,3 +1,5 @@
+mod runtime_bundles;
+
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -16,7 +18,8 @@ use smolpc_engine_core::inference::backend_store::{
 use smolpc_engine_core::inference::genai::GenAiDirectMlGenerator;
 use smolpc_engine_core::inference::session::SessionBackendOptions;
 use smolpc_engine_core::inference::{
-    init_onnx_runtime, Generator, InferenceRuntimeAdapter, InferenceSession, TokenizerWrapper,
+    Generator, InferenceRuntimeAdapter, InferenceSession, OrtRuntimeBundle, OrtRuntimeLoader,
+    TokenizerWrapper,
 };
 use smolpc_engine_core::models::{
     ModelArtifactBackend, ModelLoader, ModelRegistry, ModelRuntimeSpec, RuntimeBackendTarget,
@@ -31,6 +34,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex, Notify, Semaphore};
 use tokio::time::{sleep, timeout};
+
+use crate::runtime_bundles::{resolve_runtime_bundles, ResolvedRuntimeBundles};
+#[cfg(test)]
+use crate::runtime_bundles::{resolve_runtime_bundles_for_mode, RuntimeLoadMode};
 
 type ApiError = (StatusCode, Json<ErrorResponse>);
 
@@ -81,8 +88,8 @@ struct ParsedArgs {
     app_version: String,
     queue_size: usize,
     queue_timeout: Duration,
-    model_idle_unload: Duration,
-    process_idle_exit: Duration,
+    model_idle_unload: Option<Duration>,
+    process_idle_exit: Option<Duration>,
 }
 
 const STARTUP_PROBE_WAIT_MS: u64 = 1_500;
@@ -173,20 +180,10 @@ fn parse_args() -> ParsedArgs {
             .unwrap_or(60)
             .max(1),
     );
-    let model_idle_unload = Duration::from_secs(
-        std::env::var("SMOLPC_ENGINE_MODEL_IDLE_UNLOAD_SECS")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(300)
-            .max(30),
-    );
-    let process_idle_exit = Duration::from_secs(
-        std::env::var("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(1800)
-            .max(60),
-    );
+    let model_idle_unload =
+        parse_idle_timeout_secs("SMOLPC_ENGINE_MODEL_IDLE_UNLOAD_SECS", Some(300), 30);
+    let process_idle_exit =
+        parse_idle_timeout_secs("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS", None, 60);
 
     ParsedArgs {
         port,
@@ -197,6 +194,21 @@ fn parse_args() -> ParsedArgs {
         queue_timeout,
         model_idle_unload,
         process_idle_exit,
+    }
+}
+
+fn parse_idle_timeout_secs(
+    key: &str,
+    default_secs: Option<u64>,
+    min_secs: u64,
+) -> Option<Duration> {
+    match std::env::var(key) {
+        Ok(raw) => match raw.parse::<u64>() {
+            Ok(0) => None,
+            Ok(secs) => Some(Duration::from_secs(secs.max(min_secs))),
+            Err(_) => default_secs.map(|secs| Duration::from_secs(secs.max(min_secs))),
+        },
+        Err(_) => default_secs.map(|secs| Duration::from_secs(secs.max(min_secs))),
     }
 }
 
@@ -226,18 +238,34 @@ fn directml_required_error(model_id: &str, reason: &str) -> String {
     )
 }
 
-fn select_active_model_path(
-    active_backend: InferenceBackend,
-    cpu_model_path: &Path,
-    dml_model_path: Option<&PathBuf>,
+fn resolve_cpu_runtime_inputs(
+    model_id: &str,
+) -> Result<(PathBuf, PathBuf, ModelRuntimeSpec), String> {
+    let model_def = ModelRegistry::get_model(model_id)
+        .ok_or_else(|| format!("Unknown model ID: {}", model_id))?;
+    let cpu_spec = ModelRegistry::runtime_spec_for_backend(model_id, RuntimeBackendTarget::Cpu)
+        .ok_or_else(|| format!("Missing CPU runtime spec for model ID: {}", model_id))?;
+    cpu_spec.validate()?;
+
+    let cpu_model_path =
+        ModelLoader::validate_model_for_backend(&model_def.directory, ModelArtifactBackend::Cpu)?;
+    let tokenizer_path = ModelLoader::tokenizer_file(&model_def.directory);
+    Ok((cpu_model_path, tokenizer_path, cpu_spec))
+}
+
+fn directml_unavailable_reason(
+    directml_detected: bool,
+    directml_artifact_available: bool,
+    runtime_bundles: &ResolvedRuntimeBundles,
 ) -> String {
-    if active_backend == InferenceBackend::DirectML {
-        dml_model_path
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| cpu_model_path.display().to_string())
+    if !directml_detected {
+        "no DirectML-capable adapter was detected".to_string()
+    } else if !directml_artifact_available {
+        "the DirectML model artifact is missing".to_string()
+    } else if let Some(code) = runtime_bundles.ort.directml_failure_code() {
+        format!("the DirectML runtime bundle is unavailable ({code})")
     } else {
-        cpu_model_path.display().to_string()
+        "the DirectML runtime bundle is unavailable".to_string()
     }
 }
 
@@ -335,10 +363,43 @@ fn probe_backend_capabilities() -> BackendProbeResult {
     BackendProbeResult::default()
 }
 
+fn apply_runtime_bundle_status(
+    runtime_bundles: &ResolvedRuntimeBundles,
+    status: &mut BackendStatus,
+) {
+    status.runtime_load_mode = Some(runtime_bundles.mode.as_str().to_string());
+    status.ort_bundle_root = Some(runtime_bundles.ort.display_root().display().to_string());
+    status.ort_bundle_fingerprint = Some(runtime_bundles.ort.fingerprint.value.clone());
+    status.ort_bundle_validated = Some(runtime_bundles.ort.ort_validated());
+    status.ort_bundle_failure = runtime_bundles
+        .ort
+        .ort_failure_code()
+        .map(ToString::to_string);
+    status.directml_bundle_validated = Some(runtime_bundles.ort.directml_validated());
+    status.directml_bundle_failure = runtime_bundles
+        .ort
+        .directml_failure_code()
+        .map(ToString::to_string);
+    status.openvino_bundle_root = Some(
+        runtime_bundles
+            .openvino
+            .display_root()
+            .display()
+            .to_string(),
+    );
+    status.openvino_bundle_fingerprint = Some(runtime_bundles.openvino.fingerprint.value.clone());
+    status.openvino_bundle_validated = Some(runtime_bundles.openvino.npu_validated());
+    status.openvino_bundle_failure = runtime_bundles
+        .openvino
+        .failure_code()
+        .map(ToString::to_string);
+}
+
 struct EngineState {
     runtime_adapter: Arc<Mutex<Option<InferenceRuntimeAdapter>>>,
     current_model: Arc<Mutex<Option<String>>>,
     backend_status: Arc<Mutex<BackendStatus>>,
+    runtime_bundles: ResolvedRuntimeBundles,
     active_cancel: Arc<StdMutex<Option<Arc<AtomicBool>>>>,
     generating: Arc<AtomicBool>,
     app_version: String,
@@ -350,6 +411,14 @@ struct EngineState {
 
 impl EngineState {
     fn new(args: &ParsedArgs) -> Self {
+        let runtime_bundles = resolve_runtime_bundles(args.resource_dir.as_deref());
+        Self::new_with_runtime_bundles(args, runtime_bundles)
+    }
+
+    fn new_with_runtime_bundles(
+        args: &ParsedArgs,
+        runtime_bundles: ResolvedRuntimeBundles,
+    ) -> Self {
         let store_path = match backend_store_path(&args.data_dir) {
             Ok(path) => Some(path),
             Err(error) => {
@@ -372,18 +441,20 @@ impl EngineState {
             None => None,
         };
 
-        let status = BackendStatus {
+        let mut status = BackendStatus {
             available_backends: vec![InferenceBackend::Cpu],
             selection_state: Some("pending".to_string()),
             selection_reason: Some("startup_probe_pending".to_string()),
             store_path: store_path.as_ref().map(|path| path.display().to_string()),
             ..Default::default()
         };
+        apply_runtime_bundle_status(&runtime_bundles, &mut status);
 
         Self {
             runtime_adapter: Arc::new(Mutex::new(None)),
             current_model: Arc::new(Mutex::new(None)),
             backend_status: Arc::new(Mutex::new(status)),
+            runtime_bundles,
             active_cancel: Arc::new(StdMutex::new(None)),
             generating: Arc::new(AtomicBool::new(false)),
             app_version: args.app_version.clone(),
@@ -392,6 +463,10 @@ impl EngineState {
             startup_probe: Arc::new(Mutex::new(None)),
             startup_probe_ready: Arc::new(Notify::new()),
         }
+    }
+
+    fn runtime_bundles(&self) -> &ResolvedRuntimeBundles {
+        &self.runtime_bundles
     }
 
     fn launch_startup_probe(self: &Arc<Self>) {
@@ -433,6 +508,7 @@ impl EngineState {
                         "startup_probe_cpu_only".to_string()
                     });
                 }
+                apply_runtime_bundle_status(engine.runtime_bundles(), &mut status);
             }
 
             engine.startup_probe_ready.notify_waiters();
@@ -510,20 +586,10 @@ impl EngineState {
         let directml_required = model_requires_directml(&model_id);
         let model_def = ModelRegistry::get_model(&model_id)
             .ok_or_else(|| format!("Unknown model ID: {}", model_id))?;
-        let cpu_spec =
-            ModelRegistry::runtime_spec_for_backend(&model_id, RuntimeBackendTarget::Cpu)
-                .ok_or_else(|| format!("Missing CPU runtime spec for model ID: {}", model_id))?;
-        cpu_spec.validate()?;
-
-        let cpu_model_path = ModelLoader::validate_model_for_backend(
-            &model_def.directory,
-            ModelArtifactBackend::Cpu,
-        )?;
         let dml_model_path = ModelLoader::resolve_model_file_for_backend(
             &model_def.directory,
             ModelArtifactBackend::DirectML,
         );
-        let tokenizer_path = ModelLoader::tokenizer_file(&model_def.directory);
 
         let force_override = parse_force_override();
         let forced_device_id = parse_dml_device_id_env();
@@ -540,7 +606,9 @@ impl EngineState {
             .contains(&InferenceBackend::DirectML)
             || force_override == Some(InferenceBackend::DirectML);
         let directml_artifact_available = dml_model_path.is_some();
-        let has_dml_candidate = directml_detected && directml_artifact_available;
+        let has_dml_candidate = directml_detected
+            && directml_artifact_available
+            && self.runtime_bundles().ort.directml_validated();
 
         if directml_required && force_override == Some(InferenceBackend::Cpu) {
             return Err(directml_required_error(
@@ -549,12 +617,12 @@ impl EngineState {
             ));
         }
         if directml_required && !has_dml_candidate {
-            let reason = if !directml_detected {
-                "no DirectML-capable adapter was detected"
-            } else {
-                "the DirectML model artifact is missing"
-            };
-            return Err(directml_required_error(&model_id, reason));
+            let reason = directml_unavailable_reason(
+                directml_detected,
+                directml_artifact_available,
+                self.runtime_bundles(),
+            );
+            return Err(directml_required_error(&model_id, &reason));
         }
 
         let probe_device_id = probe
@@ -577,7 +645,7 @@ impl EngineState {
                     probe.directml_device_count
                 );
                 if force_override == Some(InferenceBackend::DirectML) {
-                    *self.backend_status.lock().await = BackendStatus {
+                    let mut status = BackendStatus {
                         available_backends: available_backends.clone(),
                         selection_state: Some("error".to_string()),
                         selection_reason: Some("invalid_directml_device_id".to_string()),
@@ -595,6 +663,8 @@ impl EngineState {
                             .map(|path| path.display().to_string()),
                         ..Default::default()
                     };
+                    apply_runtime_bundle_status(self.runtime_bundles(), &mut status);
+                    *self.backend_status.lock().await = status;
                     return Err(error);
                 }
                 selected_device_id = probe_device_id;
@@ -626,29 +696,12 @@ impl EngineState {
             .map(|record| record.failure_counters.clone())
             .unwrap_or_default();
 
-        let mut preferred_backend = InferenceBackend::Cpu;
-        let mut decision_reason = DecisionReason::NoDirectMLCandidate;
-        if let Some(override_backend) = force_override {
-            preferred_backend = override_backend;
-            decision_reason = DecisionReason::ForcedOverride;
-        } else if failure_counters.should_demote_directml() {
-            preferred_backend = InferenceBackend::Cpu;
-            decision_reason = DecisionReason::DemotedAfterFailures;
-        } else if let Some(record) = stored.as_ref() {
-            if record.decision.backend == InferenceBackend::DirectML && has_dml_candidate {
-                preferred_backend = InferenceBackend::DirectML;
-                decision_reason = DecisionReason::PersistedDecision;
-            } else if has_dml_candidate {
-                preferred_backend = InferenceBackend::DirectML;
-                decision_reason = DecisionReason::DefaultDirectMLCandidate;
-            } else {
-                preferred_backend = InferenceBackend::Cpu;
-                decision_reason = DecisionReason::PersistedDecision;
-            }
-        } else if has_dml_candidate {
-            preferred_backend = InferenceBackend::DirectML;
-            decision_reason = DecisionReason::DefaultDirectMLCandidate;
-        }
+        let (preferred_backend, decision_reason) = choose_preferred_backend(
+            force_override,
+            &failure_counters,
+            stored.as_ref(),
+            has_dml_candidate,
+        );
 
         let mut persisted_backend = preferred_backend;
         let mut persisted_reason = decision_reason.clone();
@@ -657,14 +710,20 @@ impl EngineState {
         let mut runtime_engine = "ort_cpu".to_string();
         let mut selection_state = "ready".to_string();
         let mut selection_reason = decision_reason_code(&active_reason).to_string();
+        let active_model_path: String;
 
         let adapter = if preferred_backend == InferenceBackend::DirectML {
             match dml_model_path.as_deref() {
                 Some(dml_path) => {
-                    match build_directml_runtime_adapter(dml_path, selected_device_id) {
+                    match build_directml_runtime_adapter(
+                        &self.runtime_bundles().ort,
+                        dml_path,
+                        selected_device_id,
+                    ) {
                         Ok(adapter) => {
                             failure_counters.record_directml_success();
                             runtime_engine = "genai_dml".to_string();
+                            active_model_path = dml_path.display().to_string();
                             adapter
                         }
                         Err(error) => {
@@ -675,7 +734,7 @@ impl EngineState {
                                     DirectMLFailureStage::Init,
                                     error.clone(),
                                 );
-                                *self.backend_status.lock().await = BackendStatus {
+                                let mut status = BackendStatus {
                                     available_backends: available_backends.clone(),
                                     selection_state: Some("error".to_string()),
                                     selection_reason: Some(
@@ -704,6 +763,8 @@ impl EngineState {
                                         .map(|path| path.display().to_string()),
                                     ..Default::default()
                                 };
+                                apply_runtime_bundle_status(self.runtime_bundles(), &mut status);
+                                *self.backend_status.lock().await = status;
                                 return Err(error);
                             }
 
@@ -723,11 +784,15 @@ impl EngineState {
                             }
                             selection_reason = decision_reason_code(&active_reason).to_string();
 
+                            let (cpu_model_path, tokenizer_path, cpu_spec) =
+                                resolve_cpu_runtime_inputs(&model_id)?;
                             let (adapter, _) = build_cpu_runtime_adapter(
+                                &self.runtime_bundles().ort,
                                 &cpu_model_path,
                                 &tokenizer_path,
                                 cpu_spec,
                             )?;
+                            active_model_path = cpu_model_path.display().to_string();
                             adapter
                         }
                     }
@@ -739,7 +804,7 @@ impl EngineState {
                     if force_override == Some(InferenceBackend::DirectML) || directml_required {
                         failure_counters
                             .record_directml_failure(DirectMLFailureStage::Init, error.clone());
-                        *self.backend_status.lock().await = BackendStatus {
+                        let mut status = BackendStatus {
                             available_backends: available_backends.clone(),
                             selection_state: Some("error".to_string()),
                             selection_reason: Some("directml_artifact_missing".to_string()),
@@ -762,16 +827,25 @@ impl EngineState {
                                 .map(|path| path.display().to_string()),
                             ..Default::default()
                         };
+                        apply_runtime_bundle_status(self.runtime_bundles(), &mut status);
+                        *self.backend_status.lock().await = status;
                         return Err(error);
                     }
-                    let (adapter, _) =
-                        build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)?;
+                    let (cpu_model_path, tokenizer_path, cpu_spec) =
+                        resolve_cpu_runtime_inputs(&model_id)?;
+                    let (adapter, _) = build_cpu_runtime_adapter(
+                        &self.runtime_bundles().ort,
+                        &cpu_model_path,
+                        &tokenizer_path,
+                        cpu_spec,
+                    )?;
                     active_backend = InferenceBackend::Cpu;
                     active_reason = DecisionReason::NoDirectMLCandidate;
                     persisted_backend = InferenceBackend::Cpu;
                     persisted_reason = DecisionReason::NoDirectMLCandidate;
                     selection_state = "fallback".to_string();
                     selection_reason = decision_reason_code(&active_reason).to_string();
+                    active_model_path = cpu_model_path.display().to_string();
                     adapter
                 }
             }
@@ -782,17 +856,20 @@ impl EngineState {
                     "CPU backend is unsupported for this model",
                 ));
             }
-            let (adapter, _) =
-                build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)?;
+            let (cpu_model_path, tokenizer_path, cpu_spec) = resolve_cpu_runtime_inputs(&model_id)?;
+            let (adapter, _) = build_cpu_runtime_adapter(
+                &self.runtime_bundles().ort,
+                &cpu_model_path,
+                &tokenizer_path,
+                cpu_spec,
+            )?;
+            active_model_path = cpu_model_path.display().to_string();
             adapter
         };
 
-        let active_model_path =
-            select_active_model_path(active_backend, &cpu_model_path, dml_model_path.as_ref());
-
         *self.runtime_adapter.lock().await = Some(adapter);
         *self.current_model.lock().await = Some(model_id.clone());
-        *self.backend_status.lock().await = BackendStatus {
+        let mut status = BackendStatus {
             active_backend: Some(active_backend),
             active_model_path: Some(active_model_path),
             active_artifact_backend: Some(active_backend),
@@ -804,6 +881,8 @@ impl EngineState {
             selected_device_name,
             dml_gate_state: Some(if active_backend == InferenceBackend::DirectML {
                 "selected".to_string()
+            } else if directml_detected && !self.runtime_bundles().ort.directml_validated() {
+                "bundle_missing".to_string()
             } else if directml_detected && !directml_artifact_available {
                 "artifact_missing".to_string()
             } else if has_dml_candidate {
@@ -829,6 +908,8 @@ impl EngineState {
                 .map(|path| path.display().to_string()),
             ..Default::default()
         };
+        apply_runtime_bundle_status(self.runtime_bundles(), &mut status);
+        *self.backend_status.lock().await = status;
 
         if force_override.is_none() {
             self.persist_backend_record(
@@ -859,6 +940,7 @@ impl EngineState {
         status.runtime_engine = None;
         status.selection_state = Some("ready".to_string());
         status.selection_reason = Some("model_unloaded".to_string());
+        apply_runtime_bundle_status(self.runtime_bundles(), &mut status);
         Ok(())
     }
 
@@ -878,29 +960,16 @@ impl EngineState {
         let Some(model_id) = self.current_model.lock().await.clone() else {
             return;
         };
-        let Some(model_def) = ModelRegistry::get_model(&model_id) else {
-            return;
-        };
-        let Some(cpu_spec) =
-            ModelRegistry::runtime_spec_for_backend(&model_id, RuntimeBackendTarget::Cpu)
+        let Ok((cpu_model_path, tokenizer_path, cpu_spec)) = resolve_cpu_runtime_inputs(&model_id)
         else {
             return;
         };
-        if cpu_spec.validate().is_err() {
-            return;
-        }
-
-        let cpu_model_path = match ModelLoader::validate_model_for_backend(
-            &model_def.directory,
-            ModelArtifactBackend::Cpu,
-        ) {
-            Ok(path) => path,
-            Err(_) => return,
-        };
-        let tokenizer_path = ModelLoader::tokenizer_file(&model_def.directory);
-        let Ok((cpu_adapter, _)) =
-            build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)
-        else {
+        let Ok((cpu_adapter, _)) = build_cpu_runtime_adapter(
+            &self.runtime_bundles().ort,
+            &cpu_model_path,
+            &tokenizer_path,
+            cpu_spec,
+        ) else {
             return;
         };
 
@@ -933,6 +1002,7 @@ impl EngineState {
         ));
         updated.failure_counters = counters.clone();
         updated.force_override = parse_force_override();
+        apply_runtime_bundle_status(self.runtime_bundles(), &mut updated);
         *self.backend_status.lock().await = updated;
 
         if let Some(decision_key) = status_snapshot.decision_key {
@@ -1017,6 +1087,42 @@ impl EngineState {
     }
 }
 
+fn choose_preferred_backend(
+    force_override: Option<InferenceBackend>,
+    failure_counters: &FailureCounters,
+    stored: Option<&BackendDecisionRecord>,
+    has_dml_candidate: bool,
+) -> (InferenceBackend, DecisionReason) {
+    if let Some(override_backend) = force_override {
+        return (override_backend, DecisionReason::ForcedOverride);
+    }
+    if failure_counters.should_demote_directml() {
+        return (InferenceBackend::Cpu, DecisionReason::DemotedAfterFailures);
+    }
+    if let Some(record) = stored {
+        if record.decision.backend == InferenceBackend::DirectML && has_dml_candidate {
+            return (
+                InferenceBackend::DirectML,
+                DecisionReason::PersistedDecision,
+            );
+        }
+        if has_dml_candidate {
+            return (
+                InferenceBackend::DirectML,
+                DecisionReason::DefaultDirectMLCandidate,
+            );
+        }
+        return (InferenceBackend::Cpu, DecisionReason::PersistedDecision);
+    }
+    if has_dml_candidate {
+        return (
+            InferenceBackend::DirectML,
+            DecisionReason::DefaultDirectMLCandidate,
+        );
+    }
+    (InferenceBackend::Cpu, DecisionReason::NoDirectMLCandidate)
+}
+
 struct GenerationPermit {
     generating: Arc<AtomicBool>,
     active_cancel: Arc<StdMutex<Option<Arc<AtomicBool>>>>,
@@ -1039,6 +1145,7 @@ fn lock_cancel<'a>(
 }
 
 fn build_cpu_runtime_adapter(
+    ort_bundle: &OrtRuntimeBundle,
     model_path: &Path,
     tokenizer_path: &Path,
     runtime_spec: ModelRuntimeSpec,
@@ -1049,6 +1156,7 @@ fn build_cpu_runtime_adapter(
     ),
     String,
 > {
+    OrtRuntimeLoader::ensure_initialized(ort_bundle)?;
     let session = InferenceSession::new_with_backend_options(
         model_path,
         InferenceBackend::Cpu,
@@ -1063,19 +1171,22 @@ fn build_cpu_runtime_adapter(
 
 #[cfg(target_os = "windows")]
 fn build_directml_runtime_adapter(
+    ort_bundle: &OrtRuntimeBundle,
     dml_model_path: &Path,
     directml_device_id: Option<i32>,
 ) -> Result<InferenceRuntimeAdapter, String> {
     let model_dir = dml_model_path
         .parent()
         .ok_or_else(|| format!("Invalid DirectML model path: {}", dml_model_path.display()))?;
-    let generator = GenAiDirectMlGenerator::new(model_dir, directml_device_id)?;
+    OrtRuntimeLoader::ensure_initialized(ort_bundle)?;
+    let generator = GenAiDirectMlGenerator::new(ort_bundle, model_dir, directml_device_id)?;
     generator.run_preflight("Warmup preflight")?;
     Ok(InferenceRuntimeAdapter::genai_directml(generator))
 }
 
 #[cfg(not(target_os = "windows"))]
 fn build_directml_runtime_adapter(
+    _ort_bundle: &OrtRuntimeBundle,
     _dml_model_path: &Path,
     _directml_device_id: Option<i32>,
 ) -> Result<InferenceRuntimeAdapter, String> {
@@ -1555,8 +1666,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let token =
         std::env::var("SMOLPC_ENGINE_TOKEN").map_err(|_| "SMOLPC_ENGINE_TOKEN is required")?;
-    init_onnx_runtime(args.resource_dir.as_deref())
-        .map_err(|e| format!("ONNX Runtime init failed: {e}"))?;
 
     let state = AppState {
         token: Arc::new(token),
@@ -1575,17 +1684,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             sleep(Duration::from_secs(30)).await;
             let idle_ms =
                 epoch_ms().saturating_sub(idle_state.last_activity_ms.load(Ordering::SeqCst));
-            if idle_ms >= args.model_idle_unload.as_millis() as u64
-                && !idle_state.engine.generating.load(Ordering::SeqCst)
-                && idle_state.engine.current_model.lock().await.is_some()
-            {
-                let _ = idle_state.engine.unload_model(false).await;
+            if let Some(model_idle_unload) = args.model_idle_unload {
+                if idle_ms >= model_idle_unload.as_millis() as u64
+                    && !idle_state.engine.generating.load(Ordering::SeqCst)
+                    && idle_state.engine.current_model.lock().await.is_some()
+                {
+                    let _ = idle_state.engine.unload_model(false).await;
+                }
             }
-            if idle_ms >= args.process_idle_exit.as_millis() as u64
-                && !idle_state.engine.generating.load(Ordering::SeqCst)
-            {
-                idle_state.shutdown.notify_waiters();
-                break;
+            if let Some(process_idle_exit) = args.process_idle_exit {
+                if idle_ms >= process_idle_exit.as_millis() as u64
+                    && !idle_state.engine.generating.load(Ordering::SeqCst)
+                {
+                    idle_state.shutdown.notify_waiters();
+                    break;
+                }
             }
         }
     });
@@ -1626,6 +1739,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::{OsStr, OsString};
+    use std::fs;
+    use std::sync::{Mutex, OnceLock};
+    use tempfile::tempdir;
 
     #[test]
     fn request_to_prompt_renders_chatml() {
@@ -1666,14 +1783,206 @@ mod tests {
     }
 
     #[test]
-    fn select_active_model_path_prefers_directml_artifact_when_active() {
-        let cpu = PathBuf::from("cpu/model.onnx");
-        let dml = PathBuf::from("dml/model.onnx");
+    fn engine_state_startup_succeeds_with_missing_ort_bundle() {
+        let temp = tempdir().expect("temp dir");
+        let resource_dir = temp.path().join("resources");
+        fs::create_dir_all(&resource_dir).expect("create resource dir");
 
-        let dml_selected = select_active_model_path(InferenceBackend::DirectML, &cpu, Some(&dml));
-        let cpu_selected = select_active_model_path(InferenceBackend::Cpu, &cpu, Some(&dml));
+        let args = test_args(temp.path(), Some(resource_dir.clone()));
+        let bundles =
+            resolve_runtime_bundles_for_mode(Some(&resource_dir), RuntimeLoadMode::Production);
+        let engine = EngineState::new_with_runtime_bundles(&args, bundles);
+        let status = engine.backend_status.blocking_lock().clone();
 
-        assert_eq!(dml_selected, dml.display().to_string());
-        assert_eq!(cpu_selected, cpu.display().to_string());
+        assert_eq!(status.selection_state.as_deref(), Some("pending"));
+        assert_eq!(status.ort_bundle_validated, Some(false));
+        assert_eq!(status.ort_bundle_failure.as_deref(), Some("missing_root"));
+    }
+
+    #[test]
+    fn engine_state_startup_succeeds_with_missing_openvino_bundle() {
+        let temp = tempdir().expect("temp dir");
+        let resource_dir = temp.path().join("resources");
+        let libs = resource_dir.join("libs");
+        create_ort_files(
+            &libs,
+            &[
+                "onnxruntime.dll",
+                "onnxruntime_providers_shared.dll",
+                "onnxruntime-genai.dll",
+                "DirectML.dll",
+            ],
+        );
+
+        let args = test_args(temp.path(), Some(resource_dir.clone()));
+        let bundles =
+            resolve_runtime_bundles_for_mode(Some(&resource_dir), RuntimeLoadMode::Production);
+        let engine = EngineState::new_with_runtime_bundles(&args, bundles);
+        let status = engine.backend_status.blocking_lock().clone();
+
+        assert_eq!(status.ort_bundle_validated, Some(true));
+        assert_eq!(status.openvino_bundle_validated, Some(false));
+        assert_eq!(
+            status.openvino_bundle_failure.as_deref(),
+            Some("missing_root")
+        );
+    }
+
+    #[test]
+    fn engine_state_startup_succeeds_with_missing_openvino_plugin() {
+        let temp = tempdir().expect("temp dir");
+        let resource_dir = temp.path().join("resources");
+        let libs = resource_dir.join("libs");
+        let openvino_root = libs.join("openvino");
+        create_ort_files(
+            &libs,
+            &[
+                "onnxruntime.dll",
+                "onnxruntime_providers_shared.dll",
+                "onnxruntime-genai.dll",
+                "DirectML.dll",
+            ],
+        );
+        create_openvino_files(&openvino_root);
+        fs::remove_file(openvino_root.join("openvino_intel_npu_plugin.dll"))
+            .expect("remove npu plugin");
+
+        let args = test_args(temp.path(), Some(resource_dir.clone()));
+        let bundles =
+            resolve_runtime_bundles_for_mode(Some(&resource_dir), RuntimeLoadMode::Production);
+        let engine = EngineState::new_with_runtime_bundles(&args, bundles);
+        let status = engine.backend_status.blocking_lock().clone();
+
+        assert_eq!(status.ort_bundle_validated, Some(true));
+        assert_eq!(status.openvino_bundle_validated, Some(false));
+        assert_eq!(
+            status.openvino_bundle_failure.as_deref(),
+            Some("openvino_npu_plugin_missing")
+        );
+    }
+
+    #[test]
+    fn backend_selection_prefers_directml_without_cpu_artifact_inputs() {
+        let (backend, reason) =
+            choose_preferred_backend(None, &FailureCounters::default(), None, true);
+
+        assert_eq!(backend, InferenceBackend::DirectML);
+        assert_eq!(reason, DecisionReason::DefaultDirectMLCandidate);
+    }
+
+    #[test]
+    fn process_idle_exit_is_disabled_by_default() {
+        let _guard = lock_env();
+        let env_guard = EnvVarGuard::unset("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS");
+
+        assert_eq!(
+            parse_idle_timeout_secs("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS", None, 60),
+            None
+        );
+
+        drop(env_guard);
+    }
+
+    #[test]
+    fn idle_timeout_zero_disables_timer() {
+        let _guard = lock_env();
+        let env_guard = EnvVarGuard::set("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS", "0");
+
+        assert_eq!(
+            parse_idle_timeout_secs("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS", Some(1800), 60),
+            None
+        );
+
+        drop(env_guard);
+    }
+
+    #[test]
+    fn model_idle_unload_keeps_default_when_unset() {
+        let _guard = lock_env();
+        let env_guard = EnvVarGuard::unset("SMOLPC_ENGINE_MODEL_IDLE_UNLOAD_SECS");
+
+        assert_eq!(
+            parse_idle_timeout_secs("SMOLPC_ENGINE_MODEL_IDLE_UNLOAD_SECS", Some(300), 30),
+            Some(Duration::from_secs(300))
+        );
+
+        drop(env_guard);
+    }
+
+    fn test_args(base: &Path, resource_dir: Option<PathBuf>) -> ParsedArgs {
+        ParsedArgs {
+            port: 19432,
+            data_dir: base.join("data"),
+            resource_dir,
+            app_version: "test".to_string(),
+            queue_size: 1,
+            queue_timeout: Duration::from_secs(1),
+            model_idle_unload: Some(Duration::from_secs(30)),
+            process_idle_exit: Some(Duration::from_secs(60)),
+        }
+    }
+
+    fn create_ort_files(root: &Path, files: &[&str]) {
+        fs::create_dir_all(root).expect("create ort root");
+        for file in files {
+            fs::write(root.join(file), []).expect("write ort runtime file");
+        }
+    }
+
+    fn create_openvino_files(root: &Path) {
+        fs::create_dir_all(root).expect("create openvino root");
+        for file in [
+            "openvino.dll",
+            "openvino_c.dll",
+            "openvino_intel_npu_plugin.dll",
+            "openvino_intel_cpu_plugin.dll",
+            "openvino_ir_frontend.dll",
+            "openvino_genai.dll",
+            "openvino_tokenizers.dll",
+            "tbb12.dll",
+        ] {
+            fs::write(root.join(file), []).expect("write openvino runtime file");
+        }
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        match env_lock().lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: impl AsRef<OsStr>) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.take() {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
     }
 }
