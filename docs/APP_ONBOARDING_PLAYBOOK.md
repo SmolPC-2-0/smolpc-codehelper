@@ -4,6 +4,12 @@ Use this playbook when onboarding another app (Blender helper, GIMP helper, etc.
 
 This is the fastest path for both developers and AI-assisted integration sessions.
 
+Monorepo placement convention for new apps:
+
+1. Create app root under `apps/<app-name>/`.
+2. Keep app UX/tool logic in the app root.
+3. Integrate inference only through shared engine contract/client.
+
 ## Scope
 
 1. Windows-first integration.

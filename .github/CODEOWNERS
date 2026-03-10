@@ -1,0 +1,8 @@
+# Replace @SmolPC-2-0 with team handles when teams are created.
+* @SmolPC-2-0
+
+/engine/ @SmolPC-2-0
+/launcher/ @SmolPC-2-0
+/apps/ @SmolPC-2-0
+/docs/ @SmolPC-2-0
+/scripts/ @SmolPC-2-0

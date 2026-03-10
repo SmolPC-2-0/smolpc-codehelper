@@ -1,9 +1,9 @@
 [workspace]
 members = [
-  "src-tauri",
-  "crates/smolpc-engine-core",
-  "crates/smolpc-engine-host",
-  "crates/smolpc-engine-client",
+  "apps/codehelper/src-tauri",
+  "engine/crates/smolpc-engine-core",
+  "engine/crates/smolpc-engine-host",
+  "engine/crates/smolpc-engine-client",
 ]
 resolver = "2"
 

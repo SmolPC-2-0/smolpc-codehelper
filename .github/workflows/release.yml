@@ -26,10 +26,10 @@ jobs:
           #     args: '--target x86_64-apple-darwin'
           - platform: 'ubuntu-24.04'
             target: 'x86_64-unknown-linux-gnu'
-            args: ''
+            args: '--target x86_64-unknown-linux-gnu'
           - platform: 'windows-latest'
             target: 'x86_64-pc-windows-msvc'
-            args: ''
+            args: '--target x86_64-pc-windows-msvc'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -45,6 +45,7 @@ jobs:
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.88.0
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: install dependencies (ubuntu only)
@@ -59,29 +60,33 @@ jobs:
       - name: Stage sidecar binary (unix)
         if: matrix.platform != 'windows-latest'
         run: |
-          mkdir -p src-tauri/binaries
+          mkdir -p apps/codehelper/src-tauri/binaries
           SIDE_BIN="target/${{ matrix.target }}/release/smolpc-engine-host"
           if [ ! -f "$SIDE_BIN" ]; then
-            SIDE_BIN="target/release/smolpc-engine-host"
+            echo "Expected sidecar binary missing: $SIDE_BIN"
+            echo "Build output did not contain target-specific sidecar artifact."
+            exit 1
           fi
-          cp "$SIDE_BIN" "src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}"
-          chmod +x "src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}"
+          cp "$SIDE_BIN" "apps/codehelper/src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}"
+          chmod +x "apps/codehelper/src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}"
 
       - name: Stage sidecar binary (windows)
         if: matrix.platform == 'windows-latest'
         run: |
-          New-Item -ItemType Directory -Path src-tauri/binaries -Force | Out-Null
+          New-Item -ItemType Directory -Path apps/codehelper/src-tauri/binaries -Force | Out-Null
           $sideBin = "target/${{ matrix.target }}/release/smolpc-engine-host.exe"
           if (!(Test-Path $sideBin)) {
-            $sideBin = "target/release/smolpc-engine-host.exe"
+            Write-Error "Expected sidecar binary missing: $sideBin"
+            throw "Build output did not contain target-specific sidecar artifact."
           }
-          Copy-Item $sideBin "src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}.exe" -Force
+          Copy-Item $sideBin "apps/codehelper/src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}.exe" -Force
 
       - name: Build Tauri
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          projectPath: apps/codehelper
           tagName: v__VERSION__
           releaseName: 'v__VERSION__'
           releaseBody: 'See [CHANGES.md](https://github.com/alysonhower/tauri2-svelte5-shadcn/blob/main/CHANGES.md) for a complete list of changes.'
