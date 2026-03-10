@@ -181,7 +181,7 @@ fn parse_args() -> ParsedArgs {
             .max(1),
     );
     let model_idle_unload =
-        parse_idle_timeout_secs("SMOLPC_ENGINE_MODEL_IDLE_UNLOAD_SECS", Some(300), 30);
+        parse_idle_timeout_secs("SMOLPC_ENGINE_MODEL_IDLE_UNLOAD_SECS", Some(0), 30);
     let process_idle_exit =
         parse_idle_timeout_secs("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS", None, 60);
 
