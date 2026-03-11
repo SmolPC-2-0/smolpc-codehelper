@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/capabilities/2.0.0",
+  "identifier": "default",
+  "description": "Minimal permissions for Blender Helper (dev)",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

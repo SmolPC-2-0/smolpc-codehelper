@@ -1,0 +1,176 @@
+{
+  "tutorials": [
+    {
+      "id": "basic-modeling",
+      "title": "Basic 3D Modeling",
+      "description": "Learn to create and modify basic shapes in Blender",
+      "steps": [
+        {
+          "title": "Create Your First Cube",
+          "instruction": "Let's start by adding a cube to your scene. Press Shift+A to open the Add menu, then select Mesh > Cube. You should see a new cube appear at the center of your scene.",
+          "validation": {
+            "check": "has_object_type",
+            "params": {"type": "MESH"}
+          }
+        },
+        {
+          "title": "Enter Edit Mode",
+          "instruction": "Now let's learn about Edit Mode. With your cube selected, press Tab to enter Edit Mode. You'll see the cube's vertices (corner points) become visible. This mode lets you modify the shape of your object.",
+          "validation": {
+            "check": "mode_is",
+            "params": {"mode": "EDIT"}
+          }
+        },
+        {
+          "title": "Return to Object Mode",
+          "instruction": "Press Tab again to return to Object Mode. In Object Mode, you work with entire objects. In Edit Mode, you work with the parts of an object (vertices, edges, faces).",
+          "validation": {
+            "check": "mode_is",
+            "params": {"mode": "OBJECT"}
+          }
+        },
+        {
+          "title": "Add a Subdivision Surface Modifier",
+          "instruction": "Modifiers change how objects look without permanently changing their shape. Select your cube, then find the Modifiers panel (wrench icon on the right). Click 'Add Modifier' and choose 'Subdivision Surface'. Your cube should become smoother!",
+          "validation": {
+            "check": "has_modifier",
+            "params": {"type": "SUBSURF"}
+          }
+        },
+        {
+          "title": "Create Multiple Objects",
+          "instruction": "Practice creating more objects! Try adding a UV Sphere (Shift+A > Mesh > UV Sphere) and a Cylinder (Shift+A > Mesh > Cylinder). Move them around using the G key to grab and move objects.",
+          "validation": {
+            "check": "object_count",
+            "params": {"min": 5}
+          }
+        }
+      ]
+    },
+    {
+      "id": "modifiers-intro",
+      "title": "Introduction to Modifiers",
+      "description": "Learn how modifiers can transform your 3D models",
+      "steps": [
+        {
+          "title": "Start with a Cube",
+          "instruction": "Create a new cube (Shift+A > Mesh > Cube) as our base object for learning about modifiers.",
+          "validation": {
+            "check": "has_object_type",
+            "params": {"type": "MESH"}
+          }
+        },
+        {
+          "title": "Add a Bevel Modifier",
+          "instruction": "The Bevel modifier rounds edges. With your cube selected, add a Bevel modifier (Modifiers panel > Add Modifier > Bevel). Try adjusting the 'Amount' value to see how it affects the corners.",
+          "validation": {
+            "check": "has_modifier",
+            "params": {"type": "BEVEL"}
+          }
+        },
+        {
+          "title": "Add an Array Modifier",
+          "instruction": "The Array modifier creates copies of your object. Add an Array modifier to your cube. You'll see multiple cubes appear in a row. You can change the 'Count' to add more copies.",
+          "validation": {
+            "check": "has_modifier",
+            "params": {"type": "ARRAY"}
+          }
+        },
+        {
+          "title": "Combine Modifiers",
+          "instruction": "Modifiers work together! Try adding a Subdivision Surface modifier on top of your Bevel and Array modifiers. Notice how the order matters - you can drag modifiers up and down in the panel to reorder them.",
+          "validation": {
+            "check": "has_modifier",
+            "params": {"type": "SUBSURF"}
+          }
+        }
+      ]
+    },
+    {
+      "id": "materials-basics",
+      "title": "Basic Materials",
+      "description": "Add colors and materials to your 3D objects",
+      "steps": [
+        {
+          "title": "Create an Object to Color",
+          "instruction": "Start by creating any mesh object you like - a cube, sphere, or cylinder works great!",
+          "validation": {
+            "check": "has_object_type",
+            "params": {"type": "MESH"}
+          }
+        },
+        {
+          "title": "Open the Shading Workspace",
+          "instruction": "At the top of Blender, you'll see workspace tabs. Click on 'Shading'. This gives you a better view for working with materials. The bottom half shows the shader editor where you control how objects look.",
+          "validation": {
+            "check": "always_pass",
+            "params": {}
+          }
+        },
+        {
+          "title": "Add a Material",
+          "instruction": "With your object selected, find the Material Properties panel (red sphere icon on the right). Click the '+' button and then 'New' to create a new material. You should see a 'Principled BSDF' node in the Shader Editor.",
+          "validation": {
+            "check": "has_material",
+            "params": {"min_count": 1}
+          }
+        },
+        {
+          "title": "Change the Base Color",
+          "instruction": "In the Shader Editor or Material Properties panel, find 'Base Color' and click on the color square. Choose any color you like! You'll see your object change color in the viewport (make sure you're in Solid or Material Preview shading mode).",
+          "validation": {
+            "check": "always_pass",
+            "params": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": "navigation-basics",
+      "title": "Navigating the 3D Viewport",
+      "description": "Master the basics of moving around in Blender's 3D space",
+      "steps": [
+        {
+          "title": "Rotate the View",
+          "instruction": "Hold down your middle mouse button (or scroll wheel) and drag to rotate your view around the scene. Practice looking at objects from different angles. If you have a trackpad, two-finger drag often works.",
+          "validation": {
+            "check": "always_pass",
+            "params": {}
+          }
+        },
+        {
+          "title": "Pan the View",
+          "instruction": "Hold Shift + Middle Mouse Button and drag to pan (move sideways without rotating). This helps you look at different parts of your scene.",
+          "validation": {
+            "check": "always_pass",
+            "params": {}
+          }
+        },
+        {
+          "title": "Zoom In and Out",
+          "instruction": "Scroll your mouse wheel up and down to zoom in and out. Or hold Ctrl + Middle Mouse Button and drag. Get comfortable zooming to see details or the whole scene.",
+          "validation": {
+            "check": "always_pass",
+            "params": {}
+          }
+        },
+        {
+          "title": "Frame Selected Object",
+          "instruction": "Select an object by clicking on it, then press the Period (.) key on your numpad, or View > Frame Selected from the menu. This centers your view on the selected object - super useful!",
+          "validation": {
+            "check": "always_pass",
+            "params": {}
+          }
+        },
+        {
+          "title": "Create Objects for Practice",
+          "instruction": "Now that you can navigate, create at least 3 different objects (Shift+A > Mesh) and practice moving your view to look at each one from different angles.",
+          "validation": {
+            "check": "object_count",
+            "params": {"min": 5}
+          }
+        }
+      ]
+    }
+  ]
+}
