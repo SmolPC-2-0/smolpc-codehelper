@@ -9,9 +9,9 @@ use commands::default::{read, save_code, write};
 use commands::engine_client_adapter::{engine_ensure_started, engine_status};
 use commands::hardware::{detect_hardware, get_cached_hardware, HardwareCache};
 use commands::inference::{
-    check_model_exists, generate_text, get_current_model, get_inference_backend_status,
-    inference_cancel, inference_generate, is_generating, list_models, load_model,
-    set_inference_runtime_mode, unload_model, InferenceState,
+    check_model_exists, check_model_readiness, generate_text, get_current_model,
+    get_inference_backend_status, inference_cancel, inference_generate, is_generating,
+    list_models, load_model, set_inference_runtime_mode, unload_model, InferenceState,
 };
 use commands::launcher::{launcher_launch_or_focus, launcher_list_apps};
 use launcher::orchestrator::LauncherState;
@@ -51,6 +51,7 @@ pub fn run() {
             is_generating,
             list_models,
             get_current_model,
+            check_model_readiness,
             check_model_exists,
             get_inference_backend_status,
             set_inference_runtime_mode,
