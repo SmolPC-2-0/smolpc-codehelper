@@ -1,13 +1,13 @@
 #![cfg_attr(mobile, tauri::mobile_entry_point)]
 
-mod mcp;
+mod commands;
 mod llm_client;
-mod macros; 
+mod macros;
+mod mcp;
+mod plan_execute;
+mod plan_llm;
 mod plan_schema;
 mod plan_validate;
-mod plan_execute;
-mod commands;
-mod plan_llm;
 
 use serde_json::{json, Value};
 use std::process::Command;
@@ -21,7 +21,6 @@ struct HealthStatus {
     image_open_ok: bool,
     errors: Vec<String>,
 }
-
 
 #[tauri::command]
 fn start_gimp_mcp_server() -> Result<(), String> {
@@ -55,20 +54,45 @@ fn mcp_call_tool(name: String, arguments: Value) -> Result<Value, String> {
 /// by GEGL in this version and return garbage values — use hex instead.
 /// Defaults to "blue" if no recognised colour is found.
 fn extract_color(lower: &str) -> &'static str {
-    if lower.contains("red")     { "red" }
-    else if lower.contains("blue")    { "blue" }
-    else if lower.contains("green")   { "green" }
-    else if lower.contains("yellow")  { "yellow" }
-    else if lower.contains("orange")  { "#FFA500" }   // "orange" broken in GEGL
-    else if lower.contains("purple")  { "purple" }
-    else if lower.contains("pink")    { "#FF69B4" }   // "pink" broken in GEGL
-    else if lower.contains("cyan")    { "#00FFFF" }   // "cyan" returns wrong alpha
-    else if lower.contains("magenta") { "#FF00FF" }   // "magenta" broken in GEGL
-    else if lower.contains("brown")   { "#8B4513" }   // "brown" broken in GEGL
-    else if lower.contains("grey") || lower.contains("gray") { "gray" }
-    else if lower.contains("black")   { "black" }
-    else if lower.contains("white")   { "white" }
-    else { "blue" }
+    if lower.contains("red") {
+        "red"
+    } else if lower.contains("blue") {
+        "blue"
+    } else if lower.contains("green") {
+        "green"
+    } else if lower.contains("yellow") {
+        "yellow"
+    } else if lower.contains("orange") {
+        "#FFA500"
+    }
+    // "orange" broken in GEGL
+    else if lower.contains("purple") {
+        "purple"
+    } else if lower.contains("pink") {
+        "#FF69B4"
+    }
+    // "pink" broken in GEGL
+    else if lower.contains("cyan") {
+        "#00FFFF"
+    }
+    // "cyan" returns wrong alpha
+    else if lower.contains("magenta") {
+        "#FF00FF"
+    }
+    // "magenta" broken in GEGL
+    else if lower.contains("brown") {
+        "#8B4513"
+    }
+    // "brown" broken in GEGL
+    else if lower.contains("grey") || lower.contains("gray") {
+        "gray"
+    } else if lower.contains("black") {
+        "black"
+    } else if lower.contains("white") {
+        "white"
+    } else {
+        "blue"
+    }
 }
 
 /// Detect a spatial region ("top", "bottom", "left", "right") in a lowercase prompt.
@@ -80,19 +104,31 @@ fn extract_region(lower: &str) -> Option<&'static str> {
         || lower.contains("section")
         || lower.contains("portion")
         || lower.contains("area");
-    if !has_scope { return None; }
-    if lower.contains("top")    { Some("top") }
-    else if lower.contains("bottom") { Some("bottom") }
-    else if lower.contains("left")   { Some("left") }
-    else if lower.contains("right")  { Some("right") }
-    else { None }
+    if !has_scope {
+        return None;
+    }
+    if lower.contains("top") {
+        Some("top")
+    } else if lower.contains("bottom") {
+        Some("bottom")
+    } else if lower.contains("left") {
+        Some("left")
+    } else if lower.contains("right") {
+        Some("right")
+    } else {
+        None
+    }
 }
 
 /// Call an MCP tool from a macro payload `{ "name": "...", "arguments": {...} }`.
 fn run_macro(payload: Value) -> Result<Value, String> {
-    let tool_name = payload.get("name").and_then(|v| v.as_str())
+    let tool_name = payload
+        .get("name")
+        .and_then(|v| v.as_str())
         .ok_or_else(|| "Macro payload missing 'name'".to_string())?;
-    let arguments = payload.get("arguments").cloned()
+    let arguments = payload
+        .get("arguments")
+        .cloned()
         .ok_or_else(|| "Macro payload missing 'arguments'".to_string())?;
     mcp::call_tool(tool_name, arguments)
 }
@@ -183,7 +219,9 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
 
     // Fast Path: Draw filled square-as-shape (contains "square" + draw verb, not crop/resize)
     let wants_draw_square = lower_prompt.contains("square")
-        && (lower_prompt.contains("draw") || lower_prompt.contains("add") || lower_prompt.contains("paint"))
+        && (lower_prompt.contains("draw")
+            || lower_prompt.contains("add")
+            || lower_prompt.contains("paint"))
         && !lower_prompt.contains("crop")
         && !lower_prompt.contains("resize");
     if wants_draw_square {
@@ -199,28 +237,39 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
     // Fast Path: Selection-aware operations (e.g. "blur the top half", "brighten the bottom half")
     if let Some(region) = extract_region(&lower_prompt) {
         let region_label = match region {
-            "top"    => "top half",
+            "top" => "top half",
             "bottom" => "bottom half",
-            "left"   => "left half",
-            "right"  => "right half",
-            _        => region,
+            "left" => "left half",
+            "right" => "right half",
+            _ => region,
         };
         let wants_brighter_region = lower_prompt.contains("bright")
-            && (lower_prompt.contains("increase") || lower_prompt.contains("boost")
-                || lower_prompt.contains("more") || lower_prompt.contains("brighter")
-                || lower_prompt.contains("raise") || lower_prompt.contains("up"));
+            && (lower_prompt.contains("increase")
+                || lower_prompt.contains("boost")
+                || lower_prompt.contains("more")
+                || lower_prompt.contains("brighter")
+                || lower_prompt.contains("raise")
+                || lower_prompt.contains("up"));
         let wants_darker_region = (lower_prompt.contains("dark") || lower_prompt.contains("dim"))
-            && (lower_prompt.contains("more") || lower_prompt.contains("darker")
-                || lower_prompt.contains("decrease") || lower_prompt.contains("less")
-                || lower_prompt.contains("lower") || lower_prompt.contains("reduce"));
+            && (lower_prompt.contains("more")
+                || lower_prompt.contains("darker")
+                || lower_prompt.contains("decrease")
+                || lower_prompt.contains("less")
+                || lower_prompt.contains("lower")
+                || lower_prompt.contains("reduce"));
         let wants_more_contrast_region = lower_prompt.contains("contrast")
-            && (lower_prompt.contains("increase") || lower_prompt.contains("more")
-                || lower_prompt.contains("boost") || lower_prompt.contains("up"));
+            && (lower_prompt.contains("increase")
+                || lower_prompt.contains("more")
+                || lower_prompt.contains("boost")
+                || lower_prompt.contains("up"));
         let wants_less_contrast_region = lower_prompt.contains("contrast")
-            && (lower_prompt.contains("decrease") || lower_prompt.contains("less")
-                || lower_prompt.contains("reduce") || lower_prompt.contains("down"));
+            && (lower_prompt.contains("decrease")
+                || lower_prompt.contains("less")
+                || lower_prompt.contains("reduce")
+                || lower_prompt.contains("down"));
         let wants_blur_region = lower_prompt.contains("blur")
-            && !lower_prompt.contains("unblur") && !lower_prompt.contains("sharpen");
+            && !lower_prompt.contains("unblur")
+            && !lower_prompt.contains("sharpen");
 
         if wants_brighter_region {
             run_macro(macros::brightness_contrast_region(70.0, 0.0, region))?;
@@ -404,7 +453,11 @@ User request: {user}
 
     let selection_raw = match llm_client::chat(&selector_prompt).await {
         Ok(r) => r,
-        Err(e) if e.contains("localhost:11434") || e.contains("connection refused") || e.contains("error sending request") => {
+        Err(e)
+            if e.contains("localhost:11434")
+                || e.contains("connection refused")
+                || e.contains("error sending request") =>
+        {
             return Ok(json!({
                 "reply": "I don't recognise that command yet, and Ollama isn't running so I can't handle custom requests.\n\nStart Ollama with:\n  ollama serve\n\nOr try one of the built-in commands: draw a circle, blur the image, increase brightness, draw a red heart, blur the top half.",
                 "undoable": false, "plan": {}, "tool_results": []
@@ -416,13 +469,14 @@ User request: {user}
     // Strip prefix before first '{' and suffix after last '}' (handles markdown fences)
     let sel_start = selection_raw.find('{').unwrap_or(0);
     let sel_substr = &selection_raw[sel_start..];
-    let sel_end = sel_substr.rfind('}').map(|i| i + 1).unwrap_or(sel_substr.len());
+    let sel_end = sel_substr
+        .rfind('}')
+        .map(|i| i + 1)
+        .unwrap_or(sel_substr.len());
     let selection_str = &sel_substr[..sel_end];
 
     let selection: Value = serde_json::from_str(selection_str).map_err(|e| {
-        format!(
-            "Failed to parse tool selection JSON: {e}\nLLM output was: {selection_raw}"
-        )
+        format!("Failed to parse tool selection JSON: {e}\nLLM output was: {selection_raw}")
     })?;
 
     let selected_tool = selection
@@ -622,12 +676,14 @@ EXAMPLE — rotate the image 90 degrees clockwise:
         // (handles markdown fences like ```json ... ``` wrapping the output)
         let json_start = plan_raw.find('{').unwrap_or(0);
         let json_substr = &plan_raw[json_start..];
-        let json_end = json_substr.rfind('}').map(|i| i + 1).unwrap_or(json_substr.len());
+        let json_end = json_substr
+            .rfind('}')
+            .map(|i| i + 1)
+            .unwrap_or(json_substr.len());
         let plan_str = &json_substr[..json_end];
 
-        serde_json::from_str(plan_str).map_err(|e| {
-            format!("Failed to parse plan JSON: {e}\nLLM output was: {plan_raw}")
-        })?
+        serde_json::from_str(plan_str)
+            .map_err(|e| format!("Failed to parse plan JSON: {e}\nLLM output was: {plan_raw}"))?
     } else {
         // Simple one step plan
         json!({
@@ -657,10 +713,7 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                 .unwrap_or("")
                 .to_string();
 
-            let arguments = step
-                .get("arguments")
-                .cloned()
-                .unwrap_or_else(|| json!({}));
+            let arguments = step.get("arguments").cloned().unwrap_or_else(|| json!({}));
 
             let result = mcp::call_tool(&tool_name, arguments.clone())
                 .map(|val| val)
@@ -779,14 +832,8 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                     let basic = meta.get("basic").unwrap_or(&Value::Null);
                     let file = meta.get("file").unwrap_or(&Value::Null);
 
-                    let width = basic
-                        .get("width")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                    let height = basic
-                        .get("height")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
+                    let width = basic.get("width").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let height = basic.get("height").and_then(|v| v.as_i64()).unwrap_or(0);
                     let base_type = basic
                         .get("base_type")
                         .and_then(|v| v.as_str())
@@ -836,14 +883,11 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                 .and_then(|sc| sc.get("result"))
                 .and_then(|r| r.as_str());
 
-            let looks_like_error =
-                text_msg.map_or(false, |t| t.starts_with("Error:"))
-                    || structured_result.map_or(false, |t| t.starts_with("Error:"));
+            let looks_like_error = text_msg.map_or(false, |t| t.starts_with("Error:"))
+                || structured_result.map_or(false, |t| t.starts_with("Error:"));
 
             if is_error_flag || looks_like_error {
-                let msg = structured_result
-                    .or(text_msg)
-                    .unwrap_or("Unknown error");
+                let msg = structured_result.or(text_msg).unwrap_or("Unknown error");
 
                 // Extract the generated Python lines for debugging
                 let python_preview = arguments_val
@@ -852,7 +896,8 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                     .and_then(|a| a.get(1))
                     .and_then(|v| v.as_array())
                     .map(|lines| {
-                        lines.iter()
+                        lines
+                            .iter()
                             .filter_map(|l| l.as_str())
                             .collect::<Vec<_>>()
                             .join("\n  ")
@@ -862,7 +907,9 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                 reply_text = if python_preview.is_empty() {
                     format!("GIMP returned an error: {msg}")
                 } else {
-                    format!("GIMP returned an error: {msg}\n\nGenerated Python:\n  {python_preview}")
+                    format!(
+                        "GIMP returned an error: {msg}\n\nGenerated Python:\n  {python_preview}"
+                    )
                 };
                 continue;
             }
@@ -940,7 +987,7 @@ async fn test_basic_mcp() -> String {
     }
 
     // --- Test 2: get image metadata ---
-    match mcp_list_tools(){
+    match mcp_list_tools() {
         Ok(meta) => {
             output.push_str("Image metadata:\n");
             output.push_str(&format!("{:#?}\n", meta));
@@ -1059,7 +1106,6 @@ fn macro_undo() -> Result<serde_json::Value, String> {
     mcp::call_tool(tool_name, arguments)
 }
 
-
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -1076,7 +1122,6 @@ pub fn run() {
             macro_blur,
             macro_undo,
             commands::run_action_plan,
-
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

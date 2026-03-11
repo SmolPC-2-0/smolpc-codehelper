@@ -1,11 +1,23 @@
 use serde_json::{json, Value};
 
 fn clamp_f64(x: f64, lo: f64, hi: f64) -> f64 {
-    if x < lo { lo } else if x > hi { hi } else { x }
+    if x < lo {
+        lo
+    } else if x > hi {
+        hi
+    } else {
+        x
+    }
 }
 
 fn clamp_i32(x: i32, lo: i32, hi: i32) -> i32 {
-    if x < lo { lo } else if x > hi { hi } else { x }
+    if x < lo {
+        lo
+    } else if x > hi {
+        hi
+    } else {
+        x
+    }
 }
 
 /// Build a standard MCP payload for the `call_api` tool (GIMP 3).
@@ -167,7 +179,7 @@ pub fn brightness_contrast(brightness: f64, contrast: f64) -> Value {
     // In GIMP 3, brightness_contrast takes floats in -1.0..1.0 (not -127..127).
     // Callers pass values in -127..127 range, so we normalise here.
     let b = clamp_f64(brightness / 127.0, -1.0, 1.0);
-    let c = clamp_f64(contrast   / 127.0, -1.0, 1.0);
+    let c = clamp_f64(contrast / 127.0, -1.0, 1.0);
     let mut python_lines = setup_lines(false);
     python_lines.extend(save_clipboard_lines());
     python_lines.extend(vec![
@@ -206,7 +218,8 @@ pub fn draw_circle(color: &str) -> Value {
         "r = min(w, h) // 3".to_string(),
         "cx = w // 2".to_string(),
         "cy = h // 2".to_string(),
-        "Gimp.Image.select_ellipse(image, Gimp.ChannelOps.REPLACE, cx - r, cy - r, r * 2, r * 2)".to_string(),
+        "Gimp.Image.select_ellipse(image, Gimp.ChannelOps.REPLACE, cx - r, cy - r, r * 2, r * 2)"
+            .to_string(),
         "Gimp.Drawable.edit_fill(drawable, Gimp.FillType.FOREGROUND)".to_string(),
         "Gimp.Selection.none(image)".to_string(),
         "Gimp.displays_flush()".to_string(),
@@ -265,11 +278,23 @@ pub fn draw_triangle(color: &str) -> Value {
 /// Returns an empty vec for any unrecognised value (→ full-image operation).
 pub fn region_selection_lines(region: &str) -> Vec<String> {
     match region {
-        "top"    => vec!["Gimp.Image.select_rectangle(image, Gimp.ChannelOps.REPLACE, 0, 0, w, h//2)".to_string()],
-        "bottom" => vec!["Gimp.Image.select_rectangle(image, Gimp.ChannelOps.REPLACE, 0, h//2, w, h//2)".to_string()],
-        "left"   => vec!["Gimp.Image.select_rectangle(image, Gimp.ChannelOps.REPLACE, 0, 0, w//2, h)".to_string()],
-        "right"  => vec!["Gimp.Image.select_rectangle(image, Gimp.ChannelOps.REPLACE, w//2, 0, w//2, h)".to_string()],
-        _        => vec![],
+        "top" => vec![
+            "Gimp.Image.select_rectangle(image, Gimp.ChannelOps.REPLACE, 0, 0, w, h//2)"
+                .to_string(),
+        ],
+        "bottom" => vec![
+            "Gimp.Image.select_rectangle(image, Gimp.ChannelOps.REPLACE, 0, h//2, w, h//2)"
+                .to_string(),
+        ],
+        "left" => vec![
+            "Gimp.Image.select_rectangle(image, Gimp.ChannelOps.REPLACE, 0, 0, w//2, h)"
+                .to_string(),
+        ],
+        "right" => vec![
+            "Gimp.Image.select_rectangle(image, Gimp.ChannelOps.REPLACE, w//2, 0, w//2, h)"
+                .to_string(),
+        ],
+        _ => vec![],
     }
 }
 
@@ -278,7 +303,7 @@ pub fn region_selection_lines(region: &str) -> Vec<String> {
 /// brightness / contrast in -127..127 range.
 pub fn brightness_contrast_region(brightness: f64, contrast: f64, region: &str) -> Value {
     let b = clamp_f64(brightness / 127.0, -1.0, 1.0);
-    let c = clamp_f64(contrast   / 127.0, -1.0, 1.0);
+    let c = clamp_f64(contrast / 127.0, -1.0, 1.0);
     let mut python_lines = setup_lines(false);
     python_lines.extend(save_clipboard_lines());
     python_lines.extend(region_selection_lines(region));

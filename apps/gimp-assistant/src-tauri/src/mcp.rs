@@ -122,11 +122,10 @@ impl McpConnection {
             return Err(format!("Server error: {err}"));
         }
 
-        return resp.get("result")
+        return resp
+            .get("result")
             .cloned()
             .ok_or_else(|| "Missing result in MCP response".to_string());
-        
-
     }
 
     /// Write one JSON object per line (MCP stdio format)
@@ -161,9 +160,7 @@ impl McpConnection {
         let line_trimmed = line.trim_end();
 
         serde_json::from_str(line_trimmed).map_err(|e| {
-            format!(
-                "[MCP] Invalid JSON from MCP server: {e}\nLine was: {line_trimmed}"
-            )
+            format!("[MCP] Invalid JSON from MCP server: {e}\nLine was: {line_trimmed}")
         })
     }
 
@@ -195,9 +192,7 @@ fn with_connection<F, R>(f: F) -> Result<R, String>
 where
     F: FnOnce(&mut McpConnection) -> Result<R, String>,
 {
-    let mut guard = MCP
-        .lock()
-        .map_err(|_| "MCP mutex poisoned".to_string())?;
+    let mut guard = MCP.lock().map_err(|_| "MCP mutex poisoned".to_string())?;
 
     if guard.is_none() {
         *guard = Some(McpConnection::new()?);

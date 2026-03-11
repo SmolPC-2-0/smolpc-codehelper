@@ -16,7 +16,7 @@ Built with Tauri (Rust backend) + SvelteKit frontend. Talks to GIMP via the [gim
   ```bash
   curl -LsSf https://astral.sh/uv/install.sh | sh
   ```
-- **Ollama** *(optional)* — only needed for commands that aren't recognised by the built-in fast paths (e.g. unusual drawing operations). Install from [ollama.com](https://ollama.com) and pull a model:
+- **Ollama** _(optional)_ — only needed for commands that aren't recognised by the built-in fast paths (e.g. unusual drawing operations). Install from [ollama.com](https://ollama.com) and pull a model:
   ```bash
   ollama pull llama3.2
   ```
@@ -41,6 +41,7 @@ git clone https://github.com/anthropics/gimp-mcp
 Copy `gimp-mcp-plugin.py` from the `gimp-mcp` repo into GIMP's plugin folder:
 
 **macOS:**
+
 ```bash
 cp gimp-mcp/gimp-mcp-plugin.py ~/Library/Application\ Support/GIMP/3.0/plug-ins/gimp-mcp-plugin/gimp-mcp-plugin.py
 ```
@@ -60,6 +61,7 @@ const GIMP_MCP_PATH: &str = "/Users/yourname/gimp-mcp";
 ```
 
 Also update the same path in `src-tauri/src/lib.rs` around line 30:
+
 ```rust
 let gimp_mcp_dir = "/Users/yourname/gimp-mcp";
 ```
@@ -81,15 +83,15 @@ npm run tauri dev
 3. The app will auto-connect to GIMP. The status bar shows connection state.
 4. Type a command and press Enter:
 
-| Command | What it does |
-|---|---|
-| `draw a red circle` | Draws a filled red circle in the center |
-| `add a blue line` | Draws a diagonal blue line |
-| `draw a green triangle` | Draws a filled green triangle |
-| `increase brightness` | Brightens the image |
-| `increase contrast` | Increases contrast |
-| `blur` | Applies a gaussian blur |
-| `undo` | Reverts the last change |
+| Command                 | What it does                            |
+| ----------------------- | --------------------------------------- |
+| `draw a red circle`     | Draws a filled red circle in the center |
+| `add a blue line`       | Draws a diagonal blue line              |
+| `draw a green triangle` | Draws a filled green triangle           |
+| `increase brightness`   | Brightens the image                     |
+| `increase contrast`     | Increases contrast                      |
+| `blur`                  | Applies a gaussian blur                 |
+| `undo`                  | Reverts the last change                 |
 
 Commands not in the list above are sent to Ollama (if running) to generate the GIMP Python code dynamically.
 

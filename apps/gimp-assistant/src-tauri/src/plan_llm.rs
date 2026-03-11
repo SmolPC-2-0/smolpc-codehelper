@@ -5,7 +5,7 @@ fn planner_prompt(user_text: &str) -> String {
     // IMPORTANT: LLM must output ONLY JSON matching ActionPlan schema.
     // No Python. No tools. No prose.
     format!(
-r#"
+        r#"
 You are a planner for a GIMP assistant.
 
 Your job: convert the user's request into an ActionPlan JSON object.
@@ -62,7 +62,11 @@ pub async fn make_plan_from_text(user_text: &str) -> Result<ActionPlan, String> 
     let raw = crate::llm_client::chat(&prompt).await?;
 
     // Strip anything before first '{' in case model misbehaves
-    let json_str = if let Some(idx) = raw.find('{') { &raw[idx..] } else { raw.as_str() };
+    let json_str = if let Some(idx) = raw.find('{') {
+        &raw[idx..]
+    } else {
+        raw.as_str()
+    };
 
     let plan: ActionPlan = serde_json::from_str(json_str)
         .map_err(|e| format!("Failed to parse ActionPlan JSON: {e}\nLLM output was:\n{raw}"))?;
