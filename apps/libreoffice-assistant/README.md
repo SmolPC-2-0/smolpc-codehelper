@@ -1,5 +1,18 @@
-# LibreOffice Assistant (Skeleton)
+# LibreOffice Assistant
 
-Planned app zone for LibreOffice assistant integration.
+Planned app zone for LibreOffice assistant integration into the shared engine + launcher architecture.
 
-Use `docs/APP_ONBOARDING_PLAYBOOK.md` and `docs/ENGINE_API.md` as integration baseline.
+Primary migration guide:
+
+1. `docs/LIBREOFFICE_UNIFIED_LAUNCHER_PORTING_GUIDE.md`
+
+Integration baselines:
+
+1. `docs/APP_ONBOARDING_PLAYBOOK.md`
+2. `docs/ENGINE_API.md`
+3. `docs/SMOLPC_SUITE_INTEGRATION.md`
+
+Placement rule:
+
+1. All LibreOffice app code belongs under `apps/libreoffice-assistant/...`.
+2. Do not place LibreOffice app source under root `/src-tauri` (root path is generated artifact residue, not an app zone).
