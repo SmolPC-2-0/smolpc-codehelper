@@ -66,10 +66,13 @@ Recommended planning boundaries:
 2. automatic selector handoff to `openvino_npu -> directml -> cpu` after successful OpenVINO preflight
 3. model manifests, artifact layout, and default catalog migration
 4. workload tuning, cache policy, and prompt-default calibration
+5. benchmark refresh so users can compare inference/runtime choices on their own machine
 
 Each future Codex session should take one workstream or one subsection of a phase, produce an implementation plan for that slice only, and stop before broad execution planning.
 
 Planner and implementer prompts should explicitly require small, frequent checkpoint commits. Do not carry a large dirty worktree across sessions when the work can be split into coherent checkpoints.
+
+The existing benchmark frontend shell stays in scope. The current legacy Ollama benchmark backend is a temporary holdover and should be replaced with runtime-aware benchmarking later, not deleted outright.
 
 ## Removed Assumptions
 

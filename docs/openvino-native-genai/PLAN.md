@@ -293,6 +293,13 @@ See `ENGINE_SURFACE_TARGET.md` for the target contract.
 - broaden benchmarking to weaker Intel laptops
 - decide whether later benchmark-driven lane selection is worth the added complexity
 
+### Phase 2
+
+- refresh benchmarking around the native runtime architecture
+- keep the existing benchmark frontend shell and replace the disabled legacy Ollama benchmark backend
+- benchmark real runtime/lane choices on the user's own hardware so they can see which engine performs best for that machine and model
+- decide how benchmark results should influence future user guidance and optional backend recommendations
+
 ## Explicit Non-Goals
 
 - do not add `ORT + OpenVINO EP`
@@ -312,6 +319,7 @@ Recommended next workstream order from this branch baseline:
 2. automatic selector handoff to `openvino_npu -> directml -> cpu`
 3. lane-specific manifests and default catalog migration
 4. workload tuning and cache policy refinement
+5. benchmark refresh for cross-lane, per-machine comparison once the runtime stack is stable enough to measure
 
 ## Merge Gate For Implementation Start
 
