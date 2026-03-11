@@ -1,8 +1,9 @@
+use super::super::runtime_loading::{OrtRuntimeBundle, OrtRuntimeLoader, RetainedLibrary};
 use super::super::types::{GenerationConfig, GenerationMetrics};
 use half::f16;
-use libloading::Library;
+use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -43,7 +44,8 @@ enum OgaElementType {
 }
 
 struct GenAiApi {
-    _lib: Library,
+    _genai: RetainedLibrary,
+    _directml: RetainedLibrary,
     result_get_error: unsafe extern "system" fn(*const OgaResult) -> *const c_char,
     destroy_result: unsafe extern "system" fn(*mut OgaResult),
 
@@ -126,112 +128,83 @@ unsafe impl Send for GenAiApi {}
 unsafe impl Sync for GenAiApi {}
 
 impl GenAiApi {
-    fn load() -> Result<Arc<Self>, String> {
-        let dll_path = find_genai_dll().ok_or_else(|| {
-            "onnxruntime-genai.dll not found in deterministic runtime paths".to_string()
-        })?;
-        let lib = unsafe { Library::new(&dll_path) }
-            .map_err(|e| format!("Failed to load {}: {e}", dll_path.display()))?;
+    fn load(bundle: &OrtRuntimeBundle) -> Result<Arc<Self>, String> {
+        OrtRuntimeLoader::ensure_initialized(bundle)?;
+        let directml = RetainedLibrary::load(&bundle.directml_dll)?;
+        let genai = RetainedLibrary::load(&bundle.onnxruntime_genai_dll)?;
 
         unsafe {
             Ok(Arc::new(Self {
-                result_get_error: load_symbol(&lib, b"OgaResultGetError\0")?,
-                destroy_result: load_symbol(&lib, b"OgaDestroyResult\0")?,
+                result_get_error: load_symbol(&genai, b"OgaResultGetError\0")?,
+                destroy_result: load_symbol(&genai, b"OgaDestroyResult\0")?,
 
-                create_config: load_symbol(&lib, b"OgaCreateConfig\0")?,
-                destroy_config: load_symbol(&lib, b"OgaDestroyConfig\0")?,
-                config_clear_providers: load_symbol(&lib, b"OgaConfigClearProviders\0")?,
-                config_append_provider: load_symbol(&lib, b"OgaConfigAppendProvider\0")?,
+                create_config: load_symbol(&genai, b"OgaCreateConfig\0")?,
+                destroy_config: load_symbol(&genai, b"OgaDestroyConfig\0")?,
+                config_clear_providers: load_symbol(&genai, b"OgaConfigClearProviders\0")?,
+                config_append_provider: load_symbol(&genai, b"OgaConfigAppendProvider\0")?,
                 config_set_hw_device_id: load_symbol(
-                    &lib,
+                    &genai,
                     b"OgaConfigSetDecoderProviderOptionsHardwareDeviceId\0",
                 )?,
 
-                create_model_from_config: load_symbol(&lib, b"OgaCreateModelFromConfig\0")?,
-                destroy_model: load_symbol(&lib, b"OgaDestroyModel\0")?,
+                create_model_from_config: load_symbol(&genai, b"OgaCreateModelFromConfig\0")?,
+                destroy_model: load_symbol(&genai, b"OgaDestroyModel\0")?,
 
-                create_tokenizer: load_symbol(&lib, b"OgaCreateTokenizer\0")?,
-                destroy_tokenizer: load_symbol(&lib, b"OgaDestroyTokenizer\0")?,
-                tokenizer_get_eos_token_ids: load_symbol(&lib, b"OgaTokenizerGetEosTokenIds\0")?,
-                tokenizer_encode: load_symbol(&lib, b"OgaTokenizerEncode\0")?,
-                create_tokenizer_stream: load_symbol(&lib, b"OgaCreateTokenizerStream\0")?,
-                destroy_tokenizer_stream: load_symbol(&lib, b"OgaDestroyTokenizerStream\0")?,
-                tokenizer_stream_decode: load_symbol(&lib, b"OgaTokenizerStreamDecode\0")?,
+                create_tokenizer: load_symbol(&genai, b"OgaCreateTokenizer\0")?,
+                destroy_tokenizer: load_symbol(&genai, b"OgaDestroyTokenizer\0")?,
+                tokenizer_get_eos_token_ids: load_symbol(&genai, b"OgaTokenizerGetEosTokenIds\0")?,
+                tokenizer_encode: load_symbol(&genai, b"OgaTokenizerEncode\0")?,
+                create_tokenizer_stream: load_symbol(&genai, b"OgaCreateTokenizerStream\0")?,
+                destroy_tokenizer_stream: load_symbol(&genai, b"OgaDestroyTokenizerStream\0")?,
+                tokenizer_stream_decode: load_symbol(&genai, b"OgaTokenizerStreamDecode\0")?,
 
-                create_sequences: load_symbol(&lib, b"OgaCreateSequences\0")?,
-                destroy_sequences: load_symbol(&lib, b"OgaDestroySequences\0")?,
-                sequences_get_sequence_count: load_symbol(&lib, b"OgaSequencesGetSequenceCount\0")?,
+                create_sequences: load_symbol(&genai, b"OgaCreateSequences\0")?,
+                destroy_sequences: load_symbol(&genai, b"OgaDestroySequences\0")?,
+                sequences_get_sequence_count: load_symbol(
+                    &genai,
+                    b"OgaSequencesGetSequenceCount\0",
+                )?,
 
-                create_generator_params: load_symbol(&lib, b"OgaCreateGeneratorParams\0")?,
-                destroy_generator_params: load_symbol(&lib, b"OgaDestroyGeneratorParams\0")?,
+                create_generator_params: load_symbol(&genai, b"OgaCreateGeneratorParams\0")?,
+                destroy_generator_params: load_symbol(&genai, b"OgaDestroyGeneratorParams\0")?,
                 generator_params_set_search_number: load_symbol(
-                    &lib,
+                    &genai,
                     b"OgaGeneratorParamsSetSearchNumber\0",
                 )?,
                 generator_params_set_search_bool: load_symbol(
-                    &lib,
+                    &genai,
                     b"OgaGeneratorParamsSetSearchBool\0",
                 )?,
 
-                create_generator: load_symbol(&lib, b"OgaCreateGenerator\0")?,
-                destroy_generator: load_symbol(&lib, b"OgaDestroyGenerator\0")?,
+                create_generator: load_symbol(&genai, b"OgaCreateGenerator\0")?,
+                destroy_generator: load_symbol(&genai, b"OgaDestroyGenerator\0")?,
                 generator_append_token_sequences: load_symbol(
-                    &lib,
+                    &genai,
                     b"OgaGenerator_AppendTokenSequences\0",
                 )?,
                 generator_generate_next_token: load_symbol(
-                    &lib,
+                    &genai,
                     b"OgaGenerator_GenerateNextToken\0",
                 )?,
-                generator_get_next_tokens: load_symbol(&lib, b"OgaGenerator_GetNextTokens\0")?,
-                generator_is_done: load_symbol(&lib, b"OgaGenerator_IsDone\0")?,
-                generator_get_logits: load_symbol(&lib, b"OgaGenerator_GetLogits\0")?,
+                generator_get_next_tokens: load_symbol(&genai, b"OgaGenerator_GetNextTokens\0")?,
+                generator_is_done: load_symbol(&genai, b"OgaGenerator_IsDone\0")?,
+                generator_get_logits: load_symbol(&genai, b"OgaGenerator_GetLogits\0")?,
 
-                destroy_tensor: load_symbol(&lib, b"OgaDestroyTensor\0")?,
-                tensor_get_type: load_symbol(&lib, b"OgaTensorGetType\0")?,
-                tensor_get_shape_rank: load_symbol(&lib, b"OgaTensorGetShapeRank\0")?,
-                tensor_get_shape: load_symbol(&lib, b"OgaTensorGetShape\0")?,
-                tensor_get_data: load_symbol(&lib, b"OgaTensorGetData\0")?,
+                destroy_tensor: load_symbol(&genai, b"OgaDestroyTensor\0")?,
+                tensor_get_type: load_symbol(&genai, b"OgaTensorGetType\0")?,
+                tensor_get_shape_rank: load_symbol(&genai, b"OgaTensorGetShapeRank\0")?,
+                tensor_get_shape: load_symbol(&genai, b"OgaTensorGetShape\0")?,
+                tensor_get_data: load_symbol(&genai, b"OgaTensorGetData\0")?,
 
-                _lib: lib,
+                _directml: directml,
+                _genai: genai,
             }))
         }
     }
 }
 
-unsafe fn load_symbol<T: Copy>(lib: &Library, name: &[u8]) -> Result<T, String> {
-    let symbol: libloading::Symbol<'_, T> = lib
-        .get(name)
-        .map_err(|e| format!("Missing symbol {}: {e}", String::from_utf8_lossy(name)))?;
-    Ok(*symbol)
-}
-
-fn find_genai_dll() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("SMOLPC_GENAI_DYLIB") {
-        let candidate = PathBuf::from(path);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-
-    let mut candidates = Vec::new();
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            candidates.push(exe_dir.join("onnxruntime-genai.dll"));
-            candidates.push(exe_dir.join("libs").join("onnxruntime-genai.dll"));
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    candidates.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("libs")
-            .join("onnxruntime-genai.dll"),
-    );
-    candidates.push(PathBuf::from("libs").join("onnxruntime-genai.dll"));
-
-    candidates.into_iter().find(|path| path.exists())
+unsafe fn load_symbol<T: Copy>(lib: &RetainedLibrary, name: &[u8]) -> Result<T, String> {
+    lib.get(name)
 }
 
 fn cstring(value: &str, field: &str) -> Result<CString, String> {
@@ -326,8 +299,12 @@ pub struct GenAiDirectMlGenerator {
 }
 
 impl GenAiDirectMlGenerator {
-    pub fn new(model_dir: &Path, directml_device_id: Option<i32>) -> Result<Self, String> {
-        let api = genai_api()?;
+    pub fn new(
+        bundle: &OrtRuntimeBundle,
+        model_dir: &Path,
+        directml_device_id: Option<i32>,
+    ) -> Result<Self, String> {
+        let api = genai_api(bundle)?;
         let config_path = path_to_cstring(model_dir)?;
         let provider_dml = cstring("dml", "provider")?;
 
@@ -888,29 +865,97 @@ fn read_eos_token_ids(api: &GenAiApi, tokenizer: *mut OgaTokenizer) -> Result<Ve
     Ok(eos.to_vec())
 }
 
-static GENAI_API: Mutex<Option<Arc<GenAiApi>>> = Mutex::new(None);
+#[derive(Clone)]
+enum CachedGenAiApi {
+    Success(Arc<GenAiApi>),
+    Failure(String),
+}
 
-fn genai_api() -> Result<Arc<GenAiApi>, String> {
-    let mut guard = match GENAI_API.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            log::warn!("Recovering from poisoned GenAI API cache mutex");
-            poisoned.into_inner()
+#[derive(Default)]
+struct GenAiApiState {
+    active_fingerprint: Option<String>,
+    results: HashMap<String, CachedGenAiApi>,
+}
+
+static GENAI_API: std::sync::OnceLock<Mutex<GenAiApiState>> = std::sync::OnceLock::new();
+
+fn genai_api(bundle: &OrtRuntimeBundle) -> Result<Arc<GenAiApi>, String> {
+    let state = GENAI_API.get_or_init(|| Mutex::new(GenAiApiState::default()));
+    let fingerprint = bundle.fingerprint.value.clone();
+
+    {
+        let guard = match state.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!("Recovering from poisoned GenAI API cache mutex");
+                poisoned.into_inner()
+            }
+        };
+
+        if let Some(cached) = guard.results.get(&fingerprint) {
+            return match cached {
+                CachedGenAiApi::Success(api) => Ok(Arc::clone(api)),
+                CachedGenAiApi::Failure(error) => Err(error.clone()),
+            };
         }
-    };
 
-    if let Some(api) = guard.as_ref() {
-        return Ok(Arc::clone(api));
+        if let Some(active) = guard.active_fingerprint.as_ref() {
+            if active != &fingerprint {
+                let error = format!(
+                    "DirectML GenAI already initialized from bundle fingerprint '{active}'; restart the process to use '{}'",
+                    fingerprint
+                );
+                drop(guard);
+                let mut guard = match state.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                guard
+                    .results
+                    .insert(fingerprint, CachedGenAiApi::Failure(error.clone()));
+                return Err(error);
+            }
+        }
     }
 
-    let api = GenAiApi::load()?;
-    *guard = Some(Arc::clone(&api));
+    if let Some(failure) = bundle.directml_validation_failure {
+        let error = format!(
+            "DirectML runtime bundle is not validated ({}) at {}",
+            failure.code(),
+            bundle.display_root().display()
+        );
+        let mut guard = match state.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard
+            .results
+            .insert(fingerprint, CachedGenAiApi::Failure(error.clone()));
+        return Err(error);
+    }
+
+    let api = GenAiApi::load(bundle)?;
+    let mut guard = match state.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.active_fingerprint = Some(fingerprint.clone());
+    guard
+        .results
+        .insert(fingerprint, CachedGenAiApi::Success(Arc::clone(&api)));
     Ok(api)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::last_logits_row_bounds;
+    use super::{genai_api, last_logits_row_bounds};
+    use crate::inference::runtime_loading::{
+        BundleValidationFailureClass, OrtRuntimeBundle, RequiredRuntimeFile,
+        RuntimeBundleFingerprint, RuntimeFamily, RuntimeVersionMetadata,
+    };
+    use std::fs;
+    use std::path::Path;
+    use tempfile::tempdir;
 
     #[test]
     fn last_logits_row_bounds_rank1_tensor() {
@@ -936,5 +981,91 @@ mod tests {
     fn last_logits_row_bounds_rejects_empty_dims() {
         let err = last_logits_row_bounds(&[]).expect_err("empty dims should fail");
         assert!(err.contains("rank"));
+    }
+
+    #[test]
+    fn missing_genai_dll_only_disables_directml_lane() {
+        let temp = tempdir().expect("temp dir");
+        let bundle = build_bundle(
+            temp.path(),
+            Some(BundleValidationFailureClass::OrtGenAiMissing),
+            Some(BundleValidationFailureClass::OrtGenAiMissing),
+            None,
+        );
+
+        assert!(bundle.ort_validated());
+        let err = match genai_api(&bundle) {
+            Ok(_) => panic!("missing GenAI DLL should block DML lane"),
+            Err(err) => err,
+        };
+        assert!(err.contains("ort_genai_missing"));
+    }
+
+    #[test]
+    fn missing_directml_dll_only_disables_directml_lane() {
+        let temp = tempdir().expect("temp dir");
+        let bundle = build_bundle(
+            temp.path(),
+            None,
+            Some(BundleValidationFailureClass::DirectMlMissing),
+            Some("onnxruntime-genai.dll"),
+        );
+
+        assert!(bundle.ort_validated());
+        assert!(bundle.genai_validated());
+        let err = match genai_api(&bundle) {
+            Ok(_) => panic!("missing DirectML DLL should block DML lane"),
+            Err(err) => err,
+        };
+        assert!(err.contains("directml_missing"));
+    }
+
+    fn build_bundle(
+        root: &Path,
+        genai_failure: Option<BundleValidationFailureClass>,
+        directml_failure: Option<BundleValidationFailureClass>,
+        extra_file: Option<&str>,
+    ) -> OrtRuntimeBundle {
+        let root = root.to_path_buf();
+        let onnxruntime_dll = root.join("onnxruntime.dll");
+        let providers_shared = root.join("onnxruntime_providers_shared.dll");
+        let genai_dll = root.join("onnxruntime-genai.dll");
+        let directml_dll = root.join("DirectML.dll");
+
+        fs::write(&onnxruntime_dll, []).expect("write onnxruntime.dll");
+        fs::write(&providers_shared, []).expect("write providers shared");
+        if extra_file == Some("onnxruntime-genai.dll") {
+            fs::write(&genai_dll, []).expect("write genai dll");
+        }
+
+        let required_files = vec![
+            RequiredRuntimeFile::new("onnxruntime.dll", onnxruntime_dll.clone()),
+            RequiredRuntimeFile::new("onnxruntime_providers_shared.dll", providers_shared.clone()),
+            RequiredRuntimeFile::new("onnxruntime-genai.dll", genai_dll.clone()),
+            RequiredRuntimeFile::new("DirectML.dll", directml_dll.clone()),
+        ];
+        let version_metadata = vec![RuntimeVersionMetadata::new("ort-crate", "2.0.0-rc.11")];
+        let fingerprint = RuntimeBundleFingerprint::new(
+            RuntimeFamily::Ort,
+            Some(root.clone()),
+            &root,
+            &required_files,
+            &version_metadata,
+        );
+
+        OrtRuntimeBundle {
+            bundle_root: root.clone(),
+            canonical_root: Some(root),
+            onnxruntime_dll,
+            onnxruntime_providers_shared_dll: providers_shared,
+            onnxruntime_genai_dll: genai_dll,
+            directml_dll,
+            required_files,
+            version_metadata,
+            ort_validation_failure: None,
+            genai_validation_failure: genai_failure,
+            directml_validation_failure: directml_failure,
+            fingerprint,
+        }
     }
 }
