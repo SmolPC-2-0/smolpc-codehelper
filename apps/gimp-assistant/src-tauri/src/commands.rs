@@ -10,8 +10,14 @@ pub struct RunPlanResponse {
 }
 
 #[tauri::command(rename = "run_action_plan")]
-pub async fn run_action_plan(user_text: String) -> Result<RunPlanResponse, String> {
-    let plan = generate_action_plan(&user_text).await
+pub async fn run_action_plan(
+    user_text: String,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, crate::engine::EngineState>,
+) -> Result<RunPlanResponse, String> {
+    let client = crate::engine::resolve_client(&app_handle, &state).await?;
+
+    let plan = crate::plan_llm::make_plan_from_text(&client, &user_text).await
         .map_err(|e| format!("plan generation failed: {e}"))?;
 
     let plan_json = serde_json::to_value(&plan)
@@ -21,8 +27,4 @@ pub async fn run_action_plan(user_text: String) -> Result<RunPlanResponse, Strin
         .map_err(|e| format!("plan execution failed: {e}"))?;
 
     Ok(RunPlanResponse { plan: plan_json, results })
-}
-
-pub async fn generate_action_plan(user_text: &str) -> Result<crate::plan_schema::ActionPlan, String> {
-    crate::plan_llm::make_plan_from_text(user_text).await
 }
