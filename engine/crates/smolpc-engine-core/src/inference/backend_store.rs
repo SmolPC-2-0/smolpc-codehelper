@@ -177,6 +177,7 @@ mod tests {
             npu_driver_version: Some("32.0.100.3104".to_string()),
             openvino_npu_max_prompt_len: Some(256),
             openvino_npu_min_response_len: Some(8),
+            openvino_message_mode: Some("structured_messages".to_string()),
             selection_profile: Some("default".to_string()),
         }
     }

@@ -9,10 +9,11 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
 use smolpc_engine_core::inference::backend::{
-    BackendDecision, BackendDecisionKey, BackendRuntimeBundleStatus, BackendSelectedDevice,
-    BackendSelectionState, BackendStatus, CheckModelResponse, DecisionPersistenceState,
-    DecisionReason, DirectMLFailureStage, FailureCounters, InferenceBackend, LanePreflightState,
-    LaneStartupProbeState, ModelLaneReadiness, ModelLaneReadinessByBackend, ORT_CRATE_VERSION,
+    BackendDecision, BackendDecisionKey, BackendOpenVinoTuningStatus, BackendRuntimeBundleStatus,
+    BackendSelectedDevice, BackendSelectionState, BackendStatus, CheckModelResponse,
+    DecisionPersistenceState, DecisionReason, DirectMLFailureStage, FailureCounters,
+    InferenceBackend, LanePreflightState, LaneStartupProbeState, ModelLaneReadiness,
+    ModelLaneReadinessByBackend, ORT_CRATE_VERSION,
 };
 use smolpc_engine_core::inference::backend_store::{
     backend_store_path, BackendDecisionRecord, BackendStore,
@@ -20,6 +21,7 @@ use smolpc_engine_core::inference::backend_store::{
 #[cfg(target_os = "windows")]
 use smolpc_engine_core::inference::genai::GenAiDirectMlGenerator;
 use smolpc_engine_core::inference::session::SessionBackendOptions;
+use smolpc_engine_core::inference::types::InferenceChatMessage;
 use smolpc_engine_core::inference::{
     Generator, InferenceRuntimeAdapter, InferenceSession, OrtRuntimeBundle, OrtRuntimeLoader,
     RuntimeVersionMetadata, TokenizerWrapper,
@@ -311,6 +313,10 @@ const STARTUP_PROBE_RECOVERY_WAIT_MS: u64 = 8_000;
 const OPENVINO_STARTUP_PROBE_WAIT: Duration = Duration::from_secs(30);
 const OPENVINO_PREFLIGHT_BUDGET: Duration = Duration::from_secs(300);
 const OPENVINO_SELECTION_PROFILE: &str = "openvino_native_v1";
+const OPENVINO_CHAT_MODE_STRUCTURED: &str = "structured_messages";
+const OPENVINO_CHAT_MODE_LEGACY_PROMPT: &str = "legacy_prompt";
+const OPENVINO_MAX_TOKENS_HARD_CAP_ENV: &str = "SMOLPC_OPENVINO_MAX_TOKENS_HARD_CAP";
+const OPENVINO_MAX_TOKENS_HARD_CAP_DEFAULT: usize = 8192;
 
 #[derive(Debug, Clone)]
 struct DirectMlCandidate {
@@ -536,6 +542,15 @@ fn parse_dml_device_id_env() -> Option<i32> {
     std::env::var("SMOLPC_DML_DEVICE_ID")
         .ok()
         .and_then(|v| v.parse::<i32>().ok())
+}
+
+fn current_openvino_tuning_status() -> Option<BackendOpenVinoTuningStatus> {
+    resolve_openvino_npu_tuning()
+        .ok()
+        .map(|tuning| BackendOpenVinoTuningStatus {
+            max_prompt_len: Some(tuning.max_prompt_len),
+            min_response_len: Some(tuning.min_response_len),
+        })
 }
 
 fn model_requires_directml(model_id: &str) -> bool {
@@ -1154,6 +1169,8 @@ impl EngineState {
             available_backends: vec![InferenceBackend::Cpu],
             selection_state: Some(BackendSelectionState::Pending),
             selection_reason: Some("startup_probe_pending".to_string()),
+            openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
+            openvino_tuning: current_openvino_tuning_status(),
             store_path: store_path.as_ref().map(|path| path.display().to_string()),
             ..Default::default()
         };
@@ -1182,6 +1199,10 @@ impl EngineState {
 
     fn runtime_bundles(&self) -> &ResolvedRuntimeBundles {
         &self.runtime_bundles
+    }
+
+    async fn active_backend(&self) -> Option<InferenceBackend> {
+        self.backend_status.lock().await.active_backend
     }
 
     fn openvino_cache_dir(&self, model_id: &str, artifacts: &ModelLaneArtifacts) -> PathBuf {
@@ -1215,8 +1236,9 @@ impl EngineState {
         let bundle = self.runtime_bundles().openvino.clone();
         let cache_dir = self.openvino_cache_dir(model_id, artifacts);
         let probe = probe.clone();
+        let model_id = model_id.to_string();
         let task = tokio::task::spawn_blocking(move || {
-            run_openvino_preflight(&bundle, &artifact, &probe, &cache_dir)
+            run_openvino_preflight(&bundle, &model_id, &artifact, &probe, &cache_dir)
         });
 
         match timeout(OPENVINO_PREFLIGHT_BUDGET, task).await {
@@ -1273,8 +1295,13 @@ impl EngineState {
             gpu_device_id: selected_device_id,
             npu_adapter_identity: openvino_probe.and_then(|probe| probe.adapter_identity.clone()),
             npu_driver_version: openvino_probe.and_then(|probe| probe.driver_version.clone()),
-            openvino_npu_max_prompt_len: openvino_tuning.map(|tuning| tuning.max_prompt_len),
-            openvino_npu_min_response_len: openvino_tuning.map(|tuning| tuning.min_response_len),
+            openvino_npu_max_prompt_len: openvino_tuning
+                .as_ref()
+                .map(|tuning| tuning.max_prompt_len),
+            openvino_npu_min_response_len: openvino_tuning
+                .as_ref()
+                .map(|tuning| tuning.min_response_len),
+            openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
             selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
         }
     }
@@ -1731,6 +1758,8 @@ impl EngineState {
             let mut status = BackendStatus {
                 selection_state: Some(selection_state),
                 selection_reason: Some(selection_reason),
+                openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
+                openvino_tuning: current_openvino_tuning_status(),
                 force_override,
                 store_path: self
                     .store_path
@@ -2174,6 +2203,8 @@ impl EngineState {
             selection_fingerprint: Some(decision_key.fingerprint()),
             decision_key: Some(decision_key.clone()),
             last_decision: Some(BackendDecision::new(active_backend, active_reason, None)),
+            openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
+            openvino_tuning: current_openvino_tuning_status(),
             failure_counters: failure_counters.clone(),
             force_override,
             store_path: self
@@ -2399,6 +2430,71 @@ impl EngineState {
         Ok(metrics)
     }
 
+    async fn generate_text_messages(
+        &self,
+        messages: &[InferenceChatMessage],
+        config: Option<GenerationConfig>,
+    ) -> Result<GenerationResult, String> {
+        let (_permit, cancelled) = self.begin_generation()?;
+        let mut text = String::new();
+        let result = {
+            let adapter_guard = self.runtime_adapter.lock().await;
+            let adapter = adapter_guard
+                .as_ref()
+                .ok_or_else(|| "No model loaded. Call /engine/load first.".to_string())?;
+            adapter
+                .generate_stream_messages(messages, config, cancelled.clone(), |token| {
+                    text.push_str(&token)
+                })
+                .await
+        };
+        let metrics = match result {
+            Ok(metrics) => metrics,
+            Err(error) => {
+                self.try_runtime_fallback_after_directml_failure(&error)
+                    .await;
+                return Err(error);
+            }
+        };
+        if cancelled.load(Ordering::SeqCst) {
+            return Err("INFERENCE_GENERATION_CANCELLED: Generation cancelled".to_string());
+        }
+        Ok(GenerationResult { text, metrics })
+    }
+
+    async fn generate_stream_messages<F>(
+        &self,
+        messages: &[InferenceChatMessage],
+        config: Option<GenerationConfig>,
+        on_token: F,
+    ) -> Result<GenerationMetrics, String>
+    where
+        F: FnMut(String),
+    {
+        let (_permit, cancelled) = self.begin_generation()?;
+        let result = {
+            let adapter_guard = self.runtime_adapter.lock().await;
+            let adapter = adapter_guard
+                .as_ref()
+                .ok_or_else(|| "No model loaded. Call /engine/load first.".to_string())?;
+            adapter
+                .generate_stream_messages(messages, config, cancelled.clone(), on_token)
+                .await
+        };
+        let metrics = match result {
+            Ok(metrics) => metrics,
+            Err(error) => {
+                self.try_runtime_fallback_after_directml_failure(&error)
+                    .await;
+                return Err(error);
+            }
+        };
+        if cancelled.load(Ordering::SeqCst) {
+            return Err("INFERENCE_GENERATION_CANCELLED: Generation cancelled".to_string());
+        }
+        Ok(metrics)
+    }
+
     fn cancel(&self) {
         if let Some(token) = lock_cancel(&self.active_cancel).clone() {
             token.store(true, Ordering::SeqCst);
@@ -2547,6 +2643,11 @@ enum StreamMessage {
     Error { message: String, code: &'static str },
 }
 
+enum CompletionInput {
+    Prompt(String),
+    Messages(Vec<InferenceChatMessage>),
+}
+
 struct CancelOnDrop {
     engine: Arc<EngineState>,
 }
@@ -2602,6 +2703,18 @@ fn looks_like_chatml_prompt(content: &str) -> bool {
     content.contains("<|im_start|>") && content.contains("<|im_end|>")
 }
 
+fn is_preformatted_chatml_single_user_message(messages: &[ChatCompletionMessage]) -> bool {
+    if messages.len() != 1 {
+        return false;
+    }
+    let only = &messages[0];
+    if !only.role.trim().eq_ignore_ascii_case("user") {
+        return false;
+    }
+    let content = only.content.clone().unwrap_or_default();
+    !content.trim().is_empty() && looks_like_chatml_prompt(&content)
+}
+
 fn request_to_prompt(messages: &[ChatCompletionMessage]) -> Result<String, String> {
     if messages.is_empty() {
         return Err("messages cannot be empty".to_string());
@@ -2645,11 +2758,62 @@ fn request_to_prompt(messages: &[ChatCompletionMessage]) -> Result<String, Strin
     Ok(prompt)
 }
 
-fn request_to_config(request: &ChatCompletionRequest) -> Option<GenerationConfig> {
+fn request_to_structured_messages(
+    messages: &[ChatCompletionMessage],
+) -> Result<Vec<InferenceChatMessage>, String> {
+    if messages.is_empty() {
+        return Err("messages cannot be empty".to_string());
+    }
+
+    let mut out = Vec::new();
+    for message in messages {
+        let content = message.content.clone().unwrap_or_default();
+        if content.is_empty() {
+            continue;
+        }
+
+        let role = match message.role.trim().to_ascii_lowercase().as_str() {
+            "system" => "system",
+            "user" => "user",
+            "assistant" => "assistant",
+            other => return Err(format!("unsupported message role: {other}")),
+        };
+        out.push(InferenceChatMessage {
+            role: role.to_string(),
+            content,
+        });
+    }
+
+    if out.is_empty() {
+        return Err("messages must contain at least one non-empty content item".to_string());
+    }
+    Ok(out)
+}
+
+fn max_tokens_hard_cap() -> usize {
+    std::env::var(OPENVINO_MAX_TOKENS_HARD_CAP_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(OPENVINO_MAX_TOKENS_HARD_CAP_DEFAULT)
+}
+
+fn request_to_config(request: &ChatCompletionRequest) -> Result<Option<GenerationConfig>, String> {
     let mut c = GenerationConfig::default();
     let mut changed = false;
     if let Some(v) = request.max_tokens {
-        c.max_length = v;
+        if v == 0 {
+            return Err("max_tokens must be greater than zero".to_string());
+        }
+        let hard_cap = max_tokens_hard_cap();
+        c.max_length = v.min(hard_cap);
+        if v > hard_cap {
+            log::info!(
+                "Capping max_tokens from {} to backend hard cap {}",
+                v,
+                hard_cap
+            );
+        }
         changed = true;
     }
     if let Some(v) = request.temperature {
@@ -2673,9 +2837,9 @@ fn request_to_config(request: &ChatCompletionRequest) -> Option<GenerationConfig
         changed = true;
     }
     if changed {
-        Some(c)
+        Ok(Some(c))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -2899,9 +3063,33 @@ async fn v1_chat_completions(
 
     drop(queue_permit);
 
-    let prompt = request_to_prompt(&req.messages)
+    let config = request_to_config(&req)
         .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
-    let config = request_to_config(&req);
+    let openvino_active =
+        state.engine.active_backend().await == Some(InferenceBackend::OpenVinoNpu);
+    let use_legacy_prompt = is_preformatted_chatml_single_user_message(&req.messages);
+    let completion_input = if openvino_active && !use_legacy_prompt {
+        let messages = request_to_structured_messages(&req.messages)
+            .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
+        (
+            OPENVINO_CHAT_MODE_STRUCTURED,
+            CompletionInput::Messages(messages),
+        )
+    } else {
+        let prompt = request_to_prompt(&req.messages)
+            .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
+        let mode = if use_legacy_prompt {
+            OPENVINO_CHAT_MODE_LEGACY_PROMPT
+        } else {
+            OPENVINO_CHAT_MODE_STRUCTURED
+        };
+        (mode, CompletionInput::Prompt(prompt))
+    };
+    if openvino_active {
+        let mut backend_status = state.engine.backend_status.lock().await;
+        backend_status.openvino_message_mode = Some(completion_input.0.to_string());
+    }
+    let completion_input = completion_input.1;
     let model_name = req.model.unwrap_or_else(|| "smolpc-engine".to_string());
     let request_id = format!("chatcmpl-{}", Utc::now().timestamp_millis());
     let created = Utc::now().timestamp();
@@ -2910,13 +3098,25 @@ async fn v1_chat_completions(
         let (tx, mut rx) = mpsc::unbounded_channel::<StreamMessage>();
         let engine = state.engine.clone();
         let activity = state.last_activity_ms.clone();
+        let input = completion_input;
         tokio::spawn(async move {
             let _permit = gen_permit;
-            let result = engine
-                .generate_stream(&prompt, config, |t| {
-                    let _ = tx.send(StreamMessage::Token(t));
-                })
-                .await;
+            let result = match input {
+                CompletionInput::Prompt(prompt) => {
+                    engine
+                        .generate_stream(&prompt, config, |t| {
+                            let _ = tx.send(StreamMessage::Token(t));
+                        })
+                        .await
+                }
+                CompletionInput::Messages(messages) => {
+                    engine
+                        .generate_stream_messages(&messages, config, |t| {
+                            let _ = tx.send(StreamMessage::Token(t));
+                        })
+                        .await
+                }
+            };
             match result {
                 Ok(metrics) => {
                     let _ = tx.send(StreamMessage::Metrics(metrics));
@@ -3002,16 +3202,18 @@ async fn v1_chat_completions(
             .into_response());
     }
 
-    let result = state
-        .engine
-        .generate_text(&prompt, config)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse { error: e }),
-            )
-        })?;
+    let result = match completion_input {
+        CompletionInput::Prompt(prompt) => state.engine.generate_text(&prompt, config).await,
+        CompletionInput::Messages(messages) => {
+            state.engine.generate_text_messages(&messages, config).await
+        }
+    }
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     drop(gen_permit);
 
     let response = serde_json::json!({
@@ -3153,6 +3355,54 @@ mod tests {
     }
 
     #[test]
+    fn request_to_config_rejects_zero_max_tokens() {
+        let _guard = lock_env();
+        std::env::remove_var(OPENVINO_MAX_TOKENS_HARD_CAP_ENV);
+        let request = ChatCompletionRequest {
+            model: None,
+            messages: vec![ChatCompletionMessage {
+                role: "user".to_string(),
+                content: Some("hi".to_string()),
+            }],
+            stream: None,
+            max_tokens: Some(0),
+            temperature: None,
+            top_k: None,
+            top_p: None,
+            repetition_penalty: None,
+            repetition_penalty_last_n: None,
+        };
+
+        let error = request_to_config(&request).expect_err("zero max_tokens should fail");
+        assert!(error.contains("max_tokens"));
+    }
+
+    #[test]
+    fn request_to_config_caps_max_tokens_to_hard_limit() {
+        let _guard = lock_env();
+        std::env::remove_var(OPENVINO_MAX_TOKENS_HARD_CAP_ENV);
+        let request = ChatCompletionRequest {
+            model: None,
+            messages: vec![ChatCompletionMessage {
+                role: "user".to_string(),
+                content: Some("hi".to_string()),
+            }],
+            stream: None,
+            max_tokens: Some(99_999),
+            temperature: None,
+            top_k: None,
+            top_p: None,
+            repetition_penalty: None,
+            repetition_penalty_last_n: None,
+        };
+
+        let config = request_to_config(&request)
+            .expect("config parse")
+            .expect("config");
+        assert_eq!(config.max_length, OPENVINO_MAX_TOKENS_HARD_CAP_DEFAULT);
+    }
+
+    #[test]
     fn auth_compare_is_constant_time_functionally() {
         assert!(constant_time_eq(b"abc", b"abc"));
         assert!(!constant_time_eq(b"abc", b"abd"));
@@ -3283,6 +3533,7 @@ mod tests {
                 npu_driver_version: None,
                 openvino_npu_max_prompt_len: Some(512),
                 openvino_npu_min_response_len: Some(1024),
+                openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
                 selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(
@@ -3327,6 +3578,7 @@ mod tests {
                 npu_driver_version: Some("32.0.100.3104".to_string()),
                 openvino_npu_max_prompt_len: Some(512),
                 openvino_npu_min_response_len: Some(1024),
+                openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
                 selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(
@@ -3366,6 +3618,7 @@ mod tests {
                 npu_driver_version: Some("32.0.100.3104".to_string()),
                 openvino_npu_max_prompt_len: Some(512),
                 openvino_npu_min_response_len: Some(1024),
+                openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
                 selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(

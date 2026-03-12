@@ -22,8 +22,8 @@ As of 2026-03-12, this branch has completed native runtime activation and Window
 - `npm run runtime:setup:openvino` now downloads the official 2026 Windows OpenVINO GenAI archive, verifies its SHA256, validates the `openvino_genai_c.dll` exports, and stages the app-local bundle into `apps/codehelper/src-tauri/libs/openvino`
 - `npm run model:setup:qwen3:openvino` now stages the official `OpenVINO/Qwen3-4B-int4-ov` artifact into `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-int4-ov/openvino_npu`
 - the native OpenVINO lane now applies NPU creation defaults that work on this PC:
-  - `MAX_PROMPT_LEN=256`
-  - `MIN_RESPONSE_LEN=8`
+  - `MAX_PROMPT_LEN=512`
+  - `MIN_RESPONSE_LEN=1024`
 - those NPU defaults can be overridden for debugging with:
   - `SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN`
   - `SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN`

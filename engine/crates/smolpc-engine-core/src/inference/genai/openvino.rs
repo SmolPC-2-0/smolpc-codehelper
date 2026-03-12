@@ -1,7 +1,7 @@
 use super::super::runtime_loading::{
     OpenVinoRuntimeBundle, OpenVinoRuntimeLoader, RetainedLibrary,
 };
-use super::super::types::{GenerationConfig, GenerationMetrics};
+use super::super::types::{GenerationConfig, GenerationMetrics, InferenceChatMessage};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::{Path, PathBuf};
@@ -15,6 +15,8 @@ type OvGenAiLlmPipeline = c_void;
 type OvGenAiGenerationConfig = c_void;
 type OvGenAiDecodedResults = c_void;
 type OvGenAiPerfMetrics = c_void;
+type OvGenAiChatHistory = c_void;
+type OvGenAiJsonContainer = c_void;
 
 type OvStatus = i32;
 const OV_STATUS_OK: OvStatus = 0;
@@ -54,9 +56,30 @@ struct OpenVinoGenAiApi {
         *const StreamerCallback,
         *mut *mut OvGenAiDecodedResults,
     ) -> OvStatus,
+    pipeline_generate_with_history: unsafe extern "C" fn(
+        *mut OvGenAiLlmPipeline,
+        *const OvGenAiChatHistory,
+        *const OvGenAiGenerationConfig,
+        *const StreamerCallback,
+        *mut *mut OvGenAiDecodedResults,
+    ) -> OvStatus,
+    create_json_container_from_json_string:
+        unsafe extern "C" fn(*mut *mut OvGenAiJsonContainer, *const c_char) -> OvStatus,
+    destroy_json_container: unsafe extern "C" fn(*mut OvGenAiJsonContainer),
+    create_chat_history_from_json_container:
+        unsafe extern "C" fn(*mut *mut OvGenAiChatHistory, *const OvGenAiJsonContainer) -> OvStatus,
+    set_chat_history_extra_context:
+        unsafe extern "C" fn(*mut OvGenAiChatHistory, *const OvGenAiJsonContainer) -> OvStatus,
+    destroy_chat_history: unsafe extern "C" fn(*mut OvGenAiChatHistory),
     create_generation_config: unsafe extern "C" fn(*mut *mut OvGenAiGenerationConfig) -> OvStatus,
     destroy_generation_config: unsafe extern "C" fn(*mut OvGenAiGenerationConfig),
     set_max_new_tokens: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, usize) -> OvStatus,
+    set_min_new_tokens: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, usize) -> OvStatus,
+    set_stop_token_ids:
+        unsafe extern "C" fn(*mut OvGenAiGenerationConfig, *const i64, usize) -> OvStatus,
+    set_stop_strings:
+        unsafe extern "C" fn(*mut OvGenAiGenerationConfig, *const *const c_char, usize) -> OvStatus,
+    set_ignore_eos: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, bool) -> OvStatus,
     set_echo: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, bool) -> OvStatus,
     set_do_sample: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, bool) -> OvStatus,
     set_temperature: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, f32) -> OvStatus,
@@ -96,6 +119,30 @@ impl OpenVinoGenAiApi {
                     &openvino_genai_c,
                     b"ov_genai_llm_pipeline_generate\0",
                 )?,
+                pipeline_generate_with_history: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_llm_pipeline_generate_with_history\0",
+                )?,
+                create_json_container_from_json_string: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_json_container_create_from_json_string\0",
+                )?,
+                destroy_json_container: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_json_container_free\0",
+                )?,
+                create_chat_history_from_json_container: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_chat_history_create_from_json_container\0",
+                )?,
+                set_chat_history_extra_context: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_chat_history_set_extra_context\0",
+                )?,
+                destroy_chat_history: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_chat_history_free\0",
+                )?,
                 create_generation_config: load_symbol(
                     &openvino_genai_c,
                     b"ov_genai_generation_config_create\0",
@@ -107,6 +154,22 @@ impl OpenVinoGenAiApi {
                 set_max_new_tokens: load_symbol(
                     &openvino_genai_c,
                     b"ov_genai_generation_config_set_max_new_tokens\0",
+                )?,
+                set_min_new_tokens: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_generation_config_set_min_new_tokens\0",
+                )?,
+                set_stop_token_ids: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_generation_config_set_stop_token_ids\0",
+                )?,
+                set_stop_strings: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_generation_config_set_stop_strings\0",
+                )?,
+                set_ignore_eos: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_generation_config_set_ignore_eos\0",
                 )?,
                 set_echo: load_symbol(&openvino_genai_c, b"ov_genai_generation_config_set_echo\0")?,
                 set_do_sample: load_symbol(
@@ -210,6 +273,14 @@ fn check_status(api: &OpenVinoGenAiApi, status: OvStatus, context: &str) -> Resu
     Err(format!("{context}: {details}"))
 }
 
+fn check_plain_status(status: OvStatus, context: &str) -> Result<(), String> {
+    if status == OV_STATUS_OK {
+        Ok(())
+    } else {
+        Err(format!("{context}: OpenVINO status code {status}"))
+    }
+}
+
 fn c_string_to_string(value: *const c_char) -> String {
     unsafe { CStr::from_ptr(value) }
         .to_string_lossy()
@@ -253,7 +324,11 @@ impl<T> Drop for OvOwned<T> {
 struct OpenVinoGenAiInner {
     api: Arc<OpenVinoGenAiApi>,
     pipeline: *mut OvGenAiLlmPipeline,
-    min_response_len: usize,
+    /// NPU StaticLLMPipeline response budget (MIN_RESPONSE_LEN at pipeline creation).
+    /// max_new_tokens must be clamped to this value to avoid KV cache overflow.
+    max_new_tokens_cap: usize,
+    generation_controls: OpenVinoGenerationControls,
+    disable_thinking: bool,
 }
 
 unsafe impl Send for OpenVinoGenAiInner {}
@@ -271,11 +346,21 @@ pub struct OpenVinoGenAiGenerator {
     inner: Arc<Mutex<OpenVinoGenAiInner>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OpenVinoGenerationControls {
+    pub min_new_tokens: Option<usize>,
+    pub stop_token_ids: Option<Vec<i64>>,
+    pub stop_strings: Option<Vec<String>>,
+    pub ignore_eos: Option<bool>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenVinoNpuPipelineConfig {
     pub cache_dir: PathBuf,
     pub max_prompt_len: usize,
     pub min_response_len: usize,
+    pub generation_controls: OpenVinoGenerationControls,
+    pub disable_thinking: bool,
 }
 
 impl OpenVinoNpuPipelineConfig {
@@ -288,7 +373,19 @@ impl OpenVinoNpuPipelineConfig {
             cache_dir: cache_dir.into(),
             max_prompt_len,
             min_response_len,
+            generation_controls: OpenVinoGenerationControls::default(),
+            disable_thinking: true,
         }
+    }
+
+    pub fn with_generation_controls(mut self, controls: OpenVinoGenerationControls) -> Self {
+        self.generation_controls = controls;
+        self
+    }
+
+    pub fn with_disable_thinking(mut self, disable_thinking: bool) -> Self {
+        self.disable_thinking = disable_thinking;
+        self
     }
 }
 
@@ -338,7 +435,9 @@ impl OpenVinoGenAiGenerator {
             inner: Arc::new(Mutex::new(OpenVinoGenAiInner {
                 api: Arc::clone(&api),
                 pipeline: pipeline_ptr,
-                min_response_len: config.min_response_len,
+                max_new_tokens_cap: config.min_response_len,
+                generation_controls: config.generation_controls.clone(),
+                disable_thinking: config.disable_thinking,
             })),
         })
     }
@@ -358,6 +457,7 @@ impl OpenVinoGenAiGenerator {
                 repetition_penalty: 1.0,
                 repetition_penalty_last_n: 0,
             },
+            &OpenVinoGenerationControls::default(),
         )?;
         let metrics = generate_once(&guard, prompt, config.as_ptr(), None, Instant::now())?;
         if metrics.total_tokens == 0 {
@@ -393,6 +493,59 @@ impl OpenVinoGenAiGenerator {
             .await
             .map_err(|error| format!("OpenVINO generation worker join error: {error}"))?
     }
+
+    pub async fn generate_stream_messages<F>(
+        &self,
+        messages: &[InferenceChatMessage],
+        config: Option<GenerationConfig>,
+        cancelled: Arc<AtomicBool>,
+        mut on_token: F,
+    ) -> Result<GenerationMetrics, String>
+    where
+        F: FnMut(String),
+    {
+        let gen_config = config.unwrap_or_default();
+        let messages = messages.to_vec();
+        let inner = Arc::clone(&self.inner);
+        let cancelled_worker = Arc::clone(&cancelled);
+        let (token_tx, mut token_rx) = unbounded_channel();
+        let worker = tokio::task::spawn_blocking(move || {
+            generate_stream_with_history_blocking(
+                inner,
+                messages,
+                gen_config,
+                cancelled_worker,
+                token_tx,
+            )
+        });
+
+        while let Some(piece) = token_rx.recv().await {
+            on_token(piece);
+        }
+
+        worker
+            .await
+            .map_err(|error| format!("OpenVINO generation worker join error: {error}"))?
+    }
+}
+
+/// Clamp max_new_tokens to the NPU pipeline's MIN_RESPONSE_LEN budget.
+/// StaticLLMPipeline pre-allocates a fixed KV cache at construction time.
+/// Requesting more tokens than the budget causes KV cache overflow, which
+/// makes the pipeline wrap around and replay context tokens as output.
+fn clamp_max_new_tokens(config: GenerationConfig, cap: usize) -> GenerationConfig {
+    if config.max_length <= cap {
+        return config;
+    }
+    log::info!(
+        "Clamping max_new_tokens from {} to {} (NPU StaticLLMPipeline response budget)",
+        config.max_length,
+        cap
+    );
+    GenerationConfig {
+        max_length: cap,
+        ..config
+    }
 }
 
 fn generate_stream_blocking(
@@ -405,19 +558,8 @@ fn generate_stream_blocking(
     let guard = inner
         .lock()
         .map_err(|_| "OpenVINO GenAI state mutex poisoned".to_string())?;
-    let clamped_max = gen_config.max_length.min(guard.min_response_len);
-    if clamped_max < gen_config.max_length {
-        log::info!(
-            "Clamping max_new_tokens from {} to {} (NPU MIN_RESPONSE_LEN budget)",
-            gen_config.max_length,
-            clamped_max
-        );
-    }
-    let gen_config = GenerationConfig {
-        max_length: clamped_max,
-        ..gen_config
-    };
-    let config = create_generation_config(&guard.api, gen_config)?;
+    let gen_config = clamp_max_new_tokens(gen_config, guard.max_new_tokens_cap);
+    let config = create_generation_config(&guard.api, gen_config, &guard.generation_controls)?;
     let start = Instant::now();
     let mut callback_state = StreamCallbackState {
         sender: token_tx,
@@ -430,9 +572,41 @@ fn generate_stream_blocking(
     generate_once(&guard, &prompt, config.as_ptr(), Some(&streamer), start)
 }
 
+fn generate_stream_with_history_blocking(
+    inner: Arc<Mutex<OpenVinoGenAiInner>>,
+    messages: Vec<InferenceChatMessage>,
+    gen_config: GenerationConfig,
+    cancelled: Arc<AtomicBool>,
+    token_tx: UnboundedSender<String>,
+) -> Result<GenerationMetrics, String> {
+    let guard = inner
+        .lock()
+        .map_err(|_| "OpenVINO GenAI state mutex poisoned".to_string())?;
+    let gen_config = clamp_max_new_tokens(gen_config, guard.max_new_tokens_cap);
+    let config = create_generation_config(&guard.api, gen_config, &guard.generation_controls)?;
+    let history = create_chat_history(&guard.api, &messages, guard.disable_thinking)?;
+    let start = Instant::now();
+    let mut callback_state = StreamCallbackState {
+        sender: token_tx,
+        cancelled,
+    };
+    let streamer = StreamerCallback {
+        callback_func: Some(stream_callback),
+        args: &mut callback_state as *mut StreamCallbackState as *mut c_void,
+    };
+    generate_with_history_once(
+        &guard,
+        history.as_ptr(),
+        config.as_ptr(),
+        Some(&streamer),
+        start,
+    )
+}
+
 fn create_generation_config(
     api: &Arc<OpenVinoGenAiApi>,
     config: GenerationConfig,
+    controls: &OpenVinoGenerationControls,
 ) -> Result<OvOwned<OvGenAiGenerationConfig>, String> {
     let mut config_ptr: *mut OvGenAiGenerationConfig = ptr::null_mut();
     check_status(
@@ -452,6 +626,58 @@ fn create_generation_config(
         unsafe { (api.set_max_new_tokens)(config_handle.as_ptr(), config.max_length) },
         "ov_genai_generation_config_set_max_new_tokens",
     )?;
+    if let Some(min_new_tokens) = controls.min_new_tokens {
+        check_status(
+            api,
+            unsafe { (api.set_min_new_tokens)(config_handle.as_ptr(), min_new_tokens) },
+            "ov_genai_generation_config_set_min_new_tokens",
+        )?;
+    }
+    if let Some(stop_token_ids) = controls.stop_token_ids.as_ref() {
+        if !stop_token_ids.is_empty() {
+            check_status(
+                api,
+                unsafe {
+                    (api.set_stop_token_ids)(
+                        config_handle.as_ptr(),
+                        stop_token_ids.as_ptr(),
+                        stop_token_ids.len(),
+                    )
+                },
+                "ov_genai_generation_config_set_stop_token_ids",
+            )?;
+        }
+    }
+    if let Some(stop_strings) = controls.stop_strings.as_ref() {
+        if !stop_strings.is_empty() {
+            let stop_cstrings = stop_strings
+                .iter()
+                .map(|value| cstring(value, "stop string"))
+                .collect::<Result<Vec<_>, _>>()?;
+            let stop_ptrs = stop_cstrings
+                .iter()
+                .map(|value| value.as_ptr())
+                .collect::<Vec<_>>();
+            check_status(
+                api,
+                unsafe {
+                    (api.set_stop_strings)(
+                        config_handle.as_ptr(),
+                        stop_ptrs.as_ptr(),
+                        stop_ptrs.len(),
+                    )
+                },
+                "ov_genai_generation_config_set_stop_strings",
+            )?;
+        }
+    }
+    if let Some(ignore_eos) = controls.ignore_eos {
+        check_status(
+            api,
+            unsafe { (api.set_ignore_eos)(config_handle.as_ptr(), ignore_eos) },
+            "ov_genai_generation_config_set_ignore_eos",
+        )?;
+    }
 
     let do_sample = config.temperature > 0.0;
     check_status(
@@ -525,6 +751,113 @@ fn generate_once(
             )
         },
         "ov_genai_llm_pipeline_generate",
+    )?;
+
+    if results_ptr.is_null() {
+        return Ok(fallback_metrics(start, 0));
+    }
+
+    let results = OvOwned::new(
+        Arc::clone(&guard.api),
+        results_ptr,
+        guard.api.destroy_decoded_results,
+    );
+    read_generation_metrics(&guard.api, results.as_ptr(), start)
+}
+
+fn create_chat_history(
+    api: &Arc<OpenVinoGenAiApi>,
+    messages: &[InferenceChatMessage],
+    disable_thinking: bool,
+) -> Result<OvOwned<OvGenAiChatHistory>, String> {
+    if messages.is_empty() {
+        return Err("messages cannot be empty for OpenVINO structured generation".to_string());
+    }
+
+    let messages_json = serde_json::to_string(messages)
+        .map_err(|error| format!("Failed to encode messages JSON: {error}"))?;
+    let messages_json = cstring(&messages_json, "messages JSON")?;
+
+    let mut messages_container_ptr: *mut OvGenAiJsonContainer = ptr::null_mut();
+    check_plain_status(
+        unsafe {
+            (api.create_json_container_from_json_string)(
+                &mut messages_container_ptr,
+                messages_json.as_ptr(),
+            )
+        },
+        "ov_genai_json_container_create_from_json_string(messages)",
+    )?;
+    let messages_container = OvOwned::new(
+        Arc::clone(api),
+        messages_container_ptr,
+        api.destroy_json_container,
+    );
+
+    let mut history_ptr: *mut OvGenAiChatHistory = ptr::null_mut();
+    check_plain_status(
+        unsafe {
+            (api.create_chat_history_from_json_container)(
+                &mut history_ptr,
+                messages_container.as_ptr(),
+            )
+        },
+        "ov_genai_chat_history_create_from_json_container",
+    )?;
+    let history = OvOwned::new(Arc::clone(api), history_ptr, api.destroy_chat_history);
+
+    if disable_thinking {
+        let extra_context = serde_json::json!({ "enable_thinking": false }).to_string();
+        let extra_context = cstring(&extra_context, "chat extra context JSON")?;
+        let mut extra_context_ptr: *mut OvGenAiJsonContainer = ptr::null_mut();
+        check_plain_status(
+            unsafe {
+                (api.create_json_container_from_json_string)(
+                    &mut extra_context_ptr,
+                    extra_context.as_ptr(),
+                )
+            },
+            "ov_genai_json_container_create_from_json_string(extra_context)",
+        )?;
+        let extra_context = OvOwned::new(
+            Arc::clone(api),
+            extra_context_ptr,
+            api.destroy_json_container,
+        );
+        check_plain_status(
+            unsafe {
+                (api.set_chat_history_extra_context)(history.as_ptr(), extra_context.as_ptr())
+            },
+            "ov_genai_chat_history_set_extra_context",
+        )?;
+    }
+
+    Ok(history)
+}
+
+fn generate_with_history_once(
+    guard: &OpenVinoGenAiInner,
+    history: *const OvGenAiChatHistory,
+    config: *const OvGenAiGenerationConfig,
+    streamer: Option<&StreamerCallback>,
+    start: Instant,
+) -> Result<GenerationMetrics, String> {
+    let mut results_ptr: *mut OvGenAiDecodedResults = ptr::null_mut();
+    let streamer_ptr = streamer
+        .map(|value| value as *const StreamerCallback)
+        .unwrap_or(ptr::null());
+    check_status(
+        &guard.api,
+        unsafe {
+            (guard.api.pipeline_generate_with_history)(
+                guard.pipeline,
+                history,
+                config,
+                streamer_ptr,
+                &mut results_ptr,
+            )
+        },
+        "ov_genai_llm_pipeline_generate_with_history",
     )?;
 
     if results_ptr.is_null() {

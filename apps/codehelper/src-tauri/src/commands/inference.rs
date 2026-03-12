@@ -1,6 +1,6 @@
 use smolpc_engine_client::{
-    connect_or_spawn, read_runtime_env_overrides, EngineClient, EngineConnectOptions,
-    RuntimeModePreference,
+    connect_or_spawn, read_runtime_env_overrides, EngineChatMessage, EngineClient,
+    EngineConnectOptions, RuntimeModePreference,
 };
 use smolpc_engine_core::inference::backend::{BackendStatus, CheckModelResponse};
 use smolpc_engine_core::models::registry::ModelDefinition;
@@ -37,6 +37,12 @@ pub struct InferenceState {
     connect_lock: Arc<Mutex<()>>,
     runtime_config: Arc<Mutex<RuntimeClientConfig>>,
     desired_model: Arc<Mutex<Option<String>>>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ChatMessageInput {
+    pub role: String,
+    pub content: String,
 }
 
 impl Default for InferenceState {
@@ -518,6 +524,33 @@ pub async fn inference_generate(
     ensure_desired_model_loaded(&client, &state).await?;
     client
         .generate_stream(&prompt, config, |token| {
+            if let Err(e) = on_token.send(token) {
+                log::warn!("Failed to send token via channel: {e}");
+            }
+        })
+        .await
+        .map_err(|e| format!("Streaming generation failed: {e}"))
+}
+
+#[tauri::command]
+pub async fn inference_generate_messages(
+    messages: Vec<ChatMessageInput>,
+    config: Option<GenerationConfig>,
+    on_token: Channel<String>,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, InferenceState>,
+) -> Result<GenerationMetrics, String> {
+    let client = resolve_client(&app_handle, &state, false).await?;
+    ensure_desired_model_loaded(&client, &state).await?;
+    let messages = messages
+        .into_iter()
+        .map(|message| EngineChatMessage {
+            role: message.role,
+            content: message.content,
+        })
+        .collect::<Vec<_>>();
+    client
+        .generate_stream_messages(&messages, config, |token| {
             if let Err(e) = on_token.send(token) {
                 log::warn!("Failed to send token via channel: {e}");
             }

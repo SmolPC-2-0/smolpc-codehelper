@@ -1,5 +1,7 @@
 #[cfg(target_os = "windows")]
-use smolpc_engine_core::inference::{OpenVinoGenAiGenerator, OpenVinoNpuPipelineConfig};
+use smolpc_engine_core::inference::{
+    OpenVinoGenAiGenerator, OpenVinoGenerationControls, OpenVinoNpuPipelineConfig,
+};
 use smolpc_engine_core::inference::{OpenVinoRuntimeBundle, OpenVinoRuntimeLoader};
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
@@ -27,8 +29,14 @@ impl Default for OpenVinoNpuTuning {
 
 impl OpenVinoNpuTuning {
     #[cfg(target_os = "windows")]
-    fn pipeline_config(self, cache_dir: &Path) -> OpenVinoNpuPipelineConfig {
+    fn pipeline_config(
+        self,
+        cache_dir: &Path,
+        generation_controls: OpenVinoGenerationControls,
+    ) -> OpenVinoNpuPipelineConfig {
         OpenVinoNpuPipelineConfig::new(cache_dir, self.max_prompt_len, self.min_response_len)
+            .with_generation_controls(generation_controls)
+            .with_disable_thinking(true)
     }
 }
 
@@ -347,7 +355,7 @@ pub fn probe_openvino_startup(
             log::info!(
                 "OpenVINO NPU tuning resolved: max_prompt_len={}, min_response_len={}",
                 npu_tuning.max_prompt_len,
-                npu_tuning.min_response_len
+                npu_tuning.min_response_len,
             );
 
             OpenVinoStartupProbeResult {
@@ -379,6 +387,7 @@ pub fn is_blocking_openvino_probe_failure(class: &str) -> bool {
 
 pub fn run_openvino_preflight(
     bundle: &OpenVinoRuntimeBundle,
+    model_id: &str,
     artifact: &OpenVinoReadyArtifact,
     probe: &OpenVinoStartupProbeResult,
     cache_dir: &Path,
@@ -394,7 +403,7 @@ pub fn run_openvino_preflight(
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (bundle, artifact, cache_dir);
+        let _ = (bundle, model_id, artifact, cache_dir);
         return OpenVinoPreflightResult::Failed {
             class: "openvino_npu_platform_unsupported".to_string(),
             message: "OpenVINO NPU runtime is only supported on Windows".to_string(),
@@ -422,7 +431,8 @@ pub fn run_openvino_preflight(
             };
         };
 
-        let pipeline_config = tuning.pipeline_config(cache_dir);
+        let generation_controls = openvino_generation_controls_for_model(model_id);
+        let pipeline_config = tuning.pipeline_config(cache_dir, generation_controls);
         let generator = match OpenVinoGenAiGenerator::new(bundle, model_dir, &pipeline_config) {
             Ok(generator) => generator,
             Err(message) => {
@@ -521,6 +531,21 @@ fn parse_positive_env_usize(name: &str, default: usize) -> Result<usize, String>
         return Err(format!("{name} must be greater than zero, got '{trimmed}'"));
     }
     Ok(value)
+}
+
+#[cfg(target_os = "windows")]
+fn openvino_generation_controls_for_model(model_id: &str) -> OpenVinoGenerationControls {
+    let qwen3_eos_only = matches!(model_id, "qwen3-4b-int4-ov" | "qwen3-4b-int4-ov-npu");
+    OpenVinoGenerationControls {
+        min_new_tokens: Some(1),
+        // Both token IDs for belt-and-suspenders: <|im_end|>=151645, <|endoftext|>=151643
+        stop_token_ids: qwen3_eos_only.then_some(vec![151643, 151645]),
+        // stop_strings operates on accumulated decoded text (incl. special tokens) — catches
+        // <|im_end|> even when the NPU StaticLLMPipeline doesn't honour stop_token_ids reliably.
+        stop_strings: qwen3_eos_only
+            .then_some(vec!["<|im_end|>".to_string(), "<|endoftext|>".to_string()]),
+        ignore_eos: Some(false),
+    }
 }
 
 fn version_is_older_than(actual: &str, floor: &str) -> bool {

@@ -108,6 +108,8 @@ pub struct BackendDecisionKey {
     #[serde(default)]
     pub openvino_npu_min_response_len: Option<usize>,
     #[serde(default)]
+    pub openvino_message_mode: Option<String>,
+    #[serde(default)]
     pub selection_profile: Option<String>,
 }
 
@@ -126,7 +128,7 @@ impl BackendDecisionKey {
             .map(|value| value.to_string())
             .unwrap_or_else(|| "none".to_string());
         format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             self.model_id,
             self.model_artifact_fingerprint.as_deref().unwrap_or("none"),
             self.app_version,
@@ -148,10 +150,17 @@ impl BackendDecisionKey {
             self.npu_driver_version.as_deref().unwrap_or("none"),
             openvino_npu_max_prompt_len,
             openvino_npu_min_response_len,
+            self.openvino_message_mode.as_deref().unwrap_or("none"),
             self.selection_profile.as_deref().unwrap_or("none")
         )
         .to_ascii_lowercase()
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct BackendOpenVinoTuningStatus {
+    pub max_prompt_len: Option<usize>,
+    pub min_response_len: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -408,6 +417,8 @@ pub struct BackendStatus {
     pub last_decision: Option<BackendDecision>,
     pub runtime_bundles: BackendRuntimeBundlesStatus,
     pub lanes: BackendLaneStatuses,
+    pub openvino_message_mode: Option<String>,
+    pub openvino_tuning: Option<BackendOpenVinoTuningStatus>,
     pub failure_counters: FailureCounters,
     pub force_override: Option<InferenceBackend>,
     pub store_path: Option<String>,
@@ -496,6 +507,7 @@ mod tests {
             npu_driver_version: Some("32.0.100.3104".to_string()),
             openvino_npu_max_prompt_len: Some(256),
             openvino_npu_min_response_len: Some(8),
+            openvino_message_mode: Some("structured_messages".to_string()),
             selection_profile: Some("default".to_string()),
         }
     }

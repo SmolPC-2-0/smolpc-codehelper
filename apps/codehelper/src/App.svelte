@@ -17,7 +17,7 @@
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
-	import type { GenerationConfig } from '$lib/types/inference';
+	import type { GenerationConfig, InferenceChatMessage } from '$lib/types/inference';
 
 	let messagesContainer: HTMLDivElement | undefined = $state();
 	let cancelRequested = $state(false);
@@ -89,24 +89,33 @@ Quality rules:
 Teaching rules:
 - Treat the user as a capable learner.
 - Explain difficult parts clearly, without oversimplifying.
-/no_think`;
+`;
 
-	// Build ChatML-formatted prompt for Qwen chat-template style models.
-	function buildChatMLPrompt(userMessage: string, historyMessages: Message[]): string {
-		let prompt = `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>\n`;
+	function buildStructuredMessages(
+		userMessage: string,
+		historyMessages: Message[]
+	): InferenceChatMessage[] {
+		const payload: InferenceChatMessage[] = [
+			{
+				role: 'system',
+				content: SYSTEM_PROMPT
+			}
+		];
 
-		// Include conversation history if context is enabled
 		if (settingsStore.contextEnabled) {
 			for (const msg of historyMessages) {
-				const role = msg.role === 'user' ? 'user' : 'assistant';
-				prompt += `<|im_start|>${role}\n${msg.content}<|im_end|>\n`;
+				payload.push({
+					role: msg.role === 'user' ? 'user' : 'assistant',
+					content: msg.content
+				});
 			}
 		}
 
-		// Add current user message and open assistant turn
-		prompt += `<|im_start|>user\n${userMessage}<|im_end|>\n<|im_start|>assistant\n`;
-
-		return prompt;
+		payload.push({
+			role: 'user',
+			content: userMessage
+		});
+		return payload;
 	}
 
 	function handleScrollToLatest() {
@@ -161,7 +170,7 @@ Teaching rules:
 		const messageId = assistantMessage.id;
 
 		try {
-			const prompt = buildChatMLPrompt(content, historyBeforeMessage);
+			const messagesPayload = buildStructuredMessages(content, historyBeforeMessage);
 			const config: Partial<GenerationConfig> = {
 				max_length: 2048,
 				temperature: settingsStore.temperature,
@@ -171,42 +180,10 @@ Teaching rules:
 				repetition_penalty_last_n: 128
 			};
 
-			let thinkBuffer = '';
-			let insideThink = false;
-			let thinkChecked = false;
-
-			await inferenceStore.generateStream(
-				prompt,
+			await inferenceStore.generateStreamMessages(
+				messagesPayload,
 				(token: string) => {
 					if (cancelRequested) return;
-
-					// Strip <think>...</think> blocks from Qwen3 responses
-					if (!thinkChecked) {
-						thinkBuffer += token;
-						if (thinkBuffer.includes('<think>')) {
-							insideThink = true;
-						}
-						if (insideThink) {
-							const endIdx = thinkBuffer.indexOf('</think>');
-							if (endIdx !== -1) {
-								thinkChecked = true;
-								insideThink = false;
-								const after = thinkBuffer.slice(endIdx + '</think>'.length).trimStart();
-								if (!after) return;
-								token = after;
-							} else {
-								return; // Still buffering think content
-							}
-						} else if (thinkBuffer.length > 10) {
-							// No <think> tag found in first tokens — flush buffer
-							thinkChecked = true;
-							token = thinkBuffer;
-						} else {
-							return; // Still checking
-						}
-					} else if (insideThink) {
-						return;
-					}
 
 					const streamingChat = chatsStore.chats.find((chat) => chat.id === chatId);
 					if (!streamingChat) return;

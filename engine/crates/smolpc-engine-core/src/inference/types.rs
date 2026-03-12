@@ -64,6 +64,16 @@ pub struct GenerationConfig {
     pub repetition_penalty_last_n: usize,
 }
 
+/// Structured chat message for backend-native template/rendering paths.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InferenceChatMessage {
+    /// Chat role expected by backend chat templates ("system", "user", "assistant").
+    pub role: String,
+
+    /// Plain-text message content.
+    pub content: String,
+}
+
 fn default_repetition_penalty() -> f32 {
     1.1
 }

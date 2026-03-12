@@ -38,8 +38,8 @@ Implemented on this branch as of 2026-03-12:
 - development now includes a guarded `npm run runtime:setup:openvino` path that downloads the official 2026 Windows GenAI archive, verifies its SHA256, validates `openvino_genai_c.dll`, and stages the app-local runtime bundle locally
 - development now includes an official OpenVINO-only Qwen3 smoke target via `npm run model:setup:qwen3:openvino` with local model id `qwen3-4b-int4-ov`
 - OpenVINO NPU pipeline creation now applies tuned defaults that work on this PC:
-  - `MAX_PROMPT_LEN=256`
-  - `MIN_RESPONSE_LEN=8`
+  - `MAX_PROMPT_LEN=512`
+  - `MIN_RESPONSE_LEN=1024`
 - those tuning values are included in the backend decision fingerprint so persisted fallbacks do not block a later OpenVINO retry after tuning changes
 
 Still pending for the remaining Phase 1 work:

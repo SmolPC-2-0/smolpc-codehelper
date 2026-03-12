@@ -12,6 +12,7 @@ import type {
 	GenerationConfig,
 	GenerationMetrics,
 	GenerationResult,
+	InferenceChatMessage,
 	InferenceBackend,
 	InferenceRuntimeMode,
 	InferenceStatus,
@@ -335,6 +336,66 @@ export const inferenceStore = {
 
 			const metrics = await invoke<GenerationMetrics>('inference_generate', {
 				prompt,
+				config: fullConfig,
+				onToken: onTokenChannel
+			});
+
+			lastMetrics = metrics;
+			return metrics;
+		} catch (e) {
+			const message = String(e);
+			if (
+				message.includes('INFERENCE_GENERATION_CANCELLED') ||
+				message.includes('Generation cancelled')
+			) {
+				return null;
+			}
+
+			error = message;
+			console.error('Streaming generation failed:', e);
+			return null;
+		} finally {
+			await this.syncStatus();
+			isGenerating = false;
+		}
+	},
+
+	async generateStreamMessages(
+		messages: InferenceChatMessage[],
+		onToken: (token: string) => void,
+		config?: Partial<GenerationConfig>
+	): Promise<GenerationMetrics | null> {
+		if (!this.isReady) {
+			error = 'Engine is not ready';
+			return null;
+		}
+
+		if (isGenerating) {
+			error = 'Generation already in progress';
+			return null;
+		}
+
+		isGenerating = true;
+		error = null;
+		lastMetrics = null;
+
+		try {
+			const onTokenChannel = new Channel<string>();
+			onTokenChannel.onmessage = onToken;
+
+			const fullConfig: GenerationConfig | undefined = config
+				? {
+						max_length: config.max_length ?? 2048,
+						temperature: config.temperature ?? 0.7,
+						top_k: config.top_k ?? 40,
+						top_p: config.top_p ?? 0.9,
+						repetition_penalty: config.repetition_penalty ?? 1.1,
+						repetition_penalty_last_n: config.repetition_penalty_last_n ?? 64
+					}
+				: undefined;
+
+			const metrics = await invoke<GenerationMetrics>('inference_generate_messages', {
+				messages,
 				config: fullConfig,
 				onToken: onTokenChannel
 			});
