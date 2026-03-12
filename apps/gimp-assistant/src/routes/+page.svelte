@@ -1,13 +1,12 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  import { invoke, Channel } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
 
   type AssistantResponse = {
     reply: string;
     explain?: string;
     undoable?: boolean;
-    plan: any;
-    tool_results: any[];
+    streamed?: boolean;
   };
 
   type Message = {
@@ -15,6 +14,7 @@
     text: string;
     explain?: string;
     undoable?: boolean;
+    isStreaming?: boolean;
   };
 
   const SUGGESTIONS = [
@@ -29,16 +29,18 @@
   let messages = $state<Message[]>([]);
   let input = $state("");
   let isSending = $state(false);
+  let isStreaming = $state(false);
   let isConnected = $state(false);
   let imageInfo = $state("");
+  let engineStatus = $state<"unknown" | "ready" | "offline">("unknown");
   let showDevTools = $state(false);
   let chatEl = $state<HTMLElement | undefined>(undefined);
   let textareaEl = $state<HTMLTextAreaElement | undefined>(undefined);
 
   // Dev tools state
-  let llmStatus = $state("Unknown");
+  let engineTestStatus = $state("Unknown");
   let gimpStatus = $state("Unknown");
-  let llmTestResult = $state("");
+  let engineTestResult = $state("");
   let toolsListResult = $state("");
   let actionLog = $state<string[]>([]);
 
@@ -54,13 +56,13 @@
 
   onMount(async () => {
     await checkConnection();
+    await checkEngineHealth();
   });
 
   async function checkConnection() {
     try {
       await invoke("mcp_list_tools");
       isConnected = true;
-      // Try to read the open image name
       try {
         const res = await invoke<any>("mcp_call_tool", {
           name: "call_api",
@@ -86,6 +88,15 @@
     }
   }
 
+  async function checkEngineHealth() {
+    try {
+      const healthy = await invoke<boolean>("engine_health");
+      engineStatus = healthy ? "ready" : "offline";
+    } catch {
+      engineStatus = "offline";
+    }
+  }
+
   async function sendChat(text?: string) {
     const trimmed = (text ?? input).trim();
     if (!trimmed || isSending) return;
@@ -94,28 +105,72 @@
     messages = [...messages, { role: "user", text: trimmed }];
     isSending = true;
 
+    // Add a streaming placeholder message
+    const streamIdx = messages.length;
+    messages = [...messages, { role: "assistant", text: "", isStreaming: true }];
+
+    const channel = new Channel<string>();
+    let accumulated = "";
+
+    channel.onmessage = (token: string) => {
+      accumulated += token;
+      isStreaming = true;
+      // Update the streaming message in-place
+      messages = messages.map((m, i) =>
+        i === streamIdx ? { ...m, text: accumulated } : m
+      );
+    };
+
     try {
-      const result = await invoke<AssistantResponse>("assistant_request", { prompt: trimmed });
-      messages = [...messages, {
-        role: "assistant",
-        text: result.reply || "Done.",
-        explain: result.explain,
-        undoable: result.undoable ?? false
-      }];
+      const result = await invoke<AssistantResponse>("assistant_chat_stream", {
+        prompt: trimmed,
+        onToken: channel,
+      });
+
+      // Finalize the message: use accumulated text if streamed, otherwise use reply
+      const finalText = result.streamed
+        ? accumulated
+        : (result.reply || accumulated || "Done.");
+
+      messages = messages.map((m, i) =>
+        i === streamIdx
+          ? {
+              ...m,
+              text: finalText,
+              explain: result.explain,
+              undoable: result.undoable ?? false,
+              isStreaming: false,
+            }
+          : m
+      );
+
       isConnected = true;
       await checkConnection();
     } catch (e) {
-      messages = [...messages, { role: "assistant", text: "Error: " + String(e) }];
+      messages = messages.map((m, i) =>
+        i === streamIdx
+          ? { ...m, text: "Error: " + String(e), isStreaming: false }
+          : m
+      );
       isConnected = false;
     } finally {
       isSending = false;
+      isStreaming = false;
+    }
+  }
+
+  async function cancelGeneration() {
+    try {
+      await invoke("engine_cancel");
+    } catch {
+      // ignore cancel errors
     }
   }
 
   async function undoLast() {
     try {
       await invoke("macro_undo");
-      messages = [...messages, { role: "assistant", text: "↩ Last change undone." }];
+      messages = [...messages, { role: "assistant", text: "\u21a9 Last change undone." }];
     } catch (e) {
       messages = [...messages, { role: "assistant", text: "Undo failed: " + String(e) }];
     }
@@ -140,20 +195,22 @@
   }
 
   // Dev tools helpers
-  async function testLlm() {
-    llmStatus = "Checking…";
+  async function testEngine() {
+    engineTestStatus = "Checking\u2026";
     try {
-      const result = await invoke<string>("test_llm");
-      llmTestResult = result;
-      llmStatus = "Connected";
+      const healthy = await invoke<boolean>("engine_health");
+      engineTestResult = healthy ? "Engine is healthy" : "Engine not ready";
+      engineTestStatus = healthy ? "Connected" : "Offline";
+      engineStatus = healthy ? "ready" : "offline";
     } catch (e) {
-      llmTestResult = String(e);
-      llmStatus = "Error";
+      engineTestResult = String(e);
+      engineTestStatus = "Error";
+      engineStatus = "offline";
     }
   }
 
   async function listTools() {
-    gimpStatus = "Checking…";
+    gimpStatus = "Checking\u2026";
     try {
       const result = await invoke<any>("mcp_list_tools");
       toolsListResult = JSON.stringify(result, null, 2);
@@ -165,32 +222,32 @@
   }
 
   async function runDrawTestLine() {
-    logAction("Draw test line…");
+    logAction("Draw test line\u2026");
     try {
       await invoke("macro_draw_line", { x1: 50, y1: 50, x2: 200, y2: 200 });
-      logAction("✅ Line OK");
-    } catch (e) { logAction("❌ " + String(e)); }
+      logAction("Line OK");
+    } catch (e) { logAction("Failed: " + String(e)); }
   }
 
   async function runCropSquare() {
-    logAction("Crop square…");
+    logAction("Crop square\u2026");
     try {
       await invoke("macro_crop_square");
-      logAction("✅ Crop OK");
-    } catch (e) { logAction("❌ " + String(e)); }
+      logAction("Crop OK");
+    } catch (e) { logAction("Failed: " + String(e)); }
   }
 
   async function runResize1024() {
-    logAction("Resize to 1024w…");
+    logAction("Resize to 1024w\u2026");
     try {
       await invoke("macro_resize", { width: 1024 });
-      logAction("✅ Resize OK");
-    } catch (e) { logAction("❌ " + String(e)); }
+      logAction("Resize OK");
+    } catch (e) { logAction("Failed: " + String(e)); }
   }
 </script>
 
 <div class="app">
-  <!-- ── Header ── -->
+  <!-- Header -->
   <header>
     <div class="header-left">
       <span class="app-icon">🎨</span>
@@ -200,6 +257,12 @@
       </div>
     </div>
     <div class="header-right">
+      <div class="status-pill" class:connected={engineStatus === "ready"} class:offline={engineStatus === "offline"}>
+        <span class="status-dot"></span>
+        <span class="status-label">
+          {engineStatus === "ready" ? "Engine ready" : engineStatus === "offline" ? "Engine offline" : "Engine..."}
+        </span>
+      </div>
       <div class="status-pill" class:connected={isConnected}>
         <span class="status-dot"></span>
         <span class="status-label">
@@ -215,7 +278,7 @@
     </div>
   </header>
 
-  <!-- ── Main ── -->
+  <!-- Main -->
   <div class="main">
     <!-- Chat -->
     <div class="chat" bind:this={chatEl}>
@@ -241,7 +304,9 @@
             <div class="avatar">✦</div>
           {/if}
           <div class="col">
-            <div class="bubble {msg.role}">{msg.text}</div>
+            <div class="bubble {msg.role}">
+              {msg.text}{#if msg.isStreaming}<span class="cursor">|</span>{/if}
+            </div>
             {#if msg.explain}
               <div class="tip">
                 <span class="tip-icon">💡</span>
@@ -255,8 +320,8 @@
         </div>
       {/each}
 
-      <!-- Typing indicator -->
-      {#if isSending}
+      <!-- Typing indicator (only when sending but not yet streaming) -->
+      {#if isSending && !isStreaming && messages[messages.length - 1]?.text === ""}
         <div class="row assistant">
           <div class="avatar">✦</div>
           <div class="col">
@@ -275,20 +340,28 @@
         bind:value={input}
         onkeydown={handleKeydown}
         oninput={growTextarea}
-        placeholder="Ask me to edit your image… (Enter to send)"
+        placeholder="Ask me to edit your image... (Enter to send)"
         disabled={isSending}
         rows="1"
       ></textarea>
-      <button
-        class="send-btn"
-        onclick={() => sendChat()}
-        disabled={isSending || !input.trim()}
-        title="Send"
-      >↑</button>
+      {#if isSending && isStreaming}
+        <button
+          class="stop-btn"
+          onclick={cancelGeneration}
+          title="Stop generation"
+        >■</button>
+      {:else}
+        <button
+          class="send-btn"
+          onclick={() => sendChat()}
+          disabled={isSending || !input.trim()}
+          title="Send"
+        >↑</button>
+      {/if}
     </div>
   </div>
 
-  <!-- ── Dev tools overlay ── -->
+  <!-- Dev tools overlay -->
   {#if showDevTools}
     <aside class="devtools">
       <div class="devtools-header">
@@ -297,9 +370,9 @@
       </div>
 
       <details class="dev-section">
-        <summary>LLM · <em>{llmStatus}</em></summary>
-        <button class="dev-btn" onclick={testLlm}>Test Connection</button>
-        {#if llmTestResult}<pre>{llmTestResult}</pre>{/if}
+        <summary>Engine · <em>{engineTestStatus}</em></summary>
+        <button class="dev-btn" onclick={testEngine}>Test Engine</button>
+        {#if engineTestResult}<pre>{engineTestResult}</pre>{/if}
       </details>
 
       <details class="dev-section">
@@ -311,9 +384,9 @@
       <details class="dev-section" open>
         <summary>Quick Actions</summary>
         <div class="dev-actions">
-          <button class="dev-btn" onclick={runDrawTestLine}>✏️ Line</button>
-          <button class="dev-btn" onclick={runCropSquare}>✂️ Crop</button>
-          <button class="dev-btn" onclick={runResize1024}>📐 1024w</button>
+          <button class="dev-btn" onclick={runDrawTestLine}>Line</button>
+          <button class="dev-btn" onclick={runCropSquare}>Crop</button>
+          <button class="dev-btn" onclick={runResize1024}>1024w</button>
         </div>
         {#if actionLog.length > 0}
           <pre class="action-log">{actionLog.join("\n")}</pre>
@@ -324,7 +397,7 @@
 </div>
 
 <style>
-  /* ── Reset / Base ── */
+  /* Reset / Base */
   :global(*, *::before, *::after) { box-sizing: border-box; }
   :global(body) {
     margin: 0;
@@ -333,7 +406,7 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* ── App shell ── */
+  /* App shell */
   .app {
     display: flex;
     flex-direction: column;
@@ -343,7 +416,7 @@
     overflow: hidden;
   }
 
-  /* ── Header ── */
+  /* Header */
   header {
     display: flex;
     align-items: center;
@@ -400,6 +473,11 @@
     border-color: #b8e6c6;
     color: #2a7a45;
   }
+  .status-pill.offline {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #b91c1c;
+  }
   .status-dot {
     width: 7px;
     height: 7px;
@@ -409,6 +487,7 @@
     transition: background 0.2s;
   }
   .status-pill.connected .status-dot { background: #34c759; }
+  .status-pill.offline .status-dot { background: #ef4444; }
   .status-label { white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
 
   /* Icon button */
@@ -430,7 +509,7 @@
   .icon-btn:hover { background: #f0f0f0; color: #333; }
   .icon-btn.active { background: #007aff; border-color: #007aff; color: #fff; }
 
-  /* ── Main layout ── */
+  /* Main layout */
   .main {
     flex: 1;
     display: flex;
@@ -438,7 +517,7 @@
     overflow: hidden;
   }
 
-  /* ── Chat area ── */
+  /* Chat area */
   .chat {
     flex: 1;
     overflow-y: auto;
@@ -553,6 +632,17 @@
     border-bottom-left-radius: 5px;
   }
 
+  /* Streaming cursor */
+  .cursor {
+    animation: blink 0.8s step-end infinite;
+    font-weight: 300;
+    color: #007aff;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
   /* Typing indicator */
   .bubble.typing {
     display: flex;
@@ -602,7 +692,7 @@
   }
   .undo-btn:hover { background: rgba(0, 122, 255, 0.14); }
 
-  /* ── Input bar ── */
+  /* Input bar */
   .input-bar {
     display: flex;
     align-items: flex-end;
@@ -648,7 +738,25 @@
   .send-btn:hover:not(:disabled) { background: #0060df; }
   .send-btn:disabled { opacity: 0.35; cursor: default; }
 
-  /* ── Dev tools overlay ── */
+  .stop-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: none;
+    background: #ef4444;
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.15s;
+    line-height: 1;
+  }
+  .stop-btn:hover { background: #dc2626; }
+
+  /* Dev tools overlay */
   .devtools {
     position: absolute;
     top: 57px;
