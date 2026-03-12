@@ -432,6 +432,15 @@ pub fn run_openvino_preflight(
         };
 
         let generation_controls = openvino_generation_controls_for_model(model_id);
+        log::info!(
+            "OpenVINO generation controls for {}: eos_token_id={:?}, min_new_tokens={:?}, stop_token_ids={:?}, stop_strings={:?}, ignore_eos={:?}",
+            model_id,
+            generation_controls.eos_token_id,
+            generation_controls.min_new_tokens,
+            generation_controls.stop_token_ids,
+            generation_controls.stop_strings,
+            generation_controls.ignore_eos
+        );
         let pipeline_config = tuning.pipeline_config(cache_dir, generation_controls);
         let generator = match OpenVinoGenAiGenerator::new(bundle, model_dir, &pipeline_config) {
             Ok(generator) => generator,
@@ -537,6 +546,10 @@ fn parse_positive_env_usize(name: &str, default: usize) -> Result<usize, String>
 fn openvino_generation_controls_for_model(model_id: &str) -> OpenVinoGenerationControls {
     let qwen3_eos_only = matches!(model_id, "qwen3-4b-int4-ov" | "qwen3-4b-int4-ov-npu");
     OpenVinoGenerationControls {
+        // Qwen chat template EOS token (<|im_end|>) is 151645.
+        // Set explicit EOS because OpenVINO C config is built manually and does not
+        // implicitly inherit generation_config.json defaults.
+        eos_token_id: qwen3_eos_only.then_some(151645),
         min_new_tokens: Some(1),
         // Both token IDs for belt-and-suspenders: <|im_end|>=151645, <|endoftext|>=151643
         stop_token_ids: qwen3_eos_only.then_some(vec![151643, 151645]),

@@ -74,6 +74,7 @@ struct OpenVinoGenAiApi {
     create_generation_config: unsafe extern "C" fn(*mut *mut OvGenAiGenerationConfig) -> OvStatus,
     destroy_generation_config: unsafe extern "C" fn(*mut OvGenAiGenerationConfig),
     set_max_new_tokens: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, usize) -> OvStatus,
+    set_eos_token_id: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, i64) -> OvStatus,
     set_min_new_tokens: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, usize) -> OvStatus,
     set_stop_token_ids:
         unsafe extern "C" fn(*mut OvGenAiGenerationConfig, *const i64, usize) -> OvStatus,
@@ -154,6 +155,10 @@ impl OpenVinoGenAiApi {
                 set_max_new_tokens: load_symbol(
                     &openvino_genai_c,
                     b"ov_genai_generation_config_set_max_new_tokens\0",
+                )?,
+                set_eos_token_id: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_generation_config_set_eos_token_id\0",
                 )?,
                 set_min_new_tokens: load_symbol(
                     &openvino_genai_c,
@@ -348,6 +353,7 @@ pub struct OpenVinoGenAiGenerator {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OpenVinoGenerationControls {
+    pub eos_token_id: Option<i64>,
     pub min_new_tokens: Option<usize>,
     pub stop_token_ids: Option<Vec<i64>>,
     pub stop_strings: Option<Vec<String>>,
@@ -626,6 +632,13 @@ fn create_generation_config(
         unsafe { (api.set_max_new_tokens)(config_handle.as_ptr(), config.max_length) },
         "ov_genai_generation_config_set_max_new_tokens",
     )?;
+    if let Some(eos_token_id) = controls.eos_token_id {
+        check_status(
+            api,
+            unsafe { (api.set_eos_token_id)(config_handle.as_ptr(), eos_token_id) },
+            "ov_genai_generation_config_set_eos_token_id",
+        )?;
+    }
     if let Some(min_new_tokens) = controls.min_new_tokens {
         check_status(
             api,
