@@ -42,7 +42,8 @@ use tokio::time::{sleep, timeout};
 
 use crate::openvino::{
     inspect_openvino_artifact, is_blocking_openvino_probe_failure, probe_openvino_startup,
-    run_openvino_preflight, OpenVinoPreflightResult, OpenVinoStartupProbeResult,
+    resolve_openvino_npu_tuning, run_openvino_preflight, OpenVinoPreflightResult,
+    OpenVinoStartupProbeResult,
 };
 use crate::runtime_bundles::{resolve_runtime_bundles, ResolvedRuntimeBundles};
 #[cfg(test)]
@@ -307,7 +308,7 @@ const STARTUP_PROBE_WAIT_MS: u64 = 1_500;
 /// Extended probe budget for DirectML startup.
 /// Worst-case total probe wait: STARTUP_PROBE_WAIT_MS + STARTUP_PROBE_RECOVERY_WAIT_MS.
 const STARTUP_PROBE_RECOVERY_WAIT_MS: u64 = 8_000;
-const OPENVINO_PREFLIGHT_BUDGET: Duration = Duration::from_secs(30);
+const OPENVINO_PREFLIGHT_BUDGET: Duration = Duration::from_secs(300);
 const OPENVINO_SELECTION_PROFILE: &str = "openvino_native_v1";
 
 #[derive(Debug, Clone)]
@@ -1237,6 +1238,7 @@ impl EngineState {
     ) -> BackendDecisionKey {
         let directml_candidate = probe.directml_candidate.as_ref();
         let openvino_probe = openvino_probe.filter(|probe| probe.device_visible);
+        let openvino_tuning = resolve_openvino_npu_tuning().ok();
         BackendDecisionKey {
             model_id: model_id.to_string(),
             model_artifact_fingerprint: artifacts.fingerprint.clone(),
@@ -1270,6 +1272,8 @@ impl EngineState {
             gpu_device_id: selected_device_id,
             npu_adapter_identity: openvino_probe.and_then(|probe| probe.adapter_identity.clone()),
             npu_driver_version: openvino_probe.and_then(|probe| probe.driver_version.clone()),
+            openvino_npu_max_prompt_len: openvino_tuning.map(|tuning| tuning.max_prompt_len),
+            openvino_npu_min_response_len: openvino_tuning.map(|tuning| tuning.min_response_len),
             selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
         }
     }
@@ -1893,13 +1897,12 @@ impl EngineState {
                 .clone()
                 .or_else(|| artifacts.openvino_message.clone())
                 .unwrap_or_else(|| format!("OpenVINO lane is unavailable: {selection_reason}"));
-            let error = if openvino_required
-                && force_override != Some(InferenceBackend::OpenVinoNpu)
-            {
-                openvino_required_error(&model_id, &detail)
-            } else {
-                detail
-            };
+            let error =
+                if openvino_required && force_override != Some(InferenceBackend::OpenVinoNpu) {
+                    openvino_required_error(&model_id, &detail)
+                } else {
+                    detail
+                };
 
             let mut status = make_status(
                 BackendSelectionState::Error,
@@ -3271,6 +3274,8 @@ mod tests {
                 gpu_device_id: Some(0),
                 npu_adapter_identity: None,
                 npu_driver_version: None,
+                openvino_npu_max_prompt_len: Some(256),
+                openvino_npu_min_response_len: Some(8),
                 selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(
@@ -3313,6 +3318,8 @@ mod tests {
                 gpu_device_id: Some(0),
                 npu_adapter_identity: Some("openvino:npu:intel_npu".to_string()),
                 npu_driver_version: Some("32.0.100.3104".to_string()),
+                openvino_npu_max_prompt_len: Some(256),
+                openvino_npu_min_response_len: Some(8),
                 selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(
@@ -3350,6 +3357,8 @@ mod tests {
                 gpu_device_id: Some(0),
                 npu_adapter_identity: Some("openvino:npu:intel_npu".to_string()),
                 npu_driver_version: Some("32.0.100.3104".to_string()),
+                openvino_npu_max_prompt_len: Some(256),
+                openvino_npu_min_response_len: Some(8),
                 selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(
@@ -3547,8 +3556,7 @@ mod tests {
             .expect("write generation config");
         fs::write(openvino_dir.join("config.json"), []).expect("write config");
         fs::write(openvino_dir.join("tokenizer.json"), []).expect("write tokenizer");
-        fs::write(openvino_dir.join("tokenizer_config.json"), [])
-            .expect("write tokenizer config");
+        fs::write(openvino_dir.join("tokenizer_config.json"), []).expect("write tokenizer config");
         fs::write(openvino_dir.join("special_tokens_map.json"), [])
             .expect("write special tokens map");
         fs::write(openvino_dir.join("chat_template.jinja"), []).expect("write chat template");
@@ -3671,6 +3679,7 @@ mod tests {
             "openvino_intel_cpu_plugin.dll",
             "openvino_ir_frontend.dll",
             "openvino_genai.dll",
+            "openvino_genai_c.dll",
             "openvino_tokenizers.dll",
             "tbb12.dll",
             "tbbbind_2_5.dll",

@@ -296,6 +296,7 @@ fn build_openvino_bundle(bundle_root: PathBuf) -> OpenVinoRuntimeBundle {
     let cpu_plugin = bundle_root.join("openvino_intel_cpu_plugin.dll");
     let ir_frontend = bundle_root.join("openvino_ir_frontend.dll");
     let genai_dll = bundle_root.join("openvino_genai.dll");
+    let genai_c_dll = bundle_root.join("openvino_genai_c.dll");
     let tokenizers_dll = bundle_root.join("openvino_tokenizers.dll");
     let tbb_dll = bundle_root.join("tbb12.dll");
     let tbbbind_dll = bundle_root.join("tbbbind_2_5.dll");
@@ -311,6 +312,7 @@ fn build_openvino_bundle(bundle_root: PathBuf) -> OpenVinoRuntimeBundle {
         RequiredRuntimeFile::new("openvino_intel_cpu_plugin.dll", cpu_plugin.clone()),
         RequiredRuntimeFile::new("openvino_ir_frontend.dll", ir_frontend.clone()),
         RequiredRuntimeFile::new("openvino_genai.dll", genai_dll.clone()),
+        RequiredRuntimeFile::new("openvino_genai_c.dll", genai_c_dll.clone()),
         RequiredRuntimeFile::new("openvino_tokenizers.dll", tokenizers_dll.clone()),
         RequiredRuntimeFile::new("tbb12.dll", tbb_dll.clone()),
         RequiredRuntimeFile::new("tbbbind_2_5.dll", tbbbind_dll.clone()),
@@ -369,15 +371,41 @@ fn build_openvino_bundle(bundle_root: PathBuf) -> OpenVinoRuntimeBundle {
         })
         .or_else(|| {
             missing_file(
+                &genai_c_dll,
+                BundleValidationFailureClass::OpenVinoGenAiCApiMissing,
+            )
+        })
+        .or_else(|| {
+            missing_file(
                 &tokenizers_dll,
                 BundleValidationFailureClass::OpenVinoTokenizersMissing,
             )
         })
-        .or_else(|| missing_file(&icudt_dll, BundleValidationFailureClass::OpenVinoTokenizersMissing))
-        .or_else(|| missing_file(&icuuc_dll, BundleValidationFailureClass::OpenVinoTokenizersMissing))
+        .or_else(|| {
+            missing_file(
+                &icudt_dll,
+                BundleValidationFailureClass::OpenVinoTokenizersMissing,
+            )
+        })
+        .or_else(|| {
+            missing_file(
+                &icuuc_dll,
+                BundleValidationFailureClass::OpenVinoTokenizersMissing,
+            )
+        })
         .or_else(|| missing_file(&tbb_dll, BundleValidationFailureClass::OpenVinoTbbMissing))
-        .or_else(|| missing_file(&tbbbind_dll, BundleValidationFailureClass::OpenVinoTbbMissing))
-        .or_else(|| missing_file(&tbbmalloc_dll, BundleValidationFailureClass::OpenVinoTbbMissing))
+        .or_else(|| {
+            missing_file(
+                &tbbbind_dll,
+                BundleValidationFailureClass::OpenVinoTbbMissing,
+            )
+        })
+        .or_else(|| {
+            missing_file(
+                &tbbmalloc_dll,
+                BundleValidationFailureClass::OpenVinoTbbMissing,
+            )
+        })
         .or_else(|| {
             missing_file(
                 &tbbmalloc_proxy_dll,
@@ -402,6 +430,7 @@ fn build_openvino_bundle(bundle_root: PathBuf) -> OpenVinoRuntimeBundle {
         openvino_intel_cpu_plugin_dll: cpu_plugin,
         openvino_ir_frontend_dll: ir_frontend,
         openvino_genai_dll: genai_dll,
+        openvino_genai_c_dll: genai_c_dll,
         openvino_tokenizers_dll: tokenizers_dll,
         tbb_dll,
         tbbbind_dll,
@@ -668,8 +697,7 @@ mod tests {
         let temp = tempdir().expect("temp dir");
         let root = temp.path().join("openvino");
         create_openvino_files(&root);
-        fs::remove_file(root.join("openvino_intel_npu_compiler.dll"))
-            .expect("remove npu compiler");
+        fs::remove_file(root.join("openvino_intel_npu_compiler.dll")).expect("remove npu compiler");
 
         let bundle = build_openvino_bundle(root);
         assert!(!bundle.npu_validated());
@@ -717,6 +745,7 @@ mod tests {
             "openvino_intel_cpu_plugin.dll",
             "openvino_ir_frontend.dll",
             "openvino_genai.dll",
+            "openvino_genai_c.dll",
             "openvino_tokenizers.dll",
             "tbb12.dll",
             "tbbbind_2_5.dll",

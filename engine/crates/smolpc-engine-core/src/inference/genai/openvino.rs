@@ -4,7 +4,7 @@ use super::super::runtime_loading::{
 use super::super::types::{GenerationConfig, GenerationMetrics};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -36,7 +36,7 @@ struct StreamerCallback {
 
 struct OpenVinoGenAiApi {
     _openvino_c: RetainedLibrary,
-    _openvino_genai: RetainedLibrary,
+    _openvino_genai_c: RetainedLibrary,
     get_error_info: unsafe extern "C" fn(OvStatus) -> *const c_char,
     get_last_err_msg: unsafe extern "C" fn() -> *const c_char,
     create_pipeline: unsafe extern "C" fn(
@@ -69,7 +69,6 @@ struct OpenVinoGenAiApi {
         *const OvGenAiDecodedResults,
         *mut *mut OvGenAiPerfMetrics,
     ) -> OvStatus,
-    destroy_perf_metrics: unsafe extern "C" fn(*mut OvGenAiPerfMetrics),
     get_num_generation_tokens:
         unsafe extern "C" fn(*const OvGenAiPerfMetrics, *mut usize) -> OvStatus,
     get_ttft: unsafe extern "C" fn(*const OvGenAiPerfMetrics, *mut f32, *mut f32) -> OvStatus,
@@ -85,76 +84,78 @@ impl OpenVinoGenAiApi {
     fn load(bundle: &OpenVinoRuntimeBundle) -> Result<Arc<Self>, String> {
         OpenVinoRuntimeLoader::ensure_initialized(bundle)?;
         let openvino_c = RetainedLibrary::load(&bundle.openvino_c_dll)?;
-        let openvino_genai = RetainedLibrary::load(&bundle.openvino_genai_dll)?;
+        let openvino_genai_c = RetainedLibrary::load(&bundle.openvino_genai_c_dll)?;
 
         unsafe {
             Ok(Arc::new(Self {
                 get_error_info: load_symbol(&openvino_c, b"ov_get_error_info\0")?,
                 get_last_err_msg: load_symbol(&openvino_c, b"ov_get_last_err_msg\0")?,
-                create_pipeline: load_symbol(&openvino_genai, b"ov_genai_llm_pipeline_create\0")?,
-                destroy_pipeline: load_symbol(&openvino_genai, b"ov_genai_llm_pipeline_free\0")?,
+                create_pipeline: load_symbol(&openvino_genai_c, b"ov_genai_llm_pipeline_create\0")?,
+                destroy_pipeline: load_symbol(&openvino_genai_c, b"ov_genai_llm_pipeline_free\0")?,
                 pipeline_generate: load_symbol(
-                    &openvino_genai,
+                    &openvino_genai_c,
                     b"ov_genai_llm_pipeline_generate\0",
                 )?,
                 create_generation_config: load_symbol(
-                    &openvino_genai,
+                    &openvino_genai_c,
                     b"ov_genai_generation_config_create\0",
                 )?,
                 destroy_generation_config: load_symbol(
-                    &openvino_genai,
+                    &openvino_genai_c,
                     b"ov_genai_generation_config_free\0",
                 )?,
                 set_max_new_tokens: load_symbol(
-                    &openvino_genai,
+                    &openvino_genai_c,
                     b"ov_genai_generation_config_set_max_new_tokens\0",
                 )?,
-                set_echo: load_symbol(&openvino_genai, b"ov_genai_generation_config_set_echo\0")?,
+                set_echo: load_symbol(&openvino_genai_c, b"ov_genai_generation_config_set_echo\0")?,
                 set_do_sample: load_symbol(
-                    &openvino_genai,
+                    &openvino_genai_c,
                     b"ov_genai_generation_config_set_do_sample\0",
                 )?,
                 set_temperature: load_symbol(
-                    &openvino_genai,
+                    &openvino_genai_c,
                     b"ov_genai_generation_config_set_temperature\0",
                 )?,
-                set_top_p: load_symbol(&openvino_genai, b"ov_genai_generation_config_set_top_p\0")?,
-                set_top_k: load_symbol(&openvino_genai, b"ov_genai_generation_config_set_top_k\0")?,
+                set_top_p: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_generation_config_set_top_p\0",
+                )?,
+                set_top_k: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_generation_config_set_top_k\0",
+                )?,
                 set_repetition_penalty: load_symbol(
-                    &openvino_genai,
+                    &openvino_genai_c,
                     b"ov_genai_generation_config_set_repetition_penalty\0",
                 )?,
                 validate_generation_config: load_symbol(
-                    &openvino_genai,
+                    &openvino_genai_c,
                     b"ov_genai_generation_config_validate\0",
                 )?,
                 destroy_decoded_results: load_symbol(
-                    &openvino_genai,
+                    &openvino_genai_c,
                     b"ov_genai_decoded_results_free\0",
                 )?,
                 get_perf_metrics: load_symbol(
-                    &openvino_genai,
+                    &openvino_genai_c,
                     b"ov_genai_decoded_results_get_perf_metrics\0",
                 )?,
-                destroy_perf_metrics: load_symbol(
-                    &openvino_genai,
-                    b"ov_genai_decoded_results_perf_metrics_free\0",
-                )?,
                 get_num_generation_tokens: load_symbol(
-                    &openvino_genai,
+                    &openvino_genai_c,
                     b"ov_genai_perf_metrics_get_num_generation_tokens\0",
                 )?,
-                get_ttft: load_symbol(&openvino_genai, b"ov_genai_perf_metrics_get_ttft\0")?,
+                get_ttft: load_symbol(&openvino_genai_c, b"ov_genai_perf_metrics_get_ttft\0")?,
                 get_throughput: load_symbol(
-                    &openvino_genai,
+                    &openvino_genai_c,
                     b"ov_genai_perf_metrics_get_throughput\0",
                 )?,
                 get_generate_duration: load_symbol(
-                    &openvino_genai,
+                    &openvino_genai_c,
                     b"ov_genai_perf_metrics_get_generate_duration\0",
                 )?,
                 _openvino_c: openvino_c,
-                _openvino_genai: openvino_genai,
+                _openvino_genai_c: openvino_genai_c,
             }))
         }
     }
@@ -263,6 +264,27 @@ pub struct OpenVinoGenAiGenerator {
     inner: Arc<Mutex<OpenVinoGenAiInner>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenVinoNpuPipelineConfig {
+    pub cache_dir: PathBuf,
+    pub max_prompt_len: usize,
+    pub min_response_len: usize,
+}
+
+impl OpenVinoNpuPipelineConfig {
+    pub fn new(
+        cache_dir: impl Into<PathBuf>,
+        max_prompt_len: usize,
+        min_response_len: usize,
+    ) -> Self {
+        Self {
+            cache_dir: cache_dir.into(),
+            max_prompt_len,
+            min_response_len,
+        }
+    }
+}
+
 impl OpenVinoGenAiGenerator {
     pub fn runtime_available(bundle: &OpenVinoRuntimeBundle) -> Result<(), String> {
         let _ = openvino_genai_api(bundle)?;
@@ -272,26 +294,35 @@ impl OpenVinoGenAiGenerator {
     pub fn new(
         bundle: &OpenVinoRuntimeBundle,
         model_dir: &Path,
-        cache_dir: &Path,
+        config: &OpenVinoNpuPipelineConfig,
     ) -> Result<Self, String> {
         let api = openvino_genai_api(bundle)?;
-        std::fs::create_dir_all(cache_dir)
+        std::fs::create_dir_all(&config.cache_dir)
             .map_err(|error| format!("Failed to create OpenVINO cache dir: {error}"))?;
 
         let model_dir = path_to_cstring(model_dir, "models_path")?;
         let device = cstring("NPU", "device")?;
         let cache_key = cstring("CACHE_DIR", "property key")?;
-        let cache_value = path_to_cstring(cache_dir, "CACHE_DIR")?;
+        let cache_value = path_to_cstring(&config.cache_dir, "CACHE_DIR")?;
+        let max_prompt_len_key = cstring("MAX_PROMPT_LEN", "property key")?;
+        let max_prompt_len_value = cstring(&config.max_prompt_len.to_string(), "MAX_PROMPT_LEN")?;
+        let min_response_len_key = cstring("MIN_RESPONSE_LEN", "property key")?;
+        let min_response_len_value =
+            cstring(&config.min_response_len.to_string(), "MIN_RESPONSE_LEN")?;
 
         let mut pipeline_ptr: *mut OvGenAiLlmPipeline = ptr::null_mut();
         let status = unsafe {
             (api.create_pipeline)(
                 model_dir.as_ptr(),
                 device.as_ptr(),
-                2,
+                6,
                 &mut pipeline_ptr,
                 cache_key.as_ptr(),
                 cache_value.as_ptr(),
+                max_prompt_len_key.as_ptr(),
+                max_prompt_len_value.as_ptr(),
+                min_response_len_key.as_ptr(),
+                min_response_len_value.as_ptr(),
             )
         };
         check_status(&api, status, "ov_genai_llm_pipeline_create")?;
@@ -504,28 +535,29 @@ fn read_generation_metrics(
         return Ok(fallback_metrics(started, 0));
     }
 
-    let metrics = OvOwned::new(Arc::clone(api), metrics_ptr, api.destroy_perf_metrics);
+    // metrics_ptr is owned by DecodedResults (results) and freed by destroy_decoded_results;
+    // there is no separate ov_genai_decoded_results_perf_metrics_free in the C API.
     let total_tokens = metric_usize(
         api,
-        metrics.as_ptr(),
+        metrics_ptr,
         api.get_num_generation_tokens,
         "ov_genai_perf_metrics_get_num_generation_tokens",
     )?;
     let time_to_first_token_ms = metric_ms_pair(
         api,
-        metrics.as_ptr(),
+        metrics_ptr,
         api.get_ttft,
         "ov_genai_perf_metrics_get_ttft",
     )?;
     let tokens_per_second = metric_f32_pair(
         api,
-        metrics.as_ptr(),
+        metrics_ptr,
         api.get_throughput,
         "ov_genai_perf_metrics_get_throughput",
     )?;
     let total_time_ms = metric_ms_pair(
         api,
-        metrics.as_ptr(),
+        metrics_ptr,
         api.get_generate_duration,
         "ov_genai_perf_metrics_get_generate_duration",
     )?;
@@ -764,6 +796,7 @@ mod tests {
         let cpu_plugin = root.join("openvino_intel_cpu_plugin.dll");
         let ir_frontend = root.join("openvino_ir_frontend.dll");
         let openvino_genai_dll = root.join("openvino_genai.dll");
+        let openvino_genai_c_dll = root.join("openvino_genai_c.dll");
         let tokenizers_dll = root.join("openvino_tokenizers.dll");
         let tbb_dll = root.join("tbb12.dll");
         let tbbbind_dll = root.join("tbbbind_2_5.dll");
@@ -780,6 +813,7 @@ mod tests {
             &cpu_plugin,
             &ir_frontend,
             &openvino_genai_dll,
+            &openvino_genai_c_dll,
             &tokenizers_dll,
             &tbb_dll,
             &tbbbind_dll,
@@ -799,6 +833,7 @@ mod tests {
             RequiredRuntimeFile::new("openvino_intel_cpu_plugin.dll", cpu_plugin.clone()),
             RequiredRuntimeFile::new("openvino_ir_frontend.dll", ir_frontend.clone()),
             RequiredRuntimeFile::new("openvino_genai.dll", openvino_genai_dll.clone()),
+            RequiredRuntimeFile::new("openvino_genai_c.dll", openvino_genai_c_dll.clone()),
             RequiredRuntimeFile::new("openvino_tokenizers.dll", tokenizers_dll.clone()),
             RequiredRuntimeFile::new("tbb12.dll", tbb_dll.clone()),
             RequiredRuntimeFile::new("tbbbind_2_5.dll", tbbbind_dll.clone()),
@@ -830,6 +865,7 @@ mod tests {
             openvino_intel_cpu_plugin_dll: cpu_plugin,
             openvino_ir_frontend_dll: ir_frontend,
             openvino_genai_dll,
+            openvino_genai_c_dll,
             openvino_tokenizers_dll: tokenizers_dll,
             tbb_dll,
             tbbbind_dll,
