@@ -171,9 +171,12 @@ Teaching rules:
 
 		try {
 			const messagesPayload = buildStructuredMessages(content, historyBeforeMessage);
+			const isOpenVinoNpu = inferenceStore.status.activeBackend === 'openvino_npu';
 			const config: Partial<GenerationConfig> = {
-				max_length: 2048,
-				temperature: settingsStore.temperature,
+				// OpenVINO NPU runs are more stable with greedy decoding and a tighter default
+				// token budget; users can still continue generation explicitly from the UI.
+				max_length: isOpenVinoNpu ? 512 : 2048,
+				temperature: isOpenVinoNpu ? 0 : settingsStore.temperature,
 				top_k: 40,
 				top_p: 0.85,
 				repetition_penalty: 1.15,

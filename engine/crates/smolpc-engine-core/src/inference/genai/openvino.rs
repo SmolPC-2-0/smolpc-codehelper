@@ -63,6 +63,10 @@ struct OpenVinoGenAiApi {
         *const StreamerCallback,
         *mut *mut OvGenAiDecodedResults,
     ) -> OvStatus,
+    pipeline_get_generation_config: unsafe extern "C" fn(
+        *const OvGenAiLlmPipeline,
+        *mut *mut OvGenAiGenerationConfig,
+    ) -> OvStatus,
     create_json_container_from_json_string:
         unsafe extern "C" fn(*mut *mut OvGenAiJsonContainer, *const c_char) -> OvStatus,
     destroy_json_container: unsafe extern "C" fn(*mut OvGenAiJsonContainer),
@@ -123,6 +127,10 @@ impl OpenVinoGenAiApi {
                 pipeline_generate_with_history: load_symbol(
                     &openvino_genai_c,
                     b"ov_genai_llm_pipeline_generate_with_history\0",
+                )?,
+                pipeline_get_generation_config: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_llm_pipeline_get_generation_config\0",
                 )?,
                 create_json_container_from_json_string: load_symbol(
                     &openvino_genai_c,
@@ -454,7 +462,7 @@ impl OpenVinoGenAiGenerator {
             .lock()
             .map_err(|_| "OpenVINO GenAI state mutex poisoned".to_string())?;
         let config = create_generation_config(
-            &guard.api,
+            &guard,
             GenerationConfig {
                 max_length: 1,
                 temperature: 0.0,
@@ -565,11 +573,12 @@ fn generate_stream_blocking(
         .lock()
         .map_err(|_| "OpenVINO GenAI state mutex poisoned".to_string())?;
     let gen_config = clamp_max_new_tokens(gen_config, guard.max_new_tokens_cap);
-    let config = create_generation_config(&guard.api, gen_config, &guard.generation_controls)?;
+    let config = create_generation_config(&guard, gen_config, &guard.generation_controls)?;
     let start = Instant::now();
     let mut callback_state = StreamCallbackState {
         sender: token_tx,
         cancelled,
+        trailing_dot_run: 0,
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -589,12 +598,13 @@ fn generate_stream_with_history_blocking(
         .lock()
         .map_err(|_| "OpenVINO GenAI state mutex poisoned".to_string())?;
     let gen_config = clamp_max_new_tokens(gen_config, guard.max_new_tokens_cap);
-    let config = create_generation_config(&guard.api, gen_config, &guard.generation_controls)?;
+    let config = create_generation_config(&guard, gen_config, &guard.generation_controls)?;
     let history = create_chat_history(&guard.api, &messages, guard.disable_thinking)?;
     let start = Instant::now();
     let mut callback_state = StreamCallbackState {
         sender: token_tx,
         cancelled,
+        trailing_dot_run: 0,
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -610,16 +620,42 @@ fn generate_stream_with_history_blocking(
 }
 
 fn create_generation_config(
-    api: &Arc<OpenVinoGenAiApi>,
+    guard: &OpenVinoGenAiInner,
     config: GenerationConfig,
     controls: &OpenVinoGenerationControls,
 ) -> Result<OvOwned<OvGenAiGenerationConfig>, String> {
+    let api = &guard.api;
     let mut config_ptr: *mut OvGenAiGenerationConfig = ptr::null_mut();
-    check_status(
-        api,
-        unsafe { (api.create_generation_config)(&mut config_ptr) },
-        "ov_genai_generation_config_create",
-    )?;
+    let inherited = unsafe {
+        (api.pipeline_get_generation_config)(
+            guard.pipeline as *const OvGenAiLlmPipeline,
+            &mut config_ptr,
+        )
+    };
+    let inherited_from_pipeline = inherited == OV_STATUS_OK && !config_ptr.is_null();
+    if !inherited_from_pipeline {
+        if inherited != OV_STATUS_OK {
+            if let Err(error) = check_status(
+                api,
+                inherited,
+                "ov_genai_llm_pipeline_get_generation_config",
+            ) {
+                log::warn!(
+                    "{}; falling back to empty generation config initialization",
+                    error
+                );
+            }
+        } else {
+            log::warn!(
+                "ov_genai_llm_pipeline_get_generation_config returned null config; falling back to empty generation config initialization"
+            );
+        }
+        check_status(
+            api,
+            unsafe { (api.create_generation_config)(&mut config_ptr) },
+            "ov_genai_generation_config_create",
+        )?;
+    }
     let config_handle = OvOwned::new(Arc::clone(api), config_ptr, api.destroy_generation_config);
 
     check_status(
@@ -632,7 +668,7 @@ fn create_generation_config(
         unsafe { (api.set_max_new_tokens)(config_handle.as_ptr(), config.max_length) },
         "ov_genai_generation_config_set_max_new_tokens",
     )?;
-    if let Some(eos_token_id) = controls.eos_token_id {
+    if let Some(eos_token_id) = controls.eos_token_id.filter(|_| !inherited_from_pipeline) {
         check_status(
             api,
             unsafe { (api.set_eos_token_id)(config_handle.as_ptr(), eos_token_id) },
@@ -992,6 +1028,7 @@ fn fallback_metrics(started: Instant, total_tokens: usize) -> GenerationMetrics 
 struct StreamCallbackState {
     sender: UnboundedSender<String>,
     cancelled: Arc<AtomicBool>,
+    trailing_dot_run: usize,
 }
 
 unsafe extern "C" fn stream_callback(
@@ -1009,6 +1046,20 @@ unsafe extern "C" fn stream_callback(
 
     if !text.is_null() {
         let piece = c_string_to_string_verbatim(text);
+        for ch in piece.chars() {
+            if ch == '.' {
+                state.trailing_dot_run += 1;
+            } else if !ch.is_whitespace() {
+                state.trailing_dot_run = 0;
+            }
+        }
+        if state.trailing_dot_run >= 64 {
+            log::warn!(
+                "Stopping OpenVINO stream due to degenerate trailing dot run ({})",
+                state.trailing_dot_run
+            );
+            return OvGenAiStreamingStatus::Stop;
+        }
         if !piece.is_empty() && state.sender.send(piece).is_err() {
             return OvGenAiStreamingStatus::Stop;
         }
