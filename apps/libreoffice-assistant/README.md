@@ -2,7 +2,7 @@
 
 Planned app zone for LibreOffice assistant integration into the shared engine + launcher architecture.
 
-Primary migration guide:
+Primary migration guide (includes pre-merge vs post-merge launcher tracks):
 
 1. `docs/LIBREOFFICE_UNIFIED_LAUNCHER_PORTING_GUIDE.md`
 

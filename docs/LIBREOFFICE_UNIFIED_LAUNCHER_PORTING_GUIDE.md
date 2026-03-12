@@ -1,92 +1,150 @@
 # LibreOffice Assistant Porting Guide (Unified Launcher + Shared Engine)
 
-Status: Draft migration blueprint  
-Updated: 2026-03-10  
-Scope: Port `/Users/mts/smolpc/smolpc-libreoffice` into this monorepo under `apps/libreoffice-assistant` and launch it through the unified launcher flow.
+Status: Active migration plan (launcher-aware, merge-safe)  
+Updated: 2026-03-12  
+Scope: Port `/Users/mts/smolpc/smolpc-libreoffice` into this monorepo under `apps/libreoffice-assistant`, with launcher integration staged to avoid rework while launcher PRs are in flight.
 
-## 1. Goal and Boundaries
+## 1. Decision Summary
 
-This guide defines the concrete path to move the legacy LibreOffice app from an Ollama-era codebase to the SmolPC shared engine + launcher architecture.
+Proceed with LibreOffice migration now. Do not wait for launcher PR merge.
 
-Required boundaries:
+Execution model:
 
-1. Inference must use shared engine contract only (`smolpc-engine-client` for Rust/Tauri or documented `/engine/*` and `/v1/*` HTTP contract).
+1. Track A (start now): launcher-agnostic app migration work.
+2. Track B (after launcher branch settles): final launcher binding and manifest wiring.
+
+Reason:
+
+1. Most LibreOffice migration work is independent of launcher code location.
+2. Blocking would delay high-value engine/MCP hardening unnecessarily.
+3. Launcher-specific changes can be isolated to one late integration phase.
+
+## 2. Contract and Boundary Rules
+
+Hard constraints for this port:
+
+1. Inference must use shared engine contract only:
+   1. Preferred for Rust/Tauri: `smolpc-engine-client`.
+   2. Fallback only when needed: documented `/engine/*` and `/v1/*` HTTP endpoints.
 2. No app-local inference runtime ownership.
-3. No Ollama provider/runtime path in the LibreOffice app after cutover.
-4. LibreOffice app should be launchable via launcher manifest with engine readiness gate.
+3. No Ollama provider/runtime path in final LibreOffice app.
+4. LibreOffice tool/MCP bridge remains app-owned logic.
 
-Reference contract docs:
+Reference docs:
 
 1. `docs/APP_ONBOARDING_PLAYBOOK.md`
 2. `docs/ENGINE_API.md`
 3. `docs/SMOLPC_SUITE_INTEGRATION.md`
+4. `docs/ARCHITECTURE.md`
 
-## 2. Current Repository Reality (Important)
+## 3. Repository Snapshot (As of 2026-03-12)
 
-## 2.1 Launcher location today
+## 3.1 Stable on `main`
 
-Launcher orchestration is currently implemented inside CodeHelper backend:
+1. Launcher orchestration commands exist under CodeHelper backend:
+   1. `apps/codehelper/src-tauri/src/launcher/`
+   2. `apps/codehelper/src-tauri/src/commands/launcher.rs`
+2. Launcher manifest currently lives at:
+   1. `apps/codehelper/src-tauri/resources/launcher/apps.manifest.json`
+3. `apps/libreoffice-assistant` remains a staging root.
 
-1. `apps/codehelper/src-tauri/src/launcher/`
-2. `apps/codehelper/src-tauri/src/commands/launcher.rs`
-3. Manifest file: `apps/codehelper/src-tauri/resources/launcher/apps.manifest.json`
+## 3.2 In-flight launcher work
 
-`launcher/` zone is still the extraction target, not yet the active runtime implementation.
+PR `#53` (`review/launcher-exe-installer-work`) introduces a standalone `launcher/` app workspace and Blender onboarding, but is expected to be reworked before merge.
 
-## 2.2 LibreOffice app zone today
+Planning implication:
 
-`apps/libreoffice-assistant` currently exists as a skeleton root only.  
-No migrated frontend/backend code is present yet.
+1. Do not bind LibreOffice migration to the exact current PR #53 file set.
+2. Do design for eventual standalone launcher ownership.
+3. Keep launcher-specific work isolated so rebasing is cheap.
 
-## 2.3 Root `src-tauri/` review (explicitly requested)
+## 3.3 Root `src-tauri` residue
 
-Observed at monorepo root:
+Root `/src-tauri` is generated artifact residue (`target`, `gen/schemas`) and is not an app zone.
 
-1. `/src-tauri/gen/schemas/*`
-2. `/src-tauri/target/*`
-3. Approx size: `~2.8G`
+Rules:
 
-This directory is generated artifact output, not a workspace member and not a valid app home in this monorepo layout.  
-Do not port LibreOffice code into root `/src-tauri`.
+1. Do not place LibreOffice source in root `/src-tauri`.
+2. Keep LibreOffice source under `apps/libreoffice-assistant/...` only.
 
-Decision:
+## 4. Two-Track Migration Plan
 
-1. Treat root `/src-tauri` as local generated residue.
-2. Port into `apps/libreoffice-assistant/...` only.
-3. Keep build/test commands scoped to workspace paths.
+## Track A: Start Now (Launcher-Agnostic)
 
-## 3. Target End State
+These tasks can be implemented immediately with very low launcher rework risk:
 
-After migration, architecture should be:
+1. App scaffolding under `apps/libreoffice-assistant`.
+2. Workspace wiring:
+   1. add Rust crate member in root `Cargo.toml`
+   2. add npm workspace entry in root `package.json` when frontend is present
+3. Backend engine-only migration:
+   1. `smolpc-engine-client` integration
+   2. startup/status/load/generate/cancel flows
+4. MCP lifecycle hardening:
+   1. idempotent start
+   2. cleanup on init failure
+   3. JSON-RPC id correlation
+   4. timeout/thread safety
+5. Frontend migration to engine-only UX and recoverable startup states.
+6. Tests and evidence for onboarding checklist items not dependent on launcher manifest location.
 
-1. `apps/libreoffice-assistant/` contains LibreOffice app frontend + `src-tauri`.
-2. App backend uses `smolpc-engine-client` for engine lifecycle and inference calls.
-3. MCP/LibreOffice tool bridge remains app-owned logic (Python sidecar + tool orchestration), not engine-owned.
-4. Launcher manifest contains a `libreoffice-assistant` entry with `min_engine_api_major: 1`.
-5. LibreOffice app can be launched/focused by `launcher_launch_or_focus`.
+## Track B: Defer Until Launcher Settles
 
-## 4. Migration Strategy (Phased)
+Do after launcher branch merges or launcher shape is finalized:
 
-## Phase 0: Preflight and Hygiene
+1. Final manifest entry for LibreOffice app.
+2. Launch/focus command wiring for dev and packaged modes.
+3. End-to-end launcher UI verification for LibreOffice card and launch behavior.
+4. Any launcher-path-specific docs that depend on final merge structure.
 
-1. Confirm branch and local-only workflow.
-2. Keep root `/src-tauri` out of migration path.
-3. Confirm baseline compile state before introducing new app:
+## 5. Launcher Integration Matrix (Use This To Avoid Rework)
+
+Until launcher merge settles, treat manifest path as an environment-dependent target:
+
+1. Current `main` runtime path:
+   1. `apps/codehelper/src-tauri/resources/launcher/apps.manifest.json`
+2. Candidate post-merge path (if standalone launcher lands):
+   1. `launcher/src-tauri/resources/launcher/apps.manifest.json`
+
+Implementation rule:
+
+1. Keep LibreOffice launcher payload shape stable.
+2. Switch only file location and runtime owner when launcher finalizes.
+
+Recommended manifest payload for LibreOffice:
+
+```json
+{
+  "app_id": "libreoffice-assistant",
+  "display_name": "SmolPC LibreOffice Assistant",
+  "exe_path": "C:\\Program Files\\SmolPC\\LibreOffice Assistant\\SmolPC LibreOffice Assistant.exe",
+  "args": [],
+  "focus_command": null,
+  "min_engine_api_major": 1
+}
+```
+
+If final launcher schema supports `launch_command`, include it for dev convenience, but keep packaged `exe_path` canonical.
+
+## 6. Detailed Phases
+
+## Phase 0: Preflight
+
+1. Confirm local branch and local-only workflow.
+2. Confirm baseline commands:
    1. `cargo check --workspace`
    2. `npm run check`
-4. Capture legacy app baseline from `/Users/mts/smolpc/smolpc-libreoffice/tauri-app`.
+3. Snapshot legacy source:
+   1. `/Users/mts/smolpc/smolpc-libreoffice/tauri-app`
 
 ## Phase 1: Scaffold `apps/libreoffice-assistant`
 
-Create app as first-class monorepo app (not loose root artifacts):
-
-1. Add frontend app files under `apps/libreoffice-assistant/src`.
+1. Add frontend shell under `apps/libreoffice-assistant/src`.
 2. Add backend under `apps/libreoffice-assistant/src-tauri`.
-3. Add app package metadata (`package.json`, Vite/Svelte config if used).
-4. Add Rust crate to workspace in root `Cargo.toml`.
-5. Add npm workspace entry in root `package.json` when frontend build is ready.
+3. Add app package config and Tauri config.
+4. Wire workspace memberships.
 
-Recommended structure:
+Suggested layout:
 
 ```text
 apps/libreoffice-assistant/
@@ -104,167 +162,118 @@ apps/libreoffice-assistant/
       mcp_server/
 ```
 
-## Phase 2: Backend Port (Engine-Only)
+## Phase 2: Engine-Only Backend Port
 
-Port logic from legacy `tauri-app/src-tauri` with engine-only contract:
+1. Use `smolpc-engine-client` for engine lifecycle and generation.
+2. Remove provider branching (`ollama` vs engine).
+3. Implement required operations:
+   1. ensure started
+   2. status
+   3. list models
+   4. stream generation
+   5. cancel
+4. Implement required operational handling:
+   1. 429 queue full
+   2. 504 queue timeout
+   3. stream error codes (`INFERENCE_GENERATION_CANCELLED`, `ENGINE_STREAM_ERROR`)
+   4. metrics event handling
 
-1. Add `smolpc-engine-client` dependency to LibreOffice app crate.
-2. Implement `InferenceState`-style client resolver (reuse CodeHelper pattern):
-   1. `connect_or_spawn(...)`
-   2. shared runtime dir/token handling
-   3. startup mode/runtime preference handling if needed
-3. Remove provider abstraction (`ollama` vs engine) from LibreOffice app API.
-4. Replace provider-specific commands with engine-only commands.
+## Phase 3: MCP Hardening (Must Land During Port)
 
-Minimum command surface for LibreOffice app:
+1. Prevent duplicate MCP process spawn.
+2. Stop process on initialization failure.
+3. Validate response/request id matching.
+4. Eliminate timeout-driven thread leak patterns.
+5. Honor configured `python_path`.
+6. Ensure deterministic shutdown behavior.
 
-1. `engine_ensure_started` (or equivalent startup gate)
-2. `engine_status` (readiness + diagnostics)
-3. `list_models`
-4. streaming chat/generation path (tool-calling compatible)
-5. `cancel` passthrough for active generation
+## Phase 4: Frontend Engine-Only UX
 
-Engine contract behaviors to support:
-
-1. 429 queue full handling
-2. 504 queue timeout handling
-3. stream error payload handling (`INFERENCE_GENERATION_CANCELLED`, `ENGINE_STREAM_ERROR`)
-4. metrics event support (`chat.completion.metrics` / `smolpc_metrics`)
-
-## Phase 3: MCP Bridge Hardening During Port
-
-Legacy LibreOffice MCP path needs hardening while porting:
-
-1. Make MCP `start` idempotent (do not respawn if already running).
-2. On MCP init failure, stop/cleanup spawned process.
-3. Correlate JSON-RPC response `id` to request `id`.
-4. Avoid unbounded per-request reader-thread leak risk.
-5. Use configured `python_path` consistently instead of ignoring it.
-6. Keep a reliable shutdown path in `Drop` and explicit stop command.
-
-These fixes should land as part of port, not deferred.
-
-## Phase 4: Frontend Port (Engine-Only UX)
-
-Frontend rules:
-
-1. Remove provider selector and Ollama URLs from settings UI.
-2. Default config should be engine-first (shared engine URL/model baseline).
-3. Do not block user behind non-recoverable loading screen.
-   1. Settings/retry path must remain reachable when startup checks fail.
-4. Keep tool-call UX, but align with engine stream semantics.
-5. Display engine diagnostics fields from status:
+1. Remove Ollama settings and provider selector.
+2. Default to shared engine settings/model baseline.
+3. Keep settings/retry accessible even when startup checks fail.
+4. Align stream parsing with contract SSE semantics.
+5. Surface engine diagnostics:
    1. `active_backend`
    2. `selection_reason`
    3. `selected_device_name`
-   4. `state` / `error_code` / `retryable`
+   4. readiness/error fields
 
-## Phase 5: Launcher Integration
+## Phase 5: Launcher Binding (Track B)
 
-Add LibreOffice app entry to launcher manifest currently used by runtime:
+1. Add LibreOffice manifest entry in finalized launcher owner path.
+2. Validate launch/focus flow using `launcher_launch_or_focus`.
+3. Validate API major compatibility gating.
+4. Add launcher-specific test evidence.
 
-1. File: `apps/codehelper/src-tauri/resources/launcher/apps.manifest.json`
-2. Add new app object:
-   1. `app_id`: `libreoffice-assistant`
-   2. `display_name`: user-facing app name
-   3. `exe_path`: absolute install path
-   4. `args`: optional launch args
-   5. `focus_command`: optional command for focusing existing app window
-   6. `min_engine_api_major`: `1`
+## Phase 6: Packaging
 
-Example manifest entry:
+1. Bundle app-owned MCP resources in LibreOffice `tauri.conf.json`.
+2. Keep inference ownership in shared engine, not app.
+3. Ensure resource resolution works in dev and packaged modes.
 
-```json
-{
-  "app_id": "libreoffice-assistant",
-  "display_name": "SmolPC LibreOffice Assistant",
-  "exe_path": "C:\\Program Files\\SmolPC\\LibreOffice Assistant\\SmolPC LibreOffice Assistant.exe",
-  "args": [],
-  "focus_command": null,
-  "min_engine_api_major": 1
-}
-```
-
-Development note:
-
-1. Launcher supports `SMOLPC_LAUNCHER_MANIFEST` override.
-2. Use a dev manifest with local build output paths to test launch/focus before installer packaging.
-
-## Phase 6: Packaging and Resources
-
-For LibreOffice app packaging:
-
-1. Bundle app-owned MCP resources in its `src-tauri/tauri.conf.json`.
-2. Keep engine host ownership in shared engine flow (do not embed app-local inference runtime).
-3. Ensure resource resolution works in both dev and bundled modes.
-4. Keep Python/MCP startup scripts in one canonical location per app package to avoid duplicate drift.
-
-## Phase 7: Verification Matrix (Definition of Done)
+## 7. Verification Matrix
 
 Port is complete only when all checks pass.
 
-Engine onboarding checks:
+## 7.1 Engine and app checks (Track A)
 
-1. `GET /engine/health` success.
-2. `GET /engine/meta` protocol major compatible.
-3. `POST /engine/load` success for default model.
-4. non-stream generation success with metrics.
-5. stream generation success with token chunks + metrics + `[DONE]`.
-6. cancel path works (`/engine/cancel`).
-7. app handles 429 and 504 correctly.
+1. `GET /engine/health` returns success.
+2. `GET /engine/meta` returns protocol major compatible with app.
+3. `POST /engine/load` succeeds for baseline model.
+4. Non-stream generation succeeds and returns metrics.
+5. Stream generation emits tokens, metrics event, and `[DONE]`.
+6. Cancel flow succeeds.
+7. App correctly handles 429 and 504.
+8. MCP tool flow works end-to-end.
 
-LibreOffice app checks:
+## 7.2 Launcher checks (Track B)
 
-1. MCP server starts once and is reusable.
-2. MCP tool list loads and tool calls execute correctly.
-3. Document create/read/edit tool chain works end-to-end.
-4. App remains recoverable when dependencies are missing.
+1. Launcher lists LibreOffice app entry.
+2. Launch-or-focus launches when app is down.
+3. Launch-or-focus focuses when app is already running.
+4. Engine API major gate blocks incompatible launches.
 
-Launcher checks:
-
-1. `launcher_list_apps` returns LibreOffice entry.
-2. `launcher_launch_or_focus("libreoffice-assistant")` launches app when not running.
-3. Same call focuses existing app when already running.
-4. API major gate blocks launch on incompatible engine API version.
-
-CI/local commands (minimum):
+## 7.3 Commands
 
 1. `cargo check --workspace`
 2. `cargo test --workspace`
 3. `npm run check`
 4. `npm run boundary:check`
 
-## 5. Legacy-to-Target Mapping
+## 8. Legacy-to-Target Mapping
 
-Map from legacy repo (`/Users/mts/smolpc/smolpc-libreoffice/tauri-app`) to monorepo target:
+Source legacy repo:
+
+1. `/Users/mts/smolpc/smolpc-libreoffice/tauri-app`
+
+Mapping:
 
 | Legacy area | Target area | Migration action |
 | --- | --- | --- |
 | `src-tauri/src/commands/ai.rs` | `apps/libreoffice-assistant/src-tauri/src/commands/ai.rs` | Keep chat orchestration, remove provider branching, make engine-only |
-| `src-tauri/src/services/smolpc_engine_service.rs` | `apps/libreoffice-assistant/src-tauri/src/services/` | Prefer `smolpc-engine-client`; only keep custom parser logic if truly required |
-| `src-tauri/src/services/mcp_client.rs` | `apps/libreoffice-assistant/src-tauri/src/services/mcp_client.rs` | Port with lifecycle/id-correlation fixes |
-| `src-tauri/src/commands/system.rs` | `apps/libreoffice-assistant/src-tauri/src/commands/system.rs` | Remove Ollama checks and legacy messages |
-| `src/lib/components/SettingsPage.svelte` | `apps/libreoffice-assistant/src/lib/components/` | Remove provider selector, expose engine-only settings + diagnostics |
-| `resources/mcp_server/*` | `apps/libreoffice-assistant/src-tauri/resources/mcp_server/*` | Keep as app-owned resources, unify start scripts |
+| `src-tauri/src/services/smolpc_engine_service.rs` | `apps/libreoffice-assistant/src-tauri/src/services/` | Prefer `smolpc-engine-client`; retain custom parsing only if required |
+| `src-tauri/src/services/mcp_client.rs` | `apps/libreoffice-assistant/src-tauri/src/services/mcp_client.rs` | Port with lifecycle and RPC-correlation fixes |
+| `src-tauri/src/commands/system.rs` | `apps/libreoffice-assistant/src-tauri/src/commands/system.rs` | Remove Ollama checks/messages |
+| `src/lib/components/SettingsPage.svelte` | `apps/libreoffice-assistant/src/lib/components/` | Convert to engine-only settings and diagnostics |
+| `resources/mcp_server/*` | `apps/libreoffice-assistant/src-tauri/resources/mcp_server/*` | Keep app-owned; unify startup path |
 
-## 6. Recommended PR Slices
+## 9. Recommended PR Slices
 
-Use small, reviewable slices:
+1. PR-1 scaffolding + workspace wiring.
+2. PR-2 engine-only backend port.
+3. PR-3 MCP hardening.
+4. PR-4 frontend engine-only migration.
+5. PR-5 launcher binding in finalized launcher path.
+6. PR-6 cleanup/docs/final validation evidence.
 
-1. PR-1 scaffolding (`apps/libreoffice-assistant` structure + workspace wiring).
-2. PR-2 backend engine-only port (no frontend changes yet).
-3. PR-3 MCP lifecycle hardening.
-4. PR-4 frontend migration to engine-only UX.
-5. PR-5 launcher manifest integration + launch/focus tests.
-6. PR-6 docs and final cleanup of legacy/Ollama leftovers.
+## 10. Explicit No-Ollama Rule
 
-## 7. Explicit No-Ollama Rule for This Port
-
-For LibreOffice app migration, treat all Ollama code as legacy and remove/avoid it in target implementation:
+For LibreOffice final state:
 
 1. No Ollama provider enum branch.
-2. No Ollama health check in dependency gate.
-3. No Ollama URL/model settings fields in final UI/config.
-4. No Ollama-specific command modules in final LibreOffice app crate.
+2. No Ollama health gate.
+3. No Ollama URL/model settings in UI.
+4. No Ollama command modules in LibreOffice backend.
 
-If temporary compatibility code is needed during transition, keep it behind short-lived migration commits and remove before merge to main.
+Temporary migration shims are acceptable only in short-lived intermediate commits and must be removed before merge to `main`.
