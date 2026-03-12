@@ -1,16 +1,15 @@
 #![cfg_attr(mobile, tauri::mobile_entry_point)]
 
-mod commands;
-mod llm_client;
-mod macros;
 mod mcp;
-mod plan_execute;
-mod plan_llm;
+mod llm_client;
+mod macros; 
 mod plan_schema;
 mod plan_validate;
+mod plan_execute;
+mod commands;
+mod plan_llm;
 
 use serde_json::{json, Value};
-use std::process::Command;
 
 use serde::Serialize;
 #[derive(Serialize)]
@@ -22,22 +21,7 @@ struct HealthStatus {
     errors: Vec<String>,
 }
 
-#[tauri::command]
-fn start_gimp_mcp_server() -> Result<(), String> {
-    // Update this path to where gimp_mcp_server.py lives on your machine
-    // Example for Windows:
-    let gimp_mcp_dir = "/Users/aishah/gimp-mcp";
 
-    Command::new("uv")
-        .arg("run")
-        .arg("--directory")
-        .arg(gimp_mcp_dir)
-        .arg("gimp_mcp_server.py")
-        .spawn()
-        .map_err(|e| format!("Failed to start gimp_mcp_server.py: {e}"))?;
-
-    Ok(())
-}
 
 #[tauri::command]
 fn mcp_list_tools() -> Result<Value, String> {
@@ -54,45 +38,20 @@ fn mcp_call_tool(name: String, arguments: Value) -> Result<Value, String> {
 /// by GEGL in this version and return garbage values — use hex instead.
 /// Defaults to "blue" if no recognised colour is found.
 fn extract_color(lower: &str) -> &'static str {
-    if lower.contains("red") {
-        "red"
-    } else if lower.contains("blue") {
-        "blue"
-    } else if lower.contains("green") {
-        "green"
-    } else if lower.contains("yellow") {
-        "yellow"
-    } else if lower.contains("orange") {
-        "#FFA500"
-    }
-    // "orange" broken in GEGL
-    else if lower.contains("purple") {
-        "purple"
-    } else if lower.contains("pink") {
-        "#FF69B4"
-    }
-    // "pink" broken in GEGL
-    else if lower.contains("cyan") {
-        "#00FFFF"
-    }
-    // "cyan" returns wrong alpha
-    else if lower.contains("magenta") {
-        "#FF00FF"
-    }
-    // "magenta" broken in GEGL
-    else if lower.contains("brown") {
-        "#8B4513"
-    }
-    // "brown" broken in GEGL
-    else if lower.contains("grey") || lower.contains("gray") {
-        "gray"
-    } else if lower.contains("black") {
-        "black"
-    } else if lower.contains("white") {
-        "white"
-    } else {
-        "blue"
-    }
+    if lower.contains("red")     { "red" }
+    else if lower.contains("blue")    { "blue" }
+    else if lower.contains("green")   { "green" }
+    else if lower.contains("yellow")  { "yellow" }
+    else if lower.contains("orange")  { "#FFA500" }   // "orange" broken in GEGL
+    else if lower.contains("purple")  { "purple" }
+    else if lower.contains("pink")    { "#FF69B4" }   // "pink" broken in GEGL
+    else if lower.contains("cyan")    { "#00FFFF" }   // "cyan" returns wrong alpha
+    else if lower.contains("magenta") { "#FF00FF" }   // "magenta" broken in GEGL
+    else if lower.contains("brown")   { "#8B4513" }   // "brown" broken in GEGL
+    else if lower.contains("grey") || lower.contains("gray") { "gray" }
+    else if lower.contains("black")   { "black" }
+    else if lower.contains("white")   { "white" }
+    else { "blue" }
 }
 
 /// Detect a spatial region ("top", "bottom", "left", "right") in a lowercase prompt.
@@ -104,34 +63,14 @@ fn extract_region(lower: &str) -> Option<&'static str> {
         || lower.contains("section")
         || lower.contains("portion")
         || lower.contains("area");
-    if !has_scope {
-        return None;
-    }
-    if lower.contains("top") {
-        Some("top")
-    } else if lower.contains("bottom") {
-        Some("bottom")
-    } else if lower.contains("left") {
-        Some("left")
-    } else if lower.contains("right") {
-        Some("right")
-    } else {
-        None
-    }
+    if !has_scope { return None; }
+    if lower.contains("top")    { Some("top") }
+    else if lower.contains("bottom") { Some("bottom") }
+    else if lower.contains("left")   { Some("left") }
+    else if lower.contains("right")  { Some("right") }
+    else { None }
 }
 
-/// Call an MCP tool from a macro payload `{ "name": "...", "arguments": {...} }`.
-fn run_macro(payload: Value) -> Result<Value, String> {
-    let tool_name = payload
-        .get("name")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "Macro payload missing 'name'".to_string())?;
-    let arguments = payload
-        .get("arguments")
-        .cloned()
-        .ok_or_else(|| "Macro payload missing 'arguments'".to_string())?;
-    mcp::call_tool(tool_name, arguments)
-}
 
 #[tauri::command]
 async fn assistant_request(prompt: String) -> Result<Value, String> {
@@ -151,7 +90,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
             || lower_prompt.contains("make")
             || lower_prompt.contains("black"));
     if wants_line {
-        run_macro(macros::draw_line_across_image())?;
+        plan_execute::run_payload(macros::draw_line_across_image())?;
         return Ok(json!({
             "reply": "Done! Added a black line across the image.",
             "explain": "To do this yourself in GIMP: pick the Pencil tool (press N). Hold Shift and click two points on the canvas — GIMP draws a straight line between them.",
@@ -162,7 +101,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
     // Fast Path: Draw heart — extract colour from the prompt, default to pink
     if lower_prompt.contains("heart") {
         let color = extract_color(&lower_prompt);
-        run_macro(macros::draw_heart(color))?;
+        plan_execute::run_payload(macros::draw_heart(color))?;
         return Ok(json!({
             "reply": format!("Done! Added a {} heart to the image.", color),
             "explain": "To do this yourself in GIMP: use the Ellipse Select tool (press E) to draw two overlapping circles for the bumps, then the Rectangle Select tool (press R) for the body. Fill each selection with Edit → Fill with Foreground Color. Press Shift+Ctrl+A to deselect when done.",
@@ -173,7 +112,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
     // Fast Path: Draw circle
     if lower_prompt.contains("circle") {
         let color = extract_color(&lower_prompt);
-        run_macro(macros::draw_circle(color))?;
+        plan_execute::run_payload(macros::draw_circle(color))?;
         return Ok(json!({
             "reply": format!("Done! Added a {} circle to the image.", color),
             "explain": "To do this yourself in GIMP: choose the Ellipse Select tool (press E). Hold Shift while dragging to make a perfect circle. Then go to Edit → Fill with Foreground Color. Press Shift+Ctrl+A to deselect.",
@@ -184,7 +123,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
     // Fast Path: Draw oval / ellipse
     if lower_prompt.contains("oval") || lower_prompt.contains("ellipse") {
         let color = extract_color(&lower_prompt);
-        run_macro(macros::draw_oval(color))?;
+        plan_execute::run_payload(macros::draw_oval(color))?;
         return Ok(json!({
             "reply": format!("Done! Added a {} oval to the image.", color),
             "explain": "To do this yourself in GIMP: choose the Ellipse Select tool (press E) and drag to draw an oval shape. Then go to Edit → Fill with Foreground Color. Press Shift+Ctrl+A to deselect.",
@@ -195,7 +134,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
     // Fast Path: Draw triangle
     if lower_prompt.contains("triangle") {
         let color = extract_color(&lower_prompt);
-        run_macro(macros::draw_triangle(color))?;
+        plan_execute::run_payload(macros::draw_triangle(color))?;
         return Ok(json!({
             "reply": format!("Done! Added a {} triangle to the image.", color),
             "explain": "To do this yourself in GIMP: use the Free Select tool (press F) and click three points to draw a triangle outline. Then fill it with Edit → Fill with Foreground Color.",
@@ -209,7 +148,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
         && !lower_prompt.contains("resize");
     if wants_draw_rect {
         let color = extract_color(&lower_prompt);
-        run_macro(macros::draw_filled_rect(color))?;
+        plan_execute::run_payload(macros::draw_filled_rect(color))?;
         return Ok(json!({
             "reply": format!("Done! Added a {} rectangle to the image.", color),
             "explain": "To do this yourself in GIMP: choose the Rectangle Select tool (press R) and drag to draw a rectangle. Then go to Edit → Fill with Foreground Color. Press Shift+Ctrl+A to deselect.",
@@ -219,14 +158,12 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
 
     // Fast Path: Draw filled square-as-shape (contains "square" + draw verb, not crop/resize)
     let wants_draw_square = lower_prompt.contains("square")
-        && (lower_prompt.contains("draw")
-            || lower_prompt.contains("add")
-            || lower_prompt.contains("paint"))
+        && (lower_prompt.contains("draw") || lower_prompt.contains("add") || lower_prompt.contains("paint"))
         && !lower_prompt.contains("crop")
         && !lower_prompt.contains("resize");
     if wants_draw_square {
         let color = extract_color(&lower_prompt);
-        run_macro(macros::draw_filled_rect(color))?;
+        plan_execute::run_payload(macros::draw_filled_rect(color))?;
         return Ok(json!({
             "reply": format!("Done! Added a {} square to the image.", color),
             "explain": "To do this yourself in GIMP: choose the Rectangle Select tool (press R), hold Shift while dragging to make a perfect square. Then go to Edit → Fill with Foreground Color. Press Shift+Ctrl+A to deselect.",
@@ -237,42 +174,31 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
     // Fast Path: Selection-aware operations (e.g. "blur the top half", "brighten the bottom half")
     if let Some(region) = extract_region(&lower_prompt) {
         let region_label = match region {
-            "top" => "top half",
+            "top"    => "top half",
             "bottom" => "bottom half",
-            "left" => "left half",
-            "right" => "right half",
-            _ => region,
+            "left"   => "left half",
+            "right"  => "right half",
+            _        => region,
         };
         let wants_brighter_region = lower_prompt.contains("bright")
-            && (lower_prompt.contains("increase")
-                || lower_prompt.contains("boost")
-                || lower_prompt.contains("more")
-                || lower_prompt.contains("brighter")
-                || lower_prompt.contains("raise")
-                || lower_prompt.contains("up"));
+            && (lower_prompt.contains("increase") || lower_prompt.contains("boost")
+                || lower_prompt.contains("more") || lower_prompt.contains("brighter")
+                || lower_prompt.contains("raise") || lower_prompt.contains("up"));
         let wants_darker_region = (lower_prompt.contains("dark") || lower_prompt.contains("dim"))
-            && (lower_prompt.contains("more")
-                || lower_prompt.contains("darker")
-                || lower_prompt.contains("decrease")
-                || lower_prompt.contains("less")
-                || lower_prompt.contains("lower")
-                || lower_prompt.contains("reduce"));
+            && (lower_prompt.contains("more") || lower_prompt.contains("darker")
+                || lower_prompt.contains("decrease") || lower_prompt.contains("less")
+                || lower_prompt.contains("lower") || lower_prompt.contains("reduce"));
         let wants_more_contrast_region = lower_prompt.contains("contrast")
-            && (lower_prompt.contains("increase")
-                || lower_prompt.contains("more")
-                || lower_prompt.contains("boost")
-                || lower_prompt.contains("up"));
+            && (lower_prompt.contains("increase") || lower_prompt.contains("more")
+                || lower_prompt.contains("boost") || lower_prompt.contains("up"));
         let wants_less_contrast_region = lower_prompt.contains("contrast")
-            && (lower_prompt.contains("decrease")
-                || lower_prompt.contains("less")
-                || lower_prompt.contains("reduce")
-                || lower_prompt.contains("down"));
+            && (lower_prompt.contains("decrease") || lower_prompt.contains("less")
+                || lower_prompt.contains("reduce") || lower_prompt.contains("down"));
         let wants_blur_region = lower_prompt.contains("blur")
-            && !lower_prompt.contains("unblur")
-            && !lower_prompt.contains("sharpen");
+            && !lower_prompt.contains("unblur") && !lower_prompt.contains("sharpen");
 
         if wants_brighter_region {
-            run_macro(macros::brightness_contrast_region(70.0, 0.0, region))?;
+            plan_execute::run_payload(macros::brightness_contrast_region(70.0, 0.0, region))?;
             return Ok(json!({
                 "reply": format!("Done! Brightened the {}.", region_label),
                 "explain": format!("To do this yourself in GIMP: choose the Rectangle Select tool (press R) and drag to select the {} of the image. Then go to Colors → Brightness-Contrast and drag the Brightness slider to the right. Click OK, then press Shift+Ctrl+A to deselect.", region_label),
@@ -280,7 +206,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
             }));
         }
         if wants_darker_region {
-            run_macro(macros::brightness_contrast_region(-70.0, 0.0, region))?;
+            plan_execute::run_payload(macros::brightness_contrast_region(-70.0, 0.0, region))?;
             return Ok(json!({
                 "reply": format!("Done! Darkened the {}.", region_label),
                 "explain": format!("To do this yourself in GIMP: choose the Rectangle Select tool (press R) and drag to select the {} of the image. Then go to Colors → Brightness-Contrast and drag the Brightness slider to the left. Click OK, then press Shift+Ctrl+A to deselect.", region_label),
@@ -288,7 +214,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
             }));
         }
         if wants_more_contrast_region {
-            run_macro(macros::brightness_contrast_region(0.0, 70.0, region))?;
+            plan_execute::run_payload(macros::brightness_contrast_region(0.0, 70.0, region))?;
             return Ok(json!({
                 "reply": format!("Done! Increased contrast in the {}.", region_label),
                 "explain": format!("To do this yourself in GIMP: choose the Rectangle Select tool (press R) and drag to select the {} of the image. Then go to Colors → Brightness-Contrast and drag the Contrast slider to the right. Click OK, then press Shift+Ctrl+A to deselect.", region_label),
@@ -296,7 +222,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
             }));
         }
         if wants_less_contrast_region {
-            run_macro(macros::brightness_contrast_region(0.0, -70.0, region))?;
+            plan_execute::run_payload(macros::brightness_contrast_region(0.0, -70.0, region))?;
             return Ok(json!({
                 "reply": format!("Done! Decreased contrast in the {}.", region_label),
                 "explain": format!("To do this yourself in GIMP: choose the Rectangle Select tool (press R) and drag to select the {} of the image. Then go to Colors → Brightness-Contrast and drag the Contrast slider to the left. Click OK, then press Shift+Ctrl+A to deselect.", region_label),
@@ -304,7 +230,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
             }));
         }
         if wants_blur_region {
-            run_macro(macros::blur_region(10.0, region))?;
+            plan_execute::run_payload(macros::blur_region(10.0, region))?;
             return Ok(json!({
                 "reply": format!("Done! Blurred the {}.", region_label),
                 "explain": format!("To do this yourself in GIMP: choose the Rectangle Select tool (press R) and drag to select the {} of the image. Then go to Filters → Blur → Gaussian Blur, set the size to around 10, and click OK. Press Shift+Ctrl+A to deselect.", region_label),
@@ -323,7 +249,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
             || lower_prompt.contains("higher")
             || lower_prompt.contains("up"));
     if wants_brighter {
-        run_macro(macros::brightness_contrast(70.0, 0.0))?;
+        plan_execute::run_payload(macros::brightness_contrast(70.0, 0.0))?;
         return Ok(json!({
             "reply": "Done! Increased the brightness.",
             "explain": "To do this yourself in GIMP: go to Colors → Brightness-Contrast. Drag the Brightness slider to the right (try around +70). Click OK.",
@@ -346,7 +272,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
             || lower_prompt.contains("lower")
             || lower_prompt.contains("down"));
     if wants_darker || wants_brightness_decrease {
-        run_macro(macros::brightness_contrast(-70.0, 0.0))?;
+        plan_execute::run_payload(macros::brightness_contrast(-70.0, 0.0))?;
         return Ok(json!({
             "reply": "Done! Decreased the brightness.",
             "explain": "To do this yourself in GIMP: go to Colors → Brightness-Contrast. Drag the Brightness slider to the left (try around −70). Click OK.",
@@ -362,7 +288,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
             || lower_prompt.contains("higher")
             || lower_prompt.contains("up"));
     if wants_more_contrast {
-        run_macro(macros::brightness_contrast(0.0, 70.0))?;
+        plan_execute::run_payload(macros::brightness_contrast(0.0, 70.0))?;
         return Ok(json!({
             "reply": "Done! Increased the contrast.",
             "explain": "To do this yourself in GIMP: go to Colors → Brightness-Contrast. Drag the Contrast slider to the right (try around +70). Click OK.",
@@ -378,7 +304,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
             || lower_prompt.contains("lower")
             || lower_prompt.contains("down"));
     if wants_less_contrast {
-        run_macro(macros::brightness_contrast(0.0, -70.0))?;
+        plan_execute::run_payload(macros::brightness_contrast(0.0, -70.0))?;
         return Ok(json!({
             "reply": "Done! Decreased the contrast.",
             "explain": "To do this yourself in GIMP: go to Colors → Brightness-Contrast. Drag the Contrast slider to the left (try around −70). Click OK.",
@@ -392,7 +318,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
         && !lower_prompt.contains("remove blur")
         && !lower_prompt.contains("sharpen");
     if wants_blur {
-        run_macro(macros::blur(10.0))?;
+        plan_execute::run_payload(macros::blur(10.0))?;
         return Ok(json!({
             "reply": "Done! Applied a blur to the image.",
             "explain": "To do this yourself in GIMP: go to Filters → Blur → Gaussian Blur. Increase the Size value (try 5–10 pixels) and click OK.",
@@ -402,7 +328,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
 
     // Fast Path: Undo
     if lower_prompt == "undo" || lower_prompt.starts_with("undo ") || lower_prompt == "undo last" {
-        run_macro(macros::undo())?;
+        plan_execute::run_payload(macros::undo())?;
         return Ok(json!({
             "reply": "↩ Last change undone.",
             "explain": "To undo in GIMP yourself: press Ctrl+Z (or Cmd+Z on Mac), or go to Edit → Undo.",
@@ -453,11 +379,7 @@ User request: {user}
 
     let selection_raw = match llm_client::chat(&selector_prompt).await {
         Ok(r) => r,
-        Err(e)
-            if e.contains("localhost:11434")
-                || e.contains("connection refused")
-                || e.contains("error sending request") =>
-        {
+        Err(e) if e.contains("localhost:11434") || e.contains("connection refused") || e.contains("error sending request") => {
             return Ok(json!({
                 "reply": "I don't recognise that command yet, and Ollama isn't running so I can't handle custom requests.\n\nStart Ollama with:\n  ollama serve\n\nOr try one of the built-in commands: draw a circle, blur the image, increase brightness, draw a red heart, blur the top half.",
                 "undoable": false, "plan": {}, "tool_results": []
@@ -469,14 +391,13 @@ User request: {user}
     // Strip prefix before first '{' and suffix after last '}' (handles markdown fences)
     let sel_start = selection_raw.find('{').unwrap_or(0);
     let sel_substr = &selection_raw[sel_start..];
-    let sel_end = sel_substr
-        .rfind('}')
-        .map(|i| i + 1)
-        .unwrap_or(sel_substr.len());
+    let sel_end = sel_substr.rfind('}').map(|i| i + 1).unwrap_or(sel_substr.len());
     let selection_str = &sel_substr[..sel_end];
 
     let selection: Value = serde_json::from_str(selection_str).map_err(|e| {
-        format!("Failed to parse tool selection JSON: {e}\nLLM output was: {selection_raw}")
+        format!(
+            "Failed to parse tool selection JSON: {e}\nLLM output was: {selection_raw}"
+        )
     })?;
 
     let selected_tool = selection
@@ -676,14 +597,12 @@ EXAMPLE — rotate the image 90 degrees clockwise:
         // (handles markdown fences like ```json ... ``` wrapping the output)
         let json_start = plan_raw.find('{').unwrap_or(0);
         let json_substr = &plan_raw[json_start..];
-        let json_end = json_substr
-            .rfind('}')
-            .map(|i| i + 1)
-            .unwrap_or(json_substr.len());
+        let json_end = json_substr.rfind('}').map(|i| i + 1).unwrap_or(json_substr.len());
         let plan_str = &json_substr[..json_end];
 
-        serde_json::from_str(plan_str)
-            .map_err(|e| format!("Failed to parse plan JSON: {e}\nLLM output was: {plan_raw}"))?
+        serde_json::from_str(plan_str).map_err(|e| {
+            format!("Failed to parse plan JSON: {e}\nLLM output was: {plan_raw}")
+        })?
     } else {
         // Simple one step plan
         json!({
@@ -713,7 +632,10 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                 .unwrap_or("")
                 .to_string();
 
-            let arguments = step.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let arguments = step
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
 
             let result = mcp::call_tool(&tool_name, arguments.clone())
                 .map(|val| val)
@@ -832,8 +754,14 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                     let basic = meta.get("basic").unwrap_or(&Value::Null);
                     let file = meta.get("file").unwrap_or(&Value::Null);
 
-                    let width = basic.get("width").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let height = basic.get("height").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let width = basic
+                        .get("width")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+                    let height = basic
+                        .get("height")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
                     let base_type = basic
                         .get("base_type")
                         .and_then(|v| v.as_str())
@@ -883,11 +811,14 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                 .and_then(|sc| sc.get("result"))
                 .and_then(|r| r.as_str());
 
-            let looks_like_error = text_msg.map_or(false, |t| t.starts_with("Error:"))
-                || structured_result.map_or(false, |t| t.starts_with("Error:"));
+            let looks_like_error =
+                text_msg.map_or(false, |t| t.starts_with("Error:"))
+                    || structured_result.map_or(false, |t| t.starts_with("Error:"));
 
             if is_error_flag || looks_like_error {
-                let msg = structured_result.or(text_msg).unwrap_or("Unknown error");
+                let msg = structured_result
+                    .or(text_msg)
+                    .unwrap_or("Unknown error");
 
                 // Extract the generated Python lines for debugging
                 let python_preview = arguments_val
@@ -896,8 +827,7 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                     .and_then(|a| a.get(1))
                     .and_then(|v| v.as_array())
                     .map(|lines| {
-                        lines
-                            .iter()
+                        lines.iter()
                             .filter_map(|l| l.as_str())
                             .collect::<Vec<_>>()
                             .join("\n  ")
@@ -907,9 +837,7 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                 reply_text = if python_preview.is_empty() {
                     format!("GIMP returned an error: {msg}")
                 } else {
-                    format!(
-                        "GIMP returned an error: {msg}\n\nGenerated Python:\n  {python_preview}"
-                    )
+                    format!("GIMP returned an error: {msg}\n\nGenerated Python:\n  {python_preview}")
                 };
                 continue;
             }
@@ -987,7 +915,7 @@ async fn test_basic_mcp() -> String {
     }
 
     // --- Test 2: get image metadata ---
-    match mcp_list_tools() {
+    match mcp_list_tools(){
         Ok(meta) => {
             output.push_str("Image metadata:\n");
             output.push_str(&format!("{:#?}\n", meta));
@@ -1106,10 +1034,10 @@ fn macro_undo() -> Result<serde_json::Value, String> {
     mcp::call_tool(tool_name, arguments)
 }
 
+
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            start_gimp_mcp_server,
             mcp_list_tools,
             mcp_call_tool,
             assistant_request,
@@ -1122,6 +1050,7 @@ pub fn run() {
             macro_blur,
             macro_undo,
             commands::run_action_plan,
+
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

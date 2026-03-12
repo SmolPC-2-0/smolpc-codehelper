@@ -13,6 +13,8 @@ pub struct StepResult {
     pub raw: Option<Value>,
 }
 
+
+
 /// Execute a plan sequentially using deterministic macros.
 /// Returns per-step results for UI/debug.
 pub fn execute_plan(plan: ActionPlan) -> Result<Vec<StepResult>, String> {
@@ -40,10 +42,7 @@ pub fn execute_plan(plan: ActionPlan) -> Result<Vec<StepResult>, String> {
                 run_payload(payload)
             }
 
-            ValidatedParams::BrightnessContrast {
-                brightness,
-                contrast,
-            } => {
+            ValidatedParams::BrightnessContrast { brightness, contrast } => {
                 let payload = crate::macros::brightness_contrast(brightness, contrast);
                 run_payload(payload)
             }
@@ -58,16 +57,14 @@ pub fn execute_plan(plan: ActionPlan) -> Result<Vec<StepResult>, String> {
                 for _ in 0..steps {
                     let payload = crate::macros::undo();
                     result = run_payload(payload);
-                    if result.is_err() {
-                        break;
-                    }
+                    if result.is_err() { break; }
                 }
                 result
             }
 
-            ValidatedParams::Redo { steps } => Err(format!(
-                "Redo not implemented yet (requested steps={steps})"
-            )),
+            ValidatedParams::Redo { steps } => {
+                Err(format!("Redo not implemented yet (requested steps={steps})"))
+            }
         };
 
         match exec_result {
@@ -96,7 +93,7 @@ pub fn execute_plan(plan: ActionPlan) -> Result<Vec<StepResult>, String> {
 
 /// Helper: execute a macro payload shaped like:
 /// { "name": "call_api", "arguments": {...} }
-fn run_payload(payload: Value) -> Result<Value, String> {
+pub fn run_payload(payload: Value) -> Result<Value, String> {
     let tool_name = payload
         .get("name")
         .and_then(|v| v.as_str())

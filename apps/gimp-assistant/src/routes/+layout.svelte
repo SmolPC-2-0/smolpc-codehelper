@@ -1,8 +1,8 @@
 <script lang="ts">
-	import '../app.css';
+  import "../app.css";
 
-	// Needed so Svelte accepts data from +layout.ts
-	export let data;
+  // Needed so Svelte accepts data from +layout.ts
+  export let data;
 </script>
 
 <slot />
