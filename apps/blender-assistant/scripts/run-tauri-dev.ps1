@@ -1,7 +1,8 @@
 param(
     [ValidateSet("none", "cpu", "dml")]
     [string]$ForceEp = "none",
-    [int]$DeviceId = -1
+    [int]$DeviceId = -1,
+    [switch]$ReuseEngine
 )
 
 $ErrorActionPreference = "Stop"
@@ -167,7 +168,7 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $appRoot = Split-Path -Parent $scriptRoot
 $appsDir = Split-Path -Parent $appRoot
 $repoRoot = Split-Path -Parent $appsDir
-$cargoTargetDir = Join-Path $env:LOCALAPPDATA "SmolPC\cargo-target\blender-assistant"
+$cargoTargetDir = Join-Path $repoRoot "target\blender-assistant"
 $hostBinary = Join-Path $cargoTargetDir "debug\smolpc-engine-host.exe"
 
 New-Item -ItemType Directory -Force -Path $cargoTargetDir | Out-Null
@@ -175,7 +176,11 @@ $env:CARGO_TARGET_DIR = $cargoTargetDir
 Write-Host "Using CARGO_TARGET_DIR=$cargoTargetDir"
 
 Ensure-RuntimeLibs -AppRoot $appRoot -ScriptRoot $scriptRoot
-Request-EngineShutdown
+if ($ReuseEngine) {
+    Write-Host "Reusing existing engine host if available (no forced restart)."
+} else {
+    Request-EngineShutdown
+}
 Assert-PortAvailable -Port 1420 -ServiceName "Vite dev server"
 Assert-PortAvailable -Port 5179 -ServiceName "Scene bridge"
 
@@ -195,7 +200,11 @@ if (!(Test-Path $hostBinary)) {
 }
 
 $env:SMOLPC_ENGINE_HOST_BIN = $hostBinary
-$env:SMOLPC_ENGINE_DEV_FORCE_RESPAWN = "1"
+if ($ReuseEngine) {
+    Clear-EnvVar -Name "SMOLPC_ENGINE_DEV_FORCE_RESPAWN"
+} else {
+    $env:SMOLPC_ENGINE_DEV_FORCE_RESPAWN = "1"
+}
 
 switch ($ForceEp) {
     "cpu" {

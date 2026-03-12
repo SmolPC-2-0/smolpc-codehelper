@@ -1,0 +1,22 @@
+{
+  "apps": [
+    {
+      "app_id": "codehelper",
+      "display_name": "Code Helper",
+      "icon": "icons/codehelper.png",
+      "exe_path": "C:\\Users\\siddh\\Desktop\\smolpc-codehelper\\target\\release\\smolpc-code-helper.exe",
+      "args": [],
+      "focus_command": null,
+      "min_engine_api_major": 1
+    },
+    {
+      "app_id": "blender-helper",
+      "display_name": "Blender Learning Assistant",
+      "icon": null,
+      "exe_path": "C:\\Users\\siddh\\Desktop\\smolpc-codehelper\\target\\blender-assistant\\release\\blender_helper.exe",
+      "args": [],
+      "focus_command": null,
+      "min_engine_api_major": 1
+    }
+  ]
+}

@@ -19,6 +19,8 @@ dist-ssr
 .env.*
 !.env.example
 /target/
+/src-tauri/target/
+/src-tauri/gen/
 /apps/codehelper/src-tauri/target/
 /apps/codehelper/src-tauri/gen/schemas
 /docs/.local_docs/

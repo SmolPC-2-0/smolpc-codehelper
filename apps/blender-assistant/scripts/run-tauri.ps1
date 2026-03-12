@@ -8,31 +8,33 @@ $ErrorActionPreference = "Stop"
 function Ensure-BuildScriptLinks {
     param([string]$TargetDir)
 
-    $buildRoot = Join-Path $TargetDir "debug\build"
-    if (!(Test-Path $buildRoot)) {
-        return 0
-    }
-
     $fixed = 0
-    $buildDirs = Get-ChildItem -LiteralPath $buildRoot -Directory -ErrorAction SilentlyContinue
-    foreach ($dir in $buildDirs) {
-        $candidateExe = Get-ChildItem -LiteralPath $dir.FullName -File -Filter "build_script_build-*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($null -eq $candidateExe) {
+    foreach ($profile in @("debug", "release")) {
+        $buildRoot = Join-Path $TargetDir "$profile\build"
+        if (!(Test-Path $buildRoot)) {
             continue
         }
 
-        $canonicalExe = Join-Path $dir.FullName "build-script-build.exe"
-        if (Test-Path $canonicalExe) {
-            continue
-        }
+        $buildDirs = Get-ChildItem -LiteralPath $buildRoot -Directory -ErrorAction SilentlyContinue
+        foreach ($dir in $buildDirs) {
+            $candidateExe = Get-ChildItem -LiteralPath $dir.FullName -File -Filter "build_script_build-*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($null -eq $candidateExe) {
+                continue
+            }
 
-        try {
-            New-Item -ItemType HardLink -Path $canonicalExe -Target $candidateExe.FullName -Force | Out-Null
-        } catch {
-            Copy-Item -Force $candidateExe.FullName $canonicalExe
-        }
+            $canonicalExe = Join-Path $dir.FullName "build-script-build.exe"
+            if (Test-Path $canonicalExe) {
+                continue
+            }
 
-        $fixed += 1
+            try {
+                New-Item -ItemType HardLink -Path $canonicalExe -Target $candidateExe.FullName -Force | Out-Null
+            } catch {
+                Copy-Item -Force $candidateExe.FullName $canonicalExe
+            }
+
+            $fixed += 1
+        }
     }
 
     return $fixed
@@ -40,7 +42,9 @@ function Ensure-BuildScriptLinks {
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $appRoot = Split-Path -Parent $scriptRoot
-$cargoTargetDir = Join-Path $env:LOCALAPPDATA "SmolPC\cargo-target\blender-assistant"
+$appsDir = Split-Path -Parent $appRoot
+$repoRoot = Split-Path -Parent $appsDir
+$cargoTargetDir = Join-Path $repoRoot "target\blender-assistant"
 
 New-Item -ItemType Directory -Force -Path $cargoTargetDir | Out-Null
 $env:CARGO_TARGET_DIR = $cargoTargetDir

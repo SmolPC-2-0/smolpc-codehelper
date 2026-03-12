@@ -3,7 +3,8 @@
   "private": true,
   "version": "1.0.0",
   "workspaces": [
-    "apps/codehelper"
+    "apps/codehelper",
+    "launcher"
   ],
   "scripts": {
     "dev": "npm run dev --workspace apps/codehelper",
@@ -17,6 +18,7 @@
     "tauri:dml": "npm run tauri:dml --workspace apps/codehelper",
     "model:export:dml": "npm run model:export:dml --workspace apps/codehelper",
     "model:setup:qwen3": "npm run model:setup:qwen3 --workspace apps/codehelper",
+    "launcher:dev": "npm run tauri:dev --workspace launcher",
     "boundary:check": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-boundaries.ps1"
   }
 }

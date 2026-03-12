@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "apps/codehelper/src-tauri",
+  "launcher/src-tauri",
   "engine/crates/smolpc-engine-core",
   "engine/crates/smolpc-engine-host",
   "engine/crates/smolpc-engine-client",
