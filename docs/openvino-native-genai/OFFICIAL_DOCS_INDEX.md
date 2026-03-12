@@ -7,15 +7,15 @@ Principle: primary sources only.
 
 | Source | Why it matters |
 |---|---|
-| https://github.com/openvinotoolkit/openvino/releases/tag/2026.0.0 | release-level truth for current OpenVINO capabilities |
-| https://docs.openvino.ai/nightly/about-openvino/release-notes-openvino.html | release notes and support changes |
-| https://openvinotoolkit.github.io/openvino.genai/docs/getting-started/installation/ | GenAI/OpenVINO/Tokenizers version coupling |
-| https://openvinotoolkit.github.io/openvino.genai/docs/samples/ | confirms native sample surface, including `C` `text_generation` |
-| https://docs.openvino.ai/2025/openvino-workflow/running-inference/inference-devices-and-modes/npu-device.html | NPU driver requirement and supported Windows platform |
-| https://docs.openvino.ai/2024/api/c_cpp_api/group__ov__runtime__npu__prop__cpp__api.html | NPU driver-version and device-memory property surface |
-| https://docs.openvino.ai/2025/openvino-workflow-generative/inference-with-genai/inference-with-genai-on-npu.html | native NPU export/perf/troubleshooting guidance |
-| https://docs.openvino.ai/nightly/about-openvino/release-notes-openvino/system-requirements.html | OS, driver, and redistributable requirements |
-| https://docs.openvino.ai/2025/openvino-workflow/deployment-locally/local-distribution-libraries.html | exact local-distribution library rules |
+| https://github.com/openvinotoolkit/openvino?tab=readme-ov-file | OpenVINO repo root and release-level context |
+| https://github.com/openvinotoolkit/openvino.genai?tab=readme-ov-file | OpenVINO GenAI repo root and package/runtime context |
+| https://docs.openvino.ai/2026/index.html | canonical 2026 docs entrypoint |
+| https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-genai.html | GenAI archive install path and package coupling |
+| https://docs.openvino.ai/2026/openvino-workflow-generative/inference-with-genai/inference-with-genai-on-npu.html | native NPU inference, caching, and prompt-budget guidance |
+| https://docs.openvino.ai/2026/openvino-workflow-generative/ov-tokenizers.html | tokenizers runtime packaging and install guidance |
+| https://docs.openvino.ai/2026/about-openvino/release-notes-openvino/system-requirements.html | OS, driver, and redistributable requirements |
+| https://docs.openvino.ai/2026/_static/download/OpenVINO_Quick_Start_Guide.pdf | Windows quick-start reference for the 2026 release |
+| https://github.com/openvinotoolkit/openvino.genai/tree/master/samples/c | confirms the native GenAI C sample surface |
 
 ## ORT / DirectML fallback sources
 

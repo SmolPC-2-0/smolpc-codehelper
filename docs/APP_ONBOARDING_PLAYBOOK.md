@@ -24,7 +24,7 @@ Monorepo placement convention for new apps:
    - `npm run model:setup:qwen3`
 4. Optional Intel NPU smoke path:
    - `npm run runtime:setup:openvino`
-   - This now validates that `openvino_genai.dll` exports the native `ov_genai_*` C API. The current Windows PyPI `openvino-genai` wheel does not, so archive-based bundle sourcing is still required for a real native OpenVINO smoke test.
+   - This now downloads the official 2026 Windows OpenVINO GenAI archive, verifies its SHA256, and validates that `openvino_genai_c.dll` exports the native `ov_genai_*` C API used by the shared engine.
    - `npm run model:setup:qwen3:openvino`
 5. Use this playbook as the implementation checklist.
 
@@ -131,7 +131,8 @@ Treat these as expected operational states:
 2. `qwen3-4b-int4-ov` is an OpenVINO-only smoke-test model.
    - It is not the same checkpoint as `qwen3-4b-instruct-2507`, so it should not be treated as an exact cross-lane benchmark-parity result.
 3. The current Windows PyPI `openvino-genai` wheel is not a valid native runtime bundle for this repo's OpenVINO adapter.
-   - If `runtime:setup:openvino` reports missing `ov_genai_*` exports, provisioning must switch to an archive bundle that ships the GenAI C API before `/engine/load` can succeed on `openvino_npu`.
+   - Windows provisioning now uses the official archive path instead. The app-local bundle must include `openvino_genai_c.dll`, and the current working NPU defaults on this PC are `MAX_PROMPT_LEN=256` and `MIN_RESPONSE_LEN=8`.
+   - For targeted debugging, `SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN` and `SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN` can override those defaults. Invalid values block the OpenVINO lane before a false-ready status is reported.
 
 ## Definition of Done (Per App)
 

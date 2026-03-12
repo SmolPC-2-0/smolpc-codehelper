@@ -35,13 +35,16 @@ Implemented on this branch as of 2026-03-12:
 - successful OpenVINO preflight now activates `runtime_engine=ov_genai_npu`
 - automatic live selection now prefers `openvino_npu -> directml -> cpu` when OpenVINO preflight succeeds
 - the selection fingerprint now uses `selection_profile=openvino_native_v1` so stale pre-activation records are invalidated cleanly
-- development now includes a guarded `npm run runtime:setup:openvino` path that validates the staged Windows GenAI DLL exports before copying the bundle locally
+- development now includes a guarded `npm run runtime:setup:openvino` path that downloads the official 2026 Windows GenAI archive, verifies its SHA256, validates `openvino_genai_c.dll`, and stages the app-local runtime bundle locally
 - development now includes an official OpenVINO-only Qwen3 smoke target via `npm run model:setup:qwen3:openvino` with local model id `qwen3-4b-int4-ov`
+- OpenVINO NPU pipeline creation now applies tuned defaults that work on this PC:
+  - `MAX_PROMPT_LEN=256`
+  - `MIN_RESPONSE_LEN=8`
+- those tuning values are included in the backend decision fingerprint so persisted fallbacks do not block a later OpenVINO retry after tuning changes
 
 Still pending for the remaining Phase 1 work:
 
 - exact-parity OpenVINO export for `qwen3-4b-instruct-2507` when benchmark parity across lanes matters
-- archive-based Windows OpenVINO GenAI bundle sourcing, because the current PyPI `openvino-genai` wheel does not expose the required `ov_genai_*` C API exports for the native adapter
 - default catalog migration away from `qwen3-4b-instruct-2507`
 - final Intel NPU validation and installer-time OpenVINO bundle population
 
@@ -167,6 +170,7 @@ Persistence rules:
 Implemented baseline on this branch as of 2026-03-12:
 
 - current fingerprint fields include model id, computed model artifact fingerprint, app version, selector engine id, ORT/OpenVINO version metadata, runtime bundle fingerprints, GPU identity/driver/device id, and future-ready NPU fields
+- current fingerprint fields now also include the active OpenVINO NPU prompt-length tuning (`MAX_PROMPT_LEN`, `MIN_RESPONSE_LEN`)
 - the current runtime activation slice intentionally bumped `selection_profile` to `openvino_native_v1`
 - store records now separate `persisted_decision` from `failure_counters`
 - `persisted_decision` may be `null` so temporary fallbacks can update counters without overwriting a prior good persisted record
@@ -217,13 +221,20 @@ Minimum OpenVINO bundle expectation:
 
 - `openvino`
 - `openvino_c` when using the C ABI bridge
+- `openvino_genai`
+- `openvino_genai_c`
+- `openvino_tokenizers`
 - `openvino_intel_npu_plugin`
 - `openvino_intel_cpu_plugin`
 - `openvino_ir_frontend`
-- OpenVINO GenAI native library
-- OpenVINO Tokenizers native library
 - TBB dependencies
 - Visual C++ redistributable prerequisite on Windows
+
+Windows dev staging source of truth:
+
+- `https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-genai.html`
+- archive URL used by the setup script:
+  - `https://storage.openvinotoolkit.org/repositories/openvino_genai/packages/2026.0/windows/openvino_genai_windows_2026.0.0.0_x86_64.zip`
 
 ## Model Artifact Layout
 
