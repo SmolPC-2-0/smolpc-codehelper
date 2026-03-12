@@ -1,0 +1,34 @@
+{
+  "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "SmolPC LibreOffice Assistant",
+  "version": "0.1.0",
+  "identifier": "com.smolpc.libreofficeassistant",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1422",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "SmolPC LibreOffice Assistant",
+        "width": 1080,
+        "height": 820,
+        "resizable": true,
+        "fullscreen": false,
+        "devtools": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' http://127.0.0.1:19432; object-src 'none'; base-uri 'self'; form-action 'self'"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": "all",
+    "resources": [
+      "resources/mcp_server/*"
+    ]
+  }
+}

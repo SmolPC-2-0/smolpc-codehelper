@@ -1,0 +1,26 @@
+[package]
+name = "smolpc-libreoffice-assistant"
+version = "0.1.0"
+description = "SmolPC LibreOffice Assistant"
+authors = ["SmolPC Team"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.88"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.2.0", features = [] }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+tauri = { version = "2.6.2", features = [] }
+tauri-plugin-log = "2"
+dirs = "6"
+tokio = { version = "1", features = ["full"] }
+smolpc-engine-client = { path = "../../../engine/crates/smolpc-engine-client" }
+smolpc-engine-core = { path = "../../../engine/crates/smolpc-engine-core" }
