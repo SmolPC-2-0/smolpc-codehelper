@@ -540,9 +540,20 @@ fn model_requires_directml(model_id: &str) -> bool {
     matches!(model_id, "qwen3-4b-instruct-2507")
 }
 
+fn model_requires_openvino(model_id: &str) -> bool {
+    matches!(model_id, "qwen3-4b-int4-ov")
+}
+
 fn directml_required_error(model_id: &str, reason: &str) -> String {
     format!(
         "Model '{}' currently requires DirectML backend in shared engine: {}",
+        model_id, reason
+    )
+}
+
+fn openvino_required_error(model_id: &str, reason: &str) -> String {
+    format!(
+        "Model '{}' currently requires OpenVINO NPU backend in shared engine: {}",
         model_id, reason
     )
 }
@@ -1644,6 +1655,7 @@ impl EngineState {
         }
         let directml_required =
             model_requires_directml(&model_id) || startup_mode.requires_directml();
+        let openvino_required = model_requires_openvino(&model_id);
         let model_def = ModelRegistry::get_model(&model_id)
             .ok_or_else(|| format!("Unknown model ID: {}", model_id))?;
         let artifacts = resolve_model_lane_artifacts(&model_def.directory);
@@ -1672,6 +1684,18 @@ impl EngineState {
             return Err(directml_required_error(
                 &model_id,
                 "forced CPU mode is not supported for this model",
+            ));
+        }
+        if openvino_required && force_override == Some(InferenceBackend::Cpu) {
+            return Err(openvino_required_error(
+                &model_id,
+                "forced CPU mode is not supported for this model",
+            ));
+        }
+        if openvino_required && force_override == Some(InferenceBackend::DirectML) {
+            return Err(openvino_required_error(
+                &model_id,
+                "forced DirectML mode is not supported for this model",
             ));
         }
 
@@ -1853,7 +1877,9 @@ impl EngineState {
             }
         }
 
-        if force_override == Some(InferenceBackend::OpenVinoNpu) && openvino_ready.is_none() {
+        if (force_override == Some(InferenceBackend::OpenVinoNpu) || openvino_required)
+            && openvino_ready.is_none()
+        {
             let selection_reason = openvino_reason_override
                 .as_ref()
                 .map(decision_reason_code)
@@ -1863,10 +1889,17 @@ impl EngineState {
                         .unwrap_or("openvino_npu_forced_activation_failed")
                 })
                 .to_string();
-            let error = openvino_failure_message
+            let detail = openvino_failure_message
                 .clone()
                 .or_else(|| artifacts.openvino_message.clone())
                 .unwrap_or_else(|| format!("OpenVINO lane is unavailable: {selection_reason}"));
+            let error = if openvino_required
+                && force_override != Some(InferenceBackend::OpenVinoNpu)
+            {
+                openvino_required_error(&model_id, &detail)
+            } else {
+                detail
+            };
 
             let mut status = make_status(
                 BackendSelectionState::Error,
@@ -3481,6 +3514,95 @@ mod tests {
     }
 
     #[test]
+    fn check_model_response_reports_openvino_only_model_readiness() {
+        let _guard = lock_env();
+        let temp = tempdir().expect("temp dir");
+        let resource_dir = temp.path().join("resources");
+        let libs = resource_dir.join("libs");
+        let models_dir = temp.path().join("models");
+        let model_dir = models_dir.join("qwen3-4b-int4-ov");
+        let openvino_dir = model_dir.join("openvino_npu");
+
+        create_ort_files(
+            &libs,
+            &[
+                "onnxruntime.dll",
+                "onnxruntime_providers_shared.dll",
+                "onnxruntime-genai.dll",
+                "DirectML.dll",
+            ],
+        );
+        create_openvino_files(&libs.join("openvino"));
+        fs::create_dir_all(&openvino_dir).expect("create openvino dir");
+        fs::write(openvino_dir.join("openvino_model.xml"), []).expect("write openvino model");
+        fs::write(openvino_dir.join("openvino_model.bin"), []).expect("write openvino weights");
+        fs::write(openvino_dir.join("openvino_tokenizer.xml"), []).expect("write tokenizer xml");
+        fs::write(openvino_dir.join("openvino_tokenizer.bin"), []).expect("write tokenizer bin");
+        fs::write(openvino_dir.join("openvino_detokenizer.xml"), [])
+            .expect("write detokenizer xml");
+        fs::write(openvino_dir.join("openvino_detokenizer.bin"), [])
+            .expect("write detokenizer bin");
+        fs::write(openvino_dir.join("openvino_config.json"), []).expect("write ov config");
+        fs::write(openvino_dir.join("generation_config.json"), [])
+            .expect("write generation config");
+        fs::write(openvino_dir.join("config.json"), []).expect("write config");
+        fs::write(openvino_dir.join("tokenizer.json"), []).expect("write tokenizer");
+        fs::write(openvino_dir.join("tokenizer_config.json"), [])
+            .expect("write tokenizer config");
+        fs::write(openvino_dir.join("special_tokens_map.json"), [])
+            .expect("write special tokens map");
+        fs::write(openvino_dir.join("chat_template.jinja"), []).expect("write chat template");
+        fs::write(openvino_dir.join("added_tokens.json"), []).expect("write added tokens");
+        fs::write(openvino_dir.join("merges.txt"), []).expect("write merges");
+        fs::write(openvino_dir.join("vocab.json"), []).expect("write vocab");
+        fs::write(
+            openvino_dir.join("manifest.json"),
+            br#"{"entrypoint":"openvino_model.xml","required_files":["openvino_model.bin","openvino_tokenizer.xml","openvino_tokenizer.bin","openvino_detokenizer.xml","openvino_detokenizer.bin","openvino_config.json","generation_config.json","config.json","tokenizer.json","tokenizer_config.json","special_tokens_map.json","chat_template.jinja","added_tokens.json","merges.txt","vocab.json"]}"#,
+        )
+        .expect("write openvino manifest");
+
+        let models_guard = EnvVarGuard::set("SMOLPC_MODELS_DIR", models_dir.as_os_str());
+        let bundles =
+            resolve_runtime_bundles_for_mode(Some(&resource_dir), RuntimeLoadMode::Production);
+        let probe = BackendProbeResult {
+            available_backends: vec![InferenceBackend::Cpu, InferenceBackend::DirectML],
+            directml_device_count: 1,
+            directml_candidate: Some(DirectMlCandidate {
+                device_id: 0,
+                device_name: "Intel Arc".to_string(),
+                adapter_identity: "intel:arc".to_string(),
+                driver_version: "31.0.101.5522".to_string(),
+            }),
+            npu_hardware_detected: true,
+        };
+        let openvino_probe = OpenVinoStartupProbeResult {
+            hardware_detected: true,
+            startup_ready: true,
+            device_visible: true,
+            adapter_identity: Some("openvino:npu:intel_npu".to_string()),
+            device_name: Some("Intel NPU".to_string()),
+            driver_version: Some("32.0.100.3104".to_string()),
+            failure_class: None,
+            failure_message: None,
+        };
+
+        let response = build_check_model_response(
+            "qwen3-4b-int4-ov",
+            &bundles,
+            Some(&probe),
+            Some(&openvino_probe),
+        );
+        drop(models_guard);
+
+        assert!(response.lanes.openvino_npu.ready);
+        assert_eq!(response.lanes.openvino_npu.reason, "ready");
+        assert!(!response.lanes.directml.ready);
+        assert_eq!(response.lanes.directml.reason, "artifact_missing");
+        assert!(!response.lanes.cpu.ready);
+        assert_eq!(response.lanes.cpu.reason, "artifact_missing");
+    }
+
+    #[test]
     fn process_idle_exit_is_disabled_by_default() {
         let _guard = lock_env();
         let env_guard = EnvVarGuard::unset("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS");
@@ -3545,11 +3667,17 @@ mod tests {
             "openvino.dll",
             "openvino_c.dll",
             "openvino_intel_npu_plugin.dll",
+            "openvino_intel_npu_compiler.dll",
             "openvino_intel_cpu_plugin.dll",
             "openvino_ir_frontend.dll",
             "openvino_genai.dll",
             "openvino_tokenizers.dll",
             "tbb12.dll",
+            "tbbbind_2_5.dll",
+            "tbbmalloc.dll",
+            "tbbmalloc_proxy.dll",
+            "icudt70.dll",
+            "icuuc70.dll",
         ] {
             fs::write(root.join(file), []).expect("write openvino runtime file");
         }
