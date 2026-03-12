@@ -1,10 +1,15 @@
 use super::catalog;
-use super::types::{EngineApiGateInfo, LaunchAction, LauncherLaunchResult, LauncherManifestApp};
+use super::types::{
+    EngineApiGateInfo, InstallerKind, LaunchAction, LauncherInstallOutcome, LauncherInstallResult,
+    LauncherInstallState, LauncherLaunchResult, LauncherLaunchableApp, LauncherRegistryApp,
+};
+use sha2::{Digest, Sha256};
 use smolpc_engine_client::{
     connect_or_spawn, engine_api_major_compatible, read_runtime_env_overrides, version_major,
     EngineClient, EngineConnectOptions, EngineMeta, EngineStatus, StartupMode, StartupPolicy,
     WaitReadyOptions,
 };
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -17,11 +22,15 @@ const DEFAULT_ENGINE_PORT: u16 = 19432;
 const SHARED_RUNTIME_VENDOR_DIR: &str = "SmolPC";
 const SHARED_RUNTIME_DIR: &str = "engine-runtime";
 const HOST_DATA_DIR: &str = "host-data";
+const INSTALLER_CACHE_DIR: &str = "launcher/installers";
 
 pub struct LauncherState {
     client: Arc<Mutex<Option<EngineClient>>>,
     connect_lock: Arc<Mutex<()>>,
     launch_lock: Arc<Mutex<()>>,
+    install_lock: Arc<Mutex<()>>,
+    missing_registration_attempts: Arc<Mutex<HashMap<String, u8>>>,
+    manual_registration_required: Arc<Mutex<HashSet<String>>>,
 }
 
 impl Default for LauncherState {
@@ -30,6 +39,9 @@ impl Default for LauncherState {
             client: Arc::new(Mutex::new(None)),
             connect_lock: Arc::new(Mutex::new(())),
             launch_lock: Arc::new(Mutex::new(())),
+            install_lock: Arc::new(Mutex::new(())),
+            missing_registration_attempts: Arc::new(Mutex::new(HashMap::new())),
+            manual_registration_required: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 }
@@ -41,6 +53,35 @@ impl LauncherState {
         let guard = self.client.lock().await;
         guard.clone()
     }
+
+    pub async fn manual_required_apps(&self) -> HashSet<String> {
+        self.manual_registration_required.lock().await.clone()
+    }
+
+    async fn record_missing_registration_attempt(&self, app_id: &str) -> u8 {
+        let mut attempts = self.missing_registration_attempts.lock().await;
+        let value = attempts.entry(app_id.to_string()).or_insert(0);
+        *value = value.saturating_add(1);
+        *value
+    }
+
+    async fn clear_install_tracking(&self, app_id: &str) {
+        self.missing_registration_attempts
+            .lock()
+            .await
+            .remove(app_id);
+        self.manual_registration_required
+            .lock()
+            .await
+            .remove(app_id);
+    }
+
+    async fn mark_manual_registration_required(&self, app_id: &str) {
+        self.manual_registration_required
+            .lock()
+            .await
+            .insert(app_id.to_string());
+    }
 }
 
 pub async fn launch_or_focus(
@@ -49,8 +90,8 @@ pub async fn launch_or_focus(
     state: &LauncherState,
 ) -> Result<LauncherLaunchResult, String> {
     let _launch_guard = state.launch_lock.lock().await;
-    let manifest = catalog::load_manifest(app_handle)?;
-    let app = catalog::find_app(&manifest, app_id)?;
+    let resolved = catalog::resolve_app(app_handle, app_id)?;
+    let app = resolved.launchable()?;
     let client = resolve_engine_client(app_handle, state).await?;
 
     client
@@ -92,6 +133,117 @@ pub async fn launch_or_focus(
         readiness_state: ready_status.state.or(ready_status.startup_phase),
         readiness_attempt_id: Some(ready_status.attempt_id),
         engine_api_gate: gate,
+    })
+}
+
+pub async fn install_app(
+    app_id: &str,
+    app_handle: &tauri::AppHandle,
+    state: &LauncherState,
+) -> Result<LauncherInstallResult, String> {
+    let _install_guard = state.install_lock.lock().await;
+    let catalog_doc = catalog::load_catalog(app_handle)?;
+    let catalog_app = catalog::find_catalog_app(&catalog_doc, app_id)?;
+    let installer = catalog_app.installer.ok_or_else(|| {
+        format!(
+            "App '{}' does not define installer metadata in apps.catalog.json",
+            catalog_app.display_name
+        )
+    })?;
+
+    let installer_path = resolve_installer_path(app_handle, app_id, &installer).await?;
+    run_installer(&installer.kind, &installer_path)?;
+
+    let resolved = catalog::resolve_app(app_handle, app_id)?;
+    if resolved.install_state == LauncherInstallState::Installed {
+        state.clear_install_tracking(app_id).await;
+        return Ok(LauncherInstallResult {
+            app_id: app_id.to_string(),
+            outcome: LauncherInstallOutcome::Installed,
+            message: format!(
+                "App '{}' installed and registered.",
+                catalog_app.display_name
+            ),
+            exe_path: resolved.registration.map(|entry| entry.exe_path),
+        });
+    }
+
+    let attempts = state.record_missing_registration_attempt(app_id).await;
+    let (outcome, message, requires_manual_registration) =
+        missing_registration_outcome(&catalog_app.display_name, attempts);
+    if requires_manual_registration {
+        state.mark_manual_registration_required(app_id).await;
+    }
+
+    Ok(LauncherInstallResult {
+        app_id: app_id.to_string(),
+        outcome,
+        message,
+        exe_path: resolved.registration.map(|entry| entry.exe_path),
+    })
+}
+
+pub async fn register_manual_path(
+    app_id: &str,
+    exe_path: &str,
+    app_handle: &tauri::AppHandle,
+    state: &LauncherState,
+) -> Result<LauncherInstallResult, String> {
+    let catalog_doc = catalog::load_catalog(app_handle)?;
+    let catalog_app = catalog::find_catalog_app(&catalog_doc, app_id)?;
+
+    let path = PathBuf::from(exe_path.trim());
+    if !path.is_absolute() {
+        return Err("Manual executable path must be absolute".to_string());
+    }
+    if !path.exists() {
+        return Err(format!(
+            "Manual executable path does not exist: {}",
+            path.display()
+        ));
+    }
+    let is_exe = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"));
+    if !is_exe {
+        return Err("Manual executable path must point to a .exe file".to_string());
+    }
+
+    let existing = catalog::load_registry(app_handle)?
+        .apps
+        .into_iter()
+        .find(|entry| entry.app_id == app_id);
+    let args = existing
+        .as_ref()
+        .map_or_else(Vec::new, |entry| entry.args.clone());
+    let launch_command = existing
+        .as_ref()
+        .and_then(|entry| entry.launch_command.clone());
+    let focus_command = existing
+        .as_ref()
+        .and_then(|entry| entry.focus_command.clone());
+
+    let mut entry = LauncherRegistryApp {
+        app_id: app_id.to_string(),
+        exe_path: path.display().to_string(),
+        args,
+        launch_command,
+        focus_command,
+        installed_at: catalog::now_utc_timestamp(),
+        source: "manual".to_string(),
+    };
+    catalog::upsert_registry_entry(app_handle, entry.clone())?;
+    state.clear_install_tracking(app_id).await;
+
+    Ok(LauncherInstallResult {
+        app_id: app_id.to_string(),
+        outcome: LauncherInstallOutcome::Installed,
+        message: format!(
+            "Manual executable path saved for '{}'.",
+            catalog_app.display_name
+        ),
+        exe_path: Some(std::mem::take(&mut entry.exe_path)),
     })
 }
 
@@ -156,7 +308,7 @@ pub async fn resolve_engine_client(
 }
 
 fn evaluate_engine_api_gate(
-    app: &LauncherManifestApp,
+    app: &LauncherLaunchableApp,
     meta: &EngineMeta,
     status: &EngineStatus,
 ) -> Result<EngineApiGateInfo, String> {
@@ -222,7 +374,7 @@ pub fn is_app_running(executable: &Path) -> bool {
     })
 }
 
-fn focus_existing_app(app: &LauncherManifestApp) -> Result<(), String> {
+fn focus_existing_app(app: &LauncherLaunchableApp) -> Result<(), String> {
     let Some(command_tokens) = app.focus_command.as_ref() else {
         return Err(format!(
             "App '{}' is already running but no focus_command is configured",
@@ -259,7 +411,7 @@ fn focus_existing_app(app: &LauncherManifestApp) -> Result<(), String> {
     Ok(())
 }
 
-fn launch_app_process(app: &LauncherManifestApp) -> Result<(), String> {
+fn launch_app_process(app: &LauncherLaunchableApp) -> Result<(), String> {
     let launch_target: String;
     let mut command = if cfg!(debug_assertions) {
         if let Some(command_tokens) = app.launch_command.as_ref() {
@@ -317,23 +469,26 @@ fn launch_app_process(app: &LauncherManifestApp) -> Result<(), String> {
     command.spawn().map_err(|error| {
         format!(
             "Failed to launch app '{}' ({}): {error}",
-            app.app_id,
-            launch_target
+            app.app_id, launch_target
         )
     })?;
 
     Ok(())
 }
 
-/// Check if any managed app from the manifest is currently running.
+/// Check if any managed app from the registry is currently running.
 pub fn any_app_running(app_handle: &tauri::AppHandle) -> bool {
-    let Ok(manifest) = catalog::load_manifest(app_handle) else {
+    let Ok(catalog_doc) = catalog::load_catalog(app_handle) else {
         return false;
     };
-    manifest
-        .apps
+    let Ok(registry_doc) = catalog::load_registry(app_handle) else {
+        return false;
+    };
+
+    catalog::merge_catalog_and_registry(&catalog_doc, &registry_doc)
         .iter()
-        .any(|app| is_app_running(&app.executable_path()))
+        .filter_map(|entry| entry.registration.as_ref())
+        .any(|entry| is_app_running(&entry.executable_path()))
 }
 
 /// Shut down the cached engine client and clear the cache.
@@ -383,17 +538,188 @@ fn resolve_host_binary_path() -> Option<PathBuf> {
     None
 }
 
+async fn resolve_installer_path(
+    app_handle: &tauri::AppHandle,
+    app_id: &str,
+    installer: &super::types::LauncherInstallerSpec,
+) -> Result<PathBuf, String> {
+    let url = installer.url.trim();
+    if url.starts_with("http://") || url.starts_with("https://") {
+        return download_installer(app_id, installer).await;
+    }
+
+    if let Some(stripped) = url.strip_prefix("file://") {
+        let path = PathBuf::from(stripped);
+        if !path.exists() {
+            return Err(format!("Installer path does not exist: {}", path.display()));
+        }
+        return Ok(path);
+    }
+
+    let direct = PathBuf::from(url);
+    if direct.is_absolute() {
+        if direct.exists() {
+            return Ok(direct);
+        }
+        return Err(format!(
+            "Installer path does not exist: {}",
+            direct.display()
+        ));
+    }
+
+    let mut candidates = Vec::new();
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        candidates.push(resource_dir.join("launcher").join(url));
+    }
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("launcher")
+            .join(url),
+    );
+
+    for candidate in candidates {
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(format!(
+        "Installer URL '{}' for app '{}' is not a valid absolute path or downloadable URL",
+        installer.url, app_id
+    ))
+}
+
+async fn download_installer(
+    app_id: &str,
+    installer: &super::types::LauncherInstallerSpec,
+) -> Result<PathBuf, String> {
+    let response = reqwest::get(&installer.url)
+        .await
+        .map_err(|error| format!("Failed to download installer '{}': {error}", installer.url))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Installer download failed for '{}': HTTP {}",
+            installer.url,
+            response.status()
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("Failed reading installer download bytes: {error}"))?;
+
+    if let Some(expected_hash) = installer.sha256.as_deref() {
+        let expected_hash = expected_hash.trim();
+        if !expected_hash.is_empty() {
+            let mut hasher = Sha256::new();
+            hasher.update(&bytes);
+            let actual = format!("{:x}", hasher.finalize());
+            if actual != expected_hash.to_ascii_lowercase() {
+                return Err(format!(
+                    "Installer SHA-256 mismatch for '{}': expected {}, got {}",
+                    installer.url, expected_hash, actual
+                ));
+            }
+        }
+    }
+
+    let Some(local_data_dir) = dirs::data_local_dir() else {
+        return Err("Failed to resolve local data directory for installer cache".to_string());
+    };
+    let cache_dir = local_data_dir
+        .join(SHARED_RUNTIME_VENDOR_DIR)
+        .join(INSTALLER_CACHE_DIR);
+    tokio::fs::create_dir_all(&cache_dir)
+        .await
+        .map_err(|error| {
+            format!(
+                "Failed to create installer cache directory {}: {error}",
+                cache_dir.display()
+            )
+        })?;
+
+    let extension = match installer.kind {
+        InstallerKind::Exe => "exe",
+        InstallerKind::Msi => "msi",
+    };
+    let filename = format!("{}-{}.{}", app_id, catalog::now_utc_timestamp(), extension);
+    let path = cache_dir.join(filename);
+    tokio::fs::write(&path, &bytes).await.map_err(|error| {
+        format!(
+            "Failed writing downloaded installer to {}: {error}",
+            path.display()
+        )
+    })?;
+    Ok(path)
+}
+
+fn run_installer(kind: &InstallerKind, installer_path: &Path) -> Result<(), String> {
+    let status = match kind {
+        InstallerKind::Exe => Command::new(installer_path).status().map_err(|error| {
+            format!(
+                "Failed to execute installer {}: {error}",
+                installer_path.display()
+            )
+        })?,
+        InstallerKind::Msi => Command::new("msiexec")
+            .args(["/i"])
+            .arg(installer_path)
+            .args(["/passive"])
+            .status()
+            .map_err(|error| {
+                format!(
+                    "Failed to execute MSI installer {}: {error}",
+                    installer_path.display()
+                )
+            })?,
+    };
+
+    if !status.success() {
+        return Err(format!(
+            "Installer '{}' exited with status {}",
+            installer_path.display(),
+            status
+        ));
+    }
+
+    Ok(())
+}
+
+fn missing_registration_outcome(
+    display_name: &str,
+    attempts: u8,
+) -> (LauncherInstallOutcome, String, bool) {
+    if attempts <= 1 {
+        (
+            LauncherInstallOutcome::RetryRequired,
+            format!(
+                "Installer finished, but launcher could not find a usable executable for '{}'. Retry install once.",
+                display_name
+            ),
+            false,
+        )
+    } else {
+        (
+            LauncherInstallOutcome::ManualRequired,
+            format!(
+                "Installer did not register '{}' after retry. Use manual .exe browse to repair registration.",
+                display_name
+            ),
+            true,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::launcher::types::LauncherManifestApp;
 
-    fn app_with_required_major(required_major: u64) -> LauncherManifestApp {
-        LauncherManifestApp {
+    fn app_with_required_major(required_major: u64) -> LauncherLaunchableApp {
+        LauncherLaunchableApp {
             app_id: "codehelper".to_string(),
             display_name: "Code Helper".to_string(),
             exe_path: "C:\\Program Files\\SmolPC\\Code Helper\\SmolPC Code Helper.exe".to_string(),
-            icon: None,
             args: vec![],
             launch_command: None,
             focus_command: None,
@@ -468,5 +794,22 @@ mod tests {
             .expect("protocol fallback should still gate by major");
         assert_eq!(gate.source, "meta.protocol_version_fallback");
         assert_eq!(gate.actual_version, "1.0.0");
+    }
+
+    #[test]
+    fn missing_registration_outcome_requires_retry_before_manual() {
+        let (first_outcome, _, first_manual) = missing_registration_outcome("Code Helper", 1);
+        let (second_outcome, _, second_manual) = missing_registration_outcome("Code Helper", 2);
+
+        assert!(matches!(
+            first_outcome,
+            LauncherInstallOutcome::RetryRequired
+        ));
+        assert!(!first_manual);
+        assert!(matches!(
+            second_outcome,
+            LauncherInstallOutcome::ManualRequired
+        ));
+        assert!(second_manual);
     }
 }

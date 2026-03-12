@@ -1,11 +1,27 @@
 export interface LauncherAppSummary {
 	app_id: string;
 	display_name: string;
-	exe_path: string;
 	icon: string | null;
-	is_running: boolean;
-	has_focus_command: boolean;
 	min_engine_api_major: number | null;
+	install_state: LauncherInstallState;
+	exe_path: string | null;
+	is_running: boolean;
+	has_launch_command: boolean;
+	has_focus_command: boolean;
+	can_install: boolean;
+	can_repair: boolean;
+	manual_registration_required: boolean;
+}
+
+export type LauncherInstallState = 'not_installed' | 'installed' | 'broken';
+
+export type LauncherInstallOutcome = 'installed' | 'retry_required' | 'manual_required';
+
+export interface LauncherInstallResult {
+	app_id: string;
+	outcome: LauncherInstallOutcome;
+	message: string;
+	exe_path: string | null;
 }
 
 export interface EngineStatusSummary {

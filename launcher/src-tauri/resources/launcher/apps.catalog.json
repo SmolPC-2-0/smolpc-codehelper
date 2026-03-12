@@ -1,0 +1,26 @@
+{
+  "apps": [
+    {
+      "app_id": "codehelper",
+      "display_name": "SmolPC Code Helper",
+      "icon": "icons/codehelper.png",
+      "min_engine_api_major": 1,
+      "installer": {
+        "url": "installers/SmolPC-Code-Helper-Setup.exe",
+        "sha256": null,
+        "kind": "exe"
+      }
+    },
+    {
+      "app_id": "blender-helper",
+      "display_name": "Blender Learning Assistant",
+      "icon": null,
+      "min_engine_api_major": 1,
+      "installer": {
+        "url": "installers/Blender-Learning-Assistant-Setup.exe",
+        "sha256": null,
+        "kind": "exe"
+      }
+    }
+  ]
+}

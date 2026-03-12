@@ -6,6 +6,7 @@ authors = ["SmolPC Team"]
 license = "MIT"
 edition = "2021"
 rust-version = "1.88"
+default-run = "smolpc-launcher"
 
 [lib]
 name = "app_lib"
@@ -25,3 +26,6 @@ dirs = "6"
 sysinfo = "0.32"
 smolpc-engine-client = { path = "../../engine/crates/smolpc-engine-client" }
 tauri-plugin-single-instance = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+sha2 = "0.10"
+rfd = "0.15"

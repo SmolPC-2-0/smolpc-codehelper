@@ -12,7 +12,7 @@
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
 		"tauri": "tauri",
-		"tauri:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-tauri-dev.ps1"
+		"tauri:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/launcher-tauri-dev.ps1"
 	},
 	"devDependencies": {
 		"@sveltejs/vite-plugin-svelte": "^5.0.3",

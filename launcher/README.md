@@ -4,16 +4,20 @@ Launcher is the app-suite entrypoint and app orchestration layer.
 
 ## Owned Responsibilities
 
-- app listing/manifest conventions
+- app catalog + registry conventions
 - launch-or-focus orchestration
+- install / repair orchestration
 - engine readiness gating before app launch
 
 ## Current State
 
-- Launcher foundation commands/orchestrator currently live in CodeHelper's Tauri backend at:
-  - `apps/codehelper/src-tauri/src/launcher/`
-  - `apps/codehelper/src-tauri/src/commands/launcher.rs`
-- This directory is the extraction target for a standalone launcher app/repo.
+- Launcher data sources:
+  - Bundled catalog: `launcher/src-tauri/resources/launcher/apps.catalog.json`
+  - Per-user registry: `%LOCALAPPDATA%/SmolPC/launcher/apps.registry.json`
+- Installer-facing CLI helper (Rust binary):
+  - `launcher-register register --app-id <id> --exe-path <abs> ...`
+  - `launcher-register unregister --app-id <id>`
+  - `launcher-register list`
 
 ## Next Extraction Goal
 

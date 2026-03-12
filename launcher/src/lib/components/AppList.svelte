@@ -5,11 +5,13 @@
 	let {
 		apps,
 		launching,
-		onlaunch
+		installing,
+		onprimary
 	}: {
 		apps: LauncherAppSummary[];
 		launching: string | null;
-		onlaunch: (appId: string) => void;
+		installing: string | null;
+		onprimary: (app: LauncherAppSummary) => void;
 	} = $props();
 </script>
 
@@ -23,7 +25,8 @@
 			<AppCard
 				{app}
 				launching={launching === app.app_id}
-				onclick={() => onlaunch(app.app_id)}
+				installing={installing === app.app_id}
+				onclick={() => onprimary(app)}
 			/>
 		{/each}
 	{/if}

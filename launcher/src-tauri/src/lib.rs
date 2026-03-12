@@ -1,8 +1,11 @@
 mod commands;
-mod launcher;
+pub mod launcher;
 
 use commands::engine::engine_status;
-use commands::launcher::{launcher_launch_or_focus, launcher_list_apps};
+use commands::launcher::{
+    launcher_install_app, launcher_launch_or_focus, launcher_list_apps, launcher_pick_manual_exe,
+    launcher_register_manual_path,
+};
 use launcher::orchestrator::{
     any_app_running, resolve_engine_client, shutdown_engine, LauncherState,
 };
@@ -16,10 +19,7 @@ use tauri::Manager;
 fn resolve_libs_dir(app: &tauri::App) -> Option<PathBuf> {
     let candidates = [
         // Production: resource_dir/libs/
-        app.path()
-            .resource_dir()
-            .ok()
-            .map(|d| d.join("libs")),
+        app.path().resource_dir().ok().map(|d| d.join("libs")),
         // Dev: CARGO_MANIFEST_DIR/libs/
         Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("libs")),
     ];
@@ -146,6 +146,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             launcher_list_apps,
             launcher_launch_or_focus,
+            launcher_install_app,
+            launcher_register_manual_path,
+            launcher_pick_manual_exe,
             engine_status,
         ])
         .build(tauri::generate_context!())

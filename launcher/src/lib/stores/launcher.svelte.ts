@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
 	EngineStatusSummary,
 	LauncherAppSummary,
+	LauncherInstallResult,
 	LauncherLaunchResult
 } from '$lib/types/launcher';
 
@@ -17,6 +18,11 @@ let engineStatus = $state<EngineStatusSummary>({
 let error = $state<string | null>(null);
 let launching = $state<string | null>(null);
 let launchError = $state<string | null>(null);
+
+let installing = $state<string | null>(null);
+let installError = $state<string | null>(null);
+let installMessage = $state<string | null>(null);
+let manualRegistrationAppId = $state<string | null>(null);
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -58,8 +64,68 @@ async function launchOrFocus(appId: string): Promise<LauncherLaunchResult | null
 	}
 }
 
+async function installApp(appId: string): Promise<LauncherInstallResult | null> {
+	installing = appId;
+	installError = null;
+	installMessage = null;
+	try {
+		const result = await invoke<LauncherInstallResult>('launcher_install_app', { appId });
+		if (result.outcome === 'installed') {
+			installMessage = result.message;
+			manualRegistrationAppId = null;
+		} else if (result.outcome === 'retry_required') {
+			installError = result.message;
+			manualRegistrationAppId = null;
+		} else {
+			installError = result.message;
+			manualRegistrationAppId = appId;
+		}
+		await refresh();
+		return result;
+	} catch (e) {
+		installError = e instanceof Error ? e.message : String(e);
+		return null;
+	} finally {
+		installing = null;
+	}
+}
+
+async function browseAndRegisterManualPath(appId: string): Promise<LauncherInstallResult | null> {
+	installing = appId;
+	installError = null;
+	installMessage = null;
+	try {
+		const exePath = await invoke<string | null>('launcher_pick_manual_exe');
+		if (!exePath) {
+			return null;
+		}
+
+		const result = await invoke<LauncherInstallResult>('launcher_register_manual_path', {
+			appId,
+			exePath
+		});
+		installMessage = result.message;
+		manualRegistrationAppId = null;
+		await refresh();
+		return result;
+	} catch (e) {
+		installError = e instanceof Error ? e.message : String(e);
+		return null;
+	} finally {
+		installing = null;
+	}
+}
+
 function dismissLaunchError() {
 	launchError = null;
+}
+
+function dismissInstallError() {
+	installError = null;
+}
+
+function dismissInstallMessage() {
+	installMessage = null;
 }
 
 function startPolling() {
@@ -99,9 +165,25 @@ export const launcherStore = {
 	get launchError() {
 		return launchError;
 	},
+	get installing() {
+		return installing;
+	},
+	get installError() {
+		return installError;
+	},
+	get installMessage() {
+		return installMessage;
+	},
+	get manualRegistrationAppId() {
+		return manualRegistrationAppId;
+	},
 	refresh,
 	launchOrFocus,
+	installApp,
+	browseAndRegisterManualPath,
 	dismissLaunchError,
+	dismissInstallError,
+	dismissInstallMessage,
 	startPolling,
 	stopPolling,
 	handleVisibilityChange
