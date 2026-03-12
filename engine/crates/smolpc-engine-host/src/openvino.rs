@@ -277,7 +277,6 @@ pub fn probe_openvino_startup(
                 .full_device_name
                 .clone()
                 .or_else(|| npu_device_name.clone());
-            let advisory = classify_driver_diagnostic(driver_version.as_deref());
             let adapter_identity = full_device_name.as_ref().map(|device_name| {
                 let device_name = device_name.trim().to_ascii_lowercase().replace(' ', "_");
                 let runtime_name = npu_device_name
@@ -287,6 +286,22 @@ pub fn probe_openvino_startup(
                     .to_ascii_lowercase();
                 format!("openvino:{runtime_name}:{device_name}")
             });
+            if let Err(error) = OpenVinoGenAiGenerator::runtime_available(bundle) {
+                let (failure_class, failure_message) =
+                    classify_openvino_runtime_activation_error(&error);
+                return OpenVinoStartupProbeResult {
+                    hardware_detected,
+                    device_visible: true,
+                    adapter_identity,
+                    device_name: full_device_name,
+                    driver_version,
+                    failure_class: Some(failure_class),
+                    failure_message: Some(failure_message),
+                    ..Default::default()
+                };
+            }
+
+            let advisory = classify_driver_diagnostic(driver_version.as_deref());
 
             OpenVinoStartupProbeResult {
                 hardware_detected,
@@ -402,6 +417,24 @@ fn classify_driver_diagnostic(driver_version: Option<&str>) -> Option<(String, S
     }
 }
 
+fn classify_openvino_runtime_activation_error(error: &str) -> (String, String) {
+    if error.contains("Missing symbol ov_genai_")
+        || (error.contains("ov_genai_") && error.contains("GetProcAddress failed"))
+    {
+        return (
+            "openvino_genai_c_api_missing".to_string(),
+            format!(
+                "The staged openvino_genai.dll is missing the required ov_genai_* C API exports for the native adapter: {error}"
+            ),
+        );
+    }
+
+    (
+        "openvino_genai_runtime_unavailable".to_string(),
+        format!("OpenVINO GenAI runtime activation failed: {error}"),
+    )
+}
+
 fn version_is_older_than(actual: &str, floor: &str) -> bool {
     let actual = parse_version(actual);
     let floor = parse_version(floor);
@@ -419,7 +452,10 @@ fn parse_version(raw: &str) -> Option<Vec<u32>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{inspect_openvino_artifact, version_is_older_than};
+    use super::{
+        classify_openvino_runtime_activation_error, inspect_openvino_artifact,
+        version_is_older_than,
+    };
     use std::fs;
     use tempfile::tempdir;
 
@@ -464,5 +500,15 @@ mod tests {
         assert!(version_is_older_than("32.0.100.3103", "32.0.100.3104"));
         assert!(!version_is_older_than("32.0.100.3104", "32.0.100.3104"));
         assert!(!version_is_older_than("32.0.100.3105", "32.0.100.3104"));
+    }
+
+    #[test]
+    fn openvino_runtime_activation_symbol_errors_are_classified() {
+        let (class, message) = classify_openvino_runtime_activation_error(
+            "Missing symbol ov_genai_llm_pipeline_create: GetProcAddress failed",
+        );
+
+        assert_eq!(class, "openvino_genai_c_api_missing");
+        assert!(message.contains("ov_genai_*"));
     }
 }
