@@ -181,10 +181,7 @@ mod tests {
         );
         assert_eq!(ids.get(1).map(String::as_str), Some("qwen2.5-coder-1.5b"));
         assert_eq!(ids.get(2).map(String::as_str), Some("qwen3-4b-int4-ov"));
-        assert_eq!(
-            ids.get(3).map(String::as_str),
-            Some("qwen3-4b-int4-ov-npu")
-        );
+        assert_eq!(ids.get(3).map(String::as_str), Some("qwen3-4b-int4-ov-npu"));
         assert_eq!(ids.len(), 4);
     }
 
