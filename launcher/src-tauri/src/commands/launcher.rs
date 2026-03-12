@@ -1,6 +1,6 @@
 use crate::launcher::catalog;
 use crate::launcher::orchestrator::{
-    install_app, is_app_running, launch_or_focus, register_manual_path, LauncherState,
+    install_app, is_app_running_in_snapshot, launch_or_focus, register_manual_path, LauncherState,
 };
 use crate::launcher::types::{
     LauncherAppSummary, LauncherInstallResult, LauncherInstallState, LauncherLaunchResult,
@@ -14,6 +14,7 @@ pub async fn launcher_list_apps(
     let catalog_doc = catalog::load_catalog(&app_handle)?;
     let registry_doc = catalog::load_registry(&app_handle)?;
     let manual_required = state.manual_required_apps().await;
+    let running_names = state.running_process_names().await;
 
     Ok(
         catalog::merge_catalog_and_registry(&catalog_doc, &registry_doc)
@@ -30,7 +31,7 @@ pub async fn launcher_list_apps(
                     .is_some_and(|command| !command.is_empty());
                 let is_running = match (registration, resolved.install_state.clone()) {
                     (Some(entry), LauncherInstallState::Installed) => {
-                        is_app_running(&entry.executable_path())
+                        is_app_running_in_snapshot(&entry.executable_path(), &running_names)
                     }
                     _ => false,
                 };

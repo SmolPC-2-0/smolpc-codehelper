@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
-use sysinfo::System;
+use sysinfo::{ProcessesToUpdate, System};
 use tauri::Manager;
 use tokio::sync::Mutex;
 
@@ -29,6 +29,7 @@ pub struct LauncherState {
     connect_lock: Arc<Mutex<()>>,
     launch_lock: Arc<Mutex<()>>,
     install_lock: Arc<Mutex<()>>,
+    process_system: Arc<Mutex<System>>,
     missing_registration_attempts: Arc<Mutex<HashMap<String, u8>>>,
     manual_registration_required: Arc<Mutex<HashSet<String>>>,
 }
@@ -40,6 +41,7 @@ impl Default for LauncherState {
             connect_lock: Arc::new(Mutex::new(())),
             launch_lock: Arc::new(Mutex::new(())),
             install_lock: Arc::new(Mutex::new(())),
+            process_system: Arc::new(Mutex::new(System::new_all())),
             missing_registration_attempts: Arc::new(Mutex::new(HashMap::new())),
             manual_registration_required: Arc::new(Mutex::new(HashSet::new())),
         }
@@ -56,6 +58,18 @@ impl LauncherState {
 
     pub async fn manual_required_apps(&self) -> HashSet<String> {
         self.manual_registration_required.lock().await.clone()
+    }
+
+    pub async fn running_process_names(&self) -> HashSet<String> {
+        let mut system = self.process_system.lock().await;
+        system.refresh_processes(ProcessesToUpdate::All, true);
+        process_names_from_system(&system)
+    }
+
+    pub async fn is_app_running(&self, executable: &Path) -> bool {
+        let mut system = self.process_system.lock().await;
+        system.refresh_processes(ProcessesToUpdate::All, true);
+        !matching_process_ids_in_system(&system, executable).is_empty()
     }
 
     async fn record_missing_registration_attempt(&self, app_id: &str) -> u8 {
@@ -119,7 +133,7 @@ pub async fn launch_or_focus(
     let gate = evaluate_engine_api_gate(&app, &meta, &ready_status)?;
 
     let executable = app.executable_path();
-    let action = if is_app_running(&executable) {
+    let action = if state.is_app_running(&executable).await {
         focus_existing_app(&app)?;
         LaunchAction::Focused
     } else {
@@ -202,12 +216,21 @@ pub async fn register_manual_path(
             path.display()
         ));
     }
-    let is_exe = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"));
-    if !is_exe {
-        return Err("Manual executable path must point to a .exe file".to_string());
+
+    #[cfg(target_os = "windows")]
+    {
+        let is_exe = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"));
+        if !is_exe {
+            return Err("Manual executable path must point to a .exe file".to_string());
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    if !path.is_file() {
+        return Err("Manual executable path must point to a file".to_string());
     }
 
     let existing = catalog::load_registry(app_handle)?
@@ -224,7 +247,7 @@ pub async fn register_manual_path(
         .as_ref()
         .and_then(|entry| entry.focus_command.clone());
 
-    let mut entry = LauncherRegistryApp {
+    let entry = LauncherRegistryApp {
         app_id: app_id.to_string(),
         exe_path: path.display().to_string(),
         args,
@@ -233,7 +256,13 @@ pub async fn register_manual_path(
         installed_at: catalog::now_utc_timestamp(),
         source: "manual".to_string(),
     };
-    catalog::upsert_registry_entry(app_handle, entry.clone())?;
+    let app_handle = app_handle.clone();
+    let entry_for_write = entry.clone();
+    tokio::task::spawn_blocking(move || {
+        catalog::upsert_registry_entry(&app_handle, entry_for_write)
+    })
+    .await
+    .map_err(|error| format!("Failed to join registry write task: {error}"))??;
     state.clear_install_tracking(app_id).await;
 
     Ok(LauncherInstallResult {
@@ -243,7 +272,7 @@ pub async fn register_manual_path(
             "Manual executable path saved for '{}'.",
             catalog_app.display_name
         ),
-        exe_path: Some(std::mem::take(&mut entry.exe_path)),
+        exe_path: Some(entry.exe_path),
     })
 }
 
@@ -353,13 +382,64 @@ fn evaluate_engine_api_gate(
 /// Check if a process matching the given executable path is currently running.
 /// Public so commands can call it for per-app status.
 pub fn is_app_running(executable: &Path) -> bool {
-    !matching_process_ids(executable).is_empty()
+    let mut system = System::new_all();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    !matching_process_ids_in_system(&system, executable).is_empty()
+}
+
+pub fn is_app_running_in_snapshot(executable: &Path, running_names: &HashSet<String>) -> bool {
+    let (target_file, target_stem, target_stem_exe) = executable_name_candidates(executable);
+    target_file
+        .as_ref()
+        .is_some_and(|name| running_names.contains(name))
+        || target_stem
+            .as_ref()
+            .is_some_and(|name| running_names.contains(name))
+        || target_stem_exe
+            .as_ref()
+            .is_some_and(|name| running_names.contains(name))
+}
+
+fn process_names_from_system(system: &System) -> HashSet<String> {
+    system
+        .processes()
+        .values()
+        .map(|process| process.name().to_string_lossy().to_ascii_lowercase())
+        .collect()
 }
 
 fn matching_process_ids(executable: &Path) -> Vec<u32> {
     let mut system = System::new_all();
-    system.refresh_all();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    matching_process_ids_in_system(&system, executable)
+}
 
+fn matching_process_ids_in_system(system: &System, executable: &Path) -> Vec<u32> {
+    let (target_file, target_stem, target_stem_exe) = executable_name_candidates(executable);
+
+    system
+        .processes()
+        .values()
+        .filter_map(|process| {
+            let process_name = process.name().to_string_lossy().to_ascii_lowercase();
+            let matches_target = process_name_matches(
+                &process_name,
+                target_file.as_deref(),
+                target_stem.as_deref(),
+                target_stem_exe.as_deref(),
+            );
+            if matches_target {
+                Some(process.pid().as_u32())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn executable_name_candidates(
+    executable: &Path,
+) -> (Option<String>, Option<String>, Option<String>) {
     let target_file = executable
         .file_name()
         .and_then(|name| name.to_str())
@@ -370,21 +450,18 @@ fn matching_process_ids(executable: &Path) -> Vec<u32> {
         .map(|name| name.to_ascii_lowercase());
     let target_stem_exe = target_stem.as_ref().map(|stem| format!("{stem}.exe"));
 
-    system
-        .processes()
-        .values()
-        .filter_map(|process| {
-            let process_name = process.name().to_string_lossy().to_ascii_lowercase();
-            let matches_target = target_file.as_deref() == Some(process_name.as_str())
-                || target_stem.as_deref() == Some(process_name.as_str())
-                || target_stem_exe.as_deref() == Some(process_name.as_str());
-            if matches_target {
-                Some(process.pid().as_u32())
-            } else {
-                None
-            }
-        })
-        .collect()
+    (target_file, target_stem, target_stem_exe)
+}
+
+fn process_name_matches(
+    process_name: &str,
+    target_file: Option<&str>,
+    target_stem: Option<&str>,
+    target_stem_exe: Option<&str>,
+) -> bool {
+    target_file == Some(process_name)
+        || target_stem == Some(process_name)
+        || target_stem_exe == Some(process_name)
 }
 
 fn focus_existing_app(app: &LauncherLaunchableApp) -> Result<(), String> {
@@ -558,6 +635,22 @@ pub fn any_app_running(app_handle: &tauri::AppHandle) -> bool {
         .any(|entry| is_app_running(&entry.executable_path()))
 }
 
+/// Check if any managed app from the registry is running using a shared process snapshot.
+pub async fn any_app_running_cached(app_handle: &tauri::AppHandle, state: &LauncherState) -> bool {
+    let Ok(catalog_doc) = catalog::load_catalog(app_handle) else {
+        return false;
+    };
+    let Ok(registry_doc) = catalog::load_registry(app_handle) else {
+        return false;
+    };
+    let running_names = state.running_process_names().await;
+
+    catalog::merge_catalog_and_registry(&catalog_doc, &registry_doc)
+        .iter()
+        .filter_map(|entry| entry.registration.as_ref())
+        .any(|entry| is_app_running_in_snapshot(&entry.executable_path(), &running_names))
+}
+
 /// Shut down the cached engine client and clear the cache.
 pub async fn shutdown_engine(state: &LauncherState) -> Result<(), String> {
     let client = state.client.lock().await.take();
@@ -694,12 +787,9 @@ async fn download_installer(
         ));
     }
 
-    let response = reqwest::get(installer_url).await.map_err(|error| {
-        format!(
-            "Failed to download installer '{}': {error}",
-            installer_url
-        )
-    })?;
+    let response = reqwest::get(installer_url)
+        .await
+        .map_err(|error| format!("Failed to download installer '{}': {error}", installer_url))?;
     if !response.status().is_success() {
         return Err(format!(
             "Installer download failed for '{}': HTTP {}",

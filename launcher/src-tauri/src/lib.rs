@@ -7,9 +7,8 @@ use commands::launcher::{
     launcher_register_manual_path,
 };
 use launcher::orchestrator::{
-    any_app_running, resolve_engine_client, shutdown_engine, LauncherState,
+    any_app_running, any_app_running_cached, shutdown_engine, LauncherState,
 };
-use smolpc_engine_client::{StartupMode, StartupPolicy};
 use std::path::PathBuf;
 use tauri::Manager;
 
@@ -88,24 +87,6 @@ pub fn run() {
 
             configure_runtime_dlls(app);
 
-            // Eager engine start — non-blocking, UI loads immediately
-            let eager_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let state = eager_handle.state::<LauncherState>();
-                match resolve_engine_client(&eager_handle, state.inner()).await {
-                    Ok(client) => {
-                        log::info!("Eager engine start: connected");
-                        if let Err(e) = client
-                            .ensure_started(StartupMode::Auto, StartupPolicy::default())
-                            .await
-                        {
-                            log::warn!("Eager engine start: ensure_started failed: {e}");
-                        }
-                    }
-                    Err(e) => log::warn!("Eager engine start: connect_or_spawn failed: {e}"),
-                }
-            });
-
             // Background monitor — shuts down engine when launcher is
             // hidden/closed AND all helper apps are closed.
             let monitor_handle = app.handle().clone();
@@ -124,7 +105,7 @@ pub fn run() {
                         .get_webview_window("main")
                         .and_then(|w| w.is_visible().ok())
                         .unwrap_or(false);
-                    let apps_running = any_app_running(&monitor_handle);
+                    let apps_running = any_app_running_cached(&monitor_handle, state.inner()).await;
 
                     // Keep engine alive while launcher is visible or any app is running
                     if window_visible || apps_running {

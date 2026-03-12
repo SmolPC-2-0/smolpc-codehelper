@@ -76,35 +76,19 @@ class RAGSystem:
             # Load database
             embeddings_file = DB_PATH / "embeddings.npy"
             metadata_json_file = DB_PATH / "metadata.json"
-            metadata_pickle_file = DB_PATH / "metadata.pkl"
 
             if not embeddings_file.exists():
                 print(f"[RAG] Warning: Database not found at {DB_PATH}")
                 print("[RAG] Info: Run indexer_simple.py first to build the knowledge base")
                 return False
-            if not metadata_json_file.exists() and not metadata_pickle_file.exists():
+            if not metadata_json_file.exists():
                 print(f"[RAG] Warning: metadata.json not found at {metadata_json_file}")
                 print("[RAG] Info: Rebuild the knowledge base to generate metadata.json")
                 return False
 
             self.embeddings = np.load(embeddings_file)
-
-            if metadata_json_file.exists():
-                with open(metadata_json_file, 'r', encoding='utf-8') as f:
-                    self.metadata = json.load(f)
-            else:
-                # Pickle is intentionally disabled by default because loading untrusted
-                # pickle data can execute arbitrary code.
-                allow_pickle = os.getenv("BLENDER_HELPER_ALLOW_PICKLE_METADATA", "0") == "1"
-                if not allow_pickle:
-                    print("[RAG] Error: metadata.json missing and unsafe pickle fallback disabled")
-                    print("[RAG] Error: Rebuild database or set BLENDER_HELPER_ALLOW_PICKLE_METADATA=1")
-                    return False
-
-                import pickle
-                with open(metadata_pickle_file, 'rb') as f:
-                    self.metadata = pickle.load(f)
-                print("[RAG] Warning: Loaded metadata.pkl fallback (unsafe). Prefer metadata.json.")
+            with open(metadata_json_file, 'r', encoding='utf-8') as f:
+                self.metadata = json.load(f)
 
             self.initialized = True
             print(f"[RAG] OK: Successfully loaded {len(self.metadata)} documents")

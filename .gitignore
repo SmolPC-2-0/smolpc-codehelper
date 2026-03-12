@@ -20,7 +20,9 @@ dist-ssr
 !.env.example
 /target/
 /src-tauri/target/
+# Legacy root-level path from pre-monorepo layout.
 /src-tauri/gen/
+# Launcher schemas under launcher/src-tauri/gen/schemas are intentionally committed for bootstrap/CI.
 /apps/codehelper/src-tauri/target/
 /apps/codehelper/src-tauri/gen/schemas
 /docs/.local_docs/
