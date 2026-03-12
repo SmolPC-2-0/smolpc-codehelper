@@ -31,6 +31,8 @@ impl InferenceBackend {
 #[serde(rename_all = "snake_case")]
 pub enum DecisionReason {
     DefaultCpu,
+    #[serde(rename = "default_openvino_candidate")]
+    DefaultOpenVinoCandidate,
     #[serde(
         rename = "default_directml_candidate",
         alias = "default_direct_m_l_candidate"
@@ -121,8 +123,12 @@ impl BackendDecisionKey {
             self.ort_bundle_fingerprint.as_deref().unwrap_or("none"),
             self.openvino_runtime_version.as_deref().unwrap_or("none"),
             self.openvino_genai_version.as_deref().unwrap_or("none"),
-            self.openvino_tokenizers_version.as_deref().unwrap_or("none"),
-            self.openvino_bundle_fingerprint.as_deref().unwrap_or("none"),
+            self.openvino_tokenizers_version
+                .as_deref()
+                .unwrap_or("none"),
+            self.openvino_bundle_fingerprint
+                .as_deref()
+                .unwrap_or("none"),
             self.gpu_adapter_identity.as_deref().unwrap_or("none"),
             self.gpu_driver_version.as_deref().unwrap_or("none"),
             gpu_device_id,

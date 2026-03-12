@@ -11,9 +11,8 @@ use chrono::Utc;
 use smolpc_engine_core::inference::backend::{
     BackendDecision, BackendDecisionKey, BackendRuntimeBundleStatus, BackendSelectedDevice,
     BackendSelectionState, BackendStatus, CheckModelResponse, DecisionPersistenceState,
-    DecisionReason, DirectMLFailureStage, FailureCounters, InferenceBackend,
-    LanePreflightState, LaneStartupProbeState, ModelLaneReadiness,
-    ModelLaneReadinessByBackend, ORT_CRATE_VERSION,
+    DecisionReason, DirectMLFailureStage, FailureCounters, InferenceBackend, LanePreflightState,
+    LaneStartupProbeState, ModelLaneReadiness, ModelLaneReadinessByBackend, ORT_CRATE_VERSION,
 };
 use smolpc_engine_core::inference::backend_store::{
     backend_store_path, BackendDecisionRecord, BackendStore,
@@ -42,9 +41,8 @@ use tokio::sync::{mpsc, Mutex, Notify, Semaphore};
 use tokio::time::{sleep, timeout};
 
 use crate::openvino::{
-    inspect_openvino_artifact, is_blocking_openvino_probe_failure,
-    openvino_runtime_activation_available, probe_openvino_startup, run_openvino_preflight,
-    OpenVinoPreflightResult, OpenVinoStartupProbeResult,
+    inspect_openvino_artifact, is_blocking_openvino_probe_failure, probe_openvino_startup,
+    run_openvino_preflight, OpenVinoPreflightResult, OpenVinoStartupProbeResult,
 };
 use crate::runtime_bundles::{resolve_runtime_bundles, ResolvedRuntimeBundles};
 #[cfg(test)]
@@ -310,6 +308,7 @@ const STARTUP_PROBE_WAIT_MS: u64 = 1_500;
 /// Worst-case total probe wait: STARTUP_PROBE_WAIT_MS + STARTUP_PROBE_RECOVERY_WAIT_MS.
 const STARTUP_PROBE_RECOVERY_WAIT_MS: u64 = 8_000;
 const OPENVINO_PREFLIGHT_BUDGET: Duration = Duration::from_secs(30);
+const OPENVINO_SELECTION_PROFILE: &str = "openvino_native_v1";
 
 #[derive(Debug, Clone)]
 struct DirectMlCandidate {
@@ -582,6 +581,7 @@ fn directml_unavailable_reason(
 fn decision_reason_code(reason: &DecisionReason) -> &'static str {
     match reason {
         DecisionReason::DefaultCpu => "default_cpu",
+        DecisionReason::DefaultOpenVinoCandidate => "default_openvino_candidate",
         DecisionReason::DefaultDirectMLCandidate => "default_directml_candidate",
         DecisionReason::ForcedOverride => "forced_override",
         DecisionReason::PersistedDecision => "persisted_decision",
@@ -695,12 +695,6 @@ impl ModelLaneArtifacts {
     }
 }
 
-fn openvino_manifest_path(model_dir: &str) -> PathBuf {
-    ModelLoader::model_path(model_dir)
-        .join(InferenceBackend::OpenVinoNpu.as_str())
-        .join("manifest.json")
-}
-
 fn compute_artifact_fingerprint(paths: &[PathBuf]) -> Option<String> {
     let existing = paths
         .iter()
@@ -739,12 +733,30 @@ fn compute_artifact_fingerprint(paths: &[PathBuf]) -> Option<String> {
     Some(format!("{:016x}", hasher.finish()))
 }
 
+fn sanitize_cache_component(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if sanitized.is_empty() {
+        "unknown".to_string()
+    } else {
+        sanitized
+    }
+}
+
 fn resolve_model_lane_artifacts(model_dir: &str) -> ModelLaneArtifacts {
     let (cpu_model_exists, cpu_tokenizer_exists) =
         ModelLoader::check_model_files_for_backend(model_dir, ModelArtifactBackend::Cpu);
     let (directml_model_exists, directml_tokenizer_exists) =
         ModelLoader::check_model_files_for_backend(model_dir, ModelArtifactBackend::DirectML);
-    let openvino_manifest = openvino_manifest_path(model_dir);
+    let openvino_manifest = ModelLoader::openvino_manifest_file(model_dir);
     let openvino_artifact = inspect_openvino_artifact(&openvino_manifest);
 
     let cpu_model_path = ModelLoader::resolve_cpu_model_file(model_dir);
@@ -837,7 +849,9 @@ fn rebuild_available_backends(status: &mut BackendStatus) {
         status.available_backends.push(InferenceBackend::DirectML);
     }
     if status.lanes.openvino_npu.startup_probe_state == LaneStartupProbeState::Ready {
-        status.available_backends.push(InferenceBackend::OpenVinoNpu);
+        status
+            .available_backends
+            .push(InferenceBackend::OpenVinoNpu);
     }
 }
 
@@ -927,7 +941,8 @@ fn apply_runtime_bundle_status(
 
     status.lanes.cpu.detected = true;
     status.lanes.cpu.bundle_ready = runtime_bundles.ort.ort_validated();
-    status.lanes.cpu.runtime_version = runtime_version_summary(&runtime_bundles.ort.version_metadata);
+    status.lanes.cpu.runtime_version =
+        runtime_version_summary(&runtime_bundles.ort.version_metadata);
     status.lanes.cpu.startup_probe_state = LaneStartupProbeState::Ready;
     if !status.lanes.cpu.bundle_ready && status.lanes.cpu.last_failure_class.is_none() {
         status.lanes.cpu.last_failure_class = runtime_bundles
@@ -1033,7 +1048,10 @@ fn build_check_model_response(
     let openvino_npu = ModelLaneReadiness {
         artifact_ready: artifacts.openvino_npu_ready(),
         bundle_ready: openvino_bundle_ready,
-        ready: false,
+        ready: artifacts.openvino_npu_ready()
+            && openvino_bundle_ready
+            && openvino_probe_ready
+            && openvino_probe_failure.is_none(),
         reason: if !artifacts.openvino_npu_ready() {
             artifacts
                 .openvino_reason
@@ -1047,10 +1065,8 @@ fn build_check_model_response(
             failure
         } else if !openvino_probe_ready {
             "startup_probe_failed".to_string()
-        } else if !openvino_runtime_activation_available() {
-            "runtime_unavailable".to_string()
         } else {
-            "preflight_not_run".to_string()
+            "ready".to_string()
         },
     };
 
@@ -1069,6 +1085,7 @@ struct EngineState {
     current_model: Arc<Mutex<Option<String>>>,
     backend_status: Arc<Mutex<BackendStatus>>,
     runtime_bundles: ResolvedRuntimeBundles,
+    data_dir: PathBuf,
     active_cancel: Arc<StdMutex<Option<Arc<AtomicBool>>>>,
     generating: Arc<AtomicBool>,
     app_version: String,
@@ -1134,6 +1151,7 @@ impl EngineState {
             current_model: Arc::new(Mutex::new(None)),
             backend_status: Arc::new(Mutex::new(status)),
             runtime_bundles,
+            data_dir: args.data_dir.clone(),
             active_cancel: Arc::new(StdMutex::new(None)),
             generating: Arc::new(AtomicBool::new(false)),
             app_version: args.app_version.clone(),
@@ -1151,6 +1169,51 @@ impl EngineState {
 
     fn runtime_bundles(&self) -> &ResolvedRuntimeBundles {
         &self.runtime_bundles
+    }
+
+    fn openvino_cache_dir(&self, model_id: &str, artifacts: &ModelLaneArtifacts) -> PathBuf {
+        let model_key = sanitize_cache_component(model_id);
+        let artifact_key = artifacts
+            .fingerprint
+            .as_deref()
+            .map(sanitize_cache_component)
+            .unwrap_or_else(|| "artifact-unknown".to_string());
+
+        self.data_dir
+            .join("inference")
+            .join("openvino-cache")
+            .join(model_key)
+            .join(artifact_key)
+    }
+
+    async fn run_openvino_preflight_with_timeout(
+        &self,
+        model_id: &str,
+        artifacts: &ModelLaneArtifacts,
+        probe: &OpenVinoStartupProbeResult,
+    ) -> OpenVinoPreflightResult {
+        let Some(artifact) = artifacts.openvino_artifact.clone() else {
+            return OpenVinoPreflightResult::Failed {
+                class: "openvino_npu_artifact_missing".to_string(),
+                message: "OpenVINO lane artifact is missing".to_string(),
+            };
+        };
+
+        let bundle = self.runtime_bundles().openvino.clone();
+        let cache_dir = self.openvino_cache_dir(model_id, artifacts);
+        let probe = probe.clone();
+        let task = tokio::task::spawn_blocking(move || {
+            run_openvino_preflight(&bundle, &artifact, &probe, &cache_dir)
+        });
+
+        match timeout(OPENVINO_PREFLIGHT_BUDGET, task).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(error)) => OpenVinoPreflightResult::Failed {
+                class: "openvino_npu_preflight_join_failed".to_string(),
+                message: format!("OpenVINO preflight task failed: {error}"),
+            },
+            Err(_) => OpenVinoPreflightResult::Timeout,
+        }
     }
 
     fn build_decision_key(
@@ -1189,14 +1252,14 @@ impl EngineState {
             openvino_bundle_fingerprint: Some(
                 self.runtime_bundles().openvino.fingerprint.value.clone(),
             ),
-            gpu_adapter_identity: directml_candidate.map(|candidate| candidate.adapter_identity.clone()),
-            gpu_driver_version: directml_candidate.map(|candidate| candidate.driver_version.clone()),
+            gpu_adapter_identity: directml_candidate
+                .map(|candidate| candidate.adapter_identity.clone()),
+            gpu_driver_version: directml_candidate
+                .map(|candidate| candidate.driver_version.clone()),
             gpu_device_id: selected_device_id,
-            npu_adapter_identity: openvino_probe
-                .and_then(|probe| probe.adapter_identity.clone()),
-            npu_driver_version: openvino_probe
-                .and_then(|probe| probe.driver_version.clone()),
-            selection_profile: None,
+            npu_adapter_identity: openvino_probe.and_then(|probe| probe.adapter_identity.clone()),
+            npu_driver_version: openvino_probe.and_then(|probe| probe.driver_version.clone()),
+            selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
         }
     }
 
@@ -1242,9 +1305,7 @@ impl EngineState {
                 OpenVinoStartupProbeResult {
                     hardware_detected,
                     failure_class: Some("openvino_npu_plugin_unavailable".to_string()),
-                    failure_message: Some(format!(
-                        "OpenVINO startup probe task failed: {error}"
-                    )),
+                    failure_message: Some(format!("OpenVINO startup probe task failed: {error}")),
                     ..Default::default()
                 }
             });
@@ -1628,12 +1689,10 @@ impl EngineState {
             None
         };
 
-        let make_status = |
-            selection_state: BackendSelectionState,
-            selection_reason: String,
-            device_id: Option<i32>,
-            device_name: Option<String>,
-        | {
+        let make_status = |selection_state: BackendSelectionState,
+                           selection_reason: String,
+                           device_id: Option<i32>,
+                           device_name: Option<String>| {
             let mut status = BackendStatus {
                 selection_state: Some(selection_state),
                 selection_reason: Some(selection_reason),
@@ -1704,96 +1763,9 @@ impl EngineState {
             Some(_) => false,
             None => persisted_backend.is_none() || stored_openvino,
         };
-
-        if force_override == Some(InferenceBackend::OpenVinoNpu) {
-            let reason = if !artifacts.openvino_npu_ready() {
-                artifacts
-                    .openvino_reason
-                    .clone()
-                    .unwrap_or_else(|| "artifact_missing".to_string())
-            } else if !openvino_bundle_ready {
-                bundle_reason(self.runtime_bundles().openvino.failure_code())
-            } else if openvino_probe.is_none() {
-                "startup_probe_pending".to_string()
-            } else if let Some(class) = openvino_probe
-                .as_ref()
-                .and_then(|probe| probe.failure_class.as_deref())
-                .filter(|class| is_blocking_openvino_probe_failure(class))
-            {
-                class.to_string()
-            } else {
-                let artifact = artifacts
-                    .openvino_artifact
-                    .as_ref()
-                    .expect("ready OpenVINO artifact should include manifest details");
-                let probe = openvino_probe
-                    .as_ref()
-                    .expect("forced OpenVINO path requires startup probe result");
-                let preflight = match timeout(OPENVINO_PREFLIGHT_BUDGET, async {
-                    run_openvino_preflight(artifact, probe)
-                })
-                .await
-                {
-                    Ok(result) => result,
-                    Err(_) => OpenVinoPreflightResult::Timeout,
-                };
-                match preflight {
-                    OpenVinoPreflightResult::RuntimeUnavailable => "runtime_unavailable".to_string(),
-                    OpenVinoPreflightResult::Timeout => "preflight_timeout".to_string(),
-                    OpenVinoPreflightResult::Failed { class, .. } => class,
-                    OpenVinoPreflightResult::Ready => "runtime_unavailable".to_string(),
-                }
-            };
-
-            let error = artifacts
-                .openvino_message
-                .clone()
-                .or_else(|| {
-                    openvino_probe
-                        .as_ref()
-                        .and_then(|probe| probe.failure_message.clone())
-                })
-                .unwrap_or_else(|| match reason.as_str() {
-                    "runtime_unavailable" => {
-                        "Native OpenVINO runtime activation is not implemented yet".to_string()
-                    }
-                    "startup_probe_pending" => {
-                        "OpenVINO startup probe is still running".to_string()
-                    }
-                    _ => format!("OpenVINO lane is unavailable: {reason}"),
-                });
-
-            let mut status = make_status(
-                BackendSelectionState::Error,
-                reason,
-                selected_device_id,
-                selected_device_name.clone(),
-            );
-            status.decision_key = Some(decision_key.clone());
-            status.selection_fingerprint = Some(decision_key.fingerprint());
-            status.last_decision = None;
-            *self.backend_status.lock().await = status;
-            return Err(error);
-        }
-
-        let (preferred_backend, decision_reason) = choose_preferred_backend(
-            force_override,
-            &failure_counters,
-            stored.as_ref(),
-            has_dml_candidate,
-        );
-
-        let mut active_backend = preferred_backend;
-        let mut active_reason = decision_reason.clone();
-        let mut runtime_engine = "ort_cpu".to_string();
-        let mut selection_state = BackendSelectionState::Ready;
-        let mut decision_persistence_state = if force_override.is_some() {
-            DecisionPersistenceState::None
-        } else {
-            DecisionPersistenceState::Persisted
-        };
-        let mut persisted_record_decision =
-            stored.as_ref().and_then(|record| record.persisted_decision.clone());
+        let mut persisted_record_decision = stored
+            .as_ref()
+            .and_then(|record| record.persisted_decision.clone());
         let mut directml_preflight_state = LanePreflightState::NotStarted;
         let mut openvino_preflight_state = LanePreflightState::NotStarted;
         let mut directml_failure_class = None;
@@ -1805,52 +1777,62 @@ impl EngineState {
             .as_ref()
             .and_then(|probe| probe.failure_message.clone());
         let mut suppress_store_update = false;
-        let active_model_path: String;
+        let mut decision_persistence_state = if force_override.is_some() {
+            DecisionPersistenceState::None
+        } else {
+            DecisionPersistenceState::Persisted
+        };
+        let mut selection_state = BackendSelectionState::Ready;
+        let mut openvino_reason_override = None;
+        let mut openvino_ready = None;
 
         if should_attempt_openvino {
-            let openvino_reason_override = if !artifacts.openvino_npu_ready() || !openvino_bundle_ready
-            {
-                Some(DecisionReason::NoOpenVinoCandidate)
+            if !artifacts.openvino_npu_ready() {
+                openvino_failure_class = artifacts.openvino_reason.clone();
+                openvino_failure_message = artifacts.openvino_message.clone();
+                openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
+            } else if !openvino_bundle_ready {
+                openvino_failure_class = Some(bundle_reason(
+                    self.runtime_bundles().openvino.failure_code(),
+                ));
+                openvino_failure_message = Some(format!(
+                    "OpenVINO runtime bundle is unavailable at {}",
+                    self.runtime_bundles().openvino.display_root().display()
+                ));
+                openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
             } else if openvino_probe.is_none() {
+                openvino_failure_class = Some("openvino_startup_probe_pending".to_string());
+                openvino_failure_message =
+                    Some("OpenVINO startup probe is still running".to_string());
                 suppress_store_update = true;
                 decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
                 selection_state = BackendSelectionState::Fallback;
-                Some(DecisionReason::OpenVinoStartupProbePending)
+                openvino_reason_override = Some(DecisionReason::OpenVinoStartupProbePending);
             } else if let Some(class) = openvino_probe
                 .as_ref()
                 .and_then(|probe| probe.failure_class.as_deref())
                 .filter(|class| is_blocking_openvino_probe_failure(class))
             {
                 openvino_failure_class = Some(class.to_string());
-                Some(DecisionReason::NoOpenVinoCandidate)
-            } else {
-                let artifact = artifacts
-                    .openvino_artifact
+                openvino_failure_message = openvino_probe
                     .as_ref()
-                    .expect("ready OpenVINO artifact should include manifest details");
+                    .and_then(|probe| probe.failure_message.clone());
+                openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
+            } else {
                 let probe = openvino_probe
                     .as_ref()
                     .expect("OpenVINO startup probe should exist when artifact is ready");
-                let preflight = match timeout(OPENVINO_PREFLIGHT_BUDGET, async {
-                    run_openvino_preflight(artifact, probe)
-                })
-                .await
+                match self
+                    .run_openvino_preflight_with_timeout(&model_id, &artifacts, probe)
+                    .await
                 {
-                    Ok(result) => result,
-                    Err(_) => OpenVinoPreflightResult::Timeout,
-                };
-                match preflight {
-                    OpenVinoPreflightResult::RuntimeUnavailable => {
-                        openvino_preflight_state = LanePreflightState::NotStarted;
-                        suppress_store_update = true;
-                        decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
-                        selection_state = BackendSelectionState::Fallback;
-                        Some(DecisionReason::OpenVinoRuntimeUnavailable)
+                    OpenVinoPreflightResult::Ready(ready) => {
+                        openvino_preflight_state = LanePreflightState::Ready;
+                        openvino_ready = Some(ready);
                     }
                     OpenVinoPreflightResult::Timeout => {
                         openvino_preflight_state = LanePreflightState::Timeout;
-                        openvino_failure_class =
-                            Some("openvino_npu_preflight_timeout".to_string());
+                        openvino_failure_class = Some("openvino_npu_preflight_timeout".to_string());
                         openvino_failure_message = Some(format!(
                             "OpenVINO preflight exceeded the {} second budget",
                             OPENVINO_PREFLIGHT_BUDGET.as_secs()
@@ -1858,32 +1840,95 @@ impl EngineState {
                         suppress_store_update = true;
                         decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
                         selection_state = BackendSelectionState::Fallback;
-                        Some(DecisionReason::OpenVinoPreflightTimeout)
+                        openvino_reason_override = Some(DecisionReason::OpenVinoPreflightTimeout);
                     }
                     OpenVinoPreflightResult::Failed { class, message } => {
                         openvino_preflight_state = LanePreflightState::Error;
                         openvino_failure_class = Some(class);
                         openvino_failure_message = Some(message);
                         selection_state = BackendSelectionState::Fallback;
-                        Some(DecisionReason::OpenVinoPreflightFailed)
-                    }
-                    OpenVinoPreflightResult::Ready => {
-                        openvino_preflight_state = LanePreflightState::Ready;
-                        suppress_store_update = true;
-                        decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
-                        selection_state = BackendSelectionState::Fallback;
-                        Some(DecisionReason::OpenVinoRuntimeUnavailable)
+                        openvino_reason_override = Some(DecisionReason::OpenVinoPreflightFailed);
                     }
                 }
-            };
-
-            if let Some(reason) = openvino_reason_override {
-                active_reason = reason;
-                selection_state = BackendSelectionState::Fallback;
             }
         }
 
-        let adapter = if preferred_backend == InferenceBackend::DirectML {
+        if force_override == Some(InferenceBackend::OpenVinoNpu) && openvino_ready.is_none() {
+            let selection_reason = openvino_reason_override
+                .as_ref()
+                .map(decision_reason_code)
+                .unwrap_or_else(|| {
+                    openvino_failure_class
+                        .as_deref()
+                        .unwrap_or("openvino_npu_forced_activation_failed")
+                })
+                .to_string();
+            let error = openvino_failure_message
+                .clone()
+                .or_else(|| artifacts.openvino_message.clone())
+                .unwrap_or_else(|| format!("OpenVINO lane is unavailable: {selection_reason}"));
+
+            let mut status = make_status(
+                BackendSelectionState::Error,
+                selection_reason,
+                selected_device_id,
+                selected_device_name.clone(),
+            );
+            status.decision_key = Some(decision_key.clone());
+            status.selection_fingerprint = Some(decision_key.fingerprint());
+            status.last_decision = None;
+            status.lanes.openvino_npu.preflight_state = openvino_preflight_state;
+            status.lanes.openvino_npu.last_failure_class = openvino_failure_class.clone();
+            status.lanes.openvino_npu.last_failure_message = openvino_failure_message.clone();
+            *self.backend_status.lock().await = status;
+            return Err(error);
+        }
+
+        let has_openvino_candidate = openvino_ready.is_some();
+        let (preferred_backend, decision_reason) = choose_preferred_backend(
+            force_override,
+            &failure_counters,
+            stored.as_ref(),
+            has_dml_candidate,
+            has_openvino_candidate,
+        );
+
+        let mut active_backend = preferred_backend;
+        let mut active_reason = decision_reason.clone();
+        let mut runtime_engine = "ort_cpu".to_string();
+        if let Some(reason) = openvino_reason_override {
+            active_reason = reason;
+            selection_state = BackendSelectionState::Fallback;
+        }
+        let active_model_path: String;
+
+        let adapter = if preferred_backend == InferenceBackend::OpenVinoNpu {
+            let ready = openvino_ready.take().ok_or_else(|| {
+                "OpenVINO selection expected a retained preflight generator".to_string()
+            })?;
+            if !suppress_store_update
+                && force_override.is_none()
+                && active_reason != DecisionReason::PersistedDecision
+            {
+                persisted_record_decision = Some(BackendDecision::new(
+                    InferenceBackend::OpenVinoNpu,
+                    active_reason.clone(),
+                    None,
+                ));
+            }
+            runtime_engine = "ov_genai_npu".to_string();
+            active_model_path = artifacts
+                .openvino_artifact
+                .as_ref()
+                .and_then(|artifact| artifact.manifest_path.parent())
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| {
+                    ModelLoader::openvino_dir(&model_def.directory)
+                        .display()
+                        .to_string()
+                });
+            InferenceRuntimeAdapter::openvino_genai_npu(ready.generator)
+        } else if preferred_backend == InferenceBackend::DirectML {
             match dml_model_path.as_deref() {
                 Some(dml_path) => {
                     match build_directml_runtime_adapter(
@@ -2021,12 +2066,12 @@ impl EngineState {
                         active_reason = DecisionReason::NoDirectMLCandidate;
                     }
                     selection_state = BackendSelectionState::Fallback;
-                    decision_persistence_state = if suppress_store_update || force_override.is_some()
-                    {
-                        DecisionPersistenceState::TemporaryFallback
-                    } else {
-                        DecisionPersistenceState::Persisted
-                    };
+                    decision_persistence_state =
+                        if suppress_store_update || force_override.is_some() {
+                            DecisionPersistenceState::TemporaryFallback
+                        } else {
+                            DecisionPersistenceState::Persisted
+                        };
                     if !suppress_store_update && force_override.is_none() {
                         persisted_record_decision = Some(BackendDecision::new(
                             InferenceBackend::Cpu,
@@ -2060,8 +2105,11 @@ impl EngineState {
                 && force_override.is_none()
                 && active_reason != DecisionReason::PersistedDecision
             {
-                persisted_record_decision =
-                    Some(BackendDecision::new(InferenceBackend::Cpu, active_reason.clone(), None));
+                persisted_record_decision = Some(BackendDecision::new(
+                    InferenceBackend::Cpu,
+                    active_reason.clone(),
+                    None,
+                ));
             }
             if should_attempt_openvino && active_reason != DecisionReason::PersistedDecision {
                 selection_state = BackendSelectionState::Fallback;
@@ -2108,19 +2156,16 @@ impl EngineState {
             status.lanes.directml.last_failure_class = Some(class);
             status.lanes.directml.last_failure_message = directml_failure_message;
         } else if !directml_detected {
-            status.lanes.directml.last_failure_class = Some("directml_candidate_missing".to_string());
+            status.lanes.directml.last_failure_class =
+                Some("directml_candidate_missing".to_string());
             status.lanes.directml.last_failure_message =
                 Some("No DirectML-capable adapter detected".to_string());
         }
         *self.backend_status.lock().await = status;
 
         if force_override.is_none() && !suppress_store_update {
-            self.persist_backend_record(
-                decision_key,
-                persisted_record_decision,
-                failure_counters,
-            )
-            .await;
+            self.persist_backend_record(decision_key, persisted_record_decision, failure_counters)
+                .await;
         }
 
         Ok(())
@@ -2196,13 +2241,14 @@ impl EngineState {
         *self.runtime_adapter.lock().await = Some(cpu_adapter);
         let mut counters = status_snapshot.failure_counters.clone();
         counters.record_directml_failure(DirectMLFailureStage::Runtime, error.to_string());
-        let mut persisted_record_decision = if let Some(decision_key) = status_snapshot.decision_key.as_ref() {
-            self.lookup_backend_record(decision_key)
-                .await
-                .and_then(|record| record.persisted_decision)
-        } else {
-            None
-        };
+        let mut persisted_record_decision =
+            if let Some(decision_key) = status_snapshot.decision_key.as_ref() {
+                self.lookup_backend_record(decision_key)
+                    .await
+                    .and_then(|record| record.persisted_decision)
+            } else {
+                None
+            };
         let mut decision_reason = DecisionReason::RuntimeFailureFallback;
         let mut decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
         if counters.should_demote_directml() {
@@ -2240,12 +2286,8 @@ impl EngineState {
         *self.backend_status.lock().await = updated;
 
         if let Some(decision_key) = status_snapshot.decision_key {
-            self.persist_backend_record(
-                decision_key,
-                persisted_record_decision,
-                counters,
-            )
-            .await;
+            self.persist_backend_record(decision_key, persisted_record_decision, counters)
+                .await;
         }
     }
 
@@ -2326,18 +2368,24 @@ fn choose_preferred_backend(
     failure_counters: &FailureCounters,
     stored: Option<&BackendDecisionRecord>,
     has_dml_candidate: bool,
+    has_openvino_candidate: bool,
 ) -> (InferenceBackend, DecisionReason) {
     if let Some(override_backend) = force_override {
         return (override_backend, DecisionReason::ForcedOverride);
     }
-    if failure_counters.should_demote_directml() {
-        return (InferenceBackend::Cpu, DecisionReason::DemotedAfterFailures);
-    }
     if let Some(record) = stored {
         if let Some(decision) = record.persisted_decision.as_ref() {
             match decision.backend {
+                InferenceBackend::OpenVinoNpu => {
+                    if has_openvino_candidate {
+                        return (
+                            InferenceBackend::OpenVinoNpu,
+                            DecisionReason::PersistedDecision,
+                        );
+                    }
+                }
                 InferenceBackend::DirectML => {
-                    if has_dml_candidate {
+                    if has_dml_candidate && !failure_counters.should_demote_directml() {
                         return (
                             InferenceBackend::DirectML,
                             DecisionReason::PersistedDecision,
@@ -2347,9 +2395,17 @@ fn choose_preferred_backend(
                 InferenceBackend::Cpu => {
                     return (InferenceBackend::Cpu, DecisionReason::PersistedDecision);
                 }
-                InferenceBackend::OpenVinoNpu => {}
             }
         }
+    }
+    if has_openvino_candidate {
+        return (
+            InferenceBackend::OpenVinoNpu,
+            DecisionReason::DefaultOpenVinoCandidate,
+        );
+    }
+    if failure_counters.should_demote_directml() {
+        return (InferenceBackend::Cpu, DecisionReason::DemotedAfterFailures);
     }
     if has_dml_candidate {
         return (
@@ -3072,10 +3128,7 @@ mod tests {
         let engine = EngineState::new_with_runtime_bundles(&args, bundles);
         let status = engine.backend_status.blocking_lock().clone();
 
-        assert_eq!(
-            status.selection_state,
-            Some(BackendSelectionState::Pending)
-        );
+        assert_eq!(status.selection_state, Some(BackendSelectionState::Pending));
         assert!(!status.runtime_bundles.ort.validated);
         assert_eq!(
             status.runtime_bundles.ort.failure.as_deref(),
@@ -3149,9 +3202,18 @@ mod tests {
     }
 
     #[test]
-    fn backend_selection_prefers_directml_without_cpu_artifact_inputs() {
+    fn backend_selection_prefers_openvino_when_candidate_is_ready() {
         let (backend, reason) =
-            choose_preferred_backend(None, &FailureCounters::default(), None, true);
+            choose_preferred_backend(None, &FailureCounters::default(), None, true, true);
+
+        assert_eq!(backend, InferenceBackend::OpenVinoNpu);
+        assert_eq!(reason, DecisionReason::DefaultOpenVinoCandidate);
+    }
+
+    #[test]
+    fn backend_selection_prefers_directml_when_openvino_is_unavailable() {
+        let (backend, reason) =
+            choose_preferred_backend(None, &FailureCounters::default(), None, true, false);
 
         assert_eq!(backend, InferenceBackend::DirectML);
         assert_eq!(reason, DecisionReason::DefaultDirectMLCandidate);
@@ -3176,7 +3238,7 @@ mod tests {
                 gpu_device_id: Some(0),
                 npu_adapter_identity: None,
                 npu_driver_version: None,
-                selection_profile: None,
+                selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(
                 InferenceBackend::Cpu,
@@ -3192,6 +3254,7 @@ mod tests {
             &FailureCounters::default(),
             Some(&record),
             true,
+            false,
         );
 
         assert_eq!(backend, InferenceBackend::Cpu);
@@ -3199,7 +3262,7 @@ mod tests {
     }
 
     #[test]
-    fn backend_selection_ignores_persisted_openvino_for_fallback_choice() {
+    fn backend_selection_keeps_persisted_openvino_choice_when_candidate_is_ready() {
         let record = BackendDecisionRecord {
             key: BackendDecisionKey {
                 model_id: "qwen2.5-coder-1.5b".to_string(),
@@ -3217,7 +3280,44 @@ mod tests {
                 gpu_device_id: Some(0),
                 npu_adapter_identity: Some("openvino:npu:intel_npu".to_string()),
                 npu_driver_version: Some("32.0.100.3104".to_string()),
-                selection_profile: None,
+                selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
+            },
+            persisted_decision: Some(BackendDecision::new(
+                InferenceBackend::OpenVinoNpu,
+                DecisionReason::PersistedDecision,
+                None,
+            )),
+            failure_counters: FailureCounters::default(),
+            updated_at: Utc::now().to_rfc3339(),
+        };
+
+        let (backend, reason) =
+            choose_preferred_backend(None, &FailureCounters::default(), Some(&record), true, true);
+
+        assert_eq!(backend, InferenceBackend::OpenVinoNpu);
+        assert_eq!(reason, DecisionReason::PersistedDecision);
+    }
+
+    #[test]
+    fn backend_selection_falls_back_when_persisted_openvino_candidate_is_unavailable() {
+        let record = BackendDecisionRecord {
+            key: BackendDecisionKey {
+                model_id: "qwen2.5-coder-1.5b".to_string(),
+                model_artifact_fingerprint: Some("artifact-v1".to_string()),
+                app_version: "test".to_string(),
+                selector_engine_id: "engine_host".to_string(),
+                ort_runtime_version: Some("2.0.0-rc.11".to_string()),
+                ort_bundle_fingerprint: Some("ort-bundle".to_string()),
+                openvino_runtime_version: Some("2026.0.0".to_string()),
+                openvino_genai_version: Some("2026.0.0".to_string()),
+                openvino_tokenizers_version: Some("2026.0.0".to_string()),
+                openvino_bundle_fingerprint: Some("openvino-bundle".to_string()),
+                gpu_adapter_identity: Some("intel:arc".to_string()),
+                gpu_driver_version: Some("31.0.101.5522".to_string()),
+                gpu_device_id: Some(0),
+                npu_adapter_identity: Some("openvino:npu:intel_npu".to_string()),
+                npu_driver_version: Some("32.0.100.3104".to_string()),
+                selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(
                 InferenceBackend::OpenVinoNpu,
@@ -3233,6 +3333,7 @@ mod tests {
             &FailureCounters::default(),
             Some(&record),
             true,
+            false,
         );
 
         assert_eq!(backend, InferenceBackend::DirectML);
@@ -3291,12 +3392,8 @@ mod tests {
             npu_hardware_detected: false,
         };
 
-        let response = build_check_model_response(
-            "qwen2.5-coder-1.5b",
-            &bundles,
-            Some(&probe),
-            None,
-        );
+        let response =
+            build_check_model_response("qwen2.5-coder-1.5b", &bundles, Some(&probe), None);
         drop(models_guard);
 
         assert!(response.lanes.cpu.ready);
@@ -3308,7 +3405,7 @@ mod tests {
     }
 
     #[test]
-    fn check_model_response_reports_runtime_unavailable_for_openvino_lane() {
+    fn check_model_response_reports_openvino_lane_ready_when_probe_is_ready() {
         let _guard = lock_env();
         let temp = tempdir().expect("temp dir");
         let resource_dir = temp.path().join("resources");
@@ -3379,8 +3476,8 @@ mod tests {
 
         assert!(response.lanes.openvino_npu.artifact_ready);
         assert!(response.lanes.openvino_npu.bundle_ready);
-        assert!(!response.lanes.openvino_npu.ready);
-        assert_eq!(response.lanes.openvino_npu.reason, "runtime_unavailable");
+        assert!(response.lanes.openvino_npu.ready);
+        assert_eq!(response.lanes.openvino_npu.reason, "ready");
     }
 
     #[test]

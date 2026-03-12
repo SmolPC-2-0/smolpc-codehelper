@@ -1,5 +1,7 @@
 #[cfg(target_os = "windows")]
 use super::genai::GenAiDirectMlGenerator;
+#[cfg(target_os = "windows")]
+use super::genai::OpenVinoGenAiGenerator;
 use super::generator::Generator;
 use super::types::{GenerationConfig, GenerationMetrics};
 use std::sync::atomic::AtomicBool;
@@ -17,6 +19,10 @@ pub enum InferenceRuntimeAdapter {
     GenAiDirectMl {
         generator: GenAiDirectMlGenerator,
     },
+    #[cfg(target_os = "windows")]
+    OpenVinoGenAiNpu {
+        generator: OpenVinoGenAiGenerator,
+    },
 }
 
 impl InferenceRuntimeAdapter {
@@ -27,6 +33,11 @@ impl InferenceRuntimeAdapter {
     #[cfg(target_os = "windows")]
     pub fn genai_directml(generator: GenAiDirectMlGenerator) -> Self {
         Self::GenAiDirectMl { generator }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn openvino_genai_npu(generator: OpenVinoGenAiGenerator) -> Self {
+        Self::OpenVinoGenAiNpu { generator }
     }
 
     pub async fn generate_stream<F>(
@@ -47,6 +58,12 @@ impl InferenceRuntimeAdapter {
             }
             #[cfg(target_os = "windows")]
             Self::GenAiDirectMl { generator } => {
+                generator
+                    .generate_stream(prompt, config, cancelled, on_token)
+                    .await
+            }
+            #[cfg(target_os = "windows")]
+            Self::OpenVinoGenAiNpu { generator } => {
                 generator
                     .generate_stream(prompt, config, cancelled, on_token)
                     .await

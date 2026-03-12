@@ -1,6 +1,6 @@
-use smolpc_engine_core::inference::{
-    OpenVinoRuntimeBundle, OpenVinoRuntimeLoader,
-};
+#[cfg(target_os = "windows")]
+use smolpc_engine_core::inference::OpenVinoGenAiGenerator;
+use smolpc_engine_core::inference::{OpenVinoRuntimeBundle, OpenVinoRuntimeLoader};
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
@@ -64,9 +64,7 @@ impl OpenVinoArtifactCheck {
                 manifest_path.display()
             )),
             Self::Invalid { message, .. } => Some(message.clone()),
-            Self::Incomplete {
-                missing_files, ..
-            } => Some(format!(
+            Self::Incomplete { missing_files, .. } => Some(format!(
                 "OpenVINO manifest references missing files: {}",
                 missing_files
                     .iter()
@@ -113,13 +111,15 @@ pub struct OpenVinoStartupProbeResult {
     pub failure_message: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenVinoPreflightReady {
+    #[cfg(target_os = "windows")]
+    pub generator: OpenVinoGenAiGenerator,
+}
+
 pub enum OpenVinoPreflightResult {
-    Ready,
+    Ready(OpenVinoPreflightReady),
     Timeout,
-    #[allow(dead_code)]
     Failed { class: String, message: String },
-    RuntimeUnavailable,
 }
 
 pub fn inspect_openvino_artifact(manifest_path: &Path) -> OpenVinoArtifactCheck {
@@ -313,19 +313,60 @@ pub fn is_blocking_openvino_probe_failure(class: &str) -> bool {
     )
 }
 
-pub fn openvino_runtime_activation_available() -> bool {
-    false
-}
-
 pub fn run_openvino_preflight(
-    _artifact: &OpenVinoReadyArtifact,
-    _probe: &OpenVinoStartupProbeResult,
+    bundle: &OpenVinoRuntimeBundle,
+    artifact: &OpenVinoReadyArtifact,
+    probe: &OpenVinoStartupProbeResult,
+    cache_dir: &Path,
 ) -> OpenVinoPreflightResult {
-    if !openvino_runtime_activation_available() {
-        return OpenVinoPreflightResult::RuntimeUnavailable;
+    if !probe.startup_ready || !probe.device_visible {
+        return OpenVinoPreflightResult::Failed {
+            class: "openvino_npu_startup_probe_failed".to_string(),
+            message: probe.failure_message.clone().unwrap_or_else(|| {
+                "OpenVINO startup probe did not expose a usable NPU device".to_string()
+            }),
+        };
     }
 
-    OpenVinoPreflightResult::Ready
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (bundle, artifact, cache_dir);
+        return OpenVinoPreflightResult::Failed {
+            class: "openvino_npu_platform_unsupported".to_string(),
+            message: "OpenVINO NPU runtime is only supported on Windows".to_string(),
+        };
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let Some(model_dir) = artifact.manifest_path.parent() else {
+            return OpenVinoPreflightResult::Failed {
+                class: "openvino_npu_compile_failed".to_string(),
+                message: format!(
+                    "Invalid OpenVINO manifest path: {}",
+                    artifact.manifest_path.display()
+                ),
+            };
+        };
+
+        let generator = match OpenVinoGenAiGenerator::new(bundle, model_dir, cache_dir) {
+            Ok(generator) => generator,
+            Err(message) => {
+                return OpenVinoPreflightResult::Failed {
+                    class: "openvino_npu_compile_failed".to_string(),
+                    message,
+                }
+            }
+        };
+
+        match generator.run_preflight("Warmup preflight") {
+            Ok(_) => OpenVinoPreflightResult::Ready(OpenVinoPreflightReady { generator }),
+            Err(message) => OpenVinoPreflightResult::Failed {
+                class: "openvino_npu_runtime_failed".to_string(),
+                message,
+            },
+        }
+    }
 }
 
 fn is_safe_relative_path(path: &Path) -> bool {
@@ -354,8 +395,7 @@ fn classify_driver_diagnostic(driver_version: Option<&str>) -> Option<(String, S
         }
         _ => Some((
             "openvino_npu_driver_unknown".to_string(),
-            "OpenVINO exposed an NPU device, but the NPU driver version was unreadable"
-                .to_string(),
+            "OpenVINO exposed an NPU device, but the NPU driver version was unreadable".to_string(),
         )),
     }
 }
@@ -396,8 +436,7 @@ mod tests {
         let temp = tempdir().expect("tempdir");
         let manifest_path = temp.path().join("manifest.json");
         fs::write(temp.path().join("model.xml"), []).expect("write model");
-        fs::write(&manifest_path, r#"{"required_files":["model.xml"]}"#)
-            .expect("write manifest");
+        fs::write(&manifest_path, r#"{"required_files":["model.xml"]}"#).expect("write manifest");
 
         let artifact = inspect_openvino_artifact(&manifest_path);
         assert!(artifact.is_ready());
