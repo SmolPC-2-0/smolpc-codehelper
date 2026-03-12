@@ -20,15 +20,23 @@ Monorepo placement convention for new apps:
 
 1. Read [ENGINE_API.md](./ENGINE_API.md).
 2. Read [SMOLPC_SUITE_INTEGRATION.md](./SMOLPC_SUITE_INTEGRATION.md).
-3. Run shared model bootstrap once on the machine:
+3. Run shared model bootstrap once on the machine for the default shared model:
    - `npm run model:setup:qwen3`
-4. Use this playbook as the implementation checklist.
+4. Optional Intel NPU smoke path:
+   - `npm run runtime:setup:openvino`
+   - This now downloads the official 2026 Windows OpenVINO GenAI archive, verifies its SHA256, and validates that `openvino_genai_c.dll` exports the native `ov_genai_*` C API used by the shared engine.
+   - `npm run model:setup:qwen3:openvino`
+5. Use this playbook as the implementation checklist.
 
 ## Shared Model Baseline
 
 Default shared model for onboarding:
 
 1. `qwen3-4b-instruct-2507`
+
+Optional OpenVINO smoke-test model:
+
+1. `qwen3-4b-int4-ov`
 
 Fallback model:
 
@@ -75,7 +83,7 @@ Do not depend on:
    - Header: `Authorization: Bearer <token>`
 3. Required flow:
    1. `GET /engine/meta`
-   2. `POST /engine/load` (`model_id=qwen3-4b-instruct-2507`)
+   2. `POST /engine/load` with the selected shared model id (for example `qwen3-4b-instruct-2507`)
    3. `POST /v1/chat/completions`
 
 ## Minimum Onboarding Checklist
@@ -102,8 +110,8 @@ Every app integration must pass all checks below.
    - Client handles `429` (queue full).
    - Client handles `504` (queue timeout).
 7. Backend diagnostics:
-   - App can surface/log `active_backend`, `runtime_engine`, `selection_reason`, `dml_gate_state`.
-   - For demo reliability, verify `active_backend=directml`.
+   - App can surface/log `active_backend`, `runtime_engine`, `selection_reason`, and `backend_status.lanes.*`.
+   - For targeted validation, verify the backend expected for the selected model and runtime mode. Example: `qwen3-4b-int4-ov` with `SMOLPC_FORCE_EP=openvino_npu` should report `active_backend=openvino_npu`.
 
 ## Required Error Handling
 
@@ -118,10 +126,13 @@ Treat these as expected operational states:
 
 ## Known Current Limitation
 
-1. A known deferred issue can cause auto mode to select CPU on some DML-capable systems due to startup probe gating.
-   - Tracking: `codex/WORKING_ISSUES.md` issue #5.
-   - Workaround for debugging: force DML (`SMOLPC_FORCE_EP=dml`) and inspect `/engine/status`.
-2. Qwen3 CPU artifacts are included for compatibility/fallback, but the demo readiness gate is DML-first.
+1. Automatic selection now prefers `openvino_npu -> directml -> cpu` when the OpenVINO lane passes preflight.
+   - For targeted debugging, force `SMOLPC_FORCE_EP=openvino_npu`, `dml`, or `cpu` and inspect `/engine/status`.
+2. `qwen3-4b-int4-ov` is an OpenVINO-only smoke-test model.
+   - It is not the same checkpoint as `qwen3-4b-instruct-2507`, so it should not be treated as an exact cross-lane benchmark-parity result.
+3. The current Windows PyPI `openvino-genai` wheel is not a valid native runtime bundle for this repo's OpenVINO adapter.
+   - Windows provisioning now uses the official archive path instead. The app-local bundle must include `openvino_genai_c.dll`, and the current working NPU defaults on this PC are `MAX_PROMPT_LEN=256` and `MIN_RESPONSE_LEN=8`.
+   - For targeted debugging, `SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN` and `SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN` can override those defaults. Invalid values block the OpenVINO lane before a false-ready status is reported.
 
 ## Definition of Done (Per App)
 
@@ -156,7 +167,7 @@ Requirements:
 2. Do not depend on engine internals or parse logs as API.
 3. Implement load -> generate (stream + non-stream) -> cancel -> status flow.
 4. Handle 429 queue full, 504 queue timeout, stream error events, and protocol mismatch.
-5. Surface backend diagnostics: active_backend, runtime_engine, selection_reason, dml_gate_state.
+5. Surface backend diagnostics: active_backend, runtime_engine, selection_reason, and backend_status.lanes.
 6. Provide final verification evidence with request/response examples and engine status snapshot.
 
 Reference docs:

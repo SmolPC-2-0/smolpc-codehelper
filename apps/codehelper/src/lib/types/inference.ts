@@ -155,7 +155,21 @@ export interface BackendDecisionKey {
 	gpu_device_id: number | null;
 	npu_adapter_identity: string | null;
 	npu_driver_version: string | null;
+	openvino_npu_max_prompt_len: number | null;
+	openvino_npu_min_response_len: number | null;
+	openvino_npu_prefill_hint: string | null;
+	openvino_npu_generate_hint: string | null;
+	openvino_npu_prefill_chunk_size: number | null;
+	openvino_message_mode: string | null;
 	selection_profile: string | null;
+}
+
+export interface BackendOpenVinoTuningStatus {
+	max_prompt_len: number | null;
+	min_response_len: number | null;
+	prefill_hint: string | null;
+	generate_hint: string | null;
+	prefill_chunk_size: number | null;
 }
 
 export interface FailureCounters {
@@ -213,6 +227,12 @@ export interface BackendStatus {
 		cpu: BackendLaneStatus;
 	};
 
+	/** Active OpenVINO chat path mode (structured vs legacy prompt compatibility) */
+	openvino_message_mode: string | null;
+
+	/** Active OpenVINO NPU tuning values from backend env/config */
+	openvino_tuning: BackendOpenVinoTuningStatus | null;
+
 	/** Failure counters tracked by the host */
 	failure_counters: FailureCounters;
 
@@ -257,6 +277,11 @@ export interface GenerationConfig {
 
 	/** Number of recent tokens to consider for repetition penalty (0 = all generated tokens) */
 	repetition_penalty_last_n: number;
+}
+
+export interface InferenceChatMessage {
+	role: 'system' | 'user' | 'assistant';
+	content: string;
 }
 
 /**

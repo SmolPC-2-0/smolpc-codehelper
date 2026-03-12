@@ -19,7 +19,7 @@ pub struct HardwareInfo {
 pub struct CpuInfo {
     pub vendor: String,
     pub brand: String,
-    pub architecture: String,  // "x86_64", "aarch64", etc.
+    pub architecture: String, // "x86_64", "aarch64", etc.
     pub cores_physical: usize,
     pub cores_logical: usize,
     pub frequency_mhz: Option<u32>,
@@ -55,12 +55,13 @@ pub enum GpuVendor {
     Unknown,
 }
 
-
 /// NPU information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NpuInfo {
     pub detected: bool,
     pub confidence: NpuConfidence,
+    pub identifier: String,
+    pub driver_version: Option<String>,
     pub details: String,
     pub method: String,
 }
@@ -68,8 +69,8 @@ pub struct NpuInfo {
 /// NPU detection confidence level
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum NpuConfidence {
-    High,   // DirectML/DXCore confirmed
-    Medium, // CPU model match
+    High,   // Hardware device ID present (PCI/USB)
+    Medium, // Driver/TOPS present but no stable device ID
     Low,    // Generic heuristic
 }
 

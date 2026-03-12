@@ -1,7 +1,7 @@
 use libloading::{Library, Symbol};
 use serde::{Deserialize, Serialize};
-use std::ffi::{c_char, CStr};
 use std::collections::hash_map::{DefaultHasher, HashMap};
+use std::ffi::{c_char, CStr};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -71,6 +71,7 @@ pub enum BundleValidationFailureClass {
     OpenVinoCpuPluginMissing,
     OpenVinoIrFrontendMissing,
     OpenVinoGenAiMissing,
+    OpenVinoGenAiCApiMissing,
     OpenVinoTokenizersMissing,
     OpenVinoTbbMissing,
     RuntimeConflict,
@@ -92,6 +93,7 @@ impl BundleValidationFailureClass {
             Self::OpenVinoCpuPluginMissing => "openvino_cpu_plugin_missing",
             Self::OpenVinoIrFrontendMissing => "openvino_ir_frontend_missing",
             Self::OpenVinoGenAiMissing => "openvino_genai_missing",
+            Self::OpenVinoGenAiCApiMissing => "openvino_genai_c_api_missing",
             Self::OpenVinoTokenizersMissing => "openvino_tokenizers_missing",
             Self::OpenVinoTbbMissing => "openvino_tbb_missing",
             Self::RuntimeConflict => "runtime_conflict",
@@ -198,11 +200,18 @@ pub struct OpenVinoRuntimeBundle {
     pub openvino_dll: PathBuf,
     pub openvino_c_dll: PathBuf,
     pub openvino_intel_npu_plugin_dll: PathBuf,
+    pub openvino_intel_npu_compiler_dll: PathBuf,
     pub openvino_intel_cpu_plugin_dll: PathBuf,
     pub openvino_ir_frontend_dll: PathBuf,
     pub openvino_genai_dll: PathBuf,
+    pub openvino_genai_c_dll: PathBuf,
     pub openvino_tokenizers_dll: PathBuf,
     pub tbb_dll: PathBuf,
+    pub tbbbind_dll: PathBuf,
+    pub tbbmalloc_dll: PathBuf,
+    pub tbbmalloc_proxy_dll: PathBuf,
+    pub icudt_dll: PathBuf,
+    pub icuuc_dll: PathBuf,
     pub required_files: Vec<RequiredRuntimeFile>,
     pub version_metadata: Vec<RuntimeVersionMetadata>,
     pub npu_validation_failure: Option<BundleValidationFailureClass>,
@@ -446,13 +455,20 @@ impl OpenVinoRuntimeLoader {
 
         let libs = [
             &bundle.tbb_dll,
+            &bundle.tbbbind_dll,
+            &bundle.tbbmalloc_dll,
+            &bundle.tbbmalloc_proxy_dll,
             &bundle.openvino_dll,
             &bundle.openvino_c_dll,
             &bundle.openvino_ir_frontend_dll,
             &bundle.openvino_intel_cpu_plugin_dll,
+            &bundle.openvino_intel_npu_compiler_dll,
             &bundle.openvino_intel_npu_plugin_dll,
+            &bundle.icudt_dll,
+            &bundle.icuuc_dll,
             &bundle.openvino_tokenizers_dll,
             &bundle.openvino_genai_dll,
+            &bundle.openvino_genai_c_dll,
         ]
         .into_iter()
         .map(|path| RetainedLibrary::load(path))
@@ -491,7 +507,8 @@ struct OvAvailableDevices {
 
 type OvCoreCreate = unsafe extern "C" fn(*mut *mut OvCore) -> i32;
 type OvCoreFree = unsafe extern "C" fn(*mut OvCore);
-type OvCoreGetAvailableDevices = unsafe extern "C" fn(*const OvCore, *mut OvAvailableDevices) -> i32;
+type OvCoreGetAvailableDevices =
+    unsafe extern "C" fn(*const OvCore, *mut OvAvailableDevices) -> i32;
 type OvAvailableDevicesFree = unsafe extern "C" fn(*mut OvAvailableDevices);
 type OvCoreGetProperty =
     unsafe extern "C" fn(*const OvCore, *const c_char, *const c_char, *mut *mut c_char) -> i32;

@@ -28,6 +28,8 @@ pub mod benchmark;
 pub use backend::InferenceBackend;
 #[cfg(target_os = "windows")]
 pub use genai::GenAiDirectMlGenerator;
+#[cfg(target_os = "windows")]
+pub use genai::{OpenVinoGenAiGenerator, OpenVinoGenerationControls, OpenVinoNpuPipelineConfig};
 pub use generator::Generator;
 pub use runtime_adapter::InferenceRuntimeAdapter;
 pub use runtime_loading::{

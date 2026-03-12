@@ -65,6 +65,24 @@ impl ModelRegistry {
                 directory: "qwen2.5-coder-1.5b".to_string(),
                 description: "Lightweight coding model for basic tasks and low-RAM devices".to_string(),
             },
+            ModelDefinition {
+                id: "qwen3-4b-int4-ov".to_string(),
+                name: "Qwen3 4B INT4 (OpenVINO)".to_string(),
+                size: "4B".to_string(),
+                disk_size_gb: 3.0,
+                min_ram_gb: 8.0,
+                directory: "qwen3-4b-int4-ov".to_string(),
+                description: "Official OpenVINO INT4 Qwen3 artifact for Intel NPU bring-up and smoke testing".to_string(),
+            },
+            ModelDefinition {
+                id: "qwen3-4b-int4-ov-npu".to_string(),
+                name: "Qwen3 4B INT4 (OpenVINO NPU)".to_string(),
+                size: "4B".to_string(),
+                disk_size_gb: 3.0,
+                min_ram_gb: 8.0,
+                directory: "qwen3-4b-int4-ov-npu".to_string(),
+                description: "NPU-optimized OpenVINO INT4 Qwen3 artifact (FluidInference) — requires NPU driver >= 32.0.100.4023".to_string(),
+            },
         ]
     }
 
@@ -162,7 +180,9 @@ mod tests {
             Some("qwen3-4b-instruct-2507")
         );
         assert_eq!(ids.get(1).map(String::as_str), Some("qwen2.5-coder-1.5b"));
-        assert_eq!(ids.len(), 2);
+        assert_eq!(ids.get(2).map(String::as_str), Some("qwen3-4b-int4-ov"));
+        assert_eq!(ids.get(3).map(String::as_str), Some("qwen3-4b-int4-ov-npu"));
+        assert_eq!(ids.len(), 4);
     }
 
     #[test]
@@ -174,6 +194,8 @@ mod tests {
 
         assert!(ids.contains(&"qwen3-4b-instruct-2507".to_string()));
         assert!(ids.contains(&"qwen2.5-coder-1.5b".to_string()));
+        assert!(ids.contains(&"qwen3-4b-int4-ov".to_string()));
+        assert!(ids.contains(&"qwen3-4b-int4-ov-npu".to_string()));
     }
 
     #[test]
@@ -188,6 +210,16 @@ mod tests {
             RuntimeBackendTarget::Cpu
         )
         .is_some());
+        assert!(ModelRegistry::runtime_spec_for_backend(
+            "qwen3-4b-int4-ov",
+            RuntimeBackendTarget::Cpu
+        )
+        .is_none());
+        assert!(ModelRegistry::runtime_spec_for_backend(
+            "qwen3-4b-int4-ov-npu",
+            RuntimeBackendTarget::Cpu
+        )
+        .is_none());
         assert!(
             ModelRegistry::runtime_spec_for_backend("unknown", RuntimeBackendTarget::Cpu).is_none()
         );
