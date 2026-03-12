@@ -2,7 +2,7 @@ use smolpc_engine_client::{
     connect_or_spawn, read_runtime_env_overrides, EngineClient, EngineConnectOptions,
     RuntimeModePreference,
 };
-use smolpc_engine_core::inference::backend::BackendStatus;
+use smolpc_engine_core::inference::backend::{BackendStatus, CheckModelResponse};
 use smolpc_engine_core::models::registry::ModelDefinition;
 use smolpc_engine_core::{GenerationConfig, GenerationMetrics, GenerationResult};
 use std::path::PathBuf;
@@ -36,6 +36,7 @@ pub struct InferenceState {
     client: Arc<Mutex<Option<EngineClient>>>,
     connect_lock: Arc<Mutex<()>>,
     runtime_config: Arc<Mutex<RuntimeClientConfig>>,
+    desired_model: Arc<Mutex<Option<String>>>,
 }
 
 impl Default for InferenceState {
@@ -44,6 +45,7 @@ impl Default for InferenceState {
             client: Arc::new(Mutex::new(None)),
             connect_lock: Arc::new(Mutex::new(())),
             runtime_config: Arc::new(Mutex::new(RuntimeClientConfig::default())),
+            desired_model: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -248,6 +250,45 @@ fn resolve_host_binary_path() -> Option<PathBuf> {
     None
 }
 
+fn desired_model_to_restore<'a>(
+    desired_model: Option<&'a str>,
+    current_model: Option<&str>,
+) -> Option<&'a str> {
+    match desired_model {
+        Some(model_id) if current_model != Some(model_id) => Some(model_id),
+        _ => None,
+    }
+}
+
+async fn ensure_desired_model_loaded(
+    client: &EngineClient,
+    state: &InferenceState,
+) -> Result<(), String> {
+    let desired_model = state.desired_model.lock().await.clone();
+    let Some(desired_model) = desired_model else {
+        return Ok(());
+    };
+
+    let status = client
+        .status()
+        .await
+        .map_err(|e| format!("Failed to query engine status before generation: {e}"))?;
+    let Some(model_to_restore) =
+        desired_model_to_restore(Some(&desired_model), status.current_model.as_deref())
+    else {
+        return Ok(());
+    };
+
+    log::info!(
+        "Restoring desired model '{}' into shared engine before generation",
+        model_to_restore
+    );
+    client
+        .load_model(model_to_restore)
+        .await
+        .map_err(|e| format!("Failed to restore model '{model_to_restore}': {e}"))
+}
+
 fn log_host_binary_resolution(host_binary: Option<&PathBuf>) {
     let Some(path) = host_binary else {
         log::info!("Shared engine host binary will be resolved via runtime discovery");
@@ -291,6 +332,7 @@ pub async fn load_model(
         log::error!("Model load failed for {}: {}", model_id, e);
         format!("Failed to load model: {e}")
     })?;
+    *state.desired_model.lock().await = Some(model_id.clone());
     if let Ok(status) = client.status().await {
         log::info!(
             "Model loaded: model={} backend={:?} runtime_engine={:?} selection_reason={:?}",
@@ -313,6 +355,7 @@ pub async fn unload_model(
         .unload_model(false)
         .await
         .map_err(|e| format!("Failed to unload model: {e}"))?;
+    *state.desired_model.lock().await = None;
     Ok("Model unloaded successfully".to_string())
 }
 
@@ -323,6 +366,7 @@ pub async fn generate_text(
     state: tauri::State<'_, InferenceState>,
 ) -> Result<GenerationResult, String> {
     let client = resolve_client(&app_handle, &state, false).await?;
+    ensure_desired_model_loaded(&client, &state).await?;
     client
         .generate_text(&prompt, None)
         .await
@@ -399,6 +443,7 @@ pub async fn set_inference_runtime_mode(
                     .load_model(model_id)
                     .await
                     .map_err(|e| format!("Failed to load model after mode switch: {e}"))?;
+                *state.desired_model.lock().await = Some(model_id.to_string());
             }
         }
 
@@ -435,16 +480,32 @@ pub async fn set_inference_runtime_mode(
 }
 
 #[tauri::command]
+pub async fn check_model_readiness(
+    model_id: String,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, InferenceState>,
+) -> Result<CheckModelResponse, String> {
+    let client = resolve_client(&app_handle, &state, false).await?;
+    client
+        .check_model_readiness(&model_id)
+        .await
+        .map_err(|e| format!("Failed to check model readiness: {e}"))
+}
+
+/// Compatibility shim for older callers.
+///
+/// Prefer `check_model_readiness` for new code so lane detail is not lost.
+#[tauri::command]
 pub async fn check_model_exists(
     model_id: String,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<bool, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
-    client
-        .check_model_exists(&model_id)
-        .await
-        .map_err(|e| format!("Failed to check model availability: {e}"))
+    Ok(
+        check_model_readiness(model_id, app_handle, state)
+            .await?
+            .any_ready(),
+    )
 }
 
 #[tauri::command]
@@ -456,6 +517,7 @@ pub async fn inference_generate(
     state: tauri::State<'_, InferenceState>,
 ) -> Result<GenerationMetrics, String> {
     let client = resolve_client(&app_handle, &state, false).await?;
+    ensure_desired_model_loaded(&client, &state).await?;
     client
         .generate_stream(&prompt, config, |token| {
             if let Err(e) = on_token.send(token) {
@@ -542,5 +604,24 @@ mod tests {
             assert_eq!(config.runtime_mode, RuntimeModePreference::Auto);
             assert_eq!(config.dml_device_id, None);
         });
+    }
+
+    #[test]
+    fn desired_model_to_restore_requests_reload_after_host_restart() {
+        assert_eq!(
+            desired_model_to_restore(Some("qwen3-4b-instruct-2507"), None),
+            Some("qwen3-4b-instruct-2507")
+        );
+    }
+
+    #[test]
+    fn desired_model_to_restore_skips_reload_when_model_is_already_loaded() {
+        assert_eq!(
+            desired_model_to_restore(
+                Some("qwen3-4b-instruct-2507"),
+                Some("qwen3-4b-instruct-2507")
+            ),
+            None
+        );
     }
 }

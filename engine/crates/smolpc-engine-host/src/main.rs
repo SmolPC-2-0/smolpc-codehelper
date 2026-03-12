@@ -1,3 +1,6 @@
+mod openvino;
+mod runtime_bundles;
+
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -6,8 +9,11 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
 use smolpc_engine_core::inference::backend::{
-    BackendDecision, BackendDecisionKey, BackendStatus, DecisionReason, DirectMLFailureStage,
-    FailureCounters, InferenceBackend, ORT_CRATE_VERSION,
+    BackendDecision, BackendDecisionKey, BackendRuntimeBundleStatus, BackendSelectedDevice,
+    BackendSelectionState, BackendStatus, CheckModelResponse, DecisionPersistenceState,
+    DecisionReason, DirectMLFailureStage, FailureCounters, InferenceBackend,
+    LanePreflightState, LaneStartupProbeState, ModelLaneReadiness,
+    ModelLaneReadinessByBackend, ORT_CRATE_VERSION,
 };
 use smolpc_engine_core::inference::backend_store::{
     backend_store_path, BackendDecisionRecord, BackendStore,
@@ -16,14 +22,17 @@ use smolpc_engine_core::inference::backend_store::{
 use smolpc_engine_core::inference::genai::GenAiDirectMlGenerator;
 use smolpc_engine_core::inference::session::SessionBackendOptions;
 use smolpc_engine_core::inference::{
-    init_onnx_runtime, Generator, InferenceRuntimeAdapter, InferenceSession, TokenizerWrapper,
+    Generator, InferenceRuntimeAdapter, InferenceSession, OrtRuntimeBundle, OrtRuntimeLoader,
+    RuntimeVersionMetadata, TokenizerWrapper,
 };
 use smolpc_engine_core::models::{
     ModelArtifactBackend, ModelLoader, ModelRegistry, ModelRuntimeSpec, RuntimeBackendTarget,
 };
 use smolpc_engine_core::{GenerationConfig, GenerationMetrics, GenerationResult};
 use std::cmp::Ordering as CmpOrdering;
+use std::collections::hash_map::DefaultHasher;
 use std::convert::Infallible;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -31,6 +40,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex, Notify, Semaphore};
 use tokio::time::{sleep, timeout};
+
+use crate::openvino::{
+    inspect_openvino_artifact, is_blocking_openvino_probe_failure,
+    openvino_runtime_activation_available, probe_openvino_startup, run_openvino_preflight,
+    OpenVinoPreflightResult, OpenVinoStartupProbeResult,
+};
+use crate::runtime_bundles::{resolve_runtime_bundles, ResolvedRuntimeBundles};
+#[cfg(test)]
+use crate::runtime_bundles::{resolve_runtime_bundles_for_mode, RuntimeLoadMode};
 
 type ApiError = (StatusCode, Json<ErrorResponse>);
 
@@ -283,14 +301,15 @@ struct ParsedArgs {
     app_version: String,
     queue_size: usize,
     queue_timeout: Duration,
-    model_idle_unload: Duration,
-    process_idle_exit: Duration,
+    model_idle_unload: Option<Duration>,
+    process_idle_exit: Option<Duration>,
 }
 
 const STARTUP_PROBE_WAIT_MS: u64 = 1_500;
 /// Extended probe budget for DirectML startup.
 /// Worst-case total probe wait: STARTUP_PROBE_WAIT_MS + STARTUP_PROBE_RECOVERY_WAIT_MS.
 const STARTUP_PROBE_RECOVERY_WAIT_MS: u64 = 8_000;
+const OPENVINO_PREFLIGHT_BUDGET: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 struct DirectMlCandidate {
@@ -305,6 +324,7 @@ struct BackendProbeResult {
     available_backends: Vec<InferenceBackend>,
     directml_device_count: usize,
     directml_candidate: Option<DirectMlCandidate>,
+    npu_hardware_detected: bool,
 }
 
 impl Default for BackendProbeResult {
@@ -313,6 +333,7 @@ impl Default for BackendProbeResult {
             available_backends: vec![InferenceBackend::Cpu],
             directml_device_count: 0,
             directml_candidate: None,
+            npu_hardware_detected: false,
         }
     }
 }
@@ -468,20 +489,10 @@ fn parse_args() -> ParsedArgs {
             .unwrap_or(60)
             .max(1),
     );
-    let model_idle_unload = Duration::from_secs(
-        std::env::var("SMOLPC_ENGINE_MODEL_IDLE_UNLOAD_SECS")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(300)
-            .max(30),
-    );
-    let process_idle_exit = Duration::from_secs(
-        std::env::var("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(1800)
-            .max(60),
-    );
+    let model_idle_unload =
+        parse_idle_timeout_secs("SMOLPC_ENGINE_MODEL_IDLE_UNLOAD_SECS", Some(0), 30);
+    let process_idle_exit =
+        parse_idle_timeout_secs("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS", None, 60);
 
     ParsedArgs {
         port,
@@ -495,11 +506,27 @@ fn parse_args() -> ParsedArgs {
     }
 }
 
+fn parse_idle_timeout_secs(
+    key: &str,
+    default_secs: Option<u64>,
+    min_secs: u64,
+) -> Option<Duration> {
+    match std::env::var(key) {
+        Ok(raw) => match raw.parse::<u64>() {
+            Ok(0) => None,
+            Ok(secs) => Some(Duration::from_secs(secs.max(min_secs))),
+            Err(_) => default_secs.map(|secs| Duration::from_secs(secs.max(min_secs))),
+        },
+        Err(_) => default_secs.map(|secs| Duration::from_secs(secs.max(min_secs))),
+    }
+}
+
 fn parse_force_override() -> Option<InferenceBackend> {
     let value = std::env::var("SMOLPC_FORCE_EP").ok()?;
     match value.trim().to_ascii_lowercase().as_str() {
         "cpu" => Some(InferenceBackend::Cpu),
         "dml" | "directml" => Some(InferenceBackend::DirectML),
+        "openvino" | "openvino_npu" => Some(InferenceBackend::OpenVinoNpu),
         _ => None,
     }
 }
@@ -521,18 +548,34 @@ fn directml_required_error(model_id: &str, reason: &str) -> String {
     )
 }
 
-fn select_active_model_path(
-    active_backend: InferenceBackend,
-    cpu_model_path: &Path,
-    dml_model_path: Option<&PathBuf>,
+fn resolve_cpu_runtime_inputs(
+    model_id: &str,
+) -> Result<(PathBuf, PathBuf, ModelRuntimeSpec), String> {
+    let model_def = ModelRegistry::get_model(model_id)
+        .ok_or_else(|| format!("Unknown model ID: {}", model_id))?;
+    let cpu_spec = ModelRegistry::runtime_spec_for_backend(model_id, RuntimeBackendTarget::Cpu)
+        .ok_or_else(|| format!("Missing CPU runtime spec for model ID: {}", model_id))?;
+    cpu_spec.validate()?;
+
+    let cpu_model_path =
+        ModelLoader::validate_model_for_backend(&model_def.directory, ModelArtifactBackend::Cpu)?;
+    let tokenizer_path = ModelLoader::tokenizer_file(&model_def.directory);
+    Ok((cpu_model_path, tokenizer_path, cpu_spec))
+}
+
+fn directml_unavailable_reason(
+    directml_detected: bool,
+    directml_artifact_available: bool,
+    runtime_bundles: &ResolvedRuntimeBundles,
 ) -> String {
-    if active_backend == InferenceBackend::DirectML {
-        dml_model_path
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| cpu_model_path.display().to_string())
+    if !directml_detected {
+        "no DirectML-capable adapter was detected".to_string()
+    } else if !directml_artifact_available {
+        "the DirectML model artifact is missing".to_string()
+    } else if let Some(code) = runtime_bundles.ort.directml_failure_code() {
+        format!("the DirectML runtime bundle is unavailable ({code})")
     } else {
-        cpu_model_path.display().to_string()
+        "the DirectML runtime bundle is unavailable".to_string()
     }
 }
 
@@ -549,6 +592,11 @@ fn decision_reason_code(reason: &DecisionReason) -> &'static str {
         DecisionReason::NoDirectMLCandidate => "no_directml_candidate",
         DecisionReason::DirectMLInitializationFailed => "directml_initialization_failed",
         DecisionReason::DirectMLPreflightFailed => "directml_preflight_failed",
+        DecisionReason::NoOpenVinoCandidate => "no_openvino_candidate",
+        DecisionReason::OpenVinoStartupProbePending => "openvino_startup_probe_pending",
+        DecisionReason::OpenVinoPreflightFailed => "openvino_preflight_failed",
+        DecisionReason::OpenVinoPreflightTimeout => "openvino_preflight_timeout",
+        DecisionReason::OpenVinoRuntimeUnavailable => "runtime_unavailable",
         DecisionReason::RuntimeFailureFallback => "runtime_failure_fallback",
         DecisionReason::DemotedAfterFailures => "demoted_after_failures",
     }
@@ -612,6 +660,7 @@ fn probe_backend_capabilities() -> BackendProbeResult {
         return BackendProbeResult::default();
     };
     let mut result = BackendProbeResult::default();
+    result.npu_hardware_detected = !info.npus().is_empty();
     let directml_device_count = info
         .gpus()
         .iter()
@@ -630,10 +679,396 @@ fn probe_backend_capabilities() -> BackendProbeResult {
     BackendProbeResult::default()
 }
 
+#[derive(Debug, Clone, Default)]
+struct ModelLaneArtifacts {
+    cpu_ready: bool,
+    directml_ready: bool,
+    openvino_artifact: Option<crate::openvino::OpenVinoReadyArtifact>,
+    openvino_reason: Option<String>,
+    openvino_message: Option<String>,
+    fingerprint: Option<String>,
+}
+
+impl ModelLaneArtifacts {
+    fn openvino_npu_ready(&self) -> bool {
+        self.openvino_artifact.is_some()
+    }
+}
+
+fn openvino_manifest_path(model_dir: &str) -> PathBuf {
+    ModelLoader::model_path(model_dir)
+        .join(InferenceBackend::OpenVinoNpu.as_str())
+        .join("manifest.json")
+}
+
+fn compute_artifact_fingerprint(paths: &[PathBuf]) -> Option<String> {
+    let existing = paths
+        .iter()
+        .filter(|path| path.exists())
+        .cloned()
+        .collect::<Vec<_>>();
+    if existing.is_empty() {
+        return None;
+    }
+
+    let mut sorted = existing;
+    sorted.sort_by(|a, b| {
+        a.display()
+            .to_string()
+            .to_ascii_lowercase()
+            .cmp(&b.display().to_string().to_ascii_lowercase())
+    });
+
+    let mut hasher = DefaultHasher::new();
+    for path in &sorted {
+        path.display()
+            .to_string()
+            .to_ascii_lowercase()
+            .hash(&mut hasher);
+        if let Ok(metadata) = std::fs::metadata(path) {
+            metadata.len().hash(&mut hasher);
+            if let Ok(modified) = metadata.modified() {
+                if let Ok(duration) = modified.duration_since(UNIX_EPOCH) {
+                    duration.as_secs().hash(&mut hasher);
+                    duration.subsec_nanos().hash(&mut hasher);
+                }
+            }
+        }
+    }
+
+    Some(format!("{:016x}", hasher.finish()))
+}
+
+fn resolve_model_lane_artifacts(model_dir: &str) -> ModelLaneArtifacts {
+    let (cpu_model_exists, cpu_tokenizer_exists) =
+        ModelLoader::check_model_files_for_backend(model_dir, ModelArtifactBackend::Cpu);
+    let (directml_model_exists, directml_tokenizer_exists) =
+        ModelLoader::check_model_files_for_backend(model_dir, ModelArtifactBackend::DirectML);
+    let openvino_manifest = openvino_manifest_path(model_dir);
+    let openvino_artifact = inspect_openvino_artifact(&openvino_manifest);
+
+    let cpu_model_path = ModelLoader::resolve_cpu_model_file(model_dir);
+    let cpu_tokenizer_path = ModelLoader::tokenizer_file(model_dir);
+    let directml_root =
+        ModelLoader::model_path(model_dir).join(ModelArtifactBackend::DirectML.as_dir());
+    let mut artifact_paths = vec![
+        cpu_model_path,
+        cpu_tokenizer_path,
+        directml_root.join("model.onnx"),
+        directml_root.join("genai_config.json"),
+        directml_root.join("tokenizer.json"),
+    ];
+    artifact_paths.extend(openvino_artifact.fingerprint_paths());
+
+    ModelLaneArtifacts {
+        cpu_ready: cpu_model_exists && cpu_tokenizer_exists,
+        directml_ready: directml_model_exists && directml_tokenizer_exists,
+        openvino_artifact: openvino_artifact.ready_artifact().cloned(),
+        openvino_reason: Some(openvino_artifact.reason_code().to_string()),
+        openvino_message: openvino_artifact.message(),
+        fingerprint: compute_artifact_fingerprint(&artifact_paths),
+    }
+}
+
+fn runtime_version_value(
+    version_metadata: &[RuntimeVersionMetadata],
+    component: &str,
+) -> Option<String> {
+    version_metadata
+        .iter()
+        .find(|entry| entry.component == component)
+        .map(|entry| entry.version.clone())
+}
+
+fn runtime_version_summary(version_metadata: &[RuntimeVersionMetadata]) -> Option<String> {
+    (!version_metadata.is_empty()).then(|| {
+        version_metadata
+            .iter()
+            .map(|entry| format!("{}={}", entry.component, entry.version))
+            .collect::<Vec<_>>()
+            .join("; ")
+    })
+}
+
+fn apply_model_lane_artifacts(status: &mut BackendStatus, artifacts: &ModelLaneArtifacts) {
+    status.lanes.cpu.artifact_ready = artifacts.cpu_ready;
+    status.lanes.directml.artifact_ready = artifacts.directml_ready;
+    status.lanes.openvino_npu.artifact_ready = artifacts.openvino_npu_ready();
+}
+
+fn apply_persisted_eligibility(
+    status: &mut BackendStatus,
+    persisted_decision: Option<&BackendDecision>,
+) {
+    status.lanes.cpu.persisted_eligibility = false;
+    status.lanes.directml.persisted_eligibility = false;
+    status.lanes.openvino_npu.persisted_eligibility = false;
+
+    if let Some(decision) = persisted_decision {
+        match decision.backend {
+            InferenceBackend::Cpu => status.lanes.cpu.persisted_eligibility = true,
+            InferenceBackend::DirectML => status.lanes.directml.persisted_eligibility = true,
+            InferenceBackend::OpenVinoNpu => status.lanes.openvino_npu.persisted_eligibility = true,
+        }
+    }
+}
+
+fn apply_directml_device(
+    status: &mut BackendStatus,
+    device_id: Option<i32>,
+    device_name: Option<String>,
+) {
+    status.lanes.directml.device_id = device_id;
+    status.lanes.directml.device_name = device_name.clone();
+    status.selected_device = if device_id.is_some() || device_name.is_some() {
+        Some(BackendSelectedDevice {
+            backend: InferenceBackend::DirectML,
+            device_id,
+            device_name,
+        })
+    } else {
+        None
+    };
+}
+
+fn rebuild_available_backends(status: &mut BackendStatus) {
+    status.available_backends = vec![InferenceBackend::Cpu];
+    if status.lanes.directml.detected {
+        status.available_backends.push(InferenceBackend::DirectML);
+    }
+    if status.lanes.openvino_npu.startup_probe_state == LaneStartupProbeState::Ready {
+        status.available_backends.push(InferenceBackend::OpenVinoNpu);
+    }
+}
+
+fn apply_directml_startup_probe_status(status: &mut BackendStatus, probe: &BackendProbeResult) {
+    status.lanes.directml.detected = probe.directml_candidate.is_some();
+    if let Some(candidate) = probe.directml_candidate.as_ref() {
+        status.lanes.directml.startup_probe_state = LaneStartupProbeState::Ready;
+        status.lanes.directml.driver_version = Some(candidate.driver_version.clone());
+        status.lanes.directml.last_failure_class = None;
+        status.lanes.directml.last_failure_message = None;
+        apply_directml_device(
+            status,
+            Some(candidate.device_id),
+            Some(candidate.device_name.clone()),
+        );
+    } else {
+        status.lanes.directml.startup_probe_state = LaneStartupProbeState::Error;
+        status.lanes.directml.last_failure_class = Some("directml_candidate_missing".to_string());
+        status.lanes.directml.last_failure_message =
+            Some("No DirectML-capable adapter detected".to_string());
+        apply_directml_device(status, None, None);
+    }
+    rebuild_available_backends(status);
+}
+
+fn apply_openvino_startup_probe_status(
+    status: &mut BackendStatus,
+    probe: Option<&OpenVinoStartupProbeResult>,
+) {
+    let Some(probe) = probe else {
+        rebuild_available_backends(status);
+        return;
+    };
+
+    status.lanes.openvino_npu.detected = probe.hardware_detected;
+    status.lanes.openvino_npu.device_name = probe.device_name.clone();
+    status.lanes.openvino_npu.driver_version = probe.driver_version.clone();
+    status.lanes.openvino_npu.device_id = None;
+    status.lanes.openvino_npu.startup_probe_state = if probe.startup_ready {
+        LaneStartupProbeState::Ready
+    } else {
+        LaneStartupProbeState::Error
+    };
+    status.lanes.openvino_npu.last_failure_class = probe.failure_class.clone();
+    status.lanes.openvino_npu.last_failure_message = probe.failure_message.clone();
+    rebuild_available_backends(status);
+}
+
+fn apply_runtime_bundle_status(
+    runtime_bundles: &ResolvedRuntimeBundles,
+    status: &mut BackendStatus,
+) {
+    status.runtime_bundles.load_mode = Some(runtime_bundles.mode.as_str().to_string());
+    status.runtime_bundles.ort = BackendRuntimeBundleStatus {
+        root: Some(runtime_bundles.ort.display_root().display().to_string()),
+        fingerprint: Some(runtime_bundles.ort.fingerprint.value.clone()),
+        validated: runtime_bundles.ort.ort_validated(),
+        failure: runtime_bundles
+            .ort
+            .ort_failure_code()
+            .map(ToString::to_string),
+    };
+    status.runtime_bundles.directml = BackendRuntimeBundleStatus {
+        root: Some(runtime_bundles.ort.display_root().display().to_string()),
+        fingerprint: Some(runtime_bundles.ort.fingerprint.value.clone()),
+        validated: runtime_bundles.ort.directml_validated(),
+        failure: runtime_bundles
+            .ort
+            .directml_failure_code()
+            .map(ToString::to_string),
+    };
+    status.runtime_bundles.openvino = BackendRuntimeBundleStatus {
+        root: Some(
+            runtime_bundles
+                .openvino
+                .display_root()
+                .display()
+                .to_string(),
+        ),
+        fingerprint: Some(runtime_bundles.openvino.fingerprint.value.clone()),
+        validated: runtime_bundles.openvino.npu_validated(),
+        failure: runtime_bundles
+            .openvino
+            .failure_code()
+            .map(ToString::to_string),
+    };
+
+    status.lanes.cpu.detected = true;
+    status.lanes.cpu.bundle_ready = runtime_bundles.ort.ort_validated();
+    status.lanes.cpu.runtime_version = runtime_version_summary(&runtime_bundles.ort.version_metadata);
+    status.lanes.cpu.startup_probe_state = LaneStartupProbeState::Ready;
+    if !status.lanes.cpu.bundle_ready && status.lanes.cpu.last_failure_class.is_none() {
+        status.lanes.cpu.last_failure_class = runtime_bundles
+            .ort
+            .ort_failure_code()
+            .map(ToString::to_string);
+    }
+
+    status.lanes.directml.bundle_ready = runtime_bundles.ort.directml_validated();
+    status.lanes.directml.runtime_version =
+        runtime_version_summary(&runtime_bundles.ort.version_metadata);
+    if !status.lanes.directml.bundle_ready && status.lanes.directml.last_failure_class.is_none() {
+        status.lanes.directml.last_failure_class = runtime_bundles
+            .ort
+            .directml_failure_code()
+            .map(ToString::to_string);
+    }
+
+    status.lanes.openvino_npu.bundle_ready = runtime_bundles.openvino.npu_validated();
+    status.lanes.openvino_npu.runtime_version =
+        runtime_version_summary(&runtime_bundles.openvino.version_metadata);
+    if !status.lanes.openvino_npu.bundle_ready
+        && status.lanes.openvino_npu.last_failure_class.is_none()
+    {
+        status.lanes.openvino_npu.last_failure_class = runtime_bundles
+            .openvino
+            .failure_code()
+            .map(ToString::to_string);
+    }
+}
+
+fn bundle_reason(code: Option<&str>) -> String {
+    code.unwrap_or("bundle_missing").to_string()
+}
+
+fn build_check_model_response(
+    model_id: &str,
+    runtime_bundles: &ResolvedRuntimeBundles,
+    startup_probe: Option<&BackendProbeResult>,
+    openvino_probe: Option<&OpenVinoStartupProbeResult>,
+) -> CheckModelResponse {
+    let Some(model_def) = ModelRegistry::get_model(model_id) else {
+        let unknown = ModelLaneReadiness {
+            artifact_ready: false,
+            bundle_ready: false,
+            ready: false,
+            reason: "unknown_model".to_string(),
+        };
+        return CheckModelResponse {
+            model_id: model_id.to_string(),
+            lanes: ModelLaneReadinessByBackend {
+                openvino_npu: unknown.clone(),
+                directml: unknown.clone(),
+                cpu: unknown,
+            },
+        };
+    };
+
+    let artifacts = resolve_model_lane_artifacts(&model_def.directory);
+    let cpu_bundle_ready = runtime_bundles.ort.ort_validated();
+    let directml_bundle_ready = runtime_bundles.ort.directml_validated();
+    let openvino_bundle_ready = runtime_bundles.openvino.npu_validated();
+    let directml_detected = startup_probe
+        .and_then(|probe| probe.directml_candidate.as_ref())
+        .is_some();
+    let openvino_probe_ready = openvino_probe.is_some_and(|probe| probe.startup_ready);
+    let openvino_probe_failure = openvino_probe.and_then(|probe| {
+        probe
+            .failure_class
+            .as_deref()
+            .filter(|class| is_blocking_openvino_probe_failure(class))
+            .map(ToString::to_string)
+    });
+
+    let cpu = ModelLaneReadiness {
+        artifact_ready: artifacts.cpu_ready,
+        bundle_ready: cpu_bundle_ready,
+        ready: artifacts.cpu_ready && cpu_bundle_ready,
+        reason: if artifacts.cpu_ready && cpu_bundle_ready {
+            "ready".to_string()
+        } else if !artifacts.cpu_ready {
+            "artifact_missing".to_string()
+        } else {
+            bundle_reason(runtime_bundles.ort.ort_failure_code())
+        },
+    };
+    let directml = ModelLaneReadiness {
+        artifact_ready: artifacts.directml_ready,
+        bundle_ready: directml_bundle_ready,
+        ready: artifacts.directml_ready && directml_bundle_ready && directml_detected,
+        reason: if !artifacts.directml_ready {
+            "artifact_missing".to_string()
+        } else if !directml_bundle_ready {
+            bundle_reason(runtime_bundles.ort.directml_failure_code())
+        } else if startup_probe.is_none() {
+            "startup_probe_pending".to_string()
+        } else if !directml_detected {
+            "directml_candidate_missing".to_string()
+        } else {
+            "ready".to_string()
+        },
+    };
+    let openvino_npu = ModelLaneReadiness {
+        artifact_ready: artifacts.openvino_npu_ready(),
+        bundle_ready: openvino_bundle_ready,
+        ready: false,
+        reason: if !artifacts.openvino_npu_ready() {
+            artifacts
+                .openvino_reason
+                .clone()
+                .unwrap_or_else(|| "artifact_missing".to_string())
+        } else if !openvino_bundle_ready {
+            bundle_reason(runtime_bundles.openvino.failure_code())
+        } else if openvino_probe.is_none() {
+            "startup_probe_pending".to_string()
+        } else if let Some(failure) = openvino_probe_failure {
+            failure
+        } else if !openvino_probe_ready {
+            "startup_probe_failed".to_string()
+        } else if !openvino_runtime_activation_available() {
+            "runtime_unavailable".to_string()
+        } else {
+            "preflight_not_run".to_string()
+        },
+    };
+
+    CheckModelResponse {
+        model_id: model_id.to_string(),
+        lanes: ModelLaneReadinessByBackend {
+            openvino_npu,
+            directml,
+            cpu,
+        },
+    }
+}
+
 struct EngineState {
     runtime_adapter: Arc<Mutex<Option<InferenceRuntimeAdapter>>>,
     current_model: Arc<Mutex<Option<String>>>,
     backend_status: Arc<Mutex<BackendStatus>>,
+    runtime_bundles: ResolvedRuntimeBundles,
     active_cancel: Arc<StdMutex<Option<Arc<AtomicBool>>>>,
     generating: Arc<AtomicBool>,
     app_version: String,
@@ -644,6 +1079,8 @@ struct EngineState {
     readiness: Arc<Mutex<StartupReadiness>>,
     startup_terminal: Arc<Notify>,
     startup_attempt_seq: AtomicU64,
+    openvino_startup_probe: Arc<Mutex<Option<OpenVinoStartupProbeResult>>>,
+    openvino_startup_probe_ready: Arc<Notify>,
 }
 
 impl EngineState {
@@ -653,6 +1090,14 @@ impl EngineState {
     }
 
     fn new(args: &ParsedArgs) -> Self {
+        let runtime_bundles = resolve_runtime_bundles(args.resource_dir.as_deref());
+        Self::new_with_runtime_bundles(args, runtime_bundles)
+    }
+
+    fn new_with_runtime_bundles(
+        args: &ParsedArgs,
+        runtime_bundles: ResolvedRuntimeBundles,
+    ) -> Self {
         let store_path = match backend_store_path(&args.data_dir) {
             Ok(path) => Some(path),
             Err(error) => {
@@ -675,18 +1120,20 @@ impl EngineState {
             None => None,
         };
 
-        let status = BackendStatus {
+        let mut status = BackendStatus {
             available_backends: vec![InferenceBackend::Cpu],
-            selection_state: Some("pending".to_string()),
+            selection_state: Some(BackendSelectionState::Pending),
             selection_reason: Some("startup_probe_pending".to_string()),
             store_path: store_path.as_ref().map(|path| path.display().to_string()),
             ..Default::default()
         };
+        apply_runtime_bundle_status(&runtime_bundles, &mut status);
 
         Self {
             runtime_adapter: Arc::new(Mutex::new(None)),
             current_model: Arc::new(Mutex::new(None)),
             backend_status: Arc::new(Mutex::new(status)),
+            runtime_bundles,
             active_cancel: Arc::new(StdMutex::new(None)),
             generating: Arc::new(AtomicBool::new(false)),
             app_version: args.app_version.clone(),
@@ -697,6 +1144,59 @@ impl EngineState {
             readiness: Arc::new(Mutex::new(StartupReadiness::default())),
             startup_terminal: Arc::new(Notify::new()),
             startup_attempt_seq: AtomicU64::new(0),
+            openvino_startup_probe: Arc::new(Mutex::new(None)),
+            openvino_startup_probe_ready: Arc::new(Notify::new()),
+        }
+    }
+
+    fn runtime_bundles(&self) -> &ResolvedRuntimeBundles {
+        &self.runtime_bundles
+    }
+
+    fn build_decision_key(
+        &self,
+        model_id: &str,
+        artifacts: &ModelLaneArtifacts,
+        probe: &BackendProbeResult,
+        openvino_probe: Option<&OpenVinoStartupProbeResult>,
+        selected_device_id: Option<i32>,
+    ) -> BackendDecisionKey {
+        let directml_candidate = probe.directml_candidate.as_ref();
+        let openvino_probe = openvino_probe.filter(|probe| probe.device_visible);
+        BackendDecisionKey {
+            model_id: model_id.to_string(),
+            model_artifact_fingerprint: artifacts.fingerprint.clone(),
+            app_version: self.app_version.clone(),
+            selector_engine_id: "engine_host".to_string(),
+            ort_runtime_version: runtime_version_value(
+                &self.runtime_bundles().ort.version_metadata,
+                "ort-crate",
+            )
+            .or_else(|| Some(ORT_CRATE_VERSION.to_string())),
+            ort_bundle_fingerprint: Some(self.runtime_bundles().ort.fingerprint.value.clone()),
+            openvino_runtime_version: runtime_version_value(
+                &self.runtime_bundles().openvino.version_metadata,
+                "openvino-runtime",
+            ),
+            openvino_genai_version: runtime_version_value(
+                &self.runtime_bundles().openvino.version_metadata,
+                "openvino-genai",
+            ),
+            openvino_tokenizers_version: runtime_version_value(
+                &self.runtime_bundles().openvino.version_metadata,
+                "openvino-tokenizers",
+            ),
+            openvino_bundle_fingerprint: Some(
+                self.runtime_bundles().openvino.fingerprint.value.clone(),
+            ),
+            gpu_adapter_identity: directml_candidate.map(|candidate| candidate.adapter_identity.clone()),
+            gpu_driver_version: directml_candidate.map(|candidate| candidate.driver_version.clone()),
+            gpu_device_id: selected_device_id,
+            npu_adapter_identity: openvino_probe
+                .and_then(|probe| probe.adapter_identity.clone()),
+            npu_driver_version: openvino_probe
+                .and_then(|probe| probe.driver_version.clone()),
+            selection_profile: None,
         }
     }
 
@@ -710,7 +1210,6 @@ impl EngineState {
                     BackendProbeResult::default()
                 });
 
-            let now = Utc::now().to_rfc3339();
             {
                 let mut probe_guard = engine.startup_probe.lock().await;
                 *probe_guard = Some(probed.clone());
@@ -718,21 +1217,10 @@ impl EngineState {
 
             {
                 let mut status = engine.backend_status.lock().await;
-                status.available_backends = probed.available_backends.clone();
-                status.directml_probe_passed = Some(probed.directml_candidate.is_some());
-                status.directml_probe_error = if probed.directml_candidate.is_some() {
-                    None
-                } else {
-                    Some("No DirectML-capable adapter detected".to_string())
-                };
-                status.directml_probe_at = Some(now);
-                status.selected_device_id = probed.directml_candidate.as_ref().map(|c| c.device_id);
-                status.selected_device_name = probed
-                    .directml_candidate
-                    .as_ref()
-                    .map(|c| c.device_name.clone());
-                if status.selection_state.as_deref() == Some("pending") {
-                    status.selection_state = Some("ready".to_string());
+                apply_runtime_bundle_status(engine.runtime_bundles(), &mut status);
+                apply_directml_startup_probe_status(&mut status, &probed);
+                if status.selection_state == Some(BackendSelectionState::Pending) {
+                    status.selection_state = Some(BackendSelectionState::Ready);
                     status.selection_reason = Some(if probed.directml_candidate.is_some() {
                         "startup_probe_ready".to_string()
                     } else {
@@ -742,6 +1230,38 @@ impl EngineState {
             }
 
             engine.startup_probe_ready.notify_waiters();
+
+            let openvino_bundle = engine.runtime_bundles().openvino.clone();
+            let hardware_detected = probed.npu_hardware_detected;
+            let openvino_probe = tokio::task::spawn_blocking(move || {
+                probe_openvino_startup(&openvino_bundle, hardware_detected)
+            })
+            .await
+            .unwrap_or_else(|error| {
+                log::warn!("OpenVINO startup probe task failed: {error}");
+                OpenVinoStartupProbeResult {
+                    hardware_detected,
+                    failure_class: Some("openvino_npu_plugin_unavailable".to_string()),
+                    failure_message: Some(format!(
+                        "OpenVINO startup probe task failed: {error}"
+                    )),
+                    ..Default::default()
+                }
+            });
+
+            {
+                let mut probe_guard = engine.openvino_startup_probe.lock().await;
+                *probe_guard = Some(openvino_probe.clone());
+            }
+
+            {
+                let mut status = engine.backend_status.lock().await;
+                apply_runtime_bundle_status(engine.runtime_bundles(), &mut status);
+                apply_directml_startup_probe_status(&mut status, &probed);
+                apply_openvino_startup_probe_status(&mut status, Some(&openvino_probe));
+            }
+
+            engine.openvino_startup_probe_ready.notify_waiters();
         });
     }
 
@@ -776,6 +1296,19 @@ impl EngineState {
         probe
     }
 
+    async fn wait_for_openvino_startup_probe(
+        &self,
+        budget: Duration,
+    ) -> Option<OpenVinoStartupProbeResult> {
+        if let Some(existing) = self.openvino_startup_probe.lock().await.clone() {
+            return Some(existing);
+        }
+
+        let wait = self.openvino_startup_probe_ready.notified();
+        let _ = timeout(budget, wait).await;
+        self.openvino_startup_probe.lock().await.clone()
+    }
+
     async fn lookup_backend_record(
         &self,
         key: &BackendDecisionKey,
@@ -788,7 +1321,7 @@ impl EngineState {
     async fn persist_backend_record(
         &self,
         key: BackendDecisionKey,
-        decision: BackendDecision,
+        persisted_decision: Option<BackendDecision>,
         failure_counters: FailureCounters,
     ) {
         let mut store_guard = self.backend_store.lock().await;
@@ -797,13 +1330,12 @@ impl EngineState {
         };
 
         let record = BackendDecisionRecord {
-            key: key.clone(),
-            decision,
+            key,
+            persisted_decision,
             failure_counters,
             updated_at: Utc::now().to_rfc3339(),
         };
 
-        let _ = store.remove_stale_for_model(&key);
         store.upsert(record);
         if let Err(error) = store.persist() {
             log::warn!("Failed to persist backend decision store: {error}");
@@ -1053,37 +1585,27 @@ impl EngineState {
             model_requires_directml(&model_id) || startup_mode.requires_directml();
         let model_def = ModelRegistry::get_model(&model_id)
             .ok_or_else(|| format!("Unknown model ID: {}", model_id))?;
-        let cpu_spec =
-            ModelRegistry::runtime_spec_for_backend(&model_id, RuntimeBackendTarget::Cpu)
-                .ok_or_else(|| format!("Missing CPU runtime spec for model ID: {}", model_id))?;
-        cpu_spec.validate()?;
-
-        let cpu_model_path = ModelLoader::validate_model_for_backend(
-            &model_def.directory,
-            ModelArtifactBackend::Cpu,
-        )?;
+        let artifacts = resolve_model_lane_artifacts(&model_def.directory);
         let dml_model_path = ModelLoader::resolve_model_file_for_backend(
             &model_def.directory,
             ModelArtifactBackend::DirectML,
         );
-        let tokenizer_path = ModelLoader::tokenizer_file(&model_def.directory);
 
         let force_override = parse_force_override();
         let forced_device_id = parse_dml_device_id_env();
         let probe = self
             .wait_for_startup_probe_with_recovery(directml_required)
             .await;
+        let openvino_probe = self
+            .wait_for_openvino_startup_probe(Duration::from_millis(STARTUP_PROBE_WAIT_MS))
+            .await;
 
-        let mut available_backends = probe.available_backends.clone();
-        if !available_backends.contains(&InferenceBackend::Cpu) {
-            available_backends.push(InferenceBackend::Cpu);
-        }
-        let directml_detected = probe
-            .available_backends
-            .contains(&InferenceBackend::DirectML)
-            || force_override == Some(InferenceBackend::DirectML);
-        let directml_artifact_available = dml_model_path.is_some();
-        let has_dml_candidate = directml_detected && directml_artifact_available;
+        let directml_detected = probe.directml_candidate.is_some();
+        let directml_artifact_available = artifacts.directml_ready && dml_model_path.is_some();
+        let has_dml_candidate = directml_detected
+            && directml_artifact_available
+            && self.runtime_bundles().ort.directml_validated();
+        let openvino_bundle_ready = self.runtime_bundles().openvino.npu_validated();
 
         if directml_required && force_override == Some(InferenceBackend::Cpu) {
             return Err(directml_required_error(
@@ -1091,24 +1613,44 @@ impl EngineState {
                 "forced CPU mode is not supported for this model",
             ));
         }
-        if directml_required && !has_dml_candidate {
-            let reason = if !directml_detected {
-                "no DirectML-capable adapter was detected"
-            } else {
-                "the DirectML model artifact is missing"
-            };
-            return Err(directml_required_error(&model_id, reason));
-        }
 
         let probe_device_id = probe
             .directml_candidate
             .as_ref()
             .map(|candidate| candidate.device_id);
         let mut selected_device_id = forced_device_id.or(probe_device_id);
-        let selected_device_name = probe
-            .directml_candidate
-            .as_ref()
-            .map(|candidate| candidate.device_name.clone());
+        let mut selected_device_name = if selected_device_id == probe_device_id {
+            probe
+                .directml_candidate
+                .as_ref()
+                .map(|candidate| candidate.device_name.clone())
+        } else {
+            None
+        };
+
+        let make_status = |
+            selection_state: BackendSelectionState,
+            selection_reason: String,
+            device_id: Option<i32>,
+            device_name: Option<String>,
+        | {
+            let mut status = BackendStatus {
+                selection_state: Some(selection_state),
+                selection_reason: Some(selection_reason),
+                force_override,
+                store_path: self
+                    .store_path
+                    .as_ref()
+                    .map(|path| path.display().to_string()),
+                ..Default::default()
+            };
+            apply_runtime_bundle_status(self.runtime_bundles(), &mut status);
+            apply_directml_startup_probe_status(&mut status, &probe);
+            apply_openvino_startup_probe_status(&mut status, openvino_probe.as_ref());
+            apply_model_lane_artifacts(&mut status, &artifacts);
+            apply_directml_device(&mut status, device_id, device_name);
+            status
+        };
 
         if let Some(forced_id) = forced_device_id {
             let forced_out_of_range = forced_id < 0
@@ -1120,94 +1662,250 @@ impl EngineState {
                     probe.directml_device_count
                 );
                 if force_override == Some(InferenceBackend::DirectML) {
-                    *self.backend_status.lock().await = BackendStatus {
-                        available_backends: available_backends.clone(),
-                        selection_state: Some("error".to_string()),
-                        selection_reason: Some("invalid_directml_device_id".to_string()),
-                        selected_device_id: Some(forced_id),
-                        selected_device_name: selected_device_name.clone(),
-                        dml_gate_state: Some("error".to_string()),
-                        dml_gate_reason: Some("invalid_directml_device_id".to_string()),
-                        directml_probe_passed: Some(directml_detected),
-                        directml_probe_error: Some(error.clone()),
-                        directml_probe_at: Some(Utc::now().to_rfc3339()),
-                        force_override,
-                        store_path: self
-                            .store_path
-                            .as_ref()
-                            .map(|path| path.display().to_string()),
-                        ..Default::default()
-                    };
+                    let mut status = make_status(
+                        BackendSelectionState::Error,
+                        "invalid_directml_device_id".to_string(),
+                        Some(forced_id),
+                        selected_device_name.clone(),
+                    );
+                    status.lanes.directml.last_failure_class =
+                        Some("invalid_directml_device_id".to_string());
+                    status.lanes.directml.last_failure_message = Some(error.clone());
+                    *self.backend_status.lock().await = status;
                     return Err(error);
                 }
                 selected_device_id = probe_device_id;
+                selected_device_name = probe
+                    .directml_candidate
+                    .as_ref()
+                    .map(|candidate| candidate.device_name.clone());
             }
         }
 
-        let adapter_identity = probe
-            .directml_candidate
-            .as_ref()
-            .map(|candidate| candidate.adapter_identity.clone())
-            .unwrap_or_else(|| "cpu-only".to_string());
-        let driver_version = probe
-            .directml_candidate
-            .as_ref()
-            .map(|candidate| candidate.driver_version.clone())
-            .unwrap_or_else(|| "unknown".to_string());
-
-        let decision_key = BackendDecisionKey {
-            model_id: model_id.clone(),
-            adapter_identity,
-            driver_version,
-            app_version: self.app_version.clone(),
-            ort_version: ORT_CRATE_VERSION.to_string(),
-            directml_device_id: selected_device_id,
-        };
+        let decision_key = self.build_decision_key(
+            &model_id,
+            &artifacts,
+            &probe,
+            openvino_probe.as_ref(),
+            selected_device_id,
+        );
         let stored = self.lookup_backend_record(&decision_key).await;
         let mut failure_counters = stored
             .as_ref()
             .map(|record| record.failure_counters.clone())
             .unwrap_or_default();
+        let persisted_backend = stored
+            .as_ref()
+            .and_then(|record| record.persisted_decision.as_ref())
+            .map(|decision| decision.backend);
+        let stored_openvino = persisted_backend == Some(InferenceBackend::OpenVinoNpu);
+        let should_attempt_openvino = match force_override {
+            Some(InferenceBackend::OpenVinoNpu) => true,
+            Some(_) => false,
+            None => persisted_backend.is_none() || stored_openvino,
+        };
 
-        let mut preferred_backend = InferenceBackend::Cpu;
-        let mut decision_reason = DecisionReason::NoDirectMLCandidate;
-        if let Some(override_backend) = force_override {
-            preferred_backend = override_backend;
-            decision_reason = DecisionReason::ForcedOverride;
-        } else if failure_counters.should_demote_directml() {
-            preferred_backend = InferenceBackend::Cpu;
-            decision_reason = DecisionReason::DemotedAfterFailures;
-        } else if let Some(record) = stored.as_ref() {
-            if record.decision.backend == InferenceBackend::DirectML && has_dml_candidate {
-                preferred_backend = InferenceBackend::DirectML;
-                decision_reason = DecisionReason::PersistedDecision;
-            } else if has_dml_candidate {
-                preferred_backend = InferenceBackend::DirectML;
-                decision_reason = DecisionReason::DefaultDirectMLCandidate;
+        if force_override == Some(InferenceBackend::OpenVinoNpu) {
+            let reason = if !artifacts.openvino_npu_ready() {
+                artifacts
+                    .openvino_reason
+                    .clone()
+                    .unwrap_or_else(|| "artifact_missing".to_string())
+            } else if !openvino_bundle_ready {
+                bundle_reason(self.runtime_bundles().openvino.failure_code())
+            } else if openvino_probe.is_none() {
+                "startup_probe_pending".to_string()
+            } else if let Some(class) = openvino_probe
+                .as_ref()
+                .and_then(|probe| probe.failure_class.as_deref())
+                .filter(|class| is_blocking_openvino_probe_failure(class))
+            {
+                class.to_string()
             } else {
-                preferred_backend = InferenceBackend::Cpu;
-                decision_reason = DecisionReason::PersistedDecision;
-            }
-        } else if has_dml_candidate {
-            preferred_backend = InferenceBackend::DirectML;
-            decision_reason = DecisionReason::DefaultDirectMLCandidate;
+                let artifact = artifacts
+                    .openvino_artifact
+                    .as_ref()
+                    .expect("ready OpenVINO artifact should include manifest details");
+                let probe = openvino_probe
+                    .as_ref()
+                    .expect("forced OpenVINO path requires startup probe result");
+                let preflight = match timeout(OPENVINO_PREFLIGHT_BUDGET, async {
+                    run_openvino_preflight(artifact, probe)
+                })
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => OpenVinoPreflightResult::Timeout,
+                };
+                match preflight {
+                    OpenVinoPreflightResult::RuntimeUnavailable => "runtime_unavailable".to_string(),
+                    OpenVinoPreflightResult::Timeout => "preflight_timeout".to_string(),
+                    OpenVinoPreflightResult::Failed { class, .. } => class,
+                    OpenVinoPreflightResult::Ready => "runtime_unavailable".to_string(),
+                }
+            };
+
+            let error = artifacts
+                .openvino_message
+                .clone()
+                .or_else(|| {
+                    openvino_probe
+                        .as_ref()
+                        .and_then(|probe| probe.failure_message.clone())
+                })
+                .unwrap_or_else(|| match reason.as_str() {
+                    "runtime_unavailable" => {
+                        "Native OpenVINO runtime activation is not implemented yet".to_string()
+                    }
+                    "startup_probe_pending" => {
+                        "OpenVINO startup probe is still running".to_string()
+                    }
+                    _ => format!("OpenVINO lane is unavailable: {reason}"),
+                });
+
+            let mut status = make_status(
+                BackendSelectionState::Error,
+                reason,
+                selected_device_id,
+                selected_device_name.clone(),
+            );
+            status.decision_key = Some(decision_key.clone());
+            status.selection_fingerprint = Some(decision_key.fingerprint());
+            status.last_decision = None;
+            *self.backend_status.lock().await = status;
+            return Err(error);
         }
 
-        let mut persisted_backend = preferred_backend;
-        let mut persisted_reason = decision_reason.clone();
+        let (preferred_backend, decision_reason) = choose_preferred_backend(
+            force_override,
+            &failure_counters,
+            stored.as_ref(),
+            has_dml_candidate,
+        );
+
         let mut active_backend = preferred_backend;
         let mut active_reason = decision_reason.clone();
         let mut runtime_engine = "ort_cpu".to_string();
-        let mut selection_state = "ready".to_string();
-        let mut selection_reason = decision_reason_code(&active_reason).to_string();
+        let mut selection_state = BackendSelectionState::Ready;
+        let mut decision_persistence_state = if force_override.is_some() {
+            DecisionPersistenceState::None
+        } else {
+            DecisionPersistenceState::Persisted
+        };
+        let mut persisted_record_decision =
+            stored.as_ref().and_then(|record| record.persisted_decision.clone());
+        let mut directml_preflight_state = LanePreflightState::NotStarted;
+        let mut openvino_preflight_state = LanePreflightState::NotStarted;
+        let mut directml_failure_class = None;
+        let mut directml_failure_message = None;
+        let mut openvino_failure_class = openvino_probe
+            .as_ref()
+            .and_then(|probe| probe.failure_class.clone());
+        let mut openvino_failure_message = openvino_probe
+            .as_ref()
+            .and_then(|probe| probe.failure_message.clone());
+        let mut suppress_store_update = false;
+        let active_model_path: String;
+
+        if should_attempt_openvino {
+            let openvino_reason_override = if !artifacts.openvino_npu_ready() || !openvino_bundle_ready
+            {
+                Some(DecisionReason::NoOpenVinoCandidate)
+            } else if openvino_probe.is_none() {
+                suppress_store_update = true;
+                decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
+                selection_state = BackendSelectionState::Fallback;
+                Some(DecisionReason::OpenVinoStartupProbePending)
+            } else if let Some(class) = openvino_probe
+                .as_ref()
+                .and_then(|probe| probe.failure_class.as_deref())
+                .filter(|class| is_blocking_openvino_probe_failure(class))
+            {
+                openvino_failure_class = Some(class.to_string());
+                Some(DecisionReason::NoOpenVinoCandidate)
+            } else {
+                let artifact = artifacts
+                    .openvino_artifact
+                    .as_ref()
+                    .expect("ready OpenVINO artifact should include manifest details");
+                let probe = openvino_probe
+                    .as_ref()
+                    .expect("OpenVINO startup probe should exist when artifact is ready");
+                let preflight = match timeout(OPENVINO_PREFLIGHT_BUDGET, async {
+                    run_openvino_preflight(artifact, probe)
+                })
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => OpenVinoPreflightResult::Timeout,
+                };
+                match preflight {
+                    OpenVinoPreflightResult::RuntimeUnavailable => {
+                        openvino_preflight_state = LanePreflightState::NotStarted;
+                        suppress_store_update = true;
+                        decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
+                        selection_state = BackendSelectionState::Fallback;
+                        Some(DecisionReason::OpenVinoRuntimeUnavailable)
+                    }
+                    OpenVinoPreflightResult::Timeout => {
+                        openvino_preflight_state = LanePreflightState::Timeout;
+                        openvino_failure_class =
+                            Some("openvino_npu_preflight_timeout".to_string());
+                        openvino_failure_message = Some(format!(
+                            "OpenVINO preflight exceeded the {} second budget",
+                            OPENVINO_PREFLIGHT_BUDGET.as_secs()
+                        ));
+                        suppress_store_update = true;
+                        decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
+                        selection_state = BackendSelectionState::Fallback;
+                        Some(DecisionReason::OpenVinoPreflightTimeout)
+                    }
+                    OpenVinoPreflightResult::Failed { class, message } => {
+                        openvino_preflight_state = LanePreflightState::Error;
+                        openvino_failure_class = Some(class);
+                        openvino_failure_message = Some(message);
+                        selection_state = BackendSelectionState::Fallback;
+                        Some(DecisionReason::OpenVinoPreflightFailed)
+                    }
+                    OpenVinoPreflightResult::Ready => {
+                        openvino_preflight_state = LanePreflightState::Ready;
+                        suppress_store_update = true;
+                        decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
+                        selection_state = BackendSelectionState::Fallback;
+                        Some(DecisionReason::OpenVinoRuntimeUnavailable)
+                    }
+                }
+            };
+
+            if let Some(reason) = openvino_reason_override {
+                active_reason = reason;
+                selection_state = BackendSelectionState::Fallback;
+            }
+        }
 
         let adapter = if preferred_backend == InferenceBackend::DirectML {
             match dml_model_path.as_deref() {
                 Some(dml_path) => {
-                    match build_directml_runtime_adapter(dml_path, selected_device_id) {
+                    match build_directml_runtime_adapter(
+                        &self.runtime_bundles().ort,
+                        dml_path,
+                        selected_device_id,
+                    ) {
                         Ok(adapter) => {
                             failure_counters.record_directml_success();
+                            if !suppress_store_update
+                                && force_override.is_none()
+                                && active_reason != DecisionReason::PersistedDecision
+                            {
+                                persisted_record_decision = Some(BackendDecision::new(
+                                    InferenceBackend::DirectML,
+                                    active_reason.clone(),
+                                    None,
+                                ));
+                            }
                             runtime_engine = "genai_dml".to_string();
+                            directml_preflight_state = LanePreflightState::Ready;
+                            active_model_path = dml_path.display().to_string();
                             adapter
                         }
                         Err(error) => {
@@ -1218,59 +1916,65 @@ impl EngineState {
                                     DirectMLFailureStage::Init,
                                     error.clone(),
                                 );
-                                *self.backend_status.lock().await = BackendStatus {
-                                    available_backends: available_backends.clone(),
-                                    selection_state: Some("error".to_string()),
-                                    selection_reason: Some(
-                                        decision_reason_code(
-                                            &DecisionReason::DirectMLInitializationFailed,
-                                        )
-                                        .to_string(),
-                                    ),
+                                let mut status = make_status(
+                                    BackendSelectionState::Error,
+                                    decision_reason_code(
+                                        &DecisionReason::DirectMLInitializationFailed,
+                                    )
+                                    .to_string(),
                                     selected_device_id,
-                                    selected_device_name: selected_device_name.clone(),
-                                    dml_gate_state: Some("error".to_string()),
-                                    dml_gate_reason: Some(
-                                        decision_reason_code(
-                                            &DecisionReason::DirectMLInitializationFailed,
-                                        )
-                                        .to_string(),
-                                    ),
-                                    directml_probe_passed: Some(directml_detected),
-                                    directml_probe_error: Some(error.clone()),
-                                    directml_probe_at: Some(Utc::now().to_rfc3339()),
-                                    failure_counters: failure_counters.clone(),
-                                    force_override,
-                                    store_path: self
-                                        .store_path
-                                        .as_ref()
-                                        .map(|path| path.display().to_string()),
-                                    ..Default::default()
-                                };
+                                    selected_device_name.clone(),
+                                );
+                                status.failure_counters = failure_counters.clone();
+                                status.decision_key = Some(decision_key.clone());
+                                status.selection_fingerprint = Some(decision_key.fingerprint());
+                                status.lanes.directml.preflight_state = LanePreflightState::Error;
+                                status.lanes.directml.last_failure_class =
+                                    Some("directml_initialization_failed".to_string());
+                                status.lanes.directml.last_failure_message = Some(error.clone());
+                                *self.backend_status.lock().await = status;
                                 return Err(error);
                             }
 
                             failure_counters
                                 .record_directml_failure(DirectMLFailureStage::Init, error.clone());
-                            selection_state = "fallback".to_string();
+                            selection_state = BackendSelectionState::Fallback;
                             active_backend = InferenceBackend::Cpu;
-                            active_reason = DecisionReason::DirectMLInitializationFailed;
-                            persisted_backend = InferenceBackend::DirectML;
-                            persisted_reason = DecisionReason::DirectMLInitializationFailed;
+                            if !matches!(
+                                active_reason,
+                                DecisionReason::OpenVinoStartupProbePending
+                                    | DecisionReason::OpenVinoPreflightTimeout
+                                    | DecisionReason::OpenVinoRuntimeUnavailable
+                            ) {
+                                active_reason = DecisionReason::DirectMLInitializationFailed;
+                            }
+                            decision_persistence_state =
+                                DecisionPersistenceState::TemporaryFallback;
+                            directml_preflight_state = LanePreflightState::Error;
+                            directml_failure_class =
+                                Some("directml_initialization_failed".to_string());
+                            directml_failure_message = Some(error.clone());
 
                             if failure_counters.should_demote_directml() {
                                 failure_counters.mark_demotion();
-                                persisted_backend = InferenceBackend::Cpu;
-                                persisted_reason = DecisionReason::DemotedAfterFailures;
                                 active_reason = DecisionReason::DemotedAfterFailures;
+                                decision_persistence_state = DecisionPersistenceState::Persisted;
+                                persisted_record_decision = Some(BackendDecision::new(
+                                    InferenceBackend::Cpu,
+                                    DecisionReason::DemotedAfterFailures,
+                                    None,
+                                ));
                             }
-                            selection_reason = decision_reason_code(&active_reason).to_string();
 
+                            let (cpu_model_path, tokenizer_path, cpu_spec) =
+                                resolve_cpu_runtime_inputs(&model_id)?;
                             let (adapter, _) = build_cpu_runtime_adapter(
+                                &self.runtime_bundles().ort,
                                 &cpu_model_path,
                                 &tokenizer_path,
                                 cpu_spec,
                             )?;
+                            active_model_path = cpu_model_path.display().to_string();
                             adapter
                         }
                     }
@@ -1282,88 +1986,103 @@ impl EngineState {
                     if force_override == Some(InferenceBackend::DirectML) || directml_required {
                         failure_counters
                             .record_directml_failure(DirectMLFailureStage::Init, error.clone());
-                        *self.backend_status.lock().await = BackendStatus {
-                            available_backends: available_backends.clone(),
-                            selection_state: Some("error".to_string()),
-                            selection_reason: Some("directml_artifact_missing".to_string()),
+                        let mut status = make_status(
+                            BackendSelectionState::Error,
+                            "directml_artifact_missing".to_string(),
                             selected_device_id,
-                            selected_device_name: selected_device_name.clone(),
-                            dml_gate_state: Some("artifact_missing".to_string()),
-                            dml_gate_reason: Some("directml_artifact_missing".to_string()),
-                            directml_probe_passed: Some(directml_detected),
-                            directml_probe_error: if directml_detected {
-                                None
-                            } else {
-                                Some("No DirectML-capable adapter detected".to_string())
-                            },
-                            directml_probe_at: Some(Utc::now().to_rfc3339()),
-                            failure_counters: failure_counters.clone(),
-                            force_override,
-                            store_path: self
-                                .store_path
-                                .as_ref()
-                                .map(|path| path.display().to_string()),
-                            ..Default::default()
-                        };
+                            selected_device_name.clone(),
+                        );
+                        status.failure_counters = failure_counters.clone();
+                        status.decision_key = Some(decision_key.clone());
+                        status.selection_fingerprint = Some(decision_key.fingerprint());
+                        status.lanes.directml.last_failure_class =
+                            Some("directml_artifact_missing".to_string());
+                        status.lanes.directml.last_failure_message = Some(error.clone());
+                        *self.backend_status.lock().await = status;
                         return Err(error);
                     }
-                    let (adapter, _) =
-                        build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)?;
+                    let (cpu_model_path, tokenizer_path, cpu_spec) =
+                        resolve_cpu_runtime_inputs(&model_id)?;
+                    let (adapter, _) = build_cpu_runtime_adapter(
+                        &self.runtime_bundles().ort,
+                        &cpu_model_path,
+                        &tokenizer_path,
+                        cpu_spec,
+                    )?;
                     active_backend = InferenceBackend::Cpu;
-                    active_reason = DecisionReason::NoDirectMLCandidate;
-                    persisted_backend = InferenceBackend::Cpu;
-                    persisted_reason = DecisionReason::NoDirectMLCandidate;
-                    selection_state = "fallback".to_string();
-                    selection_reason = decision_reason_code(&active_reason).to_string();
+                    if !matches!(
+                        active_reason,
+                        DecisionReason::OpenVinoStartupProbePending
+                            | DecisionReason::OpenVinoPreflightFailed
+                            | DecisionReason::OpenVinoPreflightTimeout
+                            | DecisionReason::OpenVinoRuntimeUnavailable
+                            | DecisionReason::NoOpenVinoCandidate
+                    ) {
+                        active_reason = DecisionReason::NoDirectMLCandidate;
+                    }
+                    selection_state = BackendSelectionState::Fallback;
+                    decision_persistence_state = if suppress_store_update || force_override.is_some()
+                    {
+                        DecisionPersistenceState::TemporaryFallback
+                    } else {
+                        DecisionPersistenceState::Persisted
+                    };
+                    if !suppress_store_update && force_override.is_none() {
+                        persisted_record_decision = Some(BackendDecision::new(
+                            InferenceBackend::Cpu,
+                            active_reason.clone(),
+                            None,
+                        ));
+                    }
+                    directml_failure_class = Some("directml_artifact_missing".to_string());
+                    directml_failure_message = Some(error.clone());
+                    active_model_path = cpu_model_path.display().to_string();
                     adapter
                 }
             }
         } else {
             if directml_required {
-                return Err(directml_required_error(
-                    &model_id,
-                    "CPU backend is unsupported for this model",
-                ));
+                let reason = directml_unavailable_reason(
+                    directml_detected,
+                    directml_artifact_available,
+                    self.runtime_bundles(),
+                );
+                return Err(directml_required_error(&model_id, &reason));
             }
-            let (adapter, _) =
-                build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)?;
+            let (cpu_model_path, tokenizer_path, cpu_spec) = resolve_cpu_runtime_inputs(&model_id)?;
+            let (adapter, _) = build_cpu_runtime_adapter(
+                &self.runtime_bundles().ort,
+                &cpu_model_path,
+                &tokenizer_path,
+                cpu_spec,
+            )?;
+            if !suppress_store_update
+                && force_override.is_none()
+                && active_reason != DecisionReason::PersistedDecision
+            {
+                persisted_record_decision =
+                    Some(BackendDecision::new(InferenceBackend::Cpu, active_reason.clone(), None));
+            }
+            if should_attempt_openvino && active_reason != DecisionReason::PersistedDecision {
+                selection_state = BackendSelectionState::Fallback;
+            }
+            active_model_path = cpu_model_path.display().to_string();
             adapter
         };
 
-        let active_model_path =
-            select_active_model_path(active_backend, &cpu_model_path, dml_model_path.as_ref());
-
         *self.runtime_adapter.lock().await = Some(adapter);
         *self.current_model.lock().await = Some(model_id.clone());
-        *self.backend_status.lock().await = BackendStatus {
+        let mut status = BackendStatus {
             active_backend: Some(active_backend),
             active_model_path: Some(active_model_path),
             active_artifact_backend: Some(active_backend),
             runtime_engine: Some(runtime_engine),
-            available_backends,
             selection_state: Some(selection_state),
-            selection_reason: Some(selection_reason),
-            selected_device_id,
-            selected_device_name,
-            dml_gate_state: Some(if active_backend == InferenceBackend::DirectML {
-                "selected".to_string()
-            } else if directml_detected && !directml_artifact_available {
-                "artifact_missing".to_string()
-            } else if has_dml_candidate {
-                "fallback_cpu".to_string()
-            } else {
-                "cpu_only".to_string()
-            }),
-            dml_gate_reason: Some(decision_reason_code(&persisted_reason).to_string()),
+            selection_reason: Some(decision_reason_code(&active_reason).to_string()),
+            decision_persistence_state,
+            selection_fingerprint: Some(decision_key.fingerprint()),
             decision_key: Some(decision_key.clone()),
             last_decision: Some(BackendDecision::new(active_backend, active_reason, None)),
-            directml_probe_passed: Some(directml_detected),
-            directml_probe_error: if directml_detected {
-                None
-            } else {
-                Some("No DirectML-capable adapter detected".to_string())
-            },
-            directml_probe_at: Some(Utc::now().to_rfc3339()),
             failure_counters: failure_counters.clone(),
             force_override,
             store_path: self
@@ -1372,11 +2091,33 @@ impl EngineState {
                 .map(|path| path.display().to_string()),
             ..Default::default()
         };
+        apply_runtime_bundle_status(self.runtime_bundles(), &mut status);
+        apply_directml_startup_probe_status(&mut status, &probe);
+        apply_openvino_startup_probe_status(&mut status, openvino_probe.as_ref());
+        apply_model_lane_artifacts(&mut status, &artifacts);
+        apply_directml_device(&mut status, selected_device_id, selected_device_name);
+        apply_persisted_eligibility(&mut status, persisted_record_decision.as_ref());
+        status.lanes.directml.preflight_state = directml_preflight_state;
+        status.lanes.openvino_npu.preflight_state = openvino_preflight_state;
+        status.lanes.openvino_npu.last_failure_class = openvino_failure_class;
+        status.lanes.openvino_npu.last_failure_message = openvino_failure_message;
+        if active_backend == InferenceBackend::DirectML {
+            status.lanes.directml.last_failure_class = None;
+            status.lanes.directml.last_failure_message = None;
+        } else if let Some(class) = directml_failure_class {
+            status.lanes.directml.last_failure_class = Some(class);
+            status.lanes.directml.last_failure_message = directml_failure_message;
+        } else if !directml_detected {
+            status.lanes.directml.last_failure_class = Some("directml_candidate_missing".to_string());
+            status.lanes.directml.last_failure_message =
+                Some("No DirectML-capable adapter detected".to_string());
+        }
+        *self.backend_status.lock().await = status;
 
-        if force_override.is_none() {
+        if force_override.is_none() && !suppress_store_update {
             self.persist_backend_record(
                 decision_key,
-                BackendDecision::new(persisted_backend, persisted_reason, None),
+                persisted_record_decision,
                 failure_counters,
             )
             .await;
@@ -1400,8 +2141,21 @@ impl EngineState {
         status.active_model_path = None;
         status.active_artifact_backend = None;
         status.runtime_engine = None;
-        status.selection_state = Some("ready".to_string());
+        status.selection_state = Some(BackendSelectionState::Ready);
         status.selection_reason = Some("model_unloaded".to_string());
+        status.decision_persistence_state = DecisionPersistenceState::None;
+        status.selection_fingerprint = None;
+        status.decision_key = None;
+        status.last_decision = None;
+        status.lanes.cpu.artifact_ready = false;
+        status.lanes.directml.artifact_ready = false;
+        status.lanes.openvino_npu.artifact_ready = false;
+        status.lanes.cpu.persisted_eligibility = false;
+        status.lanes.directml.persisted_eligibility = false;
+        status.lanes.openvino_npu.persisted_eligibility = false;
+        status.lanes.directml.preflight_state = LanePreflightState::NotStarted;
+        status.lanes.openvino_npu.preflight_state = LanePreflightState::NotStarted;
+        apply_runtime_bundle_status(self.runtime_bundles(), &mut status);
         drop(status);
         self.mark_readiness_idle_after_unload().await;
         Ok(())
@@ -1423,43 +2177,43 @@ impl EngineState {
         let Some(model_id) = self.current_model.lock().await.clone() else {
             return;
         };
-        let Some(model_def) = ModelRegistry::get_model(&model_id) else {
-            return;
-        };
-        let Some(cpu_spec) =
-            ModelRegistry::runtime_spec_for_backend(&model_id, RuntimeBackendTarget::Cpu)
+        let model_artifacts = ModelRegistry::get_model(&model_id)
+            .map(|model| resolve_model_lane_artifacts(&model.directory))
+            .unwrap_or_default();
+        let Ok((cpu_model_path, tokenizer_path, cpu_spec)) = resolve_cpu_runtime_inputs(&model_id)
         else {
             return;
         };
-        if cpu_spec.validate().is_err() {
-            return;
-        }
-
-        let cpu_model_path = match ModelLoader::validate_model_for_backend(
-            &model_def.directory,
-            ModelArtifactBackend::Cpu,
-        ) {
-            Ok(path) => path,
-            Err(_) => return,
-        };
-        let tokenizer_path = ModelLoader::tokenizer_file(&model_def.directory);
-        let Ok((cpu_adapter, _)) =
-            build_cpu_runtime_adapter(&cpu_model_path, &tokenizer_path, cpu_spec)
-        else {
+        let Ok((cpu_adapter, _)) = build_cpu_runtime_adapter(
+            &self.runtime_bundles().ort,
+            &cpu_model_path,
+            &tokenizer_path,
+            cpu_spec,
+        ) else {
             return;
         };
 
         *self.runtime_adapter.lock().await = Some(cpu_adapter);
         let mut counters = status_snapshot.failure_counters.clone();
         counters.record_directml_failure(DirectMLFailureStage::Runtime, error.to_string());
-        let mut persisted_backend = InferenceBackend::DirectML;
-        let mut persisted_reason = DecisionReason::RuntimeFailureFallback;
+        let mut persisted_record_decision = if let Some(decision_key) = status_snapshot.decision_key.as_ref() {
+            self.lookup_backend_record(decision_key)
+                .await
+                .and_then(|record| record.persisted_decision)
+        } else {
+            None
+        };
         let mut decision_reason = DecisionReason::RuntimeFailureFallback;
+        let mut decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
         if counters.should_demote_directml() {
             counters.mark_demotion();
-            persisted_backend = InferenceBackend::Cpu;
-            persisted_reason = DecisionReason::DemotedAfterFailures;
             decision_reason = DecisionReason::DemotedAfterFailures;
+            decision_persistence_state = DecisionPersistenceState::Persisted;
+            persisted_record_decision = Some(BackendDecision::new(
+                InferenceBackend::Cpu,
+                DecisionReason::DemotedAfterFailures,
+                None,
+            ));
         }
 
         let mut updated = status_snapshot.clone();
@@ -1467,10 +2221,9 @@ impl EngineState {
         updated.active_artifact_backend = Some(InferenceBackend::Cpu);
         updated.runtime_engine = Some("ort_cpu".to_string());
         updated.active_model_path = Some(cpu_model_path.display().to_string());
-        updated.selection_state = Some("fallback".to_string());
+        updated.selection_state = Some(BackendSelectionState::Fallback);
         updated.selection_reason = Some(decision_reason_code(&decision_reason).to_string());
-        updated.dml_gate_state = Some("fallback_cpu".to_string());
-        updated.dml_gate_reason = Some(decision_reason_code(&persisted_reason).to_string());
+        updated.decision_persistence_state = decision_persistence_state;
         updated.last_decision = Some(BackendDecision::new(
             InferenceBackend::Cpu,
             decision_reason,
@@ -1478,12 +2231,18 @@ impl EngineState {
         ));
         updated.failure_counters = counters.clone();
         updated.force_override = parse_force_override();
+        apply_runtime_bundle_status(self.runtime_bundles(), &mut updated);
+        apply_model_lane_artifacts(&mut updated, &model_artifacts);
+        apply_persisted_eligibility(&mut updated, persisted_record_decision.as_ref());
+        updated.lanes.directml.preflight_state = LanePreflightState::Ready;
+        updated.lanes.directml.last_failure_class = Some("directml_runtime_failed".to_string());
+        updated.lanes.directml.last_failure_message = Some(error.to_string());
         *self.backend_status.lock().await = updated;
 
         if let Some(decision_key) = status_snapshot.decision_key {
             self.persist_backend_record(
                 decision_key,
-                BackendDecision::new(persisted_backend, persisted_reason, None),
+                persisted_record_decision,
                 counters,
             )
             .await;
@@ -1562,6 +2321,45 @@ impl EngineState {
     }
 }
 
+fn choose_preferred_backend(
+    force_override: Option<InferenceBackend>,
+    failure_counters: &FailureCounters,
+    stored: Option<&BackendDecisionRecord>,
+    has_dml_candidate: bool,
+) -> (InferenceBackend, DecisionReason) {
+    if let Some(override_backend) = force_override {
+        return (override_backend, DecisionReason::ForcedOverride);
+    }
+    if failure_counters.should_demote_directml() {
+        return (InferenceBackend::Cpu, DecisionReason::DemotedAfterFailures);
+    }
+    if let Some(record) = stored {
+        if let Some(decision) = record.persisted_decision.as_ref() {
+            match decision.backend {
+                InferenceBackend::DirectML => {
+                    if has_dml_candidate {
+                        return (
+                            InferenceBackend::DirectML,
+                            DecisionReason::PersistedDecision,
+                        );
+                    }
+                }
+                InferenceBackend::Cpu => {
+                    return (InferenceBackend::Cpu, DecisionReason::PersistedDecision);
+                }
+                InferenceBackend::OpenVinoNpu => {}
+            }
+        }
+    }
+    if has_dml_candidate {
+        return (
+            InferenceBackend::DirectML,
+            DecisionReason::DefaultDirectMLCandidate,
+        );
+    }
+    (InferenceBackend::Cpu, DecisionReason::NoDirectMLCandidate)
+}
+
 struct GenerationPermit {
     generating: Arc<AtomicBool>,
     active_cancel: Arc<StdMutex<Option<Arc<AtomicBool>>>>,
@@ -1584,6 +2382,7 @@ fn lock_cancel<'a>(
 }
 
 fn build_cpu_runtime_adapter(
+    ort_bundle: &OrtRuntimeBundle,
     model_path: &Path,
     tokenizer_path: &Path,
     runtime_spec: ModelRuntimeSpec,
@@ -1594,6 +2393,7 @@ fn build_cpu_runtime_adapter(
     ),
     String,
 > {
+    OrtRuntimeLoader::ensure_initialized(ort_bundle)?;
     let session = InferenceSession::new_with_backend_options(
         model_path,
         InferenceBackend::Cpu,
@@ -1608,19 +2408,22 @@ fn build_cpu_runtime_adapter(
 
 #[cfg(target_os = "windows")]
 fn build_directml_runtime_adapter(
+    ort_bundle: &OrtRuntimeBundle,
     dml_model_path: &Path,
     directml_device_id: Option<i32>,
 ) -> Result<InferenceRuntimeAdapter, String> {
     let model_dir = dml_model_path
         .parent()
         .ok_or_else(|| format!("Invalid DirectML model path: {}", dml_model_path.display()))?;
-    let generator = GenAiDirectMlGenerator::new(model_dir, directml_device_id)?;
+    OrtRuntimeLoader::ensure_initialized(ort_bundle)?;
+    let generator = GenAiDirectMlGenerator::new(ort_bundle, model_dir, directml_device_id)?;
     generator.run_preflight("Warmup preflight")?;
     Ok(InferenceRuntimeAdapter::genai_directml(generator))
 }
 
 #[cfg(not(target_os = "windows"))]
 fn build_directml_runtime_adapter(
+    _ort_bundle: &OrtRuntimeBundle,
     _dml_model_path: &Path,
     _directml_device_id: Option<i32>,
 ) -> Result<InferenceRuntimeAdapter, String> {
@@ -1924,13 +2727,17 @@ async fn check_model(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     auth(&headers, &state.token)?;
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
-    let exists = ModelRegistry::get_model(&req.model_id)
-        .map(|m| {
-            let (me, te) = ModelLoader::check_model_files(&m.directory);
-            me && te
-        })
-        .unwrap_or(false);
-    Ok(Json(serde_json::json!({"exists": exists})))
+    let startup_probe = state.engine.startup_probe.lock().await.clone();
+    let openvino_probe = state.engine.openvino_startup_probe.lock().await.clone();
+    let readiness = build_check_model_response(
+        &req.model_id,
+        state.engine.runtime_bundles(),
+        startup_probe.as_ref(),
+        openvino_probe.as_ref(),
+    );
+    Ok(Json(
+        serde_json::to_value(readiness).expect("check-model response should serialize"),
+    ))
 }
 
 async fn v1_models(
@@ -2136,8 +2943,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let token =
         std::env::var("SMOLPC_ENGINE_TOKEN").map_err(|_| "SMOLPC_ENGINE_TOKEN is required")?;
-    init_onnx_runtime(args.resource_dir.as_deref())
-        .map_err(|e| format!("ONNX Runtime init failed: {e}"))?;
 
     let state = AppState {
         token: Arc::new(token),
@@ -2156,17 +2961,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             sleep(Duration::from_secs(30)).await;
             let idle_ms =
                 epoch_ms().saturating_sub(idle_state.last_activity_ms.load(Ordering::SeqCst));
-            if idle_ms >= args.model_idle_unload.as_millis() as u64
-                && !idle_state.engine.generating.load(Ordering::SeqCst)
-                && idle_state.engine.current_model.lock().await.is_some()
-            {
-                let _ = idle_state.engine.unload_model(false).await;
+            if let Some(model_idle_unload) = args.model_idle_unload {
+                if idle_ms >= model_idle_unload.as_millis() as u64
+                    && !idle_state.engine.generating.load(Ordering::SeqCst)
+                    && idle_state.engine.current_model.lock().await.is_some()
+                {
+                    let _ = idle_state.engine.unload_model(false).await;
+                }
             }
-            if idle_ms >= args.process_idle_exit.as_millis() as u64
-                && !idle_state.engine.generating.load(Ordering::SeqCst)
-            {
-                idle_state.shutdown.notify_waiters();
-                break;
+            if let Some(process_idle_exit) = args.process_idle_exit {
+                if idle_ms >= process_idle_exit.as_millis() as u64
+                    && !idle_state.engine.generating.load(Ordering::SeqCst)
+                {
+                    idle_state.shutdown.notify_waiters();
+                    break;
+                }
             }
         }
     });
@@ -2208,6 +3017,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::{OsStr, OsString};
+    use std::fs;
+    use std::sync::{Mutex, OnceLock};
+    use tempfile::tempdir;
 
     #[test]
     fn request_to_prompt_renders_chatml() {
@@ -2248,15 +3061,442 @@ mod tests {
     }
 
     #[test]
-    fn select_active_model_path_prefers_directml_artifact_when_active() {
-        let cpu = PathBuf::from("cpu/model.onnx");
-        let dml = PathBuf::from("dml/model.onnx");
+    fn engine_state_startup_succeeds_with_missing_ort_bundle() {
+        let temp = tempdir().expect("temp dir");
+        let resource_dir = temp.path().join("resources");
+        fs::create_dir_all(&resource_dir).expect("create resource dir");
 
-        let dml_selected = select_active_model_path(InferenceBackend::DirectML, &cpu, Some(&dml));
-        let cpu_selected = select_active_model_path(InferenceBackend::Cpu, &cpu, Some(&dml));
+        let args = test_args(temp.path(), Some(resource_dir.clone()));
+        let bundles =
+            resolve_runtime_bundles_for_mode(Some(&resource_dir), RuntimeLoadMode::Production);
+        let engine = EngineState::new_with_runtime_bundles(&args, bundles);
+        let status = engine.backend_status.blocking_lock().clone();
 
-        assert_eq!(dml_selected, dml.display().to_string());
-        assert_eq!(cpu_selected, cpu.display().to_string());
+        assert_eq!(
+            status.selection_state,
+            Some(BackendSelectionState::Pending)
+        );
+        assert!(!status.runtime_bundles.ort.validated);
+        assert_eq!(
+            status.runtime_bundles.ort.failure.as_deref(),
+            Some("missing_root")
+        );
+        assert!(!status.lanes.cpu.bundle_ready);
+    }
+
+    #[test]
+    fn engine_state_startup_succeeds_with_missing_openvino_bundle() {
+        let temp = tempdir().expect("temp dir");
+        let resource_dir = temp.path().join("resources");
+        let libs = resource_dir.join("libs");
+        create_ort_files(
+            &libs,
+            &[
+                "onnxruntime.dll",
+                "onnxruntime_providers_shared.dll",
+                "onnxruntime-genai.dll",
+                "DirectML.dll",
+            ],
+        );
+
+        let args = test_args(temp.path(), Some(resource_dir.clone()));
+        let bundles =
+            resolve_runtime_bundles_for_mode(Some(&resource_dir), RuntimeLoadMode::Production);
+        let engine = EngineState::new_with_runtime_bundles(&args, bundles);
+        let status = engine.backend_status.blocking_lock().clone();
+
+        assert!(status.runtime_bundles.ort.validated);
+        assert!(!status.runtime_bundles.openvino.validated);
+        assert_eq!(
+            status.runtime_bundles.openvino.failure.as_deref(),
+            Some("missing_root")
+        );
+        assert!(!status.lanes.openvino_npu.bundle_ready);
+    }
+
+    #[test]
+    fn engine_state_startup_succeeds_with_missing_openvino_plugin() {
+        let temp = tempdir().expect("temp dir");
+        let resource_dir = temp.path().join("resources");
+        let libs = resource_dir.join("libs");
+        let openvino_root = libs.join("openvino");
+        create_ort_files(
+            &libs,
+            &[
+                "onnxruntime.dll",
+                "onnxruntime_providers_shared.dll",
+                "onnxruntime-genai.dll",
+                "DirectML.dll",
+            ],
+        );
+        create_openvino_files(&openvino_root);
+        fs::remove_file(openvino_root.join("openvino_intel_npu_plugin.dll"))
+            .expect("remove npu plugin");
+
+        let args = test_args(temp.path(), Some(resource_dir.clone()));
+        let bundles =
+            resolve_runtime_bundles_for_mode(Some(&resource_dir), RuntimeLoadMode::Production);
+        let engine = EngineState::new_with_runtime_bundles(&args, bundles);
+        let status = engine.backend_status.blocking_lock().clone();
+
+        assert!(status.runtime_bundles.ort.validated);
+        assert!(!status.runtime_bundles.openvino.validated);
+        assert_eq!(
+            status.runtime_bundles.openvino.failure.as_deref(),
+            Some("openvino_npu_plugin_missing")
+        );
+        assert!(!status.lanes.openvino_npu.bundle_ready);
+    }
+
+    #[test]
+    fn backend_selection_prefers_directml_without_cpu_artifact_inputs() {
+        let (backend, reason) =
+            choose_preferred_backend(None, &FailureCounters::default(), None, true);
+
+        assert_eq!(backend, InferenceBackend::DirectML);
+        assert_eq!(reason, DecisionReason::DefaultDirectMLCandidate);
+    }
+
+    #[test]
+    fn backend_selection_keeps_persisted_cpu_choice() {
+        let record = BackendDecisionRecord {
+            key: BackendDecisionKey {
+                model_id: "qwen2.5-coder-1.5b".to_string(),
+                model_artifact_fingerprint: Some("artifact-v1".to_string()),
+                app_version: "test".to_string(),
+                selector_engine_id: "engine_host".to_string(),
+                ort_runtime_version: Some("2.0.0-rc.11".to_string()),
+                ort_bundle_fingerprint: Some("ort-bundle".to_string()),
+                openvino_runtime_version: Some("2026.0.0".to_string()),
+                openvino_genai_version: Some("2026.0.0".to_string()),
+                openvino_tokenizers_version: Some("2026.0.0".to_string()),
+                openvino_bundle_fingerprint: Some("openvino-bundle".to_string()),
+                gpu_adapter_identity: Some("intel:arc".to_string()),
+                gpu_driver_version: Some("31.0.101.5522".to_string()),
+                gpu_device_id: Some(0),
+                npu_adapter_identity: None,
+                npu_driver_version: None,
+                selection_profile: None,
+            },
+            persisted_decision: Some(BackendDecision::new(
+                InferenceBackend::Cpu,
+                DecisionReason::NoDirectMLCandidate,
+                None,
+            )),
+            failure_counters: FailureCounters::default(),
+            updated_at: Utc::now().to_rfc3339(),
+        };
+
+        let (backend, reason) = choose_preferred_backend(
+            None,
+            &FailureCounters::default(),
+            Some(&record),
+            true,
+        );
+
+        assert_eq!(backend, InferenceBackend::Cpu);
+        assert_eq!(reason, DecisionReason::PersistedDecision);
+    }
+
+    #[test]
+    fn backend_selection_ignores_persisted_openvino_for_fallback_choice() {
+        let record = BackendDecisionRecord {
+            key: BackendDecisionKey {
+                model_id: "qwen2.5-coder-1.5b".to_string(),
+                model_artifact_fingerprint: Some("artifact-v1".to_string()),
+                app_version: "test".to_string(),
+                selector_engine_id: "engine_host".to_string(),
+                ort_runtime_version: Some("2.0.0-rc.11".to_string()),
+                ort_bundle_fingerprint: Some("ort-bundle".to_string()),
+                openvino_runtime_version: Some("2026.0.0".to_string()),
+                openvino_genai_version: Some("2026.0.0".to_string()),
+                openvino_tokenizers_version: Some("2026.0.0".to_string()),
+                openvino_bundle_fingerprint: Some("openvino-bundle".to_string()),
+                gpu_adapter_identity: Some("intel:arc".to_string()),
+                gpu_driver_version: Some("31.0.101.5522".to_string()),
+                gpu_device_id: Some(0),
+                npu_adapter_identity: Some("openvino:npu:intel_npu".to_string()),
+                npu_driver_version: Some("32.0.100.3104".to_string()),
+                selection_profile: None,
+            },
+            persisted_decision: Some(BackendDecision::new(
+                InferenceBackend::OpenVinoNpu,
+                DecisionReason::PersistedDecision,
+                None,
+            )),
+            failure_counters: FailureCounters::default(),
+            updated_at: Utc::now().to_rfc3339(),
+        };
+
+        let (backend, reason) = choose_preferred_backend(
+            None,
+            &FailureCounters::default(),
+            Some(&record),
+            true,
+        );
+
+        assert_eq!(backend, InferenceBackend::DirectML);
+        assert_eq!(reason, DecisionReason::DefaultDirectMLCandidate);
+    }
+
+    #[test]
+    fn check_model_response_reports_lane_readiness() {
+        let _guard = lock_env();
+        let temp = tempdir().expect("temp dir");
+        let resource_dir = temp.path().join("resources");
+        let libs = resource_dir.join("libs");
+        let models_dir = temp.path().join("models");
+        let model_dir = models_dir.join("qwen2.5-coder-1.5b");
+        let dml_dir = model_dir.join("dml");
+        let cpu_dir = model_dir.join("cpu");
+        let openvino_dir = model_dir.join("openvino_npu");
+
+        create_ort_files(
+            &libs,
+            &[
+                "onnxruntime.dll",
+                "onnxruntime_providers_shared.dll",
+                "onnxruntime-genai.dll",
+                "DirectML.dll",
+            ],
+        );
+        create_openvino_files(&libs.join("openvino"));
+        fs::create_dir_all(&cpu_dir).expect("create cpu dir");
+        fs::create_dir_all(&dml_dir).expect("create dml dir");
+        fs::create_dir_all(&openvino_dir).expect("create openvino dir");
+        fs::write(cpu_dir.join("model.onnx"), []).expect("write cpu model");
+        fs::write(model_dir.join("tokenizer.json"), []).expect("write cpu tokenizer");
+        fs::write(dml_dir.join("model.onnx"), []).expect("write dml model");
+        fs::write(dml_dir.join("genai_config.json"), []).expect("write dml config");
+        fs::write(dml_dir.join("tokenizer.json"), []).expect("write dml tokenizer");
+        fs::write(openvino_dir.join("model.xml"), []).expect("write openvino model");
+        fs::write(
+            openvino_dir.join("manifest.json"),
+            br#"{"required_files":["model.xml"]}"#,
+        )
+        .expect("write openvino manifest");
+
+        let models_guard = EnvVarGuard::set("SMOLPC_MODELS_DIR", models_dir.as_os_str());
+        let bundles =
+            resolve_runtime_bundles_for_mode(Some(&resource_dir), RuntimeLoadMode::Production);
+        let probe = BackendProbeResult {
+            available_backends: vec![InferenceBackend::Cpu, InferenceBackend::DirectML],
+            directml_device_count: 1,
+            directml_candidate: Some(DirectMlCandidate {
+                device_id: 0,
+                device_name: "Intel Arc".to_string(),
+                adapter_identity: "intel:arc".to_string(),
+                driver_version: "31.0.101.5522".to_string(),
+            }),
+            npu_hardware_detected: false,
+        };
+
+        let response = build_check_model_response(
+            "qwen2.5-coder-1.5b",
+            &bundles,
+            Some(&probe),
+            None,
+        );
+        drop(models_guard);
+
+        assert!(response.lanes.cpu.ready);
+        assert_eq!(response.lanes.cpu.reason, "ready");
+        assert!(response.lanes.directml.ready);
+        assert_eq!(response.lanes.directml.reason, "ready");
+        assert!(!response.lanes.openvino_npu.ready);
+        assert_eq!(response.lanes.openvino_npu.reason, "startup_probe_pending");
+    }
+
+    #[test]
+    fn check_model_response_reports_runtime_unavailable_for_openvino_lane() {
+        let _guard = lock_env();
+        let temp = tempdir().expect("temp dir");
+        let resource_dir = temp.path().join("resources");
+        let libs = resource_dir.join("libs");
+        let models_dir = temp.path().join("models");
+        let model_dir = models_dir.join("qwen2.5-coder-1.5b");
+        let dml_dir = model_dir.join("dml");
+        let cpu_dir = model_dir.join("cpu");
+        let openvino_dir = model_dir.join("openvino_npu");
+
+        create_ort_files(
+            &libs,
+            &[
+                "onnxruntime.dll",
+                "onnxruntime_providers_shared.dll",
+                "onnxruntime-genai.dll",
+                "DirectML.dll",
+            ],
+        );
+        create_openvino_files(&libs.join("openvino"));
+        fs::create_dir_all(&cpu_dir).expect("create cpu dir");
+        fs::create_dir_all(&dml_dir).expect("create dml dir");
+        fs::create_dir_all(&openvino_dir).expect("create openvino dir");
+        fs::write(cpu_dir.join("model.onnx"), []).expect("write cpu model");
+        fs::write(model_dir.join("tokenizer.json"), []).expect("write cpu tokenizer");
+        fs::write(dml_dir.join("model.onnx"), []).expect("write dml model");
+        fs::write(dml_dir.join("genai_config.json"), []).expect("write dml config");
+        fs::write(dml_dir.join("tokenizer.json"), []).expect("write dml tokenizer");
+        fs::write(openvino_dir.join("model.xml"), []).expect("write openvino model");
+        fs::write(
+            openvino_dir.join("manifest.json"),
+            br#"{"required_files":["model.xml"]}"#,
+        )
+        .expect("write openvino manifest");
+
+        let models_guard = EnvVarGuard::set("SMOLPC_MODELS_DIR", models_dir.as_os_str());
+        let bundles =
+            resolve_runtime_bundles_for_mode(Some(&resource_dir), RuntimeLoadMode::Production);
+        let probe = BackendProbeResult {
+            available_backends: vec![InferenceBackend::Cpu, InferenceBackend::DirectML],
+            directml_device_count: 1,
+            directml_candidate: Some(DirectMlCandidate {
+                device_id: 0,
+                device_name: "Intel Arc".to_string(),
+                adapter_identity: "intel:arc".to_string(),
+                driver_version: "31.0.101.5522".to_string(),
+            }),
+            npu_hardware_detected: true,
+        };
+        let openvino_probe = OpenVinoStartupProbeResult {
+            hardware_detected: true,
+            startup_ready: true,
+            device_visible: true,
+            adapter_identity: Some("openvino:npu:intel_npu".to_string()),
+            device_name: Some("Intel NPU".to_string()),
+            driver_version: Some("32.0.100.3104".to_string()),
+            failure_class: None,
+            failure_message: None,
+        };
+
+        let response = build_check_model_response(
+            "qwen2.5-coder-1.5b",
+            &bundles,
+            Some(&probe),
+            Some(&openvino_probe),
+        );
+        drop(models_guard);
+
+        assert!(response.lanes.openvino_npu.artifact_ready);
+        assert!(response.lanes.openvino_npu.bundle_ready);
+        assert!(!response.lanes.openvino_npu.ready);
+        assert_eq!(response.lanes.openvino_npu.reason, "runtime_unavailable");
+    }
+
+    #[test]
+    fn process_idle_exit_is_disabled_by_default() {
+        let _guard = lock_env();
+        let env_guard = EnvVarGuard::unset("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS");
+
+        assert_eq!(
+            parse_idle_timeout_secs("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS", None, 60),
+            None
+        );
+
+        drop(env_guard);
+    }
+
+    #[test]
+    fn idle_timeout_zero_disables_timer() {
+        let _guard = lock_env();
+        let env_guard = EnvVarGuard::set("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS", "0");
+
+        assert_eq!(
+            parse_idle_timeout_secs("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS", Some(1800), 60),
+            None
+        );
+
+        drop(env_guard);
+    }
+
+    #[test]
+    fn model_idle_unload_keeps_default_when_unset() {
+        let _guard = lock_env();
+        let env_guard = EnvVarGuard::unset("SMOLPC_ENGINE_MODEL_IDLE_UNLOAD_SECS");
+
+        assert_eq!(
+            parse_idle_timeout_secs("SMOLPC_ENGINE_MODEL_IDLE_UNLOAD_SECS", Some(300), 30),
+            Some(Duration::from_secs(300))
+        );
+
+        drop(env_guard);
+    }
+
+    fn test_args(base: &Path, resource_dir: Option<PathBuf>) -> ParsedArgs {
+        ParsedArgs {
+            port: 19432,
+            data_dir: base.join("data"),
+            resource_dir,
+            app_version: "test".to_string(),
+            queue_size: 1,
+            queue_timeout: Duration::from_secs(1),
+            model_idle_unload: Some(Duration::from_secs(30)),
+            process_idle_exit: Some(Duration::from_secs(60)),
+        }
+    }
+
+    fn create_ort_files(root: &Path, files: &[&str]) {
+        fs::create_dir_all(root).expect("create ort root");
+        for file in files {
+            fs::write(root.join(file), []).expect("write ort runtime file");
+        }
+    }
+
+    fn create_openvino_files(root: &Path) {
+        fs::create_dir_all(root).expect("create openvino root");
+        for file in [
+            "openvino.dll",
+            "openvino_c.dll",
+            "openvino_intel_npu_plugin.dll",
+            "openvino_intel_cpu_plugin.dll",
+            "openvino_ir_frontend.dll",
+            "openvino_genai.dll",
+            "openvino_tokenizers.dll",
+            "tbb12.dll",
+        ] {
+            fs::write(root.join(file), []).expect("write openvino runtime file");
+        }
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        match env_lock().lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: impl AsRef<OsStr>) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.take() {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
     }
 
     #[test]

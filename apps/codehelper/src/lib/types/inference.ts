@@ -89,46 +89,151 @@ export interface EngineReadinessDto {
 	attempt_id: string;
 	state: EngineReadinessState;
 	state_since: string;
-	active_backend: string | null;
+	active_backend: InferenceBackend | null;
 	active_model_id: string | null;
 	error_code: string | null;
 	error_message: string | null;
 	retryable: boolean;
 }
 
+export type InferenceBackend = 'cpu' | 'directml' | 'openvino_npu';
+export type BackendSelectionState = 'pending' | 'ready' | 'fallback' | 'error';
+export type DecisionPersistenceState = 'none' | 'persisted' | 'temporary_fallback';
+export type LaneStartupProbeState = 'not_started' | 'ready' | 'error';
+export type LanePreflightState = 'not_started' | 'pending' | 'ready' | 'timeout' | 'error';
+export type LaneCacheState = 'unknown' | 'cold' | 'warm';
+
+export interface BackendSelectedDevice {
+	backend: InferenceBackend;
+	device_id: number | null;
+	device_name: string | null;
+}
+
+export interface BackendRuntimeBundleStatus {
+	root: string | null;
+	fingerprint: string | null;
+	validated: boolean;
+	failure: string | null;
+}
+
+export interface BackendRuntimeBundlesStatus {
+	load_mode: string | null;
+	ort: BackendRuntimeBundleStatus;
+	directml: BackendRuntimeBundleStatus;
+	openvino: BackendRuntimeBundleStatus;
+}
+
+export interface BackendLaneStatus {
+	detected: boolean;
+	bundle_ready: boolean;
+	artifact_ready: boolean;
+	startup_probe_state: LaneStartupProbeState;
+	preflight_state: LanePreflightState;
+	persisted_eligibility: boolean;
+	last_failure_class: string | null;
+	last_failure_message: string | null;
+	driver_version: string | null;
+	runtime_version: string | null;
+	cache_state: LaneCacheState;
+	device_id: number | null;
+	device_name: string | null;
+}
+
+export interface BackendDecisionKey {
+	model_id: string;
+	model_artifact_fingerprint: string | null;
+	app_version: string;
+	selector_engine_id: string;
+	ort_runtime_version: string | null;
+	ort_bundle_fingerprint: string | null;
+	openvino_runtime_version: string | null;
+	openvino_genai_version: string | null;
+	openvino_tokenizers_version: string | null;
+	openvino_bundle_fingerprint: string | null;
+	gpu_adapter_identity: string | null;
+	gpu_driver_version: string | null;
+	gpu_device_id: number | null;
+	npu_adapter_identity: string | null;
+	npu_driver_version: string | null;
+	selection_profile: string | null;
+}
+
+export interface FailureCounters {
+	directml_init_failures: number;
+	directml_runtime_failures: number;
+	directml_total_failures: number;
+	directml_consecutive_failures: number;
+	demotions: number;
+	last_failure_stage: string | null;
+	last_failure_reason: string | null;
+	last_failure_at: string | null;
+}
+
 export interface BackendStatus {
-	/** Active backend identifier ("cpu" or "directml") */
-	active_backend: string | null;
+	/** Active backend identifier */
+	active_backend: InferenceBackend | null;
 
 	/** Resolved active model path on disk */
 	active_model_path: string | null;
+
+	/** Active artifact backend identifier */
+	active_artifact_backend: InferenceBackend | null;
 
 	/** Runtime implementation in use (e.g. "ort_cpu", "genai_dml") */
 	runtime_engine: string | null;
 
 	/** Available backend identifiers on current machine */
-	available_backends: string[];
+	available_backends: InferenceBackend[];
+
+	/** Selected device details when a lane exposes one */
+	selected_device: BackendSelectedDevice | null;
 
 	/** Selection lifecycle state ("pending", "ready", "fallback", "error") */
-	selection_state: string | null;
+	selection_state: BackendSelectionState | null;
 
 	/** Selection reason code from host */
 	selection_reason: string | null;
 
-	/** Selected DirectML device id when applicable */
-	selected_device_id: number | null;
+	/** Whether the current active backend is persisted or a temporary fallback */
+	decision_persistence_state: DecisionPersistenceState;
 
-	/** Selected DirectML device name when applicable */
-	selected_device_name: string | null;
+	/** Opaque selection fingerprint for the active model load */
+	selection_fingerprint: string | null;
 
-	/** Runtime gate state for DML policy visibility */
-	dml_gate_state?: string | null;
+	/** Full decision key used for persistence */
+	decision_key: BackendDecisionKey | null;
 
-	/** Runtime gate reason for DML policy visibility */
-	dml_gate_reason?: string | null;
+	/** Runtime bundle validation grouped by runtime family */
+	runtime_bundles: BackendRuntimeBundlesStatus;
+
+	/** Lane-based readiness and failure state */
+	lanes: {
+		openvino_npu: BackendLaneStatus;
+		directml: BackendLaneStatus;
+		cpu: BackendLaneStatus;
+	};
+
+	/** Failure counters tracked by the host */
+	failure_counters: FailureCounters;
 
 	/** Force override mode applied by host policy when present */
-	force_override?: string | null;
+	force_override: InferenceBackend | null;
+}
+
+export interface ModelLaneReadiness {
+	artifact_ready: boolean;
+	bundle_ready: boolean;
+	ready: boolean;
+	reason: string;
+}
+
+export interface CheckModelResponse {
+	model_id: string;
+	lanes: {
+		openvino_npu: ModelLaneReadiness;
+		directml: ModelLaneReadiness;
+		cpu: ModelLaneReadiness;
+	};
 }
 
 /**
@@ -188,8 +293,11 @@ export interface InferenceStatus {
 	/** Whether startup failure is retryable */
 	startupRetryable: boolean;
 
-	/** Active backend identifier ("cpu" or "directml") */
-	activeBackend: string | null;
+	/** Active backend identifier */
+	activeBackend: InferenceBackend | null;
+
+	/** Active artifact backend identifier */
+	activeArtifactBackend: InferenceBackend | null;
 
 	/** Runtime implementation in use (e.g. "ort_cpu", "genai_dml") */
 	runtimeEngine: string | null;
@@ -198,20 +306,23 @@ export interface InferenceStatus {
 	activeModelPath: string | null;
 
 	/** Selection lifecycle state ("pending", "ready", "fallback", "error") */
-	selectionState: string | null;
+	selectionState: BackendSelectionState | null;
 
 	/** Selection reason code from host */
 	selectionReason: string | null;
 
-	/** Selected DirectML device name when applicable */
+	/** Whether the active backend is persisted or a temporary fallback */
+	decisionPersistenceState: DecisionPersistenceState | null;
+
+	/** Selected device name when applicable */
 	selectedDeviceName: string | null;
 
 	/** Runtime mode preference used by host policy */
 	runtimeMode: InferenceRuntimeMode;
 
-	/** Runtime gate state for DML policy visibility */
-	dmlGateState: string | null;
+	/** Current DirectML lane preflight state */
+	directmlPreflightState: LanePreflightState | null;
 
-	/** Runtime gate reason for DML policy visibility */
-	dmlGateReason: string | null;
+	/** Current DirectML lane failure class when known */
+	directmlFailureClass: string | null;
 }

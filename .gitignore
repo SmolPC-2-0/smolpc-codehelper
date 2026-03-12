@@ -40,3 +40,4 @@ nul
 /cache_dir/
 /apps/codehelper/scripts/src-tauri/
 /launcher/src-tauri/resources/launcher/apps.manifest.json
+/tmp/

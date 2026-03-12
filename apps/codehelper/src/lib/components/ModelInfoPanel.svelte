@@ -63,6 +63,9 @@
 		if (!backend) {
 			return 'Unknown';
 		}
+		if (backend === 'openvino_npu') {
+			return 'OpenVINO NPU';
+		}
 		if (backend === 'directml') {
 			return 'DirectML';
 		}
@@ -144,8 +147,10 @@
 					<span>{status.selectedDeviceName ?? 'n/a'}</span>
 					<span>Selection Reason</span>
 					<span>{formatReason(status.selectionReason)}</span>
-					<span>Gate State</span>
-					<span>{formatReason(status.dmlGateState)}</span>
+					<span>Persistence</span>
+					<span>{formatReason(status.decisionPersistenceState)}</span>
+					<span>DirectML Lane</span>
+					<span>{formatReason(status.directmlPreflightState ?? status.directmlFailureClass)}</span>
 					<span>Model Path</span>
 					<span title={status.activeModelPath ?? ''}>{status.activeModelPath ?? 'n/a'}</span>
 				</div>

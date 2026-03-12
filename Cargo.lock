@@ -4754,6 +4754,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smolpc-engine-core",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tower",
