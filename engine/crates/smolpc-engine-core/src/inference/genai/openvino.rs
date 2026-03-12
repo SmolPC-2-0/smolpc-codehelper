@@ -760,21 +760,33 @@ mod tests {
         let openvino_dll = root.join("openvino.dll");
         let openvino_c_dll = root.join("openvino_c.dll");
         let npu_plugin = root.join("openvino_intel_npu_plugin.dll");
+        let npu_compiler = root.join("openvino_intel_npu_compiler.dll");
         let cpu_plugin = root.join("openvino_intel_cpu_plugin.dll");
         let ir_frontend = root.join("openvino_ir_frontend.dll");
         let openvino_genai_dll = root.join("openvino_genai.dll");
         let tokenizers_dll = root.join("openvino_tokenizers.dll");
         let tbb_dll = root.join("tbb12.dll");
+        let tbbbind_dll = root.join("tbbbind_2_5.dll");
+        let tbbmalloc_dll = root.join("tbbmalloc.dll");
+        let tbbmalloc_proxy_dll = root.join("tbbmalloc_proxy.dll");
+        let icudt_dll = root.join("icudt70.dll");
+        let icuuc_dll = root.join("icuuc70.dll");
 
         for file in [
             &openvino_dll,
             &openvino_c_dll,
             &npu_plugin,
+            &npu_compiler,
             &cpu_plugin,
             &ir_frontend,
             &openvino_genai_dll,
             &tokenizers_dll,
             &tbb_dll,
+            &tbbbind_dll,
+            &tbbmalloc_dll,
+            &tbbmalloc_proxy_dll,
+            &icudt_dll,
+            &icuuc_dll,
         ] {
             fs::write(file, []).expect("write runtime file");
         }
@@ -783,11 +795,17 @@ mod tests {
             RequiredRuntimeFile::new("openvino.dll", openvino_dll.clone()),
             RequiredRuntimeFile::new("openvino_c.dll", openvino_c_dll.clone()),
             RequiredRuntimeFile::new("openvino_intel_npu_plugin.dll", npu_plugin.clone()),
+            RequiredRuntimeFile::new("openvino_intel_npu_compiler.dll", npu_compiler.clone()),
             RequiredRuntimeFile::new("openvino_intel_cpu_plugin.dll", cpu_plugin.clone()),
             RequiredRuntimeFile::new("openvino_ir_frontend.dll", ir_frontend.clone()),
             RequiredRuntimeFile::new("openvino_genai.dll", openvino_genai_dll.clone()),
             RequiredRuntimeFile::new("openvino_tokenizers.dll", tokenizers_dll.clone()),
             RequiredRuntimeFile::new("tbb12.dll", tbb_dll.clone()),
+            RequiredRuntimeFile::new("tbbbind_2_5.dll", tbbbind_dll.clone()),
+            RequiredRuntimeFile::new("tbbmalloc.dll", tbbmalloc_dll.clone()),
+            RequiredRuntimeFile::new("tbbmalloc_proxy.dll", tbbmalloc_proxy_dll.clone()),
+            RequiredRuntimeFile::new("icudt70.dll", icudt_dll.clone()),
+            RequiredRuntimeFile::new("icuuc70.dll", icuuc_dll.clone()),
         ];
         let version_metadata = vec![
             RuntimeVersionMetadata::new("openvino-runtime", "2026.0.0"),
@@ -808,11 +826,17 @@ mod tests {
             openvino_dll,
             openvino_c_dll,
             openvino_intel_npu_plugin_dll: npu_plugin,
+            openvino_intel_npu_compiler_dll: npu_compiler,
             openvino_intel_cpu_plugin_dll: cpu_plugin,
             openvino_ir_frontend_dll: ir_frontend,
             openvino_genai_dll,
             openvino_tokenizers_dll: tokenizers_dll,
             tbb_dll,
+            tbbbind_dll,
+            tbbmalloc_dll,
+            tbbmalloc_proxy_dll,
+            icudt_dll,
+            icuuc_dll,
             required_files,
             version_metadata,
             npu_validation_failure: failure,
