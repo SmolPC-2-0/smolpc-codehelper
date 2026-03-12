@@ -18,11 +18,12 @@
 		if (installing) return 'Installing';
 		if (app.manual_registration_required || app.install_state === 'broken') return 'Repair';
 		if (app.install_state === 'not_installed') return 'Install';
-		if (app.is_running) return 'Focus';
+		if (app.is_running) return 'Running';
 		return 'Launch';
 	}
 
 	function canAct() {
+		if (app.is_running) return false;
 		return (
 			app.install_state === 'installed' ||
 			app.can_install ||
@@ -37,7 +38,7 @@
 		if (app.manual_registration_required) return 'Manual registration required';
 		if (app.install_state === 'not_installed') return 'Not installed yet';
 		if (app.install_state === 'broken') return 'Install path is missing';
-		if (app.is_running) return 'Running - click to focus';
+		if (app.is_running) return 'Running';
 		return 'Ready to launch';
 	}
 </script>

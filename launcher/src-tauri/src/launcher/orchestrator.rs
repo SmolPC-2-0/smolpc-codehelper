@@ -353,6 +353,10 @@ fn evaluate_engine_api_gate(
 /// Check if a process matching the given executable path is currently running.
 /// Public so commands can call it for per-app status.
 pub fn is_app_running(executable: &Path) -> bool {
+    !matching_process_ids(executable).is_empty()
+}
+
+fn matching_process_ids(executable: &Path) -> Vec<u32> {
     let mut system = System::new_all();
     system.refresh_all();
 
@@ -366,50 +370,112 @@ pub fn is_app_running(executable: &Path) -> bool {
         .map(|name| name.to_ascii_lowercase());
     let target_stem_exe = target_stem.as_ref().map(|stem| format!("{stem}.exe"));
 
-    system.processes().values().any(|process| {
-        let process_name = process.name().to_string_lossy().to_ascii_lowercase();
-        target_file.as_deref() == Some(process_name.as_str())
-            || target_stem.as_deref() == Some(process_name.as_str())
-            || target_stem_exe.as_deref() == Some(process_name.as_str())
-    })
+    system
+        .processes()
+        .values()
+        .filter_map(|process| {
+            let process_name = process.name().to_string_lossy().to_ascii_lowercase();
+            let matches_target = target_file.as_deref() == Some(process_name.as_str())
+                || target_stem.as_deref() == Some(process_name.as_str())
+                || target_stem_exe.as_deref() == Some(process_name.as_str());
+            if matches_target {
+                Some(process.pid().as_u32())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn focus_existing_app(app: &LauncherLaunchableApp) -> Result<(), String> {
-    let Some(command_tokens) = app.focus_command.as_ref() else {
-        return fallback_focus_via_launch(app, "no focus_command is configured");
-    };
+    if let Some(command_tokens) = app.focus_command.as_ref() {
+        if !command_tokens.is_empty() && !command_tokens[0].trim().is_empty() {
+            let mut command = Command::new(&command_tokens[0]);
+            if command_tokens.len() > 1 {
+                command.args(&command_tokens[1..]);
+            }
 
-    if command_tokens.is_empty() || command_tokens[0].trim().is_empty() {
-        return fallback_focus_via_launch(app, "focus_command is invalid");
+            match command.status() {
+                Ok(status) if status.success() => return Ok(()),
+                Ok(_) | Err(_) => {
+                    // Fall through to native window focus if command fails.
+                }
+            }
+        }
     }
 
-    let mut command = Command::new(&command_tokens[0]);
-    if command_tokens.len() > 1 {
-        command.args(&command_tokens[1..]);
-    }
-
-    match command.status() {
-        Ok(status) if status.success() => Ok(()),
-        Ok(status) => fallback_focus_via_launch(
-            app,
-            &format!("focus_command exited with status {status}"),
-        ),
-        Err(error) => fallback_focus_via_launch(
-            app,
-            &format!("failed to execute focus_command: {error}"),
-        ),
-    }
-}
-
-fn fallback_focus_via_launch(app: &LauncherLaunchableApp, reason: &str) -> Result<(), String> {
-    // Relaunch to trigger single-instance handoff in apps that foreground
-    // an existing window on secondary launch.
-    launch_app_process(app).map_err(|error| {
+    focus_existing_window(&app.executable_path()).map_err(|error| {
         format!(
-            "App '{}' is already running and {}; fallback launch failed: {}",
-            app.app_id, reason, error
+            "Failed to focus already running app '{}': {error}",
+            app.app_id
         )
     })
+}
+
+#[cfg(target_os = "windows")]
+fn focus_existing_window(executable: &Path) -> Result<(), String> {
+    use std::collections::HashSet;
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, SetForegroundWindow, ShowWindow,
+        SW_RESTORE,
+    };
+
+    struct WindowSearch {
+        target_pids: HashSet<u32>,
+        matched_hwnd: HWND,
+    }
+
+    unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let search = unsafe { &mut *(lparam as *mut WindowSearch) };
+        if unsafe { IsWindowVisible(hwnd) } == 0 {
+            return 1;
+        }
+
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        if pid != 0 && search.target_pids.contains(&pid) {
+            search.matched_hwnd = hwnd;
+            return 0;
+        }
+
+        1
+    }
+
+    let target_pids: HashSet<u32> = matching_process_ids(executable).into_iter().collect();
+    if target_pids.is_empty() {
+        return Err("no matching process IDs found".to_string());
+    }
+
+    let mut search = Box::new(WindowSearch {
+        target_pids,
+        matched_hwnd: std::ptr::null_mut(),
+    });
+
+    unsafe {
+        EnumWindows(
+            Some(enum_windows_callback),
+            (&mut *search as *mut WindowSearch) as LPARAM,
+        );
+    }
+
+    if search.matched_hwnd.is_null() {
+        return Err("no visible window found for running process".to_string());
+    }
+
+    unsafe {
+        ShowWindow(search.matched_hwnd, SW_RESTORE);
+        if SetForegroundWindow(search.matched_hwnd) == 0 {
+            return Err("failed to set foreground window".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn focus_existing_window(_executable: &Path) -> Result<(), String> {
+    Err("native focus without focus_command is currently supported only on Windows".to_string())
 }
 
 fn launch_app_process(app: &LauncherLaunchableApp) -> Result<(), String> {
@@ -545,7 +611,14 @@ async fn resolve_installer_path(
     installer: &super::types::LauncherInstallerSpec,
 ) -> Result<PathBuf, String> {
     let url = installer.url.trim();
-    if url.starts_with("http://") || url.starts_with("https://") {
+    if is_http_url(url) {
+        return Err(format!(
+            "Installer URL '{}' for app '{}' uses insecure http://; only https:// is allowed for remote installers",
+            installer.url, app_id
+        ));
+    }
+
+    if is_https_url(url) {
         return download_installer(app_id, installer).await;
     }
 
@@ -595,13 +668,42 @@ async fn download_installer(
     app_id: &str,
     installer: &super::types::LauncherInstallerSpec,
 ) -> Result<PathBuf, String> {
-    let response = reqwest::get(&installer.url)
-        .await
-        .map_err(|error| format!("Failed to download installer '{}': {error}", installer.url))?;
+    let installer_url = installer.url.trim();
+    if !is_https_url(installer_url) {
+        return Err(format!(
+            "Installer URL '{}' is not a secure https:// URL",
+            installer.url
+        ));
+    }
+
+    let expected_hash = installer
+        .sha256
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "Installer URL '{}' must define installer.sha256 for remote downloads",
+                installer.url
+            )
+        })?;
+    if !is_valid_sha256_hex(expected_hash) {
+        return Err(format!(
+            "Installer URL '{}' has invalid installer.sha256 digest '{}'",
+            installer.url, expected_hash
+        ));
+    }
+
+    let response = reqwest::get(installer_url).await.map_err(|error| {
+        format!(
+            "Failed to download installer '{}': {error}",
+            installer_url
+        )
+    })?;
     if !response.status().is_success() {
         return Err(format!(
             "Installer download failed for '{}': HTTP {}",
-            installer.url,
+            installer_url,
             response.status()
         ));
     }
@@ -610,19 +712,14 @@ async fn download_installer(
         .await
         .map_err(|error| format!("Failed reading installer download bytes: {error}"))?;
 
-    if let Some(expected_hash) = installer.sha256.as_deref() {
-        let expected_hash = expected_hash.trim();
-        if !expected_hash.is_empty() {
-            let mut hasher = Sha256::new();
-            hasher.update(&bytes);
-            let actual = format!("{:x}", hasher.finalize());
-            if actual != expected_hash.to_ascii_lowercase() {
-                return Err(format!(
-                    "Installer SHA-256 mismatch for '{}': expected {}, got {}",
-                    installer.url, expected_hash, actual
-                ));
-            }
-        }
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let actual = format!("{:x}", hasher.finalize());
+    if actual != expected_hash.to_ascii_lowercase() {
+        return Err(format!(
+            "Installer SHA-256 mismatch for '{}': expected {}, got {}",
+            installer_url, expected_hash, actual
+        ));
     }
 
     let Some(local_data_dir) = dirs::data_local_dir() else {
@@ -653,6 +750,24 @@ async fn download_installer(
         )
     })?;
     Ok(path)
+}
+
+fn is_http_url(value: &str) -> bool {
+    has_url_prefix(value, "http://")
+}
+
+fn is_https_url(value: &str) -> bool {
+    has_url_prefix(value, "https://")
+}
+
+fn has_url_prefix(value: &str, prefix: &str) -> bool {
+    value
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+}
+
+fn is_valid_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
 fn run_installer(kind: &InstallerKind, installer_path: &Path) -> Result<(), String> {
@@ -812,5 +927,19 @@ mod tests {
             LauncherInstallOutcome::ManualRequired
         ));
         assert!(second_manual);
+    }
+
+    #[test]
+    fn installer_url_scheme_checks_are_case_insensitive() {
+        assert!(is_http_url("HTTP://example.com/installer.exe"));
+        assert!(is_https_url("HTTPS://example.com/installer.exe"));
+        assert!(!is_http_url("file://C:/installer.exe"));
+    }
+
+    #[test]
+    fn sha256_validator_enforces_hex_length_and_charset() {
+        assert!(is_valid_sha256_hex(&"a".repeat(64)));
+        assert!(!is_valid_sha256_hex("a"));
+        assert!(!is_valid_sha256_hex(&"g".repeat(64)));
     }
 }

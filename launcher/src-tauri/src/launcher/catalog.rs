@@ -316,14 +316,34 @@ fn validate_catalog(catalog: &LauncherCatalog) -> Result<(), String> {
         }
 
         if let Some(installer) = &app.installer {
-            if installer.url.trim().is_empty() {
+            let installer_url = installer.url.trim();
+            if installer_url.is_empty() {
                 return Err(format!(
                     "Launcher app '{app_id}' installer.url must be non-empty when installer is configured"
                 ));
             }
-            if let Some(digest) = installer.sha256.as_ref() {
-                let digest = digest.trim();
-                if !digest.is_empty() && !is_valid_sha256_hex(digest) {
+
+            if is_http_url(installer_url) {
+                return Err(format!(
+                    "Launcher app '{app_id}' installer.url must not use insecure http://"
+                ));
+            }
+
+            let digest = installer.sha256.as_deref().map(str::trim);
+            let digest = digest.filter(|digest| !digest.is_empty());
+            if is_https_url(installer_url) {
+                let Some(digest) = digest else {
+                    return Err(format!(
+                        "Launcher app '{app_id}' remote installer.url requires installer.sha256"
+                    ));
+                };
+                if !is_valid_sha256_hex(digest) {
+                    return Err(format!(
+                        "Launcher app '{app_id}' installer.sha256 must be a 64-char hex digest for remote installers"
+                    ));
+                }
+            } else if let Some(digest) = digest {
+                if !is_valid_sha256_hex(digest) {
                     return Err(format!(
                         "Launcher app '{app_id}' installer.sha256 must be a 64-char hex digest when provided"
                     ));
@@ -447,6 +467,20 @@ fn validate_min_engine_api_major(app_id: &str, major: Option<u64>) -> Result<(),
 
 fn is_valid_sha256_hex(value: &str) -> bool {
     value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn is_http_url(value: &str) -> bool {
+    has_url_prefix(value, "http://")
+}
+
+fn is_https_url(value: &str) -> bool {
+    has_url_prefix(value, "https://")
+}
+
+fn has_url_prefix(value: &str, prefix: &str) -> bool {
+    value
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
 }
 
 fn lock_path_for_registry(registry_path: &Path) -> PathBuf {
@@ -626,7 +660,7 @@ mod tests {
                     icon: None,
                     min_engine_api_major: Some(1),
                     installer: Some(LauncherInstallerSpec {
-                        url: "https://example.com/a.exe".to_string(),
+                        url: "installers/a.exe".to_string(),
                         sha256: None,
                         kind: InstallerKind::Exe,
                     }),
@@ -672,6 +706,46 @@ mod tests {
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].install_state, LauncherInstallState::Installed);
         assert_eq!(merged[1].install_state, LauncherInstallState::Broken);
+    }
+
+    #[test]
+    fn validate_catalog_rejects_http_installer_urls() {
+        let catalog = LauncherCatalog {
+            apps: vec![LauncherCatalogApp {
+                app_id: "codehelper".to_string(),
+                display_name: "Code Helper".to_string(),
+                icon: None,
+                min_engine_api_major: Some(1),
+                installer: Some(LauncherInstallerSpec {
+                    url: "http://example.com/codehelper.exe".to_string(),
+                    sha256: Some("a".repeat(64)),
+                    kind: InstallerKind::Exe,
+                }),
+            }],
+        };
+
+        let error = validate_catalog(&catalog).expect_err("http URL should fail validation");
+        assert!(error.contains("must not use insecure http://"));
+    }
+
+    #[test]
+    fn validate_catalog_requires_sha256_for_https_installer_urls() {
+        let catalog = LauncherCatalog {
+            apps: vec![LauncherCatalogApp {
+                app_id: "codehelper".to_string(),
+                display_name: "Code Helper".to_string(),
+                icon: None,
+                min_engine_api_major: Some(1),
+                installer: Some(LauncherInstallerSpec {
+                    url: "https://example.com/codehelper.exe".to_string(),
+                    sha256: None,
+                    kind: InstallerKind::Exe,
+                }),
+            }],
+        };
+
+        let error = validate_catalog(&catalog).expect_err("missing sha256 should fail");
+        assert!(error.contains("requires installer.sha256"));
     }
 
     #[test]

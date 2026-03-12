@@ -6,6 +6,10 @@
 	import EngineStatusBar from '$lib/components/EngineStatusBar.svelte';
 
 	function handlePrimaryAction(app: LauncherAppSummary) {
+		if (app.is_running) {
+			return;
+		}
+
 		if (app.install_state === 'installed' && !app.manual_registration_required) {
 			void launcherStore.launchOrFocus(app.app_id);
 			return;
