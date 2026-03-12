@@ -376,17 +376,11 @@ pub fn is_app_running(executable: &Path) -> bool {
 
 fn focus_existing_app(app: &LauncherLaunchableApp) -> Result<(), String> {
     let Some(command_tokens) = app.focus_command.as_ref() else {
-        return Err(format!(
-            "App '{}' is already running but no focus_command is configured",
-            app.app_id
-        ));
+        return fallback_focus_via_launch(app, "no focus_command is configured");
     };
 
     if command_tokens.is_empty() || command_tokens[0].trim().is_empty() {
-        return Err(format!(
-            "App '{}' focus_command must include an executable token",
-            app.app_id
-        ));
+        return fallback_focus_via_launch(app, "focus_command is invalid");
     }
 
     let mut command = Command::new(&command_tokens[0]);
@@ -394,21 +388,28 @@ fn focus_existing_app(app: &LauncherLaunchableApp) -> Result<(), String> {
         command.args(&command_tokens[1..]);
     }
 
-    let status = command.status().map_err(|error| {
-        format!(
-            "Failed to execute focus_command for app '{}': {error}",
-            app.app_id
-        )
-    })?;
-
-    if !status.success() {
-        return Err(format!(
-            "focus_command for app '{}' exited with status {}",
-            app.app_id, status
-        ));
+    match command.status() {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => fallback_focus_via_launch(
+            app,
+            &format!("focus_command exited with status {status}"),
+        ),
+        Err(error) => fallback_focus_via_launch(
+            app,
+            &format!("failed to execute focus_command: {error}"),
+        ),
     }
+}
 
-    Ok(())
+fn fallback_focus_via_launch(app: &LauncherLaunchableApp, reason: &str) -> Result<(), String> {
+    // Relaunch to trigger single-instance handoff in apps that foreground
+    // an existing window on secondary launch.
+    launch_app_process(app).map_err(|error| {
+        format!(
+            "App '{}' is already running and {}; fallback launch failed: {}",
+            app.app_id, reason, error
+        )
+    })
 }
 
 fn launch_app_process(app: &LauncherLaunchableApp) -> Result<(), String> {
