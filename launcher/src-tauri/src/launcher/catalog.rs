@@ -599,23 +599,80 @@ fn write_registry_atomic(registry_path: &Path, registry: &LauncherRegistry) -> R
         )
     })?;
 
-    if registry_path.exists() {
-        fs::remove_file(registry_path).map_err(|error| {
-            format!(
-                "Failed to replace launcher registry {}: {error}",
-                registry_path.display()
-            )
-        })?;
-    }
+    replace_registry_file(&temp_path, registry_path)?;
 
-    fs::rename(&temp_path, registry_path).map_err(|error| {
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn replace_registry_file(temp_path: &Path, registry_path: &Path) -> Result<(), String> {
+    fs::rename(temp_path, registry_path).map_err(|error| {
         format!(
             "Failed to finalize launcher registry {}: {error}",
             registry_path.display()
         )
-    })?;
+    })
+}
+
+#[cfg(windows)]
+fn replace_registry_file(temp_path: &Path, registry_path: &Path) -> Result<(), String> {
+    let backup_path = backup_path_for_registry(registry_path);
+    if backup_path.exists() {
+        fs::remove_file(&backup_path).map_err(|error| {
+            format!(
+                "Failed to clear stale launcher registry backup {}: {error}",
+                backup_path.display()
+            )
+        })?;
+    }
+
+    let had_existing_registry = registry_path.exists();
+    if had_existing_registry {
+        fs::rename(registry_path, &backup_path).map_err(|error| {
+            format!(
+                "Failed to create launcher registry backup {}: {error}",
+                backup_path.display()
+            )
+        })?;
+    }
+
+    if let Err(error) = fs::rename(temp_path, registry_path) {
+        if had_existing_registry {
+            let restore_result = fs::rename(&backup_path, registry_path).map_err(|restore_error| {
+                format!(
+                    "Failed to restore launcher registry from backup {} -> {}: {restore_error}",
+                    backup_path.display(),
+                    registry_path.display()
+                )
+            });
+            if let Err(restore_error) = restore_result {
+                return Err(format!(
+                    "Failed to finalize launcher registry {}: {error}; {restore_error}",
+                    registry_path.display()
+                ));
+            }
+        }
+        return Err(format!(
+            "Failed to finalize launcher registry {}: {error}",
+            registry_path.display()
+        ));
+    }
+
+    if had_existing_registry {
+        let _ = fs::remove_file(&backup_path);
+    }
 
     Ok(())
+}
+
+fn backup_path_for_registry(registry_path: &Path) -> PathBuf {
+    let mut backup_name = registry_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(REGISTRY_FILE_NAME)
+        .to_string();
+    backup_name.push_str(".bak");
+    registry_path.with_file_name(backup_name)
 }
 
 #[cfg(test)]
@@ -757,5 +814,53 @@ mod tests {
 
         let second = acquire_registry_lock_with_timeout(&lock_path, Duration::from_millis(120));
         assert!(second.is_err());
+    }
+
+    #[test]
+    fn backup_path_for_registry_appends_bak_suffix() {
+        let registry_path = temp_test_path("apps.registry.json");
+        let backup_path = backup_path_for_registry(&registry_path);
+        assert_eq!(
+            backup_path.file_name().and_then(|name| name.to_str()),
+            Some("apps.registry.json.bak")
+        );
+    }
+
+    #[test]
+    fn write_registry_atomic_replaces_existing_registry_file() {
+        let registry_path = temp_test_path("apps.registry.json");
+        let initial_registry = LauncherRegistry {
+            schema_version: LAUNCHER_REGISTRY_SCHEMA_VERSION,
+            apps: vec![LauncherRegistryApp {
+                app_id: "old-app".to_string(),
+                exe_path: temp_test_path("old-app.exe").display().to_string(),
+                args: vec![],
+                launch_command: None,
+                focus_command: None,
+                installed_at: now_utc_timestamp(),
+                source: "installer".to_string(),
+            }],
+        };
+        let replacement_registry = LauncherRegistry {
+            schema_version: LAUNCHER_REGISTRY_SCHEMA_VERSION,
+            apps: vec![LauncherRegistryApp {
+                app_id: "new-app".to_string(),
+                exe_path: temp_test_path("new-app.exe").display().to_string(),
+                args: vec![],
+                launch_command: None,
+                focus_command: None,
+                installed_at: now_utc_timestamp(),
+                source: "installer".to_string(),
+            }],
+        };
+
+        write_registry_atomic(&registry_path, &initial_registry)
+            .expect("initial registry write should succeed");
+        write_registry_atomic(&registry_path, &replacement_registry)
+            .expect("replacement registry write should succeed");
+
+        let loaded = load_registry_from_path(&registry_path).expect("registry should be readable");
+        assert_eq!(loaded.apps.len(), 1);
+        assert_eq!(loaded.apps[0].app_id, "new-app");
     }
 }
