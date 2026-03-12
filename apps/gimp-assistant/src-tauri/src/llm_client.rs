@@ -1,61 +1,34 @@
-use serde::Serialize;
-use serde_json::Value;
+use smolpc_engine_client::EngineClient;
+use smolpc_engine_core::GenerationConfig;
 
-const OLLAMA_URL: &str = "http://localhost:11434/api/chat";
-const MODEL_NAME: &str = "llama3"; // change if you use a different model
-
-#[derive(Serialize)]
-struct OllamaMessage {
-    role: String,
-    content: String,
-}
-
-#[derive(Serialize)]
-struct OllamaRequest {
-    model: String,
-    messages: Vec<OllamaMessage>,
-    stream: bool,
-}
-
-/// Simple chat call to the local LLM (Ollama).
-pub async fn chat(prompt: &str) -> Result<String, String> {
-    let client = reqwest::Client::new();
-
-    let req = OllamaRequest {
-        model: MODEL_NAME.to_string(),
-        messages: vec![OllamaMessage {
-            role: "user".into(),
-            content: prompt.into(),
-        }],
-        // Important: disable streaming so we get a single JSON object
-        stream: false,
+/// Non-streaming text generation (for tool selection + plan generation — needs complete JSON).
+pub async fn chat(client: &EngineClient, prompt: &str) -> Result<String, String> {
+    let config = GenerationConfig {
+        max_length: 2048,
+        temperature: 0.7,
+        ..Default::default()
     };
-
-    let resp = client
-        .post(OLLAMA_URL)
-        .json(&req)
-        .send()
+    let result = client
+        .generate_text(prompt, Some(config))
         .await
-        .map_err(|e| format!("Failed to call LLM: {e}"))?;
+        .map_err(|e| format!("Engine generation failed: {e}"))?;
+    Ok(result.text)
+}
 
-    if !resp.status().is_success() {
-        return Err(format!("LLM returned HTTP {}", resp.status()));
-    }
-
-    // Parse as generic JSON so extra fields don't break us
-    let body: Value = resp
-        .json()
+/// Streaming text generation (for natural language answers).
+pub async fn chat_stream(
+    client: &EngineClient,
+    prompt: &str,
+    on_token: impl FnMut(String),
+) -> Result<(), String> {
+    let config = GenerationConfig {
+        max_length: 2048,
+        temperature: 0.7,
+        ..Default::default()
+    };
+    client
+        .generate_stream(prompt, Some(config), on_token)
         .await
-        .map_err(|e| format!("Failed to parse LLM response: {e}"))?;
-
-    // Expect something like: { "message": { "content": "..." }, ... }
-    if let Some(content) = body
-        .get("message")
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())
-    {
-        Ok(content.to_string())
-    } else {
-        Err(format!("Unexpected LLM response shape: {body}"))
-    }
+        .map_err(|e| format!("Engine streaming failed: {e}"))?;
+    Ok(())
 }

@@ -2,19 +2,20 @@
 
 mod mcp;
 mod llm_client;
-mod macros; 
+mod macros;
 mod plan_schema;
 mod plan_validate;
 mod plan_execute;
 mod commands;
 mod plan_llm;
+mod engine;
 
 use serde_json::{json, Value};
 
 use serde::Serialize;
 #[derive(Serialize)]
 struct HealthStatus {
-    ollama_reachable: bool,
+    engine_reachable: bool,
     mcp_connected: bool,
     tools_count: u32,
     image_open_ok: bool,
@@ -73,7 +74,11 @@ fn extract_region(lower: &str) -> Option<&'static str> {
 
 
 #[tauri::command]
-async fn assistant_request(prompt: String) -> Result<Value, String> {
+async fn assistant_request(
+    prompt: String,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, engine::EngineState>,
+) -> Result<Value, String> {
     let lower_prompt = prompt.to_lowercase();
 
     // Fast Path: Describe Image
@@ -351,7 +356,7 @@ async fn assistant_request(prompt: String) -> Result<Value, String> {
             "undoable": true, "plan": {}, "tool_results": []
         }));
     }
-    // STEP 1: Tool selection, small prompt for Ollama
+    // STEP 1: Tool selection via engine
     let selector_prompt = format!(
         r#"
 You are a tool selector for a GIMP assistant.
@@ -377,14 +382,18 @@ User request: {user}
         user = prompt
     );
 
-    let selection_raw = match llm_client::chat(&selector_prompt).await {
-        Ok(r) => r,
-        Err(e) if e.contains("localhost:11434") || e.contains("connection refused") || e.contains("error sending request") => {
+    let client = match engine::resolve_client(&app_handle, &state).await {
+        Ok(c) => c,
+        Err(_) => {
             return Ok(json!({
-                "reply": "I don't recognise that command yet, and Ollama isn't running so I can't handle custom requests.\n\nStart Ollama with:\n  ollama serve\n\nOr try one of the built-in commands: draw a circle, blur the image, increase brightness, draw a red heart, blur the top half.",
+                "reply": "I don't recognise that command yet, and the AI engine isn't running so I can't handle custom requests.\n\nTry one of the built-in commands: draw a circle, blur the image, increase brightness, draw a red heart, blur the top half.",
                 "undoable": false, "plan": {}, "tool_results": []
             }));
         }
+    };
+
+    let selection_raw = match llm_client::chat(&client, &selector_prompt).await {
+        Ok(r) => r,
         Err(e) => return Err(e),
     };
 
@@ -415,7 +424,7 @@ User request: {user}
             user = prompt
         );
 
-        let reply_text = llm_client::chat(&answer_prompt).await?;
+        let reply_text = llm_client::chat(&client, &answer_prompt).await?;
 
         let plan = json!({
             "thought": "Tool selector chose 'none'. I answered without calling MCP tools.",
@@ -591,7 +600,7 @@ EXAMPLE — rotate the image 90 degrees clockwise:
             user = prompt
         );
 
-        let plan_raw = llm_client::chat(&planning_prompt).await?;
+        let plan_raw = llm_client::chat(&client, &planning_prompt).await?;
 
         // Strip any prefix before first '{' and any suffix after last '}'
         // (handles markdown fences like ```json ... ``` wrapping the output)
@@ -787,7 +796,7 @@ EXAMPLE — rotate the image 90 degrees clockwise:
     for tr in &tool_results {
         if tr.get("tool").and_then(|t| t.as_str()) == Some("call_api") {
             let arguments_val = tr.get("arguments").cloned().unwrap_or_else(|| json!({}));
-            let api_path = arguments_val
+            let _api_path = arguments_val
                 .get("api_path")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
@@ -868,15 +877,477 @@ EXAMPLE — rotate the image 90 degrees clockwise:
     }))
 }
 
+/// Streaming assistant command — single entry point for the frontend.
+/// Fast paths send the reply as a single channel message and return instantly.
+/// LLM "none" tool path streams token-by-token. Other tool paths use non-streaming
+/// generation then send the final reply as a single channel message.
 #[tauri::command]
-async fn health_check() -> HealthStatus {
+async fn assistant_chat_stream(
+    prompt: String,
+    on_token: tauri::ipc::Channel<String>,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, engine::EngineState>,
+) -> Result<Value, String> {
+    let lower_prompt = prompt.to_lowercase();
+
+    // ── Fast paths (identical logic to assistant_request) ──
+
+    if lower_prompt.contains("describe") && lower_prompt.contains("image") {
+        let result = mcp::call_tool("get_image_metadata", json!({}))?;
+        let reply = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let _ = on_token.send(reply.clone());
+        return Ok(json!({ "reply": reply, "undoable": false }));
+    }
+
+    let wants_line = lower_prompt.contains("line")
+        && (lower_prompt.contains("draw") || lower_prompt.contains("add")
+            || lower_prompt.contains("paint") || lower_prompt.contains("create")
+            || lower_prompt.contains("make") || lower_prompt.contains("black"));
+    if wants_line {
+        plan_execute::run_payload(macros::draw_line_across_image())?;
+        let reply = "Done! Added a black line across the image.";
+        let _ = on_token.send(reply.to_string());
+        return Ok(json!({
+            "reply": reply,
+            "explain": "To do this yourself in GIMP: pick the Pencil tool (press N). Hold Shift and click two points on the canvas — GIMP draws a straight line between them.",
+            "undoable": true
+        }));
+    }
+
+    if lower_prompt.contains("heart") {
+        let color = extract_color(&lower_prompt);
+        plan_execute::run_payload(macros::draw_heart(color))?;
+        let reply = format!("Done! Added a {} heart to the image.", color);
+        let _ = on_token.send(reply.clone());
+        return Ok(json!({
+            "reply": reply,
+            "explain": "To do this yourself in GIMP: use the Ellipse Select tool (press E) to draw two overlapping circles for the bumps, then the Rectangle Select tool (press R) for the body. Fill each selection with Edit → Fill with Foreground Color. Press Shift+Ctrl+A to deselect when done.",
+            "undoable": true
+        }));
+    }
+
+    if lower_prompt.contains("circle") {
+        let color = extract_color(&lower_prompt);
+        plan_execute::run_payload(macros::draw_circle(color))?;
+        let reply = format!("Done! Added a {} circle to the image.", color);
+        let _ = on_token.send(reply.clone());
+        return Ok(json!({
+            "reply": reply,
+            "explain": "To do this yourself in GIMP: choose the Ellipse Select tool (press E). Hold Shift while dragging to make a perfect circle. Then go to Edit → Fill with Foreground Color. Press Shift+Ctrl+A to deselect.",
+            "undoable": true
+        }));
+    }
+
+    if lower_prompt.contains("oval") || lower_prompt.contains("ellipse") {
+        let color = extract_color(&lower_prompt);
+        plan_execute::run_payload(macros::draw_oval(color))?;
+        let reply = format!("Done! Added a {} oval to the image.", color);
+        let _ = on_token.send(reply.clone());
+        return Ok(json!({
+            "reply": reply,
+            "explain": "To do this yourself in GIMP: choose the Ellipse Select tool (press E) and drag to draw an oval shape. Then go to Edit → Fill with Foreground Color. Press Shift+Ctrl+A to deselect.",
+            "undoable": true
+        }));
+    }
+
+    if lower_prompt.contains("triangle") {
+        let color = extract_color(&lower_prompt);
+        plan_execute::run_payload(macros::draw_triangle(color))?;
+        let reply = format!("Done! Added a {} triangle to the image.", color);
+        let _ = on_token.send(reply.clone());
+        return Ok(json!({
+            "reply": reply,
+            "explain": "To do this yourself in GIMP: use the Free Select tool (press F) and click three points to draw a triangle outline. Then fill it with Edit → Fill with Foreground Color.",
+            "undoable": true
+        }));
+    }
+
+    let wants_draw_rect = (lower_prompt.contains("rectangle") || lower_prompt.contains("rect"))
+        && !lower_prompt.contains("crop") && !lower_prompt.contains("resize");
+    if wants_draw_rect {
+        let color = extract_color(&lower_prompt);
+        plan_execute::run_payload(macros::draw_filled_rect(color))?;
+        let reply = format!("Done! Added a {} rectangle to the image.", color);
+        let _ = on_token.send(reply.clone());
+        return Ok(json!({
+            "reply": reply,
+            "explain": "To do this yourself in GIMP: choose the Rectangle Select tool (press R) and drag to draw a rectangle. Then go to Edit → Fill with Foreground Color. Press Shift+Ctrl+A to deselect.",
+            "undoable": true
+        }));
+    }
+
+    let wants_draw_square = lower_prompt.contains("square")
+        && (lower_prompt.contains("draw") || lower_prompt.contains("add") || lower_prompt.contains("paint"))
+        && !lower_prompt.contains("crop") && !lower_prompt.contains("resize");
+    if wants_draw_square {
+        let color = extract_color(&lower_prompt);
+        plan_execute::run_payload(macros::draw_filled_rect(color))?;
+        let reply = format!("Done! Added a {} square to the image.", color);
+        let _ = on_token.send(reply.clone());
+        return Ok(json!({
+            "reply": reply,
+            "explain": "To do this yourself in GIMP: choose the Rectangle Select tool (press R), hold Shift while dragging to make a perfect square. Then go to Edit → Fill with Foreground Color. Press Shift+Ctrl+A to deselect.",
+            "undoable": true
+        }));
+    }
+
+    // Region-aware fast paths
+    if let Some(region) = extract_region(&lower_prompt) {
+        let region_label = match region {
+            "top" => "top half", "bottom" => "bottom half",
+            "left" => "left half", "right" => "right half",
+            _ => region,
+        };
+        let wants_brighter_region = lower_prompt.contains("bright")
+            && (lower_prompt.contains("increase") || lower_prompt.contains("boost")
+                || lower_prompt.contains("more") || lower_prompt.contains("brighter")
+                || lower_prompt.contains("raise") || lower_prompt.contains("up"));
+        let wants_darker_region = (lower_prompt.contains("dark") || lower_prompt.contains("dim"))
+            && (lower_prompt.contains("more") || lower_prompt.contains("darker")
+                || lower_prompt.contains("decrease") || lower_prompt.contains("less")
+                || lower_prompt.contains("lower") || lower_prompt.contains("reduce"));
+        let wants_more_contrast_region = lower_prompt.contains("contrast")
+            && (lower_prompt.contains("increase") || lower_prompt.contains("more")
+                || lower_prompt.contains("boost") || lower_prompt.contains("up"));
+        let wants_less_contrast_region = lower_prompt.contains("contrast")
+            && (lower_prompt.contains("decrease") || lower_prompt.contains("less")
+                || lower_prompt.contains("reduce") || lower_prompt.contains("down"));
+        let wants_blur_region = lower_prompt.contains("blur")
+            && !lower_prompt.contains("unblur") && !lower_prompt.contains("sharpen");
+
+        if wants_brighter_region {
+            plan_execute::run_payload(macros::brightness_contrast_region(70.0, 0.0, region))?;
+            let reply = format!("Done! Brightened the {}.", region_label);
+            let _ = on_token.send(reply.clone());
+            return Ok(json!({ "reply": reply, "explain": format!("To do this yourself in GIMP: choose the Rectangle Select tool (press R) and drag to select the {} of the image. Then go to Colors → Brightness-Contrast and drag the Brightness slider to the right. Click OK, then press Shift+Ctrl+A to deselect.", region_label), "undoable": true }));
+        }
+        if wants_darker_region {
+            plan_execute::run_payload(macros::brightness_contrast_region(-70.0, 0.0, region))?;
+            let reply = format!("Done! Darkened the {}.", region_label);
+            let _ = on_token.send(reply.clone());
+            return Ok(json!({ "reply": reply, "explain": format!("To do this yourself in GIMP: choose the Rectangle Select tool (press R) and drag to select the {} of the image. Then go to Colors → Brightness-Contrast and drag the Brightness slider to the left. Click OK, then press Shift+Ctrl+A to deselect.", region_label), "undoable": true }));
+        }
+        if wants_more_contrast_region {
+            plan_execute::run_payload(macros::brightness_contrast_region(0.0, 70.0, region))?;
+            let reply = format!("Done! Increased contrast in the {}.", region_label);
+            let _ = on_token.send(reply.clone());
+            return Ok(json!({ "reply": reply, "explain": format!("To do this yourself in GIMP: choose the Rectangle Select tool (press R) and drag to select the {} of the image. Then go to Colors → Brightness-Contrast and drag the Contrast slider to the right. Click OK, then press Shift+Ctrl+A to deselect.", region_label), "undoable": true }));
+        }
+        if wants_less_contrast_region {
+            plan_execute::run_payload(macros::brightness_contrast_region(0.0, -70.0, region))?;
+            let reply = format!("Done! Decreased contrast in the {}.", region_label);
+            let _ = on_token.send(reply.clone());
+            return Ok(json!({ "reply": reply, "explain": format!("To do this yourself in GIMP: choose the Rectangle Select tool (press R) and drag to select the {} of the image. Then go to Colors → Brightness-Contrast and drag the Contrast slider to the left. Click OK, then press Shift+Ctrl+A to deselect.", region_label), "undoable": true }));
+        }
+        if wants_blur_region {
+            plan_execute::run_payload(macros::blur_region(10.0, region))?;
+            let reply = format!("Done! Blurred the {}.", region_label);
+            let _ = on_token.send(reply.clone());
+            return Ok(json!({ "reply": reply, "explain": format!("To do this yourself in GIMP: choose the Rectangle Select tool (press R) and drag to select the {} of the image. Then go to Filters → Blur → Gaussian Blur, set the size to around 10, and click OK. Press Shift+Ctrl+A to deselect.", region_label), "undoable": true }));
+        }
+    }
+
+    // Global brightness/contrast/blur/undo/crop fast paths
+    let wants_brighter = lower_prompt.contains("bright")
+        && (lower_prompt.contains("increase") || lower_prompt.contains("boost")
+            || lower_prompt.contains("more") || lower_prompt.contains("brighter")
+            || lower_prompt.contains("raise") || lower_prompt.contains("higher")
+            || lower_prompt.contains("up"));
+    if wants_brighter {
+        plan_execute::run_payload(macros::brightness_contrast(70.0, 0.0))?;
+        let reply = "Done! Increased the brightness.";
+        let _ = on_token.send(reply.to_string());
+        return Ok(json!({ "reply": reply, "explain": "To do this yourself in GIMP: go to Colors → Brightness-Contrast. Drag the Brightness slider to the right (try around +70). Click OK.", "undoable": true }));
+    }
+
+    let wants_darker = (lower_prompt.contains("dark") || lower_prompt.contains("dim"))
+        && (lower_prompt.contains("more") || lower_prompt.contains("darker")
+            || lower_prompt.contains("decrease") || lower_prompt.contains("less")
+            || lower_prompt.contains("lower") || lower_prompt.contains("reduce"));
+    let wants_brightness_decrease = lower_prompt.contains("bright")
+        && (lower_prompt.contains("decrease") || lower_prompt.contains("reduce")
+            || lower_prompt.contains("less") || lower_prompt.contains("lower")
+            || lower_prompt.contains("down"));
+    if wants_darker || wants_brightness_decrease {
+        plan_execute::run_payload(macros::brightness_contrast(-70.0, 0.0))?;
+        let reply = "Done! Decreased the brightness.";
+        let _ = on_token.send(reply.to_string());
+        return Ok(json!({ "reply": reply, "explain": "To do this yourself in GIMP: go to Colors → Brightness-Contrast. Drag the Brightness slider to the left (try around −70). Click OK.", "undoable": true }));
+    }
+
+    let wants_more_contrast = lower_prompt.contains("contrast")
+        && (lower_prompt.contains("increase") || lower_prompt.contains("more")
+            || lower_prompt.contains("boost") || lower_prompt.contains("higher")
+            || lower_prompt.contains("up"));
+    if wants_more_contrast {
+        plan_execute::run_payload(macros::brightness_contrast(0.0, 70.0))?;
+        let reply = "Done! Increased the contrast.";
+        let _ = on_token.send(reply.to_string());
+        return Ok(json!({ "reply": reply, "explain": "To do this yourself in GIMP: go to Colors → Brightness-Contrast. Drag the Contrast slider to the right (try around +70). Click OK.", "undoable": true }));
+    }
+
+    let wants_less_contrast = lower_prompt.contains("contrast")
+        && (lower_prompt.contains("decrease") || lower_prompt.contains("less")
+            || lower_prompt.contains("reduce") || lower_prompt.contains("lower")
+            || lower_prompt.contains("down"));
+    if wants_less_contrast {
+        plan_execute::run_payload(macros::brightness_contrast(0.0, -70.0))?;
+        let reply = "Done! Decreased the contrast.";
+        let _ = on_token.send(reply.to_string());
+        return Ok(json!({ "reply": reply, "explain": "To do this yourself in GIMP: go to Colors → Brightness-Contrast. Drag the Contrast slider to the left (try around −70). Click OK.", "undoable": true }));
+    }
+
+    let wants_blur = lower_prompt.contains("blur")
+        && !lower_prompt.contains("unblur") && !lower_prompt.contains("remove blur")
+        && !lower_prompt.contains("sharpen");
+    if wants_blur {
+        plan_execute::run_payload(macros::blur(10.0))?;
+        let reply = "Done! Applied a blur to the image.";
+        let _ = on_token.send(reply.to_string());
+        return Ok(json!({ "reply": reply, "explain": "To do this yourself in GIMP: go to Filters → Blur → Gaussian Blur. Increase the Size value (try 5–10 pixels) and click OK.", "undoable": true }));
+    }
+
+    if lower_prompt == "undo" || lower_prompt.starts_with("undo ") || lower_prompt == "undo last" {
+        plan_execute::run_payload(macros::undo())?;
+        let reply = "↩ Last change undone.";
+        let _ = on_token.send(reply.to_string());
+        return Ok(json!({ "reply": reply, "explain": "To undo in GIMP yourself: press Ctrl+Z (or Cmd+Z on Mac), or go to Edit → Undo.", "undoable": false }));
+    }
+
+    let wants_square_crop = lower_prompt.contains("square")
+        && (lower_prompt.contains("crop") || lower_prompt.contains("resize")
+            || lower_prompt.contains("make") || lower_prompt.contains("to a")
+            || lower_prompt.contains("into a"));
+    if wants_square_crop {
+        macro_crop_square()?;
+        let reply = "Done! Cropped the image to a square.";
+        let _ = on_token.send(reply.to_string());
+        return Ok(json!({ "reply": reply, "explain": "To do this yourself in GIMP: go to Image → Canvas Size, set Width and Height to the same value.", "undoable": true }));
+    }
+
+    // ── No fast path matched — use the engine ──
+
+    let client = match engine::resolve_client(&app_handle, &state).await {
+        Ok(c) => c,
+        Err(_) => {
+            let reply = "I don't recognise that command yet, and the AI engine isn't running so I can't handle custom requests.\n\nTry one of the built-in commands: draw a circle, blur the image, increase brightness, draw a red heart, blur the top half.";
+            let _ = on_token.send(reply.to_string());
+            return Ok(json!({ "reply": reply, "undoable": false }));
+        }
+    };
+
+    // STEP 1: Tool selection
+    let selector_prompt = format!(
+        r#"You are a tool selector for a GIMP assistant.
+
+Decide which single tool is best for the user's request.
+
+Tools:
+- "get_gimp_info": GIMP version, platform, system, install, environment.
+- "get_image_metadata": what image is open, details of the current image, size, dimensions, file name, layers.
+- "call_api": editing the image (resize, crop, rotate, flip, draw, filters, colors, etc).
+- "none": no tool needed, just answer in natural language.
+
+Return ONLY JSON in this format:
+{{"tool": "get_gimp_info" | "get_image_metadata" | "call_api" | "none", "reason": "short reason"}}
+
+The response MUST:
+- Start with '{{'
+- Contain only JSON
+- Have no explanation, no prose, no backticks, no prefix
+
+User request: {user}"#,
+        user = prompt
+    );
+
+    let selection_raw = llm_client::chat(&client, &selector_prompt).await?;
+
+    let sel_start = selection_raw.find('{').unwrap_or(0);
+    let sel_substr = &selection_raw[sel_start..];
+    let sel_end = sel_substr.rfind('}').map(|i| i + 1).unwrap_or(sel_substr.len());
+    let selection_str = &sel_substr[..sel_end];
+
+    let selection: Value = serde_json::from_str(selection_str).map_err(|e| {
+        format!("Failed to parse tool selection JSON: {e}\nLLM output was: {selection_raw}")
+    })?;
+
+    let selected_tool = selection.get("tool").and_then(|t| t.as_str()).unwrap_or("none").to_string();
+
+    // Tool: "none" → stream a natural language answer
+    if selected_tool == "none" {
+        let answer_prompt = format!(
+            "You are a helpful assistant that knows about GIMP.\n\
+             Answer the user's question in natural language. Do not mention tools.\n\n\
+             User: {user}\nAssistant:",
+            user = prompt
+        );
+
+        llm_client::chat_stream(&client, &answer_prompt, |token| {
+            let _ = on_token.send(token);
+        }).await?;
+
+        return Ok(json!({
+            "reply": "",
+            "streamed": true,
+            "undoable": false
+        }));
+    }
+
+    // Tool: "get_gimp_info" or "get_image_metadata" → simple one-step call
+    if selected_tool == "get_gimp_info" || selected_tool == "get_image_metadata" {
+        let result = mcp::call_tool(&selected_tool, json!({}))
+            .unwrap_or_else(|err| json!({ "isError": true, "content": [{ "text": format!("MCP error: {err}"), "type": "text" }] }));
+
+        let reply = summarize_info_result(&selected_tool, &result);
+        let _ = on_token.send(reply.clone());
+        return Ok(json!({ "reply": reply, "undoable": false }));
+    }
+
+    // Tool: "call_api" → non-streaming plan generation + execution
+    let planning_prompt = format!(
+        r#"You write Python console commands to control GIMP 3 via the PyGObject console.
+
+User request: {user}
+
+Respond ONLY with valid JSON in this format:
+{{
+  "thought": "short explanation of what you will do",
+  "explain": "2-3 sentences for a beginner describing how to do this manually in GIMP using menus and toolbar. Start with 'To do this yourself in GIMP:'. Do NOT mention Python.",
+  "steps": [
+    {{
+      "tool": "call_api",
+      "arguments": {{
+        "api_path": "exec",
+        "args": [
+          "pyGObject-console",
+          [
+            "from gi.repository import Gimp, Gegl",
+            "image = Gimp.get_images()[0]",
+            "layer = image.flatten()",
+            "w = image.get_width()",
+            "h = image.get_height()",
+            "drawable = layer",
+            "... your commands ...",
+            "Gimp.displays_flush()"
+          ]
+        ],
+        "kwargs": {{}}
+      }}
+    }}
+  ]
+}}
+
+CRITICAL RULES:
+1. Each element of args[1] must be ONE simple Python statement.
+2. NO multiline code, NO for-loops, NO if/else, NO try/except.
+3. NEVER use f-strings — they are invalid inside JSON strings.
+4. Use separate array elements to build up values step by step.
+5. ONLY use valid GIMP 3 API methods.
+6. NEVER add Python comments anywhere in the output.
+7. Output ONLY the JSON object. No prose, no backticks.
+8. ALWAYS start with the exact setup block shown above."#,
+        user = prompt
+    );
+
+    let plan_raw = llm_client::chat(&client, &planning_prompt).await?;
+
+    let json_start = plan_raw.find('{').unwrap_or(0);
+    let json_substr = &plan_raw[json_start..];
+    let json_end = json_substr.rfind('}').map(|i| i + 1).unwrap_or(json_substr.len());
+    let plan_str = &json_substr[..json_end];
+
+    let plan: Value = serde_json::from_str(plan_str).map_err(|e| {
+        format!("Failed to parse plan JSON: {e}\nLLM output was: {plan_raw}")
+    })?;
+
+    // Execute steps via MCP
+    let mut reply_text = plan.get("thought").and_then(|t| t.as_str())
+        .unwrap_or("Done! Changes applied to the image.").to_string();
+
+    if let Some(steps) = plan.get("steps").and_then(|s| s.as_array()) {
+        for step in steps {
+            let tool_name = step.get("tool").and_then(|t| t.as_str()).unwrap_or("");
+            let arguments = step.get("arguments").cloned().unwrap_or_else(|| json!({}));
+
+            let result = mcp::call_tool(tool_name, arguments)
+                .unwrap_or_else(|err| json!({ "isError": true, "content": [{ "text": format!("MCP error: {err}"), "type": "text" }] }));
+
+            let is_error = result.get("isError").and_then(|e| e.as_bool()).unwrap_or(false);
+            if is_error {
+                let msg = result.get("content").and_then(|c| c.as_array())
+                    .and_then(|arr| arr.first()).and_then(|f| f.get("text"))
+                    .and_then(|t| t.as_str()).unwrap_or("Unknown error");
+                reply_text = format!("GIMP returned an error: {msg}");
+            } else {
+                reply_text = "Done! Changes applied to the image.".to_string();
+            }
+        }
+    }
+
+    let explain_text = plan.get("explain").and_then(|t| t.as_str()).map(|s| s.to_string());
+    let undoable = !reply_text.starts_with("GIMP returned an error");
+
+    let _ = on_token.send(reply_text.clone());
+    Ok(json!({
+        "reply": reply_text,
+        "explain": explain_text,
+        "undoable": undoable
+    }))
+}
+
+/// Summarize info tool results into a human-readable string.
+fn summarize_info_result(tool: &str, result: &Value) -> String {
+    let text_opt = result.get("content").and_then(|c| c.as_array())
+        .and_then(|arr| arr.first()).and_then(|first| first.get("text"))
+        .and_then(|t| t.as_str());
+
+    let is_error = result.get("isError").and_then(|e| e.as_bool()).unwrap_or(false);
+    if is_error {
+        return text_opt.map(|m| format!("Error: {m}"))
+            .unwrap_or_else(|| "Could not get info from GIMP.".to_string());
+    }
+
+    let Some(text_json) = text_opt else {
+        return "No data returned.".to_string();
+    };
+
+    if tool == "get_gimp_info" {
+        if let Ok(info) = serde_json::from_str::<Value>(text_json) {
+            let version = info.get("version").and_then(|v| v.get("detected_version"))
+                .and_then(|v| v.as_str()).unwrap_or("unknown");
+            let platform = info.get("system").and_then(|s| s.get("platform"))
+                .and_then(|v| v.as_str()).unwrap_or("unknown");
+            return format!("You are using GIMP {version} on {platform}.");
+        }
+    }
+
+    if tool == "get_image_metadata" {
+        if let Ok(meta) = serde_json::from_str::<Value>(text_json) {
+            let basic = meta.get("basic").unwrap_or(&Value::Null);
+            let file = meta.get("file").unwrap_or(&Value::Null);
+            let w = basic.get("width").and_then(|v| v.as_i64()).unwrap_or(0);
+            let h = basic.get("height").and_then(|v| v.as_i64()).unwrap_or(0);
+            let base_type = basic.get("base_type").and_then(|v| v.as_str()).unwrap_or("Unknown");
+            let name = file.get("basename").and_then(|v| v.as_str()).unwrap_or("unknown image");
+            return format!("Your current image \"{name}\" is {w}×{h} pixels with base type {base_type}.");
+        }
+    }
+
+    text_json.to_string()
+}
+
+#[tauri::command]
+async fn health_check(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, engine::EngineState>,
+) -> Result<HealthStatus, String> {
     let mut errors = Vec::new();
 
-    // --- Check 1: Ollama reachable ---
-    let ollama_reachable = match reqwest::get("http://localhost:11434").await {
-        Ok(_) => true,
+    // --- Check 1: Engine reachable ---
+    let engine_reachable = match engine::resolve_client(&app_handle, &state).await {
+        Ok(client) => client.health().await.unwrap_or(false),
         Err(e) => {
-            errors.push(format!("Ollama not reachable: {}", e));
+            errors.push(format!("Engine not reachable: {}", e));
             false
         }
     };
@@ -890,13 +1361,13 @@ async fn health_check() -> HealthStatus {
     // --- Check 4: GIMP image open ---
     let image_open_ok = false; // TEMP: replace with get_image_metadata() later
 
-    HealthStatus {
-        ollama_reachable,
+    Ok(HealthStatus {
+        engine_reachable,
         mcp_connected,
         tools_count,
         image_open_ok,
         errors,
-    }
+    })
 }
 
 #[tauri::command]
@@ -1037,10 +1508,12 @@ fn macro_undo() -> Result<serde_json::Value, String> {
 
 pub fn run() {
     tauri::Builder::default()
+        .manage(engine::EngineState::default())
         .invoke_handler(tauri::generate_handler![
             mcp_list_tools,
             mcp_call_tool,
             assistant_request,
+            assistant_chat_stream,
             health_check,
             test_basic_mcp,
             macro_draw_line,
@@ -1050,7 +1523,9 @@ pub fn run() {
             macro_blur,
             macro_undo,
             commands::run_action_plan,
-
+            engine::engine_health,
+            engine::engine_cancel,
+            engine::engine_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,5 @@
-use crate::plan_schema::{ActionPlan, Op, Target};
-use serde_json::json;
+use crate::plan_schema::ActionPlan;
+use smolpc_engine_client::EngineClient;
 
 fn planner_prompt(user_text: &str) -> String {
     // IMPORTANT: LLM must output ONLY JSON matching ActionPlan schema.
@@ -55,11 +55,10 @@ User request:
     )
 }
 
-pub async fn make_plan_from_text(user_text: &str) -> Result<ActionPlan, String> {
+pub async fn make_plan_from_text(client: &EngineClient, user_text: &str) -> Result<ActionPlan, String> {
     let prompt = planner_prompt(user_text);
 
-    // Uses your existing Ollama client
-    let raw = crate::llm_client::chat(&prompt).await?;
+    let raw = crate::llm_client::chat(client, &prompt).await?;
 
     // Strip anything before first '{' in case model misbehaves
     let json_str = if let Some(idx) = raw.find('{') { &raw[idx..] } else { raw.as_str() };
