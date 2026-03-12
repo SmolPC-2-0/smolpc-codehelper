@@ -113,7 +113,9 @@ print(snapshot_download(**kwargs))
         entrypoint = "openvino_model.xml"
         required_files = $manifestRequiredFiles
     }
-    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $manifestPath -Encoding utf8
+    $manifestJson = $manifest | ConvertTo-Json -Depth 4
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($manifestPath, $manifestJson, $utf8NoBom)
 
     $manifestData = Get-Content $manifestPath -Raw | ConvertFrom-Json
     $expectedFiles = @($manifestData.entrypoint) + @($manifestData.required_files)

@@ -142,7 +142,9 @@ pub fn inspect_openvino_artifact(manifest_path: &Path) -> OpenVinoArtifactCheck 
         }
     };
 
-    let manifest = match serde_json::from_str::<OpenVinoLaneManifest>(&raw) {
+    let raw = raw.strip_prefix('\u{feff}').unwrap_or(&raw);
+
+    let manifest = match serde_json::from_str::<OpenVinoLaneManifest>(raw) {
         Ok(manifest) => manifest,
         Err(error) => {
             return OpenVinoArtifactCheck::Invalid {
@@ -437,6 +439,21 @@ mod tests {
         let manifest_path = temp.path().join("manifest.json");
         fs::write(temp.path().join("model.xml"), []).expect("write model");
         fs::write(&manifest_path, r#"{"required_files":["model.xml"]}"#).expect("write manifest");
+
+        let artifact = inspect_openvino_artifact(&manifest_path);
+        assert!(artifact.is_ready());
+    }
+
+    #[test]
+    fn openvino_manifest_tolerates_utf8_bom() {
+        let temp = tempdir().expect("tempdir");
+        let manifest_path = temp.path().join("manifest.json");
+        fs::write(temp.path().join("model.xml"), []).expect("write model");
+        fs::write(
+            &manifest_path,
+            b"\xEF\xBB\xBF{\"required_files\":[\"model.xml\"]}",
+        )
+        .expect("write manifest");
 
         let artifact = inspect_openvino_artifact(&manifest_path);
         assert!(artifact.is_ready());
