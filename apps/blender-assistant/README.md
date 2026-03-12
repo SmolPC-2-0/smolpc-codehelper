@@ -68,14 +68,17 @@ npm run tauri:build
 
 ## Blender Addon
 
-Install `blender_addon/blender_helper_http.py` in Blender:
+`blender_addon/blender_helper_http.py` is auto-synced into detected Blender user addon folders when the desktop app starts.
+
+Then in Blender:
 
 1. Blender -> Edit -> Preferences -> Add-ons
-2. Click `Install...`
-3. Select `blender_addon/blender_helper_http.py`
-4. Enable the addon
+2. Search for `Blender Learning Assistant`
+3. Enable the addon
 
 The addon talks to the local bridge (`127.0.0.1:5179`) and reads the auth token written by the desktop app.
+
+If Blender is not installed yet (or no Blender version folder is found), use manual install from `blender_addon/blender_helper_http.py`.
 
 ## Self-Contained Build (Engine + Model Resources)
 

@@ -657,6 +657,39 @@ impl EngineClient {
         Ok(host_metrics
             .unwrap_or_else(|| fallback_stream_metrics(started, emitted_chunks, first_chunk_at)))
     }
+
+    /// Request graceful engine shutdown.
+    pub async fn shutdown(&self) -> Result<(), EngineClientError> {
+        let response = self
+            .http
+            .post(self.url("/engine/shutdown"))
+            .header(AUTHORIZATION, self.auth_header())
+            .send()
+            .await;
+
+        match response {
+            Ok(r) => {
+                r.error_for_status()?;
+                Ok(())
+            }
+            Err(e) if e.is_connect() => Ok(()), // already down
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Poll health until engine is down (timeout after given duration).
+    pub async fn wait_for_shutdown(&self, timeout: Duration) -> Result<(), EngineClientError> {
+        let started = Instant::now();
+        while self.health().await.unwrap_or(false) {
+            if started.elapsed() > timeout {
+                return Err(EngineClientError::Message(
+                    "Engine shutdown timed out".to_string(),
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        Ok(())
+    }
 }
 
 fn default_engine_api_version() -> String {

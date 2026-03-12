@@ -68,12 +68,17 @@ See `Docs/ENGINE_BUNDLING_SETUP.md` for runtime library and sidecar details.
 
 ## 5) Blender Addon Installation
 
+When the desktop app starts, it automatically syncs `blender_addon/blender_helper_http.py` into detected Blender user addon folders.
+
+Then:
+
 1. Open Blender -> Edit -> Preferences -> Add-ons
-2. Click `Install...`
-3. Choose `blender_addon/blender_helper_http.py`
-4. Enable the addon
+2. Search for `Blender Learning Assistant`
+3. Enable the addon
 
 The addon connects to the desktop app bridge on `127.0.0.1:5179`.
+
+If Blender folders are not detected yet, install manually from `blender_addon/blender_helper_http.py`.
 
 ## 6) Troubleshooting
 
