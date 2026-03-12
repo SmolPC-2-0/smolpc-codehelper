@@ -1,6 +1,6 @@
 # Native OpenVINO GenAI Plan
 
-Checked on: 2026-03-10
+Checked on: 2026-03-12
 
 ## Scope
 
@@ -21,7 +21,7 @@ OpenVINO is a dedicated native runtime lane, not another ORT execution provider.
 
 ## Current Branch Baseline
 
-Implemented on this branch as of 2026-03-10:
+Implemented on this branch as of 2026-03-12:
 
 - backend persistence is now keyed by a full selection fingerprint and stored in `backend_decisions.v2.json`
 - multiple persisted records for the same model are retained when the fingerprint differs
@@ -30,14 +30,16 @@ Implemented on this branch as of 2026-03-10:
 - `decision_persistence_state` now distinguishes `persisted` from `temporary_fallback`
 - OpenVINO lane artifacts are validated via `openvino_npu/manifest.json`
 - `engine-host` now launches a dedicated machine-scoped OpenVINO startup probe and reports truthful OpenVINO device/driver diagnostics into lane status
-- model load now applies the `30 seconds` OpenVINO preflight budget and temporary-fallback semantics before falling through to `directml` or `cpu`
+- `engine-core` now includes a native OpenVINO GenAI runtime adapter for the `openvino_npu` lane
+- model load now runs real OpenVINO compile plus first-token preflight under the `30 seconds` budget
+- successful OpenVINO preflight now activates `runtime_engine=ov_genai_npu`
+- automatic live selection now prefers `openvino_npu -> directml -> cpu` when OpenVINO preflight succeeds
+- the selection fingerprint now uses `selection_profile=openvino_native_v1` so stale pre-activation records are invalidated cleanly
 
 Still pending for the remaining Phase 1 work:
 
-- native `openvino_npu` runtime adapter and `runtime_engine=ov_genai_npu`
-- successful OpenVINO compile and first-token preflight
-- automatic live selection order `openvino_npu -> directml -> cpu`
 - lane-specific manifest rollout and default catalog migration away from `qwen3-4b-instruct-2507`
+- app-local OpenVINO bundle staging for real Windows validation and packaging
 
 ## Responsibilities
 
@@ -74,9 +76,9 @@ Selection order:
 
 Current branch behavior:
 
-- automatic selection still resolves to `directml -> cpu`
-- OpenVINO is probed, validated, and can drive `temporary_fallback` status semantics now
-- successful native OpenVINO activation still cannot happen because the runtime adapter is not implemented yet
+- automatic selection now resolves to `openvino_npu -> directml -> cpu` when the OpenVINO lane passes preflight
+- OpenVINO compile/runtime failures fall through to `directml` or `cpu`
+- OpenVINO preflight timeout remains `temporary_fallback` and does not overwrite a prior good OpenVINO record
 
 Rules:
 
@@ -158,9 +160,10 @@ Persistence rules:
 - persist only completed preflight outcomes
 - timeout or incomplete probe results may be logged, but must not become the final persisted winner
 
-Implemented baseline on this branch as of 2026-03-10:
+Implemented baseline on this branch as of 2026-03-12:
 
 - current fingerprint fields include model id, computed model artifact fingerprint, app version, selector engine id, ORT/OpenVINO version metadata, runtime bundle fingerprints, GPU identity/driver/device id, and future-ready NPU fields
+- the current runtime activation slice intentionally bumped `selection_profile` to `openvino_native_v1`
 - store records now separate `persisted_decision` from `failure_counters`
 - `persisted_decision` may be `null` so temporary fallbacks can update counters without overwriting a prior good persisted record
 - repeated DirectML failures still demote to persisted CPU after the existing threshold; single-load fallbacks stay `temporary_fallback`
@@ -243,7 +246,7 @@ Manifest rules:
 
 Phase 0 had to define a per-lane readiness model before workstream 2 planning could proceed.
 
-Implemented baseline on this branch as of 2026-03-10:
+Implemented baseline on this branch as of 2026-03-12:
 
 - `GET /engine/status` reports lane readiness and the selected runtime lane
 - `POST /engine/check-model` reports readiness by lane, not a single boolean
@@ -251,17 +254,17 @@ Implemented baseline on this branch as of 2026-03-10:
   - runtime bundle integrity
   - artifact completeness
   - startup probe result
-  - preflight result
-  - persisted-eligibility state
-  - last failure class
+- preflight result
+- persisted-eligibility state
+- last failure class
 - OpenVINO lane startup probe truth is now surfaced in status (`detected`, `device_name`, `driver_version`, `startup_probe_state`, `last_failure_class`)
-- `POST /engine/check-model` can already report OpenVINO startup-probe failures and `runtime_unavailable`
+- `POST /engine/check-model` now reports OpenVINO lane `ready` when bundle, artifact, and startup-probe inputs are all viable
+- `/engine/load` now records truthful OpenVINO preflight outcomes from real compile/first-token smoke tests
 
 Still pending for the remaining Phase 1 work:
 
-- `openvino_npu.ready=true` after a real native OpenVINO preflight
-- truthful OpenVINO preflight outcomes driven by compile/first-token smoke tests rather than the current `runtime_unavailable` stub
-- real `openvino_npu` selection and runtime-engine activation
+- lane-specific manifest rollout and default catalog migration
+- app-local bundle validation on the Intel NPU laptop
 
 See `ENGINE_SURFACE_TARGET.md` for the target contract.
 
@@ -281,11 +284,13 @@ See `ENGINE_SURFACE_TARGET.md` for the target contract.
 
 ### Phase 1
 
-- add a native `OpenVINO GenAI` runtime adapter
-- replace the current `runtime_unavailable` short-circuit with real compile and first-token preflight
-- switch automatic selection from `directml -> cpu` to `openvino_npu -> directml -> cpu` once the OpenVINO lane is genuinely viable
-- surface explicit driver/runtime diagnostics
-- validate on the Intel NPU laptop first
+- completed in this slice:
+  - add a native `OpenVINO GenAI` runtime adapter
+  - replace the old placeholder short-circuit with real compile and first-token preflight
+  - switch automatic selection to `openvino_npu -> directml -> cpu` when the OpenVINO lane is genuinely viable
+- still required before broader rollout:
+  - surface final app-local bundle validation evidence on the Intel NPU laptop
+  - validate the real bundled runtime and shared-model layout end to end
 
 ### Phase 1b
 
@@ -315,11 +320,10 @@ Planner and implementer prompts must require small, frequent checkpoint commits.
 
 Recommended next workstream order from this branch baseline:
 
-1. native OpenVINO runtime adapter and successful activation path
-2. automatic selector handoff to `openvino_npu -> directml -> cpu`
-3. lane-specific manifests and default catalog migration
-4. workload tuning and cache policy refinement
-5. benchmark refresh for cross-lane, per-machine comparison once the runtime stack is stable enough to measure
+1. lane-specific manifests and default catalog migration
+2. app-local runtime-bundle staging and Intel NPU validation
+3. workload tuning and cache policy refinement
+4. benchmark refresh for cross-lane, per-machine comparison once the runtime stack is stable enough to measure
 
 ## Merge Gate For Implementation Start
 

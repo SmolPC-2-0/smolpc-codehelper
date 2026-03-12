@@ -1,27 +1,29 @@
 # Native OpenVINO GenAI Plan Pack
 
-Checked on: 2026-03-10
+Checked on: 2026-03-12
 Scope: Windows x64 only, canonical planning + contract docs, weak Intel laptops are the primary KPI.
 
 This folder is the canonical plan pack for the SmolPC Intel acceleration path.
 
 ## Implementation Status
 
-As of 2026-03-10, this branch is beyond the Phase 0 prerequisite baseline and has most of the OpenVINO bring-up scaffolding wired:
+As of 2026-03-12, this branch has completed the first native runtime-activation slice:
 
 - selection persistence is keyed by full fingerprint and keeps multiple records per model
 - `GET /engine/status` is lane-based instead of DML-only
 - `POST /engine/check-model` reports readiness by lane instead of a single boolean
 - `openvino_npu/manifest.json` inspection and artifact validation are implemented
 - an async OpenVINO startup probe classifies hardware, device visibility, driver version, and startup failure class
-- model load now applies the OpenVINO preflight budget and `temporary_fallback` status plumbing before falling through to `directml` or `cpu`
+- a native OpenVINO GenAI runtime adapter is implemented in `engine-core`
+- model load now runs real OpenVINO compile plus first-token preflight under the `30 seconds` budget
+- successful OpenVINO preflight now activates `runtime_engine=ov_genai_npu`
+- automatic selection now prefers `openvino_npu -> directml -> cpu` when the OpenVINO lane is viable
+- the selection fingerprint now uses the `openvino_native_v1` profile so stale pre-activation records do not block rollout
 
 Still pending for the remaining Phase 1 / Phase 1b work:
 
-- native `openvino_npu` runtime activation and `runtime_engine=ov_genai_npu`
-- successful OpenVINO compile and first-token preflight
-- automatic live selection order `openvino_npu -> directml -> cpu`
 - lane-specific manifest rollout and default catalog migration away from `qwen3-4b-instruct-2507`
+- app-local/runtime-bundle population for real Windows validation and packaging
 - workload tuning, cache policy, and prompt-default calibration
 
 ## Final Decision
@@ -62,11 +64,10 @@ This pack is intentionally structured for short-lived, focused implementation-pl
 
 Recommended planning boundaries:
 
-1. native OpenVINO runtime adapter implementation and successful activation
-2. automatic selector handoff to `openvino_npu -> directml -> cpu` after successful OpenVINO preflight
-3. model manifests, artifact layout, and default catalog migration
-4. workload tuning, cache policy, and prompt-default calibration
-5. benchmark refresh so users can compare inference/runtime choices on their own machine
+1. lane-specific manifests, artifact layout, and default catalog migration
+2. app-local runtime-bundle staging and Intel NPU validation
+3. workload tuning, cache policy, and prompt-default calibration
+4. benchmark refresh so users can compare inference/runtime choices on their own machine
 
 Each future Codex session should take one workstream or one subsection of a phase, produce an implementation plan for that slice only, and stop before broad execution planning.
 
