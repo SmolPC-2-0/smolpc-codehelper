@@ -72,6 +72,8 @@ export interface GpuInfo {
 export interface NpuInfo {
 	detected: boolean;
 	confidence: 'High' | 'Medium' | 'Low';
+	identifier: string;
+	driver_version?: string;
 	details: string;
 	method: string;
 }
