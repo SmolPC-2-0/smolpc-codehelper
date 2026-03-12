@@ -1,19 +1,19 @@
 // Disable console window on Windows release builds
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod commands;
 mod addon_sync;
+mod commands;
+mod engine_integration;
 mod logger;
 mod ollama;
 mod prompts;
 mod rag;
 mod scene_bridge;
-mod shared_engine;
 mod state;
 
+use state::GenerationBackend;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use state::GenerationBackend;
 use tauri::Manager;
 
 struct BridgeRuntimeState {
@@ -132,8 +132,9 @@ fn main() {
                 log::info!("[SharedEngine] Warning: No resource directory resolved");
             }
 
-            // Clean up stale engine processes from previous crashes
-            shared_engine::cleanup_stale_engine();
+            engine_integration::configure(resource_dir.clone());
+            // Legacy no-op with engine-client lifecycle management.
+            engine_integration::cleanup_stale_engine();
 
             let allow_ollama_fallback = state::allow_ollama_fallback();
             if allow_ollama_fallback {
@@ -162,7 +163,7 @@ fn main() {
                 let state = startup_backend;
                 let resource_dir = startup_resource_dir;
 
-                match shared_engine::ensure_engine_running(resource_dir.as_deref()).await {
+                match engine_integration::ensure_engine_running(resource_dir.as_deref()).await {
                     Ok(spawned) => {
                         tracker_ref.store(spawned, std::sync::atomic::Ordering::SeqCst);
                         if spawned {
@@ -171,7 +172,7 @@ fn main() {
                             log::info!("[SharedEngine] OK: Engine already running on 127.0.0.1:19432");
                         }
 
-                        match shared_engine::ensure_model_loaded().await {
+                        match engine_integration::ensure_model_loaded().await {
                             Ok(model_id) => {
                                 log::info!("[SharedEngine] OK: Model ready '{}'", model_id);
                                 state.set_loaded_model_id(Some(model_id));
@@ -244,10 +245,13 @@ fn main() {
 
                     // Shut down engine if we spawned it
                     if let Some(tracker) = app_handle.try_state::<EngineSpawnTracker>() {
-                        if tracker.spawned_by_us.load(std::sync::atomic::Ordering::SeqCst) {
+                        if tracker
+                            .spawned_by_us
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                        {
                             log::info!("[SharedEngine] Shutting down engine we spawned...");
                             let _ = tauri::async_runtime::block_on(
-                                shared_engine::shutdown_engine(),
+                                engine_integration::shutdown_engine(),
                             );
                         }
                     }
