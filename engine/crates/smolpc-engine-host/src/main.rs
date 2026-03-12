@@ -543,7 +543,7 @@ fn model_requires_directml(model_id: &str) -> bool {
 }
 
 fn model_requires_openvino(model_id: &str) -> bool {
-    matches!(model_id, "qwen3-4b-int4-ov")
+    matches!(model_id, "qwen3-4b-int4-ov" | "qwen3-4b-int4-ov-npu")
 }
 
 fn directml_required_error(model_id: &str, reason: &str) -> String {
@@ -3281,8 +3281,8 @@ mod tests {
                 gpu_device_id: Some(0),
                 npu_adapter_identity: None,
                 npu_driver_version: None,
-                openvino_npu_max_prompt_len: Some(256),
-                openvino_npu_min_response_len: Some(8),
+                openvino_npu_max_prompt_len: Some(512),
+                openvino_npu_min_response_len: Some(1024),
                 selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(
@@ -3325,8 +3325,8 @@ mod tests {
                 gpu_device_id: Some(0),
                 npu_adapter_identity: Some("openvino:npu:intel_npu".to_string()),
                 npu_driver_version: Some("32.0.100.3104".to_string()),
-                openvino_npu_max_prompt_len: Some(256),
-                openvino_npu_min_response_len: Some(8),
+                openvino_npu_max_prompt_len: Some(512),
+                openvino_npu_min_response_len: Some(1024),
                 selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(
@@ -3364,8 +3364,8 @@ mod tests {
                 gpu_device_id: Some(0),
                 npu_adapter_identity: Some("openvino:npu:intel_npu".to_string()),
                 npu_driver_version: Some("32.0.100.3104".to_string()),
-                openvino_npu_max_prompt_len: Some(256),
-                openvino_npu_min_response_len: Some(8),
+                openvino_npu_max_prompt_len: Some(512),
+                openvino_npu_min_response_len: Some(1024),
                 selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(

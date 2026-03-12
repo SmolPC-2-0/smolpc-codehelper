@@ -217,6 +217,12 @@ fn c_string_to_string(value: *const c_char) -> String {
         .to_string()
 }
 
+fn c_string_to_string_verbatim(value: *const c_char) -> String {
+    unsafe { CStr::from_ptr(value) }
+        .to_string_lossy()
+        .into_owned()
+}
+
 struct OvOwned<T> {
     api: Arc<OpenVinoGenAiApi>,
     ptr: *mut T,
@@ -247,6 +253,7 @@ impl<T> Drop for OvOwned<T> {
 struct OpenVinoGenAiInner {
     api: Arc<OpenVinoGenAiApi>,
     pipeline: *mut OvGenAiLlmPipeline,
+    min_response_len: usize,
 }
 
 unsafe impl Send for OpenVinoGenAiInner {}
@@ -331,6 +338,7 @@ impl OpenVinoGenAiGenerator {
             inner: Arc::new(Mutex::new(OpenVinoGenAiInner {
                 api: Arc::clone(&api),
                 pipeline: pipeline_ptr,
+                min_response_len: config.min_response_len,
             })),
         })
     }
@@ -397,6 +405,18 @@ fn generate_stream_blocking(
     let guard = inner
         .lock()
         .map_err(|_| "OpenVINO GenAI state mutex poisoned".to_string())?;
+    let clamped_max = gen_config.max_length.min(guard.min_response_len);
+    if clamped_max < gen_config.max_length {
+        log::info!(
+            "Clamping max_new_tokens from {} to {} (NPU MIN_RESPONSE_LEN budget)",
+            gen_config.max_length,
+            clamped_max
+        );
+    }
+    let gen_config = GenerationConfig {
+        max_length: clamped_max,
+        ..gen_config
+    };
     let config = create_generation_config(&guard.api, gen_config)?;
     let start = Instant::now();
     let mut callback_state = StreamCallbackState {
@@ -642,7 +662,7 @@ unsafe extern "C" fn stream_callback(
     }
 
     if !text.is_null() {
-        let piece = c_string_to_string(text);
+        let piece = c_string_to_string_verbatim(text);
         if !piece.is_empty() && state.sender.send(piece).is_err() {
             return OvGenAiStreamingStatus::Stop;
         }

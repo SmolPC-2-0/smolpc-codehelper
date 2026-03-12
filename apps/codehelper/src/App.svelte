@@ -88,7 +88,8 @@ Quality rules:
 
 Teaching rules:
 - Treat the user as a capable learner.
-- Explain difficult parts clearly, without oversimplifying.`;
+- Explain difficult parts clearly, without oversimplifying.
+/no_think`;
 
 	// Build ChatML-formatted prompt for Qwen chat-template style models.
 	function buildChatMLPrompt(userMessage: string, historyMessages: Message[]): string {
@@ -170,10 +171,42 @@ Teaching rules:
 				repetition_penalty_last_n: 128
 			};
 
+			let thinkBuffer = '';
+			let insideThink = false;
+			let thinkChecked = false;
+
 			await inferenceStore.generateStream(
 				prompt,
 				(token: string) => {
 					if (cancelRequested) return;
+
+					// Strip <think>...</think> blocks from Qwen3 responses
+					if (!thinkChecked) {
+						thinkBuffer += token;
+						if (thinkBuffer.includes('<think>')) {
+							insideThink = true;
+						}
+						if (insideThink) {
+							const endIdx = thinkBuffer.indexOf('</think>');
+							if (endIdx !== -1) {
+								thinkChecked = true;
+								insideThink = false;
+								const after = thinkBuffer.slice(endIdx + '</think>'.length).trimStart();
+								if (!after) return;
+								token = after;
+							} else {
+								return; // Still buffering think content
+							}
+						} else if (thinkBuffer.length > 10) {
+							// No <think> tag found in first tokens — flush buffer
+							thinkChecked = true;
+							token = thinkBuffer;
+						} else {
+							return; // Still checking
+						}
+					} else if (insideThink) {
+						return;
+					}
 
 					const streamingChat = chatsStore.chats.find((chat) => chat.id === chatId);
 					if (!streamingChat) return;

@@ -7,8 +7,8 @@ use std::path::{Component, Path, PathBuf};
 const OPENVINO_NPU_DRIVER_RECOMMENDED_FLOOR: &str = "32.0.100.3104";
 const OPENVINO_NPU_MAX_PROMPT_LEN_ENV: &str = "SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN";
 const OPENVINO_NPU_MIN_RESPONSE_LEN_ENV: &str = "SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN";
-const DEFAULT_OPENVINO_NPU_MAX_PROMPT_LEN: usize = 256;
-const DEFAULT_OPENVINO_NPU_MIN_RESPONSE_LEN: usize = 8;
+const DEFAULT_OPENVINO_NPU_MAX_PROMPT_LEN: usize = 512;
+const DEFAULT_OPENVINO_NPU_MIN_RESPONSE_LEN: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenVinoNpuTuning {
@@ -608,8 +608,8 @@ mod tests {
         std::env::remove_var("SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN");
 
         let tuning = resolve_openvino_npu_tuning().expect("default tuning");
-        assert_eq!(tuning.max_prompt_len, 256);
-        assert_eq!(tuning.min_response_len, 8);
+        assert_eq!(tuning.max_prompt_len, 512);
+        assert_eq!(tuning.min_response_len, 1024);
     }
 
     #[test]
