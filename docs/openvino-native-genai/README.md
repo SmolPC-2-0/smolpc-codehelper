@@ -19,11 +19,14 @@ As of 2026-03-12, this branch has completed the first native runtime-activation 
 - successful OpenVINO preflight now activates `runtime_engine=ov_genai_npu`
 - automatic selection now prefers `openvino_npu -> directml -> cpu` when the OpenVINO lane is viable
 - the selection fingerprint now uses the `openvino_native_v1` profile so stale pre-activation records do not block rollout
+- `npm run runtime:setup:openvino` now stages the app-local OpenVINO runtime bundle under `apps/codehelper/src-tauri/libs/openvino`
+- `npm run model:setup:qwen3:openvino` now stages the official `OpenVINO/Qwen3-4B-int4-ov` artifact into `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-int4-ov/openvino_npu`
 
 Still pending for the remaining Phase 1 / Phase 1b work:
 
-- lane-specific manifest rollout and default catalog migration away from `qwen3-4b-instruct-2507`
-- app-local/runtime-bundle population for real Windows validation and packaging
+- exact-parity OpenVINO export for `qwen3-4b-instruct-2507` if benchmark parity across lanes is still required
+- default catalog migration away from `qwen3-4b-instruct-2507`
+- final Intel NPU validation and installer-time bundle population
 - workload tuning, cache policy, and prompt-default calibration
 
 ## Final Decision
@@ -65,9 +68,9 @@ This pack is intentionally structured for short-lived, focused implementation-pl
 Recommended planning boundaries:
 
 1. lane-specific manifests, artifact layout, and default catalog migration
-2. app-local runtime-bundle staging and Intel NPU validation
-3. workload tuning, cache policy, and prompt-default calibration
-4. benchmark refresh so users can compare inference/runtime choices on their own machine
+2. exact-parity OpenVINO export and benchmark refresh
+3. Intel NPU validation and packaging hardening
+4. workload tuning, cache policy, and prompt-default calibration
 
 Each future Codex session should take one workstream or one subsection of a phase, produce an implementation plan for that slice only, and stop before broad execution planning.
 

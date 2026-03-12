@@ -1,6 +1,6 @@
 # Official Docs Index
 
-Checked on: 2026-03-09
+Checked on: 2026-03-12
 Principle: primary sources only.
 
 ## OpenVINO-native sources
@@ -32,6 +32,7 @@ Principle: primary sources only.
 |---|---|
 | https://huggingface.co/OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov | primary native OpenVINO bring-up model |
 | https://huggingface.co/OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int4-ov | coding-oriented native OpenVINO backup |
+| https://huggingface.co/OpenVINO/Qwen3-4B-int4-ov | current official Qwen3 OpenVINO smoke-test artifact |
 | https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct | upstream base model reference |
 
 ## Repo-local references
