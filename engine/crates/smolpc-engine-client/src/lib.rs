@@ -224,8 +224,11 @@ pub struct EngineStatus {
     pub effective_mode: Option<String>,
     #[serde(default)]
     pub effective_startup_policy: Option<StartupPolicy>,
+    #[serde(default)]
     pub current_model: Option<String>,
+    #[serde(default)]
     pub generating: bool,
+    #[serde(default)]
     pub backend_status: BackendStatus,
 }
 
@@ -365,11 +368,20 @@ impl EngineClient {
         let parsed_payload = serde_json::from_str::<EngineStatus>(&body).ok();
 
         if status.is_success() {
-            return parsed_payload.ok_or_else(|| {
-                EngineClientError::Message(
-                    "/engine/ensure-started returned success but payload was invalid".to_string(),
-                )
-            });
+            if let Some(payload) = parsed_payload {
+                return Ok(payload);
+            }
+
+            // Compatibility fallback: some older host builds return a minimal
+            // success payload for /engine/ensure-started. Probe /engine/status
+            // instead of failing startup immediately.
+            if let Ok(payload) = self.status().await {
+                return Ok(payload);
+            }
+
+            return Err(EngineClientError::Message(
+                "/engine/ensure-started returned success but payload was invalid".to_string(),
+            ));
         }
 
         if let Some(payload) = parsed_payload {
@@ -1547,10 +1559,7 @@ mod tests {
     #[test]
     fn engine_status_keeps_legacy_payload_compatible() {
         let payload = serde_json::json!({
-            "ok": true,
-            "current_model": null,
-            "generating": false,
-            "backend_status": {}
+            "ok": true
         });
         let status: EngineStatus =
             serde_json::from_value(payload).expect("legacy payload should deserialize");
@@ -1558,6 +1567,8 @@ mod tests {
         assert_eq!(status.attempt_id, "unknown");
         assert_eq!(status.engine_api_version, ENGINE_API_VERSION);
         assert!(status.state.is_none());
+        assert!(!status.generating);
+        assert_eq!(status.backend_status, BackendStatus::default());
     }
 
     #[test]

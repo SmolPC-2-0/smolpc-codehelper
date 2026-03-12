@@ -7,8 +7,9 @@ use commands::launcher::{
     launcher_register_manual_path,
 };
 use launcher::orchestrator::{
-    any_app_running, any_app_running_cached, shutdown_engine, LauncherState,
+    any_app_running, any_app_running_cached, resolve_engine_client, shutdown_engine, LauncherState,
 };
+use smolpc_engine_client::{StartupMode, StartupPolicy};
 use std::path::PathBuf;
 use tauri::Manager;
 
@@ -87,6 +88,25 @@ pub fn run() {
 
             configure_runtime_dlls(app);
 
+            // Eager engine start — non-blocking, UI loads immediately.
+            // Restored so launcher boot still warms the engine even if frontend only polls status.
+            let eager_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = eager_handle.state::<LauncherState>();
+                match resolve_engine_client(&eager_handle, state.inner()).await {
+                    Ok(client) => {
+                        log::info!("Eager engine start: connected");
+                        if let Err(e) = client
+                            .ensure_started(StartupMode::Auto, StartupPolicy::default())
+                            .await
+                        {
+                            log::warn!("Eager engine start: ensure_started failed: {e}");
+                        }
+                    }
+                    Err(e) => log::warn!("Eager engine start: connect_or_spawn failed: {e}"),
+                }
+            });
+
             // Background monitor — shuts down engine when launcher is
             // hidden/closed AND all helper apps are closed.
             let monitor_handle = app.handle().clone();
@@ -142,11 +162,22 @@ pub fn run() {
             ..
         } = &event
         {
-            if label == "main" && any_app_running(app_handle) {
+            if label == "main" {
                 api.prevent_close();
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    let _ = window.hide();
+
+                if any_app_running(app_handle) {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.hide();
+                    }
+                    return;
                 }
+
+                let app_handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_handle.state::<LauncherState>();
+                    let _ = shutdown_engine(state.inner()).await;
+                    app_handle.exit(0);
+                });
             }
         }
     });

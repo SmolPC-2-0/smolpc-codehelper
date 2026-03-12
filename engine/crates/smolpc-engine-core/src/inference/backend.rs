@@ -78,6 +78,7 @@ pub struct BackendDecisionKey {
     #[serde(default)]
     pub model_artifact_fingerprint: Option<String>,
     pub app_version: String,
+    #[serde(default)]
     pub selector_engine_id: String,
     #[serde(default)]
     pub ort_runtime_version: Option<String>,
@@ -476,6 +477,19 @@ mod tests {
             npu_driver_version: Some("32.0.100.3104".to_string()),
             selection_profile: Some("default".to_string()),
         }
+    }
+
+    #[test]
+    fn backend_decision_key_keeps_legacy_payload_compatible() {
+        let payload = serde_json::json!({
+            "model_id": "qwen3-4b-instruct-2507",
+            "app_version": "1.0.0"
+        });
+
+        let key: BackendDecisionKey =
+            serde_json::from_value(payload).expect("legacy decision key should deserialize");
+        assert_eq!(key.selector_engine_id, "");
+        assert_eq!(key.model_id, "qwen3-4b-instruct-2507");
     }
 
     #[test]
