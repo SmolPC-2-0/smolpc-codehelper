@@ -27,10 +27,16 @@ Phase 1 shared-engine baseline is implemented in this app:
    - `create_integration_issue_report`
    - `run_runtime_verification_checklist`
    - `export_phase1_evidence_bundle`
-5. Phase 2 MCP bridge baseline now wired:
-   - Python MCP assets imported under `src-tauri/resources/mcp_server`
-   - Rust MCP commands (`start/check/stop/list/call`) registered
-   - MCP diagnostics/tool-call panel added to `src/App.svelte`
+5. Phase 2 MCP bridge implemented and verified on Windows (2026-03-12):
+    - Python MCP assets imported under `src-tauri/resources/mcp_server`
+    - Rust MCP commands (`start/check/stop/list/call`) registered
+    - MCP diagnostics/tool-call panel added to `src/App.svelte`
+    - verified runtime: `running: true`, `tools_loaded: 27`
+    - verified read-only tool call from UI (`list_documents`)
+
+Current implementation focus:
+
+1. Phase 3 chat/tool workflow port.
 
 ## Source migration baseline
 

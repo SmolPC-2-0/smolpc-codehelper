@@ -108,11 +108,17 @@ Progress update (2026-03-12):
    - `npm run check:libreoffice`
    - `npm run build:libreoffice`
 
-Remaining Phase 2 acceptance work:
+Phase 2 acceptance status: complete (Windows lane, 2026-03-12).
 
-1. Run app in `tauri dev` and verify real MCP startup against local Python/LibreOffice environment.
-2. Execute one read-only MCP tool call end-to-end from UI and capture result evidence.
-3. Follow Windows runbook:
+Completion evidence:
+
+1. `start_mcp_server` verified in-app with `running: true`.
+2. `list_mcp_tools` verified in-app with `tools_loaded: 27`.
+3. Read-only MCP tool call verified end-to-end from UI:
+   - Tool: `list_documents`
+   - Args: `{"directory":"C:\\Users\\<YOUR_USER>\\Documents"}`
+   - Result: successful JSON content listing `test.docx` and `test.odt`.
+4. Verification followed:
    - `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md`
 
 ### Phase 3: Chat/tool workflow port

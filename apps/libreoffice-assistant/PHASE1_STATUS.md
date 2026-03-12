@@ -84,3 +84,14 @@ Tracked in:
    - `cargo test -p smolpc-libreoffice-assistant --lib`
    - `npm run check:libreoffice`
    - `npm run build:libreoffice`
+
+## Phase 2 Windows verification completion (2026-03-12)
+
+1. MCP server startup verified in app UI (`running: true`).
+2. MCP tool discovery verified in app UI (`tools_loaded: 27`).
+3. Read-only MCP tool invocation verified from app UI:
+   - tool: `list_documents`
+   - directory: `C:\\Users\\<YOUR_USER>\\Documents`
+   - result included `test.docx` and `test.odt`.
+4. Windows runbook used:
+   - `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md`

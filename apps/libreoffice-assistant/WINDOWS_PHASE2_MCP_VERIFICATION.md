@@ -71,8 +71,18 @@ Recommended first read-only call:
 2. JSON output of one successful read-only MCP tool call.
 3. If any failure occurs:
    - MCP status error text
-   - issue report JSON from `Integration Issue Report` section
-   - evidence bundle path/file from `Export Evidence Bundle`
+    - issue report JSON from `Integration Issue Report` section
+    - evidence bundle path/file from `Export Evidence Bundle`
+
+## Latest validation snapshot (2026-03-12)
+
+Recorded on branch `codex/libreoffice-port-track-a`:
+
+1. MCP status: `running: true`, `tools_loaded: 27`, `error: none`.
+2. Successful read-only tool call from UI:
+   - Tool: `list_documents`
+   - Args: `{"directory":"C:\\Users\\<YOUR_USER>\\Documents"}`
+   - Output contained `test.docx` and `test.odt`.
 
 ## Troubleshooting
 
