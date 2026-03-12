@@ -54,7 +54,6 @@ pub struct BenchmarkMetrics {
     // Note: Multiple CPU measurements enable accurate comparison when migrating from
     // Ollama (HTTP-based) to llama.cpp (in-process). The HTTP architecture splits
     // CPU usage across processes, so measuring only Ollama undercounts total cost.
-
     /// Average CPU utilization of the Ollama/inference process during inference (%)
     /// This measures only the inference engine's CPU usage.
     pub cpu_ollama_percent: f64,
@@ -161,16 +160,48 @@ pub fn calculate_summary(metrics: &[BenchmarkMetrics]) -> Vec<BenchmarkSummary> 
         }
 
         let count = category_metrics.len();
-        let avg_first_token = category_metrics.iter().map(|m| m.first_token_latency_ms).sum::<f64>() / count as f64;
-        let avg_tokens_per_sec = category_metrics.iter().map(|m| m.tokens_per_second).sum::<f64>() / count as f64;
-        let avg_total_time = category_metrics.iter().map(|m| m.total_response_time_ms).sum::<f64>() / count as f64;
-        let avg_memory = category_metrics.iter().map(|m| m.peak_memory_mb).sum::<f64>() / count as f64;
+        let avg_first_token = category_metrics
+            .iter()
+            .map(|m| m.first_token_latency_ms)
+            .sum::<f64>()
+            / count as f64;
+        let avg_tokens_per_sec = category_metrics
+            .iter()
+            .map(|m| m.tokens_per_second)
+            .sum::<f64>()
+            / count as f64;
+        let avg_total_time = category_metrics
+            .iter()
+            .map(|m| m.total_response_time_ms)
+            .sum::<f64>()
+            / count as f64;
+        let avg_memory = category_metrics
+            .iter()
+            .map(|m| m.peak_memory_mb)
+            .sum::<f64>()
+            / count as f64;
 
         // Calculate all CPU metrics
-        let avg_cpu_ollama = category_metrics.iter().map(|m| m.cpu_ollama_percent).sum::<f64>() / count as f64;
-        let avg_cpu_tauri = category_metrics.iter().map(|m| m.cpu_tauri_percent).sum::<f64>() / count as f64;
-        let avg_cpu_system = category_metrics.iter().map(|m| m.cpu_system_percent).sum::<f64>() / count as f64;
-        let avg_cpu_total = category_metrics.iter().map(|m| m.cpu_total_percent).sum::<f64>() / count as f64;
+        let avg_cpu_ollama = category_metrics
+            .iter()
+            .map(|m| m.cpu_ollama_percent)
+            .sum::<f64>()
+            / count as f64;
+        let avg_cpu_tauri = category_metrics
+            .iter()
+            .map(|m| m.cpu_tauri_percent)
+            .sum::<f64>()
+            / count as f64;
+        let avg_cpu_system = category_metrics
+            .iter()
+            .map(|m| m.cpu_system_percent)
+            .sum::<f64>()
+            / count as f64;
+        let avg_cpu_total = category_metrics
+            .iter()
+            .map(|m| m.cpu_total_percent)
+            .sum::<f64>()
+            / count as f64;
 
         summaries.push(BenchmarkSummary {
             category: category.to_string(),
@@ -181,7 +212,7 @@ pub fn calculate_summary(metrics: &[BenchmarkMetrics]) -> Vec<BenchmarkSummary> 
             avg_cpu_ollama_percent: avg_cpu_ollama,
             avg_cpu_tauri_percent: avg_cpu_tauri,
             avg_cpu_system_percent: avg_cpu_system,
-            avg_cpu_total_percent: avg_cpu_total, 
+            avg_cpu_total_percent: avg_cpu_total,
             test_count: count,
         });
     }
@@ -320,8 +351,14 @@ mod tests {
         let timestamp = get_timestamp();
 
         // Should be a valid RFC3339 timestamp
-        assert!(timestamp.contains('T'), "Timestamp should contain 'T' separator");
-        assert!(timestamp.len() > 20, "Timestamp should be a reasonable length");
+        assert!(
+            timestamp.contains('T'),
+            "Timestamp should contain 'T' separator"
+        );
+        assert!(
+            timestamp.len() > 20,
+            "Timestamp should be a reasonable length"
+        );
 
         // Should parse as chrono DateTime
         let parsed = chrono::DateTime::parse_from_rfc3339(&timestamp);
@@ -343,6 +380,9 @@ mod tests {
 
         let metric2 = deserialized.unwrap();
         assert_eq!(metric.prompt_type, metric2.prompt_type);
-        assert_eq!(metric.first_token_latency_ms, metric2.first_token_latency_ms);
+        assert_eq!(
+            metric.first_token_latency_ms,
+            metric2.first_token_latency_ms
+        );
     }
 }

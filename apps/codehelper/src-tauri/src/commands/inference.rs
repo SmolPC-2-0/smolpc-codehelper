@@ -501,11 +501,9 @@ pub async fn check_model_exists(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<bool, String> {
-    Ok(
-        check_model_readiness(model_id, app_handle, state)
-            .await?
-            .any_ready(),
-    )
+    Ok(check_model_readiness(model_id, app_handle, state)
+        .await?
+        .any_ready())
 }
 
 #[tauri::command]

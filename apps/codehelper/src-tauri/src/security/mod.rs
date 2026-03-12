@@ -36,7 +36,11 @@ pub fn validate_path<P: AsRef<Path>>(path: P, app: &AppHandle) -> Result<PathBuf
 
     // Canonicalize path - resolves symlinks and normalizes .. components
     let canonical = std::fs::canonicalize(path).map_err(|e| {
-        log::warn!("Path canonicalization failed for '{}': {}", path.display(), e);
+        log::warn!(
+            "Path canonicalization failed for '{}': {}",
+            path.display(),
+            e
+        );
         format!("File not found or inaccessible: {e}")
     })?;
 
