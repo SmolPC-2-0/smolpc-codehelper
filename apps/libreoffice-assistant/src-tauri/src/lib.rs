@@ -113,6 +113,13 @@ struct RuntimeVerificationReport {
     all_passed: bool,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct EvidenceExportResult {
+    path: String,
+    runtime_verification: RuntimeVerificationReport,
+    integration_issue_report: IntegrationIssueReport,
+}
+
 pub struct EngineBridgeState {
     client: Arc<Mutex<Option<EngineClient>>>,
     connect_lock: Arc<Mutex<()>>,
@@ -472,6 +479,108 @@ fn build_runtime_verification_checks(
     ]
 }
 
+fn sanitize_filename_fragment(value: &str) -> String {
+    let mut sanitized = String::new();
+    let mut previous_dash = false;
+
+    for character in value.chars() {
+        let mapped = if character.is_ascii_alphanumeric() {
+            character.to_ascii_lowercase()
+        } else {
+            '-'
+        };
+
+        if mapped == '-' {
+            if previous_dash {
+                continue;
+            }
+            previous_dash = true;
+        } else {
+            previous_dash = false;
+        }
+
+        sanitized.push(mapped);
+    }
+
+    let trimmed = sanitized.trim_matches('-');
+    if trimmed.is_empty() {
+        "model".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn phase1_evidence_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|error| {
+        format!("Failed to resolve app data directory for evidence export: {error}")
+    })?;
+    Ok(app_data_dir.join("phase1-evidence"))
+}
+
+async fn build_integration_issue_report(
+    client: &EngineClient,
+    app_handle: &tauri::AppHandle,
+    request_payload: Option<serde_json::Value>,
+    http_status: Option<u16>,
+    response_body: Option<String>,
+) -> Result<IntegrationIssueReport, String> {
+    let meta = client
+        .meta()
+        .await
+        .map_err(|error| format!("Failed to query engine meta for issue report: {error}"))?;
+    let status = client
+        .status()
+        .await
+        .map_err(|error| format!("Failed to query engine status for issue report: {error}"))?;
+
+    Ok(IntegrationIssueReport {
+        app_name: "SmolPC LibreOffice Assistant".to_string(),
+        app_version: app_handle.package_info().version.to_string(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        hardware_summary: hardware_summary(&status),
+        request_payload,
+        http_status,
+        response_body,
+        engine_status: map_engine_status_snapshot(&status),
+        engine_meta: map_engine_meta_snapshot(&meta),
+        runtime_overrides: runtime_override_snapshot(),
+    })
+}
+
+async fn build_runtime_verification_report(
+    client: &EngineClient,
+    model_id: String,
+) -> Result<RuntimeVerificationReport, String> {
+    let health_ok = client
+        .health()
+        .await
+        .map_err(|error| format!("Health check failed during runtime verification: {error}"))?;
+    let meta = client
+        .meta()
+        .await
+        .map_err(|error| format!("Meta query failed during runtime verification: {error}"))?;
+    let status = client
+        .status()
+        .await
+        .map_err(|error| format!("Status query failed during runtime verification: {error}"))?;
+    let readiness = client
+        .check_model_readiness(&model_id)
+        .await
+        .map_err(|error| format!("Readiness query failed during runtime verification: {error}"))?;
+
+    let checks =
+        build_runtime_verification_checks(&model_id, health_ok, &meta, &status, &readiness);
+    let all_passed = checks.iter().all(|check| check.ok);
+
+    Ok(RuntimeVerificationReport {
+        generated_at_unix: now_unix_seconds(),
+        model_id,
+        checks,
+        all_passed,
+    })
+}
+
 async fn collect_bootstrap_status(
     app_handle: &tauri::AppHandle,
     state: &EngineBridgeState,
@@ -736,28 +845,14 @@ async fn create_integration_issue_report(
     state: tauri::State<'_, EngineBridgeState>,
 ) -> Result<IntegrationIssueReport, String> {
     let client = resolve_client(&app_handle, &state).await?;
-    let meta = client
-        .meta()
-        .await
-        .map_err(|error| format!("Failed to query engine meta for issue report: {error}"))?;
-    let status = client
-        .status()
-        .await
-        .map_err(|error| format!("Failed to query engine status for issue report: {error}"))?;
-
-    Ok(IntegrationIssueReport {
-        app_name: "SmolPC LibreOffice Assistant".to_string(),
-        app_version: app_handle.package_info().version.to_string(),
-        os: std::env::consts::OS.to_string(),
-        arch: std::env::consts::ARCH.to_string(),
-        hardware_summary: hardware_summary(&status),
+    build_integration_issue_report(
+        &client,
+        &app_handle,
         request_payload,
         http_status,
         response_body,
-        engine_status: map_engine_status_snapshot(&status),
-        engine_meta: map_engine_meta_snapshot(&meta),
-        runtime_overrides: runtime_override_snapshot(),
-    })
+    )
+    .await
 }
 
 #[tauri::command]
@@ -767,32 +862,63 @@ async fn run_runtime_verification_checklist(
     state: tauri::State<'_, EngineBridgeState>,
 ) -> Result<RuntimeVerificationReport, String> {
     let client = resolve_client(&app_handle, &state).await?;
-    let health_ok = client
-        .health()
-        .await
-        .map_err(|error| format!("Health check failed during runtime verification: {error}"))?;
-    let meta = client
-        .meta()
-        .await
-        .map_err(|error| format!("Meta query failed during runtime verification: {error}"))?;
-    let status = client
-        .status()
-        .await
-        .map_err(|error| format!("Status query failed during runtime verification: {error}"))?;
-    let readiness = client
-        .check_model_readiness(&model_id)
-        .await
-        .map_err(|error| format!("Readiness query failed during runtime verification: {error}"))?;
+    build_runtime_verification_report(&client, model_id).await
+}
 
-    let checks =
-        build_runtime_verification_checks(&model_id, health_ok, &meta, &status, &readiness);
-    let all_passed = checks.iter().all(|check| check.ok);
+#[tauri::command]
+async fn export_phase1_evidence_bundle(
+    model_id: String,
+    request_payload: Option<serde_json::Value>,
+    http_status: Option<u16>,
+    response_body: Option<String>,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, EngineBridgeState>,
+) -> Result<EvidenceExportResult, String> {
+    let client = resolve_client(&app_handle, &state).await?;
+    let runtime_verification = build_runtime_verification_report(&client, model_id.clone()).await?;
+    let integration_issue_report = build_integration_issue_report(
+        &client,
+        &app_handle,
+        request_payload,
+        http_status,
+        response_body,
+    )
+    .await?;
 
-    Ok(RuntimeVerificationReport {
-        generated_at_unix: now_unix_seconds(),
-        model_id,
-        checks,
-        all_passed,
+    let evidence_dir = phase1_evidence_dir(&app_handle)?;
+    std::fs::create_dir_all(&evidence_dir).map_err(|error| {
+        format!(
+            "Failed to create evidence directory '{}': {error}",
+            evidence_dir.display()
+        )
+    })?;
+
+    let generated_at = now_unix_seconds();
+    let filename = format!(
+        "libreoffice-phase1-evidence-{}-{}.json",
+        sanitize_filename_fragment(&model_id),
+        generated_at
+    );
+    let path = evidence_dir.join(filename);
+    let bundle = serde_json::json!({
+        "generated_at_unix": generated_at,
+        "model_id": model_id,
+        "runtime_verification": &runtime_verification,
+        "integration_issue_report": &integration_issue_report
+    });
+    let serialized = serde_json::to_string_pretty(&bundle)
+        .map_err(|error| format!("Failed to serialize evidence bundle JSON: {error}"))?;
+    std::fs::write(&path, serialized).map_err(|error| {
+        format!(
+            "Failed to write evidence bundle to '{}': {error}",
+            path.display()
+        )
+    })?;
+
+    Ok(EvidenceExportResult {
+        path: path.display().to_string(),
+        runtime_verification,
+        integration_issue_report,
     })
 }
 
@@ -827,7 +953,8 @@ pub fn run() {
             check_model_readiness,
             check_model_exists,
             create_integration_issue_report,
-            run_runtime_verification_checklist
+            run_runtime_verification_checklist,
+            export_phase1_evidence_bundle
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -835,7 +962,9 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_runtime_verification_checks, desired_model_to_restore};
+    use super::{
+        build_runtime_verification_checks, desired_model_to_restore, sanitize_filename_fragment,
+    };
     use smolpc_engine_client::{EngineMeta, EngineStatus};
     use smolpc_engine_core::inference::backend::{
         BackendSelectionState, CheckModelResponse, ModelLaneReadiness, ModelLaneReadinessByBackend,
@@ -955,5 +1084,17 @@ mod tests {
             .find(|check| check.id == "protocol_major_v1")
             .expect("protocol check should exist");
         assert!(!protocol_check.ok);
+    }
+
+    #[test]
+    fn sanitize_filename_fragment_normalizes_non_alphanumeric_characters() {
+        let sanitized = sanitize_filename_fragment("Qwen3 4B/Instruct (2507)");
+        assert_eq!(sanitized, "qwen3-4b-instruct-2507");
+    }
+
+    #[test]
+    fn sanitize_filename_fragment_falls_back_for_empty_result() {
+        let sanitized = sanitize_filename_fragment("$$$");
+        assert_eq!(sanitized, "model");
     }
 }

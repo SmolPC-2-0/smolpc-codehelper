@@ -93,6 +93,12 @@
     all_passed: boolean;
   };
 
+  type EvidenceExportResult = {
+    path: string;
+    runtime_verification: RuntimeVerificationReport;
+    integration_issue_report: IntegrationIssueReport;
+  };
+
   let loadingBootstrap = $state(true);
   let actionBusy = $state(false);
   let commandError = $state<string | null>(null);
@@ -113,6 +119,7 @@
   let issueResponseBody = $state('');
   let integrationIssueReport = $state<IntegrationIssueReport | null>(null);
   let runtimeVerification = $state<RuntimeVerificationReport | null>(null);
+  let evidenceExportPath = $state<string | null>(null);
 
   function formatError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -323,25 +330,41 @@
     }
   }
 
+  function parseIssueContext():
+    | { requestPayload: unknown; httpStatus: number | null; responseBody: string | null }
+    | null {
+    const requestPayload = issueRequestPayload.trim()
+      ? (JSON.parse(issueRequestPayload) as unknown)
+      : null;
+    const parsedStatus =
+      issueHttpStatus.trim() === '' ? null : Number.parseInt(issueHttpStatus, 10);
+    if (parsedStatus !== null && Number.isNaN(parsedStatus)) {
+      commandError = 'HTTP status must be an integer.';
+      return null;
+    }
+
+    return {
+      requestPayload,
+      httpStatus: parsedStatus,
+      responseBody: issueResponseBody.trim() || null
+    };
+  }
+
   async function createIssueReport(): Promise<void> {
     actionBusy = true;
     clearFeedback();
     try {
-      const requestPayload = issueRequestPayload.trim()
-        ? (JSON.parse(issueRequestPayload) as unknown)
-        : null;
-      const parsedStatus =
-        issueHttpStatus.trim() === '' ? null : Number.parseInt(issueHttpStatus, 10);
-      if (parsedStatus !== null && Number.isNaN(parsedStatus)) {
-        commandError = 'HTTP status must be an integer.';
+      const context = parseIssueContext();
+      if (!context) {
         return;
       }
 
       integrationIssueReport = await invoke<IntegrationIssueReport>('create_integration_issue_report', {
-        requestPayload,
-        httpStatus: parsedStatus,
-        responseBody: issueResponseBody.trim() || null
+        requestPayload: context.requestPayload,
+        httpStatus: context.httpStatus,
+        responseBody: context.responseBody
       });
+      evidenceExportPath = null;
       actionMessage = 'Integration issue report snapshot generated.';
     } catch (error) {
       commandError = normalizeEngineError(formatError(error));
@@ -362,6 +385,37 @@
       actionMessage = 'Issue report JSON copied to clipboard.';
     } catch (error) {
       commandError = `Clipboard copy failed: ${formatError(error)}`;
+    }
+  }
+
+  async function exportEvidenceBundle(): Promise<void> {
+    if (!selectedModelId.trim()) {
+      commandError = 'Select a model before exporting an evidence bundle.';
+      return;
+    }
+
+    actionBusy = true;
+    clearFeedback();
+    try {
+      const context = parseIssueContext();
+      if (!context) {
+        return;
+      }
+
+      const result = await invoke<EvidenceExportResult>('export_phase1_evidence_bundle', {
+        modelId: selectedModelId,
+        requestPayload: context.requestPayload,
+        httpStatus: context.httpStatus,
+        responseBody: context.responseBody
+      });
+      runtimeVerification = result.runtime_verification;
+      integrationIssueReport = result.integration_issue_report;
+      evidenceExportPath = result.path;
+      actionMessage = 'Phase 1 evidence bundle exported.';
+    } catch (error) {
+      commandError = normalizeEngineError(formatError(error));
+    } finally {
+      actionBusy = false;
     }
   }
 
@@ -620,10 +674,16 @@
       <button type="button" onclick={() => void createIssueReport()} disabled={actionBusy}>
         Generate Issue Report
       </button>
+      <button type="button" onclick={() => void exportEvidenceBundle()} disabled={actionBusy || !selectedModelId}>
+        Export Evidence Bundle
+      </button>
       <button type="button" onclick={() => void copyIssueReport()} disabled={actionBusy || !integrationIssueReport}>
         Copy JSON
       </button>
     </div>
+    {#if evidenceExportPath}
+      <p class="kv">Evidence file: <code>{evidenceExportPath}</code></p>
+    {/if}
     {#if integrationIssueReport}
       <pre>{JSON.stringify(integrationIssueReport, null, 2)}</pre>
     {:else}

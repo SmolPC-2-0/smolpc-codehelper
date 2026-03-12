@@ -21,6 +21,7 @@
 4. Diagnostics + verification command surface:
    - `create_integration_issue_report`
    - `run_runtime_verification_checklist`
+   - `export_phase1_evidence_bundle`
 5. Frontend Phase 1 control panel for:
    - bootstrap status
    - model load/unload
@@ -30,6 +31,8 @@
    - runtime verification execution
    - integration issue payload generation/copy
 6. Rust unit tests for desired-model restore + runtime checklist evaluation.
+7. Windows verification runbook:
+   - `apps/libreoffice-assistant/WINDOWS_PHASE1_VERIFICATION.md`
 
 ## Validation run (local)
 
@@ -46,3 +49,4 @@ All passed.
 2. Integrate real LibreOffice-side tool bridge (UNO/MCP process wiring) once repo/code is provided.
 3. End-to-end runtime verification on Windows target hardware (DML-first lane checks).
 4. Capture and attach first real issue-report payload generated from a failing run.
+5. Capture and attach first exported evidence-bundle JSON from a Windows run.

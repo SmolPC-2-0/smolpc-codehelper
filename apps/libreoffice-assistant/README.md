@@ -15,12 +15,14 @@ Current Phase 1 baseline in this app:
 5. Diagnostics helpers wired:
    - `create_integration_issue_report`
    - `run_runtime_verification_checklist`
+   - `export_phase1_evidence_bundle`
 
 Integration references:
 
 1. `docs/APP_ONBOARDING_PLAYBOOK.md`
 2. `docs/ENGINE_API.md`
 3. `docs/SMOLPC_SUITE_INTEGRATION.md`
+4. `apps/libreoffice-assistant/WINDOWS_PHASE1_VERIFICATION.md`
 
 Useful commands from repo root:
 
