@@ -108,6 +108,16 @@
     name: string;
     description: string;
     input_schema?: unknown;
+    output_schema?: unknown;
+  };
+
+  type JsonSchema = {
+    type?: string;
+    anyOf?: JsonSchema[];
+    default?: unknown;
+    properties?: Record<string, JsonSchema>;
+    required?: string[];
+    items?: JsonSchema;
   };
 
   type ToolContent = {
@@ -170,6 +180,61 @@
   function clearFeedback(): void {
     commandError = null;
     actionMessage = null;
+  }
+
+  function chooseNonNullSchema(schema: JsonSchema | undefined): JsonSchema | undefined {
+    if (!schema) {
+      return undefined;
+    }
+    if (schema.anyOf && schema.anyOf.length > 0) {
+      return schema.anyOf.find((candidate) => candidate.type !== 'null') ?? schema.anyOf[0];
+    }
+    return schema;
+  }
+
+  function schemaTemplateValue(schema: JsonSchema | undefined): unknown {
+    const resolved = chooseNonNullSchema(schema);
+    if (!resolved) {
+      return '';
+    }
+    if (resolved.default !== undefined) {
+      return resolved.default;
+    }
+    if (resolved.type === 'object') {
+      return {};
+    }
+    if (resolved.type === 'array') {
+      return [];
+    }
+    if (resolved.type === 'boolean') {
+      return false;
+    }
+    if (resolved.type === 'integer' || resolved.type === 'number') {
+      return 0;
+    }
+    return '';
+  }
+
+  function buildMcpArgsTemplate(tool: McpTool | undefined): Record<string, unknown> {
+    const schema = tool?.input_schema as JsonSchema | undefined;
+    const properties = schema?.properties;
+    if (!properties) {
+      return {};
+    }
+
+    const required = new Set(schema?.required ?? []);
+    const template: Record<string, unknown> = {};
+    for (const [key, propertySchema] of Object.entries(properties)) {
+      if (required.has(key) || propertySchema.default !== undefined) {
+        template[key] = schemaTemplateValue(propertySchema);
+      }
+    }
+    return template;
+  }
+
+  function setToolArgumentTemplate(toolName: string): void {
+    const tool = mcpTools.find((candidate) => candidate.name === toolName);
+    mcpArguments = JSON.stringify(buildMcpArgsTemplate(tool), null, 2);
   }
 
   async function refreshBootstrapStatus(): Promise<void> {
@@ -511,9 +576,16 @@
 
   async function loadMcpTools(): Promise<void> {
     try {
+      const previousSelected = selectedMcpTool;
       mcpTools = await invoke<McpTool[]>('list_mcp_tools');
       if (!mcpTools.some((tool) => tool.name === selectedMcpTool) && mcpTools.length > 0) {
         selectedMcpTool = mcpTools[0].name;
+      }
+      if (
+        selectedMcpTool &&
+        (selectedMcpTool !== previousSelected || !mcpArguments.trim() || mcpArguments.trim() === '{}')
+      ) {
+        setToolArgumentTemplate(selectedMcpTool);
       }
     } catch (error) {
       commandError = normalizeEngineError(formatError(error));
@@ -736,7 +808,12 @@
     <p class="kv">tools_loaded: <code>{mcpTools.length}</code></p>
     <div class="row">
       <label for="mcp-tool">Tool</label>
-      <select id="mcp-tool" bind:value={selectedMcpTool} disabled={actionBusy || mcpTools.length === 0}>
+      <select
+        id="mcp-tool"
+        bind:value={selectedMcpTool}
+        disabled={actionBusy || mcpTools.length === 0}
+        onchange={() => setToolArgumentTemplate(selectedMcpTool)}
+      >
         {#if mcpTools.length === 0}
           <option value="">(no tools loaded)</option>
         {:else}

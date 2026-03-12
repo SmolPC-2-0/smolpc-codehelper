@@ -115,7 +115,10 @@ def start_office(port=2002):
                 "--norestore",
                 "--nodefault",
                 "--nologo",
-            ]
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         time.sleep(3)  # Give it time to start
     else:
@@ -131,7 +134,12 @@ def start_helper():
         exe_dir = os.path.dirname(sys.argv[0])
         helper_script = os.path.join(exe_dir, "helper.py")
         python_path = get_python_path()
-        helper_process = subprocess.Popen([python_path, helper_script])
+        helper_process = subprocess.Popen(
+            [python_path, helper_script],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         time.sleep(3)
     else:
         print("Helper script already running on port 8765", file=sys.stderr)

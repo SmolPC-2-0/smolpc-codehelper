@@ -6,6 +6,7 @@ use reqwest::Client;
 use smolpc_engine_core::inference::backend::{BackendStatus, CheckModelResponse};
 use smolpc_engine_core::models::registry::ModelDefinition;
 use smolpc_engine_core::{GenerationConfig, GenerationMetrics, GenerationResult};
+use std::ffi::OsString;
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -23,6 +24,9 @@ const SPAWN_LOCK_WAIT: Duration = Duration::from_secs(10);
 const SPAWN_LOCK_STALE_AGE: Duration = Duration::from_secs(30);
 pub(crate) const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
 pub(crate) const DML_DEVICE_ENV: &str = "SMOLPC_DML_DEVICE_ID";
+const ORT_BUNDLE_ROOT_ENV: &str = "SMOLPC_ORT_BUNDLE_ROOT";
+const OPENVINO_BUNDLE_ROOT_ENV: &str = "SMOLPC_OPENVINO_BUNDLE_ROOT";
+const ORT_DYLIB_PATH_ENV: &str = "ORT_DYLIB_PATH";
 const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
 const SHARED_MODELS_DIR: &str = "models";
 const DEFAULT_WAIT_READY_TIMEOUT: Duration = Duration::from_secs(60);
@@ -1064,6 +1068,96 @@ fn create_new_token_file(path: &Path, token: &str) -> Result<(), std::io::Error>
     }
 }
 
+fn absolute_existing_path_from_env(key: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(std::env::var_os(key)?);
+    if path.is_absolute() && path.exists() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+fn discover_ort_bundle_root(options: &EngineConnectOptions) -> Option<PathBuf> {
+    if let Some(path) = absolute_existing_path_from_env(ORT_BUNDLE_ROOT_ENV) {
+        return Some(path);
+    }
+
+    if let Some(resource_dir) = &options.resource_dir {
+        let libs = resource_dir.join("libs");
+        if libs.join("onnxruntime.dll").exists() {
+            return Some(libs);
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        if let Some(repo_root) = manifest_dir
+            .parent()
+            .and_then(|value| value.parent())
+            .and_then(|value| value.parent())
+        {
+            for libs in [
+                repo_root.join("src-tauri").join("libs"),
+                repo_root
+                    .join("apps")
+                    .join("codehelper")
+                    .join("src-tauri")
+                    .join("libs"),
+                repo_root
+                    .join("apps")
+                    .join("libreoffice-assistant")
+                    .join("src-tauri")
+                    .join("libs"),
+            ] {
+                if libs.join("onnxruntime.dll").exists() {
+                    return Some(libs);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn discover_openvino_bundle_root(ort_bundle_root: &Path) -> Option<PathBuf> {
+    if let Some(path) = absolute_existing_path_from_env(OPENVINO_BUNDLE_ROOT_ENV) {
+        return Some(path);
+    }
+
+    let candidate = ort_bundle_root.join("openvino");
+    candidate.exists().then_some(candidate)
+}
+
+#[cfg(target_os = "windows")]
+fn prepend_windows_path(cmd: &mut Command, entries: &[PathBuf]) {
+    let mut prefix = OsString::new();
+    let mut has_entry = false;
+    for entry in entries {
+        if !entry.exists() {
+            continue;
+        }
+        if has_entry {
+            prefix.push(";");
+        }
+        prefix.push(entry.as_os_str());
+        has_entry = true;
+    }
+
+    if !has_entry {
+        return;
+    }
+
+    if let Some(existing) = std::env::var_os("PATH") {
+        if !existing.is_empty() {
+            prefix.push(";");
+            prefix.push(existing);
+        }
+    }
+
+    cmd.env("PATH", prefix);
+}
+
 fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineClientError> {
     let host_bin = resolve_host_binary(options)?;
     let mut cmd = Command::new(host_bin);
@@ -1098,6 +1192,28 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
         .or_else(default_shared_models_dir)
     {
         cmd.env("SMOLPC_MODELS_DIR", models_dir);
+    }
+
+    if let Some(ort_bundle_root) = discover_ort_bundle_root(options) {
+        cmd.env(ORT_BUNDLE_ROOT_ENV, &ort_bundle_root);
+        let ort_dylib = ort_bundle_root.join("onnxruntime.dll");
+        if ort_dylib.exists() {
+            cmd.env(ORT_DYLIB_PATH_ENV, ort_dylib);
+        }
+
+        let openvino_bundle_root = discover_openvino_bundle_root(&ort_bundle_root);
+        if let Some(openvino_root) = &openvino_bundle_root {
+            cmd.env(OPENVINO_BUNDLE_ROOT_ENV, openvino_root);
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let mut path_entries = vec![ort_bundle_root.clone()];
+            if let Some(openvino_root) = openvino_bundle_root {
+                path_entries.push(openvino_root);
+            }
+            prepend_windows_path(&mut cmd, &path_entries);
+        }
     }
 
     #[cfg(target_os = "windows")]

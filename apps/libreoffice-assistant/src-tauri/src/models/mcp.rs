@@ -43,8 +43,10 @@ pub struct McpError {
 pub struct McpTool {
     pub name: String,
     pub description: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", alias = "inputSchema")]
     pub input_schema: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "outputSchema")]
+    pub output_schema: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

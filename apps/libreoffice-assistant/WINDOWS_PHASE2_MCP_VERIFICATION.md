@@ -32,8 +32,8 @@ Install MCP Python dependencies:
 
 1. `cd apps/libreoffice-assistant/src-tauri/resources/mcp_server`
 2. `python -m venv .venv`
-3. `.venv\\Scripts\\activate`
-4. `pip install mcp httpx pillow`
+3. `.\.venv\Scripts\python.exe -m pip install mcp httpx pillow`
+4. `.\.venv\Scripts\python.exe -m pip show mcp httpx pillow`
 5. `cd ..\\..\\..\\..\\..`
 
 ## App startup
@@ -77,8 +77,7 @@ Recommended first read-only call:
 ## Troubleshooting
 
 1. `Start MCP Server` fails with Python/module error:
-   - Re-activate `.venv`
-   - Re-run `pip install mcp httpx pillow`
+   - Re-run `.\.venv\Scripts\python.exe -m pip install mcp httpx pillow`
 2. Tool list remains empty:
    - Click `Refresh MCP Tools`
    - Confirm MCP server is still running
@@ -87,5 +86,16 @@ Recommended first read-only call:
    - Verify LibreOffice/Collabora is installed in expected Windows path
    - Ensure no local policy blocks launching `soffice.exe`
 4. If needed, retry with explicit Python:
-   - Launch app with `SMOLPC_PYTHON_PATH=python` set in environment
+   - Launch app with `SMOLPC_PYTHON_PATH` set to:
+     `apps\libreoffice-assistant\src-tauri\resources\mcp_server\.venv\Scripts\python.exe`
+5. Cargo fails with `Access is denied` under `resources\mcp_server\.venv_tmp`:
+   - Cause: interrupted `pip/ensurepip` left locked temp folders.
+   - Move or remove the locked temp directory so Cargo can scan `src-tauri`:
+     - `Move-Item apps\libreoffice-assistant\src-tauri\resources\mcp_server\.venv_tmp apps\libreoffice-assistant\target\.venv_tmp_quarantine`
+   - Re-run `npm run tauri:dev:libreoffice`.
+6. MCP tool invoke appears to do nothing:
+   - Ensure `Tool` is a real MCP tool name (for example `get_document_properties`, not `invoke_document_properties`).
+   - Ensure `Tool Arguments` is valid JSON with escaped Windows paths.
+     - Example:
+       `{"file_path":"C:\\Users\\<YOUR_USER>\\Documents\\test.odt"}`
 

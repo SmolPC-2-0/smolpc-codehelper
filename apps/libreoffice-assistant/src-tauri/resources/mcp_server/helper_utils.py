@@ -8,12 +8,20 @@ from contextlib import contextmanager
 
 
 # Set up logging immediately when this module is imported
+def _resolve_log_path(filename):
+    """Resolve log file location, preferring SMOLPC_MCP_LOG_DIR when provided."""
+    log_dir = os.getenv("SMOLPC_MCP_LOG_DIR")
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+        return os.path.join(log_dir, filename)
+    module_dir = os.path.dirname(__file__)
+    return os.path.join(module_dir, filename)
+
+
 def _setup_module_logging():
     """Internal function to set up logging for this module."""
     try:
-        # Get the directory of this file
-        module_dir = os.path.dirname(__file__)
-        log_path = os.path.join(module_dir, "helper.log")
+        log_path = _resolve_log_path("helper.log")
 
         # Clear existing handlers
         for handler in logging.root.handlers[:]:

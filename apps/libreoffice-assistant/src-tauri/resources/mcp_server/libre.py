@@ -19,7 +19,14 @@ def _print_to_stderr(*args, **kwargs):
     _original_print(*args, **kwargs)
 builtins.print = _print_to_stderr
 
-log_path = os.path.join(os.path.dirname(__file__), "libre.log")
+def _resolve_log_path(filename: str) -> str:
+    log_dir = os.getenv("SMOLPC_MCP_LOG_DIR")
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+        return os.path.join(log_dir, filename)
+    return os.path.join(os.path.dirname(__file__), filename)
+
+log_path = _resolve_log_path("libre.log")
 logging.basicConfig(
     filename=log_path,
     level=logging.INFO,

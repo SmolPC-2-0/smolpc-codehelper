@@ -3,6 +3,7 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+use std::fs;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -49,6 +50,19 @@ impl McpClient {
         Ok(())
     }
 
+    fn prepare_python_env(command: &mut Command) {
+        // Avoid writing __pycache__ into the watched mcp_server resource directory.
+        command.env("PYTHONDONTWRITEBYTECODE", "1");
+
+        // Route MCP Python logs outside of src-tauri/resources to avoid hot-reload loops.
+        let log_dir = std::env::temp_dir().join("smolpc-libreoffice-mcp-logs");
+        if let Err(error) = fs::create_dir_all(&log_dir) {
+            log::warn!("Failed to create MCP log directory {:?}: {}", log_dir, error);
+        } else {
+            command.env("SMOLPC_MCP_LOG_DIR", &log_dir);
+        }
+    }
+
     pub fn start(&self, python_path: Option<&str>, mcp_dir: std::path::PathBuf) -> Result<()> {
         #[cfg(all(target_os = "macos", debug_assertions))]
         {
@@ -68,13 +82,15 @@ impl McpClient {
                 .map(ToString::to_string)
                 .unwrap_or(default_cmd);
 
-            let mut child = Command::new(&python_cmd)
+            let mut process = Command::new(&python_cmd);
+            process
                 .arg(&libre_script)
                 .current_dir(&mcp_dir)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()?;
+                .stderr(Stdio::piped());
+            Self::prepare_python_env(&mut process);
+            let mut child = process.spawn()?;
 
             self.store_child_io(&mut child)?;
             let mut process_guard = self.process.lock().expect("process mutex poisoned");
@@ -120,13 +136,15 @@ impl McpClient {
                 return Err(anyhow!("MCP server scripts not found at {:?}", mcp_dir));
             };
 
-            let mut child = Command::new(&command)
+            let mut process = Command::new(&command);
+            process
                 .args(&args)
                 .current_dir(&mcp_dir)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()?;
+                .stderr(Stdio::piped());
+            Self::prepare_python_env(&mut process);
+            let mut child = process.spawn()?;
 
             self.store_child_io(&mut child)?;
 
