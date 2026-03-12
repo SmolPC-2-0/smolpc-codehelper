@@ -3,17 +3,26 @@
   "private": true,
   "version": "1.0.0",
   "workspaces": [
-    "apps/codehelper"
+    "apps/codehelper",
+    "apps/libreoffice-assistant"
   ],
   "scripts": {
     "dev": "npm run dev --workspace apps/codehelper",
+    "dev:libreoffice": "npm run dev --workspace apps/libreoffice-assistant",
     "build": "npm run build --workspace apps/codehelper",
+    "build:libreoffice": "npm run build --workspace apps/libreoffice-assistant",
     "preview": "npm run preview --workspace apps/codehelper",
+    "preview:libreoffice": "npm run preview --workspace apps/libreoffice-assistant",
     "check": "npm run check --workspace apps/codehelper",
+    "check:libreoffice": "npm run check --workspace apps/libreoffice-assistant",
     "format": "npm run format --workspace apps/codehelper",
+    "format:libreoffice": "npm run format --workspace apps/libreoffice-assistant",
     "lint": "npm run lint --workspace apps/codehelper",
+    "lint:libreoffice": "npm run lint --workspace apps/libreoffice-assistant",
     "tauri": "npm run tauri --workspace apps/codehelper",
+    "tauri:libreoffice": "npm run tauri --workspace apps/libreoffice-assistant",
     "tauri:dev": "npm run tauri:dev --workspace apps/codehelper",
+    "tauri:dev:libreoffice": "npm run tauri:dev --workspace apps/libreoffice-assistant",
     "tauri:dml": "npm run tauri:dml --workspace apps/codehelper",
     "model:export:dml": "npm run model:export:dml --workspace apps/codehelper",
     "model:setup:qwen3": "npm run model:setup:qwen3 --workspace apps/codehelper",

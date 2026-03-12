@@ -1,0 +1,6 @@
+.venv/
+.venv_tmp/
+__pycache__/
+*.pyc
+*.pyo
+*.log

@@ -4678,6 +4678,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "smolpc-libreoffice-assistant"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "log",
+ "serde",
+ "serde_json",
+ "smolpc-engine-client",
+ "smolpc-engine-core",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-log",
+ "tokio",
+]
+
+[[package]]
 name = "socket2"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
