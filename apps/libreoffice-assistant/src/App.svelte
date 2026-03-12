@@ -42,6 +42,15 @@
     metrics: GenerationMetrics;
   };
 
+  type GenerationConfig = {
+    max_length: number;
+    temperature: number;
+    top_k?: number | null;
+    top_p?: number | null;
+    repetition_penalty?: number | null;
+    repetition_penalty_last_n?: number | null;
+  };
+
   type LaneReadiness = {
     artifact_ready: boolean;
     bundle_ready: boolean;
@@ -130,6 +139,33 @@
     is_error?: boolean;
   };
 
+  type ChatRole = 'system' | 'user' | 'assistant';
+
+  type ChatTurn = {
+    role: ChatRole;
+    content: string;
+  };
+
+  type WorkflowToolCall = {
+    name: string;
+    arguments: Record<string, unknown>;
+  };
+
+  const PHASE3_MAX_TOOL_CHAIN_DEPTH = 4;
+  const PHASE3_MAX_TOOL_CALLS_PER_RESPONSE = 1;
+  const PHASE3_MODEL_TURN_TIMEOUT_MS = 45000;
+  const PHASE3_WORKFLOW_CONFIG: GenerationConfig = {
+    max_length: 64,
+    temperature: 0.0,
+    top_k: 1,
+    top_p: 1.0
+  };
+  const PHASE3_SYSTEM_INSTRUCTION = `You are a LibreOffice assistant that can use MCP tools.
+When you need to call a tool, respond with JSON only in this exact shape:
+{"tool_call":{"name":"<tool_name>","arguments":{...}}}
+Do not include markdown fences when returning tool_call JSON.
+If no tool call is needed, respond with the final user-facing answer in plain text.`;
+
   let loadingBootstrap = $state(true);
   let actionBusy = $state(false);
   let commandError = $state<string | null>(null);
@@ -156,6 +192,13 @@
   let selectedMcpTool = $state('');
   let mcpArguments = $state('{}');
   let mcpToolResult = $state<ToolResult | null>(null);
+  let workflowPrompt = $state(
+    'List LibreOffice text documents in my Documents folder, then summarize the result in one short paragraph.'
+  );
+  let workflowFinalResponse = $state('');
+  let workflowTrace = $state<string[]>([]);
+  let workflowDepthUsed = $state(0);
+  let workflowToolCallsUsed = $state(0);
 
   function formatError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -180,6 +223,24 @@
   function clearFeedback(): void {
     commandError = null;
     actionMessage = null;
+  }
+
+  function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error(timeoutMessage));
+      }, timeoutMs);
+
+      promise
+        .then((value) => {
+          clearTimeout(timeoutId);
+          resolve(value);
+        })
+        .catch((error: unknown) => {
+          clearTimeout(timeoutId);
+          reject(error);
+        });
+    });
   }
 
   function chooseNonNullSchema(schema: JsonSchema | undefined): JsonSchema | undefined {
@@ -235,6 +296,196 @@
   function setToolArgumentTemplate(toolName: string): void {
     const tool = mcpTools.find((candidate) => candidate.name === toolName);
     mcpArguments = JSON.stringify(buildMcpArgsTemplate(tool), null, 2);
+  }
+
+  function buildChatMlPrompt(turns: ChatTurn[]): string {
+    const lines = turns.map((turn) => `<|im_start|>${turn.role}\n${turn.content}<|im_end|>`);
+    return `${lines.join('\n')}\n<|im_start|>assistant\n`;
+  }
+
+  function asObject(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    return value as Record<string, unknown>;
+  }
+
+  function parseToolArguments(value: unknown): Record<string, unknown> {
+    const objectValue = asObject(value);
+    if (objectValue) {
+      return objectValue;
+    }
+    if (typeof value === 'string' && value.trim()) {
+      try {
+        const parsed = JSON.parse(value) as unknown;
+        return asObject(parsed) ?? {};
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  }
+
+  function parseSingleToolCall(value: unknown): WorkflowToolCall | null {
+    const objectValue = asObject(value);
+    if (!objectValue) {
+      return null;
+    }
+
+    const functionField = asObject(objectValue.function);
+    const rawName =
+      typeof objectValue.name === 'string'
+        ? objectValue.name
+        : typeof functionField?.name === 'string'
+          ? functionField.name
+          : '';
+    if (!rawName.trim()) {
+      return null;
+    }
+
+    const rawArguments =
+      objectValue.arguments ?? objectValue.args ?? functionField?.arguments ?? functionField?.args;
+    return {
+      name: rawName.trim(),
+      arguments: parseToolArguments(rawArguments)
+    };
+  }
+
+  function normalizeToolCalls(value: unknown): WorkflowToolCall[] {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => parseSingleToolCall(item))
+        .filter((item): item is WorkflowToolCall => item !== null);
+    }
+
+    const objectValue = asObject(value);
+    if (!objectValue) {
+      return [];
+    }
+
+    if ('tool_calls' in objectValue) {
+      return normalizeToolCalls(objectValue.tool_calls);
+    }
+    if ('tool_call' in objectValue) {
+      return normalizeToolCalls(objectValue.tool_call);
+    }
+
+    const direct = parseSingleToolCall(objectValue);
+    return direct ? [direct] : [];
+  }
+
+  function extractJsonCandidates(rawText: string): string[] {
+    const trimmed = rawText.trim();
+    const candidates = trimmed ? [trimmed] : [];
+    const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)```/gi;
+    let match: RegExpExecArray | null;
+    while ((match = codeBlockRegex.exec(rawText)) !== null) {
+      const candidate = match[1]?.trim();
+      if (candidate) {
+        candidates.push(candidate);
+      }
+    }
+    return candidates;
+  }
+
+  function extractToolCallsFromModelText(rawText: string): WorkflowToolCall[] {
+    for (const candidate of extractJsonCandidates(rawText)) {
+      try {
+        const parsed = JSON.parse(candidate) as unknown;
+        const toolCalls = normalizeToolCalls(parsed);
+        if (toolCalls.length > 0) {
+          return toolCalls.slice(0, PHASE3_MAX_TOOL_CALLS_PER_RESPONSE);
+        }
+      } catch {
+        continue;
+      }
+    }
+    return [];
+  }
+
+  function summarizeToolResult(result: ToolResult): string {
+    const text = result.content.find((entry) => entry.type === 'text')?.text ?? JSON.stringify(result);
+    if (text.length <= 220) {
+      return text;
+    }
+    return `${text.slice(0, 220)}...`;
+  }
+
+  function extractPrimaryToolText(result: ToolResult): string {
+    return result.content.find((entry) => entry.type === 'text')?.text ?? '';
+  }
+
+  function hasHelperConnectionError(result: ToolResult): boolean {
+    const text = extractPrimaryToolText(result).toLowerCase();
+    return text.includes('connection refused') || text.includes('helper script running');
+  }
+
+  function buildLocalFallbackSummary(result: ToolResult): string {
+    const text = extractPrimaryToolText(result);
+    if (!text.trim()) {
+      return 'MCP tool call succeeded, but no text content was returned.';
+    }
+
+    const countMatch = text.match(/Found\s+(\d+)\s+documents?/i);
+    const docCount = countMatch ? Number.parseInt(countMatch[1], 10) : null;
+    const nameMatches = Array.from(text.matchAll(/Name:\s*(.+)/g))
+      .map((match) => match[1]?.trim())
+      .filter((name): name is string => Boolean(name))
+      .slice(0, 3);
+
+    if (docCount !== null && nameMatches.length > 0) {
+      const names = nameMatches.join(', ');
+      return `Found ${docCount} document(s) in the target directory. Example files: ${names}.`;
+    }
+    if (docCount !== null) {
+      return `Found ${docCount} document(s) in the target directory.`;
+    }
+    return text.length <= 280 ? text : `${text.slice(0, 280)}...`;
+  }
+
+  function pushWorkflowTrace(line: string): void {
+    workflowTrace = [...workflowTrace, line];
+  }
+
+  async function restartMcpServerWithOptionalTrace(traceLabel?: string): Promise<void> {
+    if (traceLabel) {
+      pushWorkflowTrace(`${traceLabel}: restarting MCP server...`);
+    }
+    await invoke<McpStatus>('stop_mcp_server');
+    mcpStatus = await invoke<McpStatus>('start_mcp_server');
+    if (!mcpStatus.running) {
+      throw new Error(mcpStatus.error_message ?? 'MCP restart failed.');
+    }
+    await loadMcpTools();
+    if (traceLabel) {
+      pushWorkflowTrace(`${traceLabel}: MCP restart completed.`);
+    }
+  }
+
+  async function callMcpToolWithRecovery(
+    name: string,
+    args: unknown,
+    traceLabel?: string
+  ): Promise<ToolResult> {
+    let result = await invoke<ToolResult>('call_mcp_tool', {
+      name,
+      arguments: args
+    });
+
+    if (hasHelperConnectionError(result)) {
+      if (traceLabel) {
+        pushWorkflowTrace(
+          `${traceLabel}: helper connection failed, retrying once after MCP restart.`
+        );
+      }
+      await restartMcpServerWithOptionalTrace(traceLabel);
+      result = await invoke<ToolResult>('call_mcp_tool', {
+        name,
+        arguments: args
+      });
+    }
+
+    return result;
   }
 
   async function refreshBootstrapStatus(): Promise<void> {
@@ -310,8 +561,13 @@
 
     actionBusy = true;
     clearFeedback();
+    actionMessage = `Loading model '${selectedModelId}'...`;
     try {
-      actionMessage = await invoke<string>('load_model', { modelId: selectedModelId });
+      actionMessage = await withTimeout(
+        invoke<string>('load_model', { modelId: selectedModelId }),
+        120000,
+        "Model load timed out after 120s. Check backend logs and retry."
+      );
       await Promise.all([
         refreshBootstrapStatus(),
         refreshCurrentModel(),
@@ -604,15 +860,223 @@
       const parsedArgs = mcpArguments.trim()
         ? (JSON.parse(mcpArguments) as unknown)
         : {};
-      mcpToolResult = await invoke<ToolResult>('call_mcp_tool', {
-        name: selectedMcpTool,
-        arguments: parsedArgs
-      });
+      mcpToolResult = await callMcpToolWithRecovery(selectedMcpTool, parsedArgs);
       actionMessage = `MCP tool '${selectedMcpTool}' executed.`;
     } catch (error) {
       commandError = normalizeEngineError(formatError(error));
     } finally {
       actionBusy = false;
+    }
+  }
+
+  async function ensureMcpReadyForWorkflow(): Promise<void> {
+    mcpStatus = await invoke<McpStatus>('check_mcp_status');
+    if (!mcpStatus.running) {
+      pushWorkflowTrace('MCP server is not running. Starting it now...');
+      mcpStatus = await invoke<McpStatus>('start_mcp_server');
+    }
+    if (!mcpStatus.running) {
+      throw new Error(mcpStatus.error_message ?? 'MCP server failed to start.');
+    }
+    if (mcpTools.length === 0) {
+      await loadMcpTools();
+    }
+  }
+
+  async function runMcpAssistedWorkflow(): Promise<void> {
+    if (!workflowPrompt.trim()) {
+      commandError = 'Enter a workflow prompt before running the Phase 3 flow.';
+      return;
+    }
+
+    actionBusy = true;
+    clearFeedback();
+    workflowFinalResponse = '';
+    workflowTrace = [];
+    workflowDepthUsed = 0;
+    workflowToolCallsUsed = 0;
+    mcpToolResult = null;
+
+    try {
+      await ensureMcpReadyForWorkflow();
+      pushWorkflowTrace(`Loaded ${mcpTools.length} MCP tools.`);
+
+      const turns: ChatTurn[] = [
+        {
+          role: 'system',
+          content: PHASE3_SYSTEM_INSTRUCTION
+        },
+        {
+          role: 'user',
+          content: workflowPrompt.trim()
+        }
+      ];
+
+      let finalResponse: string | null = null;
+      let totalToolCalls = 0;
+
+      for (let depth = 1; depth <= PHASE3_MAX_TOOL_CHAIN_DEPTH; depth += 1) {
+        workflowDepthUsed = depth;
+        pushWorkflowTrace(`Turn ${depth}: requesting model response...`);
+        const modelResult = await withTimeout(
+          invoke<GenerationResult>('generate_text_with_config', {
+            prompt: buildChatMlPrompt(turns),
+            config: PHASE3_WORKFLOW_CONFIG
+          }),
+          PHASE3_MODEL_TURN_TIMEOUT_MS,
+          `Turn ${depth} timed out after ${PHASE3_MODEL_TURN_TIMEOUT_MS / 1000}s.`
+        );
+        lastMetrics = modelResult.metrics;
+        const assistantText = modelResult.text.trim();
+        turns.push({
+          role: 'assistant',
+          content: assistantText
+        });
+        pushWorkflowTrace(`Turn ${depth}: model response received (${assistantText.length} chars).`);
+
+        const toolCalls = extractToolCallsFromModelText(assistantText);
+        if (toolCalls.length === 0) {
+          finalResponse = assistantText;
+          break;
+        }
+
+        for (const toolCall of toolCalls) {
+          totalToolCalls += 1;
+          workflowToolCallsUsed = totalToolCalls;
+          pushWorkflowTrace(
+            `Tool call ${totalToolCalls}: ${toolCall.name} ${JSON.stringify(toolCall.arguments)}`
+          );
+          const toolResult = await callMcpToolWithRecovery(
+            toolCall.name,
+            toolCall.arguments,
+            `Tool call ${totalToolCalls}`
+          );
+          mcpToolResult = toolResult;
+          pushWorkflowTrace(`Tool result ${totalToolCalls}: ${summarizeToolResult(toolResult)}`);
+          turns.push({
+            role: 'system',
+            content:
+              `MCP tool result for '${toolCall.name}':\n` +
+              `${JSON.stringify(toolResult)}\n` +
+              'Use this result to continue. Return another tool_call JSON only if needed.'
+          });
+        }
+      }
+
+      if (!finalResponse) {
+        finalResponse =
+          'Stopped before final answer because the workflow reached the maximum tool-chain depth.';
+        pushWorkflowTrace(
+          `Stopped after reaching max depth (${PHASE3_MAX_TOOL_CHAIN_DEPTH} turns).`
+        );
+      }
+
+      workflowFinalResponse = finalResponse;
+      generatedText = finalResponse;
+      actionMessage = 'Phase 3 MCP-assisted workflow completed.';
+    } catch (error) {
+      commandError = normalizeEngineError(formatError(error));
+    } finally {
+      actionBusy = false;
+      await Promise.all([
+        refreshBootstrapStatus(),
+        refreshBackendStatus(),
+        refreshCurrentModel(),
+        refreshMcpStatus()
+      ]);
+    }
+  }
+
+  async function runToolFirstWorkflow(): Promise<void> {
+    const toolName = selectedMcpTool.trim();
+    if (!toolName) {
+      commandError = 'Select an MCP tool in the MCP Bridge section first.';
+      return;
+    }
+
+    actionBusy = true;
+    clearFeedback();
+    workflowFinalResponse = '';
+    workflowTrace = [];
+    workflowDepthUsed = 0;
+    workflowToolCallsUsed = 0;
+
+    try {
+      await ensureMcpReadyForWorkflow();
+      pushWorkflowTrace(`Fast path: invoking '${toolName}' directly.`);
+
+      const parsedArgs = mcpArguments.trim() ? (JSON.parse(mcpArguments) as unknown) : {};
+      const toolResult = await callMcpToolWithRecovery(
+        toolName,
+        parsedArgs,
+        `Fast path '${toolName}'`
+      );
+      mcpToolResult = toolResult;
+      workflowToolCallsUsed = 1;
+      workflowDepthUsed = 1;
+      pushWorkflowTrace(`Tool call succeeded: ${toolName}`);
+
+      let backendSnapshot: BackendStatus | null = null;
+      try {
+        backendSnapshot = await invoke<BackendStatus>('get_inference_backend_status');
+      } catch {
+        backendSnapshot = backendStatus;
+      }
+      if ((backendSnapshot?.active_backend ?? '').toLowerCase() === 'cpu') {
+        workflowFinalResponse = buildLocalFallbackSummary(toolResult);
+        pushWorkflowTrace('CPU backend detected; skipped summary model turn.');
+        actionMessage = 'Phase 3 fast workflow completed (CPU local summary).';
+        return;
+      }
+
+      const summaryPrompt = buildChatMlPrompt([
+        {
+          role: 'system',
+          content:
+            'Summarize the provided MCP tool result for the user in 2 short sentences. Plain text only.'
+        },
+        {
+          role: 'user',
+          content:
+            `Original user request:\n${workflowPrompt.trim()}\n\n` +
+            `Tool result JSON:\n${JSON.stringify(toolResult)}`
+        }
+      ]);
+
+      pushWorkflowTrace('Fast path: requesting short summary turn...');
+      const summary = await withTimeout(
+        invoke<GenerationResult>('generate_text_with_config', {
+          prompt: summaryPrompt,
+          config: PHASE3_WORKFLOW_CONFIG
+        }),
+        30000,
+        'Summary turn timed out after 30s.'
+      );
+      workflowDepthUsed = 2;
+      lastMetrics = summary.metrics;
+      workflowFinalResponse = summary.text.trim();
+      pushWorkflowTrace('Summary turn completed.');
+      actionMessage = 'Phase 3 fast workflow completed.';
+    } catch (error) {
+      const message = normalizeEngineError(formatError(error));
+      if (message.includes('timed out')) {
+        const fallbackSummary = mcpToolResult
+          ? buildLocalFallbackSummary(mcpToolResult)
+          : 'Tool call succeeded, but summary generation timed out on this machine.';
+        workflowFinalResponse = fallbackSummary;
+        pushWorkflowTrace('Summary turn timed out; used local fallback summary.');
+        actionMessage = 'Phase 3 fast workflow completed with summary timeout on CPU.';
+      } else {
+        commandError = message;
+      }
+    } finally {
+      actionBusy = false;
+      await Promise.all([
+        refreshBootstrapStatus(),
+        refreshBackendStatus(),
+        refreshCurrentModel(),
+        refreshMcpStatus()
+      ]);
     }
   }
 
@@ -631,7 +1095,7 @@
 
 <main class="container">
   <h1>SmolPC LibreOffice Assistant</h1>
-  <p class="subtitle">Phase 1: shared-engine onboarding flow</p>
+  <p class="subtitle">Phase 1/2 baseline with Phase 3 workflow preview</p>
 
   <div class="actions">
     <button
@@ -841,6 +1305,58 @@
     {:else}
       <p class="muted">No MCP tool result yet.</p>
     {/if}
+  </section>
+
+  <section class="panel">
+    <h2>Phase 3 Workflow (Preview)</h2>
+    <p class="muted">
+      Runs a basic model-to-MCP orchestration loop with JSON tool-call fallback parsing and safety caps.
+    </p>
+    <p class="muted">
+      Fast-mode limits: <code>max_length=64</code>, per-turn timeout <code>45s</code>.
+    </p>
+    <p class="muted">
+      On slow machines use <code>Run Tool-First Fast Path</code>: it executes MCP first, then requests one short summary turn.
+    </p>
+    <div class="row stacked">
+      <label for="workflow-prompt">Workflow Prompt</label>
+      <textarea
+        id="workflow-prompt"
+        bind:value={workflowPrompt}
+        rows="4"
+        disabled={actionBusy}
+      ></textarea>
+    </div>
+    <div class="actions">
+      <button
+        type="button"
+        onclick={() => void runMcpAssistedWorkflow()}
+        disabled={actionBusy || !workflowPrompt.trim()}
+      >
+        Run MCP-Assisted Flow
+      </button>
+      <button
+        type="button"
+        onclick={() => void runToolFirstWorkflow()}
+        disabled={actionBusy || !workflowPrompt.trim() || !selectedMcpTool}
+      >
+        Run Tool-First Fast Path
+      </button>
+    </div>
+    <p class="kv">
+      workflow_stats:
+      <code>depth={workflowDepthUsed}, tool_calls={workflowToolCallsUsed}</code>
+    </p>
+    <div class="output-grid">
+      <div>
+        <h3>Workflow Final Response</h3>
+        <pre>{workflowFinalResponse || '(no workflow response yet)'}</pre>
+      </div>
+      <div>
+        <h3>Workflow Trace</h3>
+        <pre>{workflowTrace.length > 0 ? workflowTrace.join('\n') : '(no workflow trace yet)'}</pre>
+      </div>
+    </div>
   </section>
 
   <section class="panel">

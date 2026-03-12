@@ -2,6 +2,10 @@
 
 Use this runbook on a Windows machine to validate the newly integrated MCP bridge flow.
 
+For Phase 3 chat/tool workflow validation, use:
+
+1. `apps/libreoffice-assistant/WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md`
+
 ## Goal
 
 Verify that the app can:
@@ -71,8 +75,8 @@ Recommended first read-only call:
 2. JSON output of one successful read-only MCP tool call.
 3. If any failure occurs:
    - MCP status error text
-    - issue report JSON from `Integration Issue Report` section
-    - evidence bundle path/file from `Export Evidence Bundle`
+   - issue report JSON from `Integration Issue Report` section
+   - evidence bundle path/file from `Export Evidence Bundle`
 
 ## Latest validation snapshot (2026-03-12)
 
@@ -106,6 +110,12 @@ Recorded on branch `codex/libreoffice-port-track-a`:
 6. MCP tool invoke appears to do nothing:
    - Ensure `Tool` is a real MCP tool name (for example `get_document_properties`, not `invoke_document_properties`).
    - Ensure `Tool Arguments` is valid JSON with escaped Windows paths.
-     - Example:
-       `{"file_path":"C:\\Users\\<YOUR_USER>\\Documents\\test.odt"}`
+      - Example:
+        `{"file_path":"C:\\Users\\<YOUR_USER>\\Documents\\test.odt"}`
+7. MCP tool returns helper connection refusal:
+   - Symptom:
+     - `Error: Connection refused. Is the helper script running?`
+   - Actions:
+     - Click `Stop MCP Server`, then `Start MCP Server`, then retry the tool call.
+     - If the issue persists, restart `tauri dev` once and retry.
 

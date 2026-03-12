@@ -748,16 +748,20 @@ async fn load_model(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, EngineBridgeState>,
 ) -> Result<String, String> {
+    log::info!("load_model requested for model_id={}", model_id);
     let client = resolve_client(&app_handle, &state).await?;
+    log::info!("load_model: resolve_client succeeded");
     client
         .ensure_started(StartupMode::Auto, StartupPolicy::default())
         .await
         .map_err(|error| format!("Engine ensure_started failed: {error}"))?;
+    log::info!("load_model: ensure_started succeeded");
     client
         .load_model(&model_id)
         .await
         .map_err(|error| format!("Failed to load model '{model_id}': {error}"))?;
     *state.desired_model.lock().await = Some(model_id.clone());
+    log::info!("load_model: model loaded successfully ({})", model_id);
     Ok(format!("Model loaded: {model_id}"))
 }
 
@@ -785,6 +789,21 @@ async fn generate_text(
     ensure_desired_model_loaded(&client, &state).await?;
     client
         .generate_text(&prompt, None)
+        .await
+        .map_err(|error| format!("Generation failed: {error}"))
+}
+
+#[tauri::command]
+async fn generate_text_with_config(
+    prompt: String,
+    config: GenerationConfig,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, EngineBridgeState>,
+) -> Result<GenerationResult, String> {
+    let client = resolve_client(&app_handle, &state).await?;
+    ensure_desired_model_loaded(&client, &state).await?;
+    client
+        .generate_text(&prompt, Some(config))
         .await
         .map_err(|error| format!("Generation failed: {error}"))
 }
@@ -1090,6 +1109,7 @@ pub fn run() {
             load_model,
             unload_model,
             generate_text,
+            generate_text_with_config,
             inference_generate,
             inference_cancel,
             is_generating,

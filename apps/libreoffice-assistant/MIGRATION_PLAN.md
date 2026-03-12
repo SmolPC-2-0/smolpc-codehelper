@@ -31,11 +31,17 @@ Implemented:
 1. Phase 1 engine bootstrap, model lifecycle, generation, cancel, diagnostics, and verification surfaces.
 2. Runtime checklist and evidence export flow in app backend/UI.
 3. Source repo audit completed and mapped to migration tasks.
+4. Phase 2 MCP bridge acceptance completed with Windows evidence (`running: true`, `tools_loaded: 27`, successful `list_documents` call).
+5. Phase 3 preview workflow slice implemented in UI:
+   - model/tool orchestration preview with JSON fallback tool-call parsing
+   - tool-first fast path for CPU machines
+   - MCP helper auto-recovery (restart + one retry)
 
 Not implemented yet:
 
-1. End-to-end MCP startup/tool-call validation evidence from a Windows run.
-2. End-to-end chat tool loop from source app, adapted to engine-only backend.
+1. Full Phase 3 acceptance on non-CPU Windows lane (model-assisted follow-up response without timeout).
+2. Phase 3 validation artifacts from teammate hardware matrix.
+3. Phase 4 packaging/hardening evidence pass.
 
 ## Migration phases
 
@@ -51,7 +57,7 @@ Acceptance:
 
 1. Local checks and tests pass (see `PHASE1_STATUS.md`).
 
-### Phase 2: MCP runtime port and bridge (in progress)
+### Phase 2: MCP runtime port and bridge (completed)
 
 Goal:
 
@@ -143,6 +149,26 @@ Acceptance:
 2. MCP tool calls execute and feed back into follow-up model turns.
 3. At least one end-to-end document flow works on Windows.
 
+Progress update (2026-03-12, CPU lane):
+
+1. Added Phase 3 workflow preview panel in `src/App.svelte`.
+2. Added JSON fallback parser for tool-call payloads returned by model text.
+3. Added tool-first fast path:
+   - execute selected MCP tool directly
+   - then request short model summary turn
+   - if summary times out on CPU, produce deterministic local summary from MCP result
+4. Added MCP helper recovery logic in frontend orchestration:
+   - if MCP tool result returns helper connection refusal, restart MCP and retry once
+5. Verified on CPU-only Windows machine:
+   - `list_documents` tool call succeeds and returns expected document list
+   - local fallback summary produced successfully when summary model turn times out
+
+Remaining Phase 3 acceptance work:
+
+1. Validate full model-assisted loop (no fallback summary) on at least one faster Windows machine.
+2. Capture artifacts from teammate runs using `WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md`.
+3. Promote preview workflow into final chat UX/store migration from source app.
+
 ### Phase 4: Packaging and hardening
 
 Goal:
@@ -188,3 +214,4 @@ Use docs in this order:
 3. `PHASE1_STATUS.md` for completed baseline and validation evidence.
 4. `WINDOWS_PHASE1_VERIFICATION.md` for runtime evidence capture steps.
 5. `WINDOWS_PHASE2_MCP_VERIFICATION.md` for MCP bridge validation on Windows.
+6. `WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md` for Phase 3 chat/tool workflow validation matrix.

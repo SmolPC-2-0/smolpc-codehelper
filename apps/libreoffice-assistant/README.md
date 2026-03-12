@@ -11,6 +11,7 @@ Use these docs in order:
 3. `apps/libreoffice-assistant/PHASE1_STATUS.md` (implemented baseline + validations)
 4. `apps/libreoffice-assistant/WINDOWS_PHASE1_VERIFICATION.md` (verification runbook)
 5. `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md` (MCP bridge Windows test runbook)
+6. `apps/libreoffice-assistant/WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md` (chat/tool workflow Windows runbook)
 
 ## Current migration status
 
@@ -33,10 +34,17 @@ Phase 1 shared-engine baseline is implemented in this app:
     - MCP diagnostics/tool-call panel added to `src/App.svelte`
     - verified runtime: `running: true`, `tools_loaded: 27`
     - verified read-only tool call from UI (`list_documents`)
+6. Phase 3 workflow preview implemented (2026-03-12):
+    - new Phase 3 workflow panel in `src/App.svelte`
+    - JSON tool-call fallback parser with safety caps
+    - tool-first fast path for CPU machines
+    - automatic MCP helper recovery (restart + single retry) on helper connection refusal
+    - CPU-lane validated outcome: MCP tool call succeeds, local summary fallback used when model summary turn times out
 
 Current implementation focus:
 
-1. Phase 3 chat/tool workflow port.
+1. Phase 3 teammate validation across CPU and accelerator Windows machines.
+2. Full model-assisted loop reliability on non-CPU lanes.
 
 ## Source migration baseline
 

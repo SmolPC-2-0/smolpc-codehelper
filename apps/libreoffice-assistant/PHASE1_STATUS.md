@@ -41,6 +41,10 @@ Primary planning doc for next phases:
    - `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md`
 9. Source repo audit completed for migration planning:
    - `apps/libreoffice-assistant/LIBREOFFICE_SOURCE_REPO_ANALYSIS.md`
+10. Phase 3 preview workflow panel and orchestration added in `src/App.svelte`:
+   - JSON fallback tool-call parsing
+   - tool-first fast path for CPU lane
+   - helper connection refusal recovery (MCP restart + one retry)
 
 ## Validation run (local)
 
@@ -95,3 +99,18 @@ Tracked in:
    - result included `test.docx` and `test.odt`.
 4. Windows runbook used:
    - `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md`
+
+## Phase 3 preview CPU-lane validation (2026-03-12)
+
+1. Model load verified for `qwen3-4b-instruct-2507`.
+2. MCP tool-first workflow verified with read-only tool:
+   - tool: `list_documents`
+   - directory: `C:\\Users\\<YOUR_USER>\\Documents`
+   - result contained expected `test.docx` and `test.odt`.
+3. On CPU lane, short summary generation may time out; local fallback summary now returns:
+   - `Found 2 document(s) in the target directory. Example files: test.docx, test.odt.`
+4. MCP helper reliability issue observed and mitigated in preview flow:
+   - symptom: `Connection refused. Is the helper script running?`
+   - mitigation: auto MCP restart + single retry in workflow/tool-call path.
+5. Teammate validation runbook added:
+   - `apps/libreoffice-assistant/WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md`
