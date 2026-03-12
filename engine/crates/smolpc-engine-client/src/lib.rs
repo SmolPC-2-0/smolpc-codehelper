@@ -282,6 +282,12 @@ pub struct EngineClient {
     http: Client,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EngineChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
 impl EngineClient {
     fn new(base_url: String, token: String) -> Self {
         Self {
@@ -539,7 +545,7 @@ impl EngineClient {
         config: Option<GenerationConfig>,
     ) -> Result<GenerationResult, EngineClientError> {
         let started = Instant::now();
-        let body = completion_body(prompt, false, config);
+        let body = completion_body(&prompt_as_messages(prompt), false, config);
         let response = self
             .http
             .post(self.url("/v1/chat/completions"))
@@ -570,6 +576,42 @@ impl EngineClient {
         Ok(GenerationResult { text, metrics })
     }
 
+    pub async fn generate_text_messages(
+        &self,
+        messages: &[EngineChatMessage],
+        config: Option<GenerationConfig>,
+    ) -> Result<GenerationResult, EngineClientError> {
+        let started = Instant::now();
+        let body = completion_body(messages, false, config);
+        let response = self
+            .http
+            .post(self.url("/v1/chat/completions"))
+            .header(AUTHORIZATION, self.auth_header())
+            .header(CONTENT_TYPE, "application/json")
+            .body(body.to_string())
+            .send()
+            .await?;
+        let response = ensure_success(response, "/v1/chat/completions").await?;
+        let value = response.json::<serde_json::Value>().await?;
+
+        if let Some(error_message) = parse_error_message(&value) {
+            return Err(EngineClientError::Message(error_message));
+        }
+
+        let text = value
+            .get("choices")
+            .and_then(|c| c.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|first| first.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        let metrics = non_stream_metrics(&value, started, &text)?;
+        Ok(GenerationResult { text, metrics })
+    }
+
     pub async fn generate_stream<F>(
         &self,
         prompt: &str,
@@ -584,7 +626,102 @@ impl EngineClient {
         let mut first_chunk_at = None;
         let mut host_metrics: Option<GenerationMetrics> = None;
 
-        let body = completion_body(prompt, true, config);
+        let body = completion_body(&prompt_as_messages(prompt), true, config);
+        let response = self
+            .http
+            .post(self.url("/v1/chat/completions"))
+            .header(AUTHORIZATION, self.auth_header())
+            .header(CONTENT_TYPE, "application/json")
+            .body(body.to_string())
+            .send()
+            .await?;
+        let response = ensure_success(response, "/v1/chat/completions").await?;
+
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
+
+        while let Some(chunk) = stream.next().await {
+            let bytes = chunk?;
+            let text = String::from_utf8_lossy(&bytes);
+            buffer.push_str(&text);
+
+            let mut consumed_until = 0usize;
+            while let Some(rel_newline) = buffer[consumed_until..].find('\n') {
+                let newline = consumed_until + rel_newline;
+                let line = buffer[consumed_until..newline].trim();
+                consumed_until = newline + 1;
+                if !line.starts_with("data:") {
+                    continue;
+                }
+                let data = line[5..].trim();
+                if data == "[DONE]" {
+                    return Ok(host_metrics.unwrap_or_else(|| {
+                        fallback_stream_metrics(started, emitted_chunks, first_chunk_at)
+                    }));
+                }
+                if data.is_empty() {
+                    continue;
+                }
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(error_message) = parse_error_message(&value) {
+                        return Err(EngineClientError::Message(error_message));
+                    }
+
+                    if let Some(metrics_value) = value.get("smolpc_metrics") {
+                        host_metrics = Some(serde_json::from_value(metrics_value.clone())?);
+                        continue;
+                    }
+
+                    if value.get("object").and_then(|object| object.as_str())
+                        == Some("chat.completion.metrics")
+                    {
+                        return Err(EngineClientError::Message(
+                            "Engine stream metrics event is missing required smolpc_metrics payload"
+                                .to_string(),
+                        ));
+                    }
+
+                    if let Some(content) = value
+                        .get("choices")
+                        .and_then(|c| c.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|first| first.get("delta"))
+                        .and_then(|d| d.get("content"))
+                        .and_then(|c| c.as_str())
+                    {
+                        emitted_chunks += 1;
+                        if first_chunk_at.is_none() {
+                            first_chunk_at = Some(started.elapsed().as_millis() as u64);
+                        }
+                        on_token(content.to_string());
+                    }
+                }
+            }
+
+            if consumed_until > 0 {
+                buffer.drain(..consumed_until);
+            }
+        }
+
+        Ok(host_metrics
+            .unwrap_or_else(|| fallback_stream_metrics(started, emitted_chunks, first_chunk_at)))
+    }
+
+    pub async fn generate_stream_messages<F>(
+        &self,
+        messages: &[EngineChatMessage],
+        config: Option<GenerationConfig>,
+        mut on_token: F,
+    ) -> Result<GenerationMetrics, EngineClientError>
+    where
+        F: FnMut(String),
+    {
+        let started = Instant::now();
+        let mut emitted_chunks = 0usize;
+        let mut first_chunk_at = None;
+        let mut host_metrics: Option<GenerationMetrics> = None;
+
+        let body = completion_body(messages, true, config);
         let response = self
             .http
             .post(self.url("/v1/chat/completions"))
@@ -854,15 +991,22 @@ async fn wait_for_engine_down(
     Ok(())
 }
 
+fn prompt_as_messages(prompt: &str) -> Vec<EngineChatMessage> {
+    vec![EngineChatMessage {
+        role: "user".to_string(),
+        content: prompt.to_string(),
+    }]
+}
+
 fn completion_body(
-    prompt: &str,
+    messages: &[EngineChatMessage],
     stream: bool,
     config: Option<GenerationConfig>,
 ) -> serde_json::Value {
     let mut body = serde_json::json!({
         "model": "smolpc-engine",
         "stream": stream,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
     });
 
     if let Some(config) = config {

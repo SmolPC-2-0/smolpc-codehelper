@@ -9,10 +9,11 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
 use smolpc_engine_core::inference::backend::{
-    BackendDecision, BackendDecisionKey, BackendRuntimeBundleStatus, BackendSelectedDevice,
-    BackendSelectionState, BackendStatus, CheckModelResponse, DecisionPersistenceState,
-    DecisionReason, DirectMLFailureStage, FailureCounters, InferenceBackend, LanePreflightState,
-    LaneStartupProbeState, ModelLaneReadiness, ModelLaneReadinessByBackend, ORT_CRATE_VERSION,
+    BackendDecision, BackendDecisionKey, BackendOpenVinoTuningStatus, BackendRuntimeBundleStatus,
+    BackendSelectedDevice, BackendSelectionState, BackendStatus, CheckModelResponse,
+    DecisionPersistenceState, DecisionReason, DirectMLFailureStage, FailureCounters,
+    InferenceBackend, LanePreflightState, LaneStartupProbeState, ModelLaneReadiness,
+    ModelLaneReadinessByBackend, ORT_CRATE_VERSION,
 };
 use smolpc_engine_core::inference::backend_store::{
     backend_store_path, BackendDecisionRecord, BackendStore,
@@ -20,6 +21,7 @@ use smolpc_engine_core::inference::backend_store::{
 #[cfg(target_os = "windows")]
 use smolpc_engine_core::inference::genai::GenAiDirectMlGenerator;
 use smolpc_engine_core::inference::session::SessionBackendOptions;
+use smolpc_engine_core::inference::types::InferenceChatMessage;
 use smolpc_engine_core::inference::{
     Generator, InferenceRuntimeAdapter, InferenceSession, OrtRuntimeBundle, OrtRuntimeLoader,
     RuntimeVersionMetadata, TokenizerWrapper,
@@ -42,7 +44,8 @@ use tokio::time::{sleep, timeout};
 
 use crate::openvino::{
     inspect_openvino_artifact, is_blocking_openvino_probe_failure, probe_openvino_startup,
-    run_openvino_preflight, OpenVinoPreflightResult, OpenVinoStartupProbeResult,
+    resolve_openvino_npu_tuning, run_openvino_preflight, OpenVinoPreflightResult,
+    OpenVinoStartupProbeResult,
 };
 use crate::runtime_bundles::{resolve_runtime_bundles, ResolvedRuntimeBundles};
 #[cfg(test)]
@@ -307,8 +310,13 @@ const STARTUP_PROBE_WAIT_MS: u64 = 1_500;
 /// Extended probe budget for DirectML startup.
 /// Worst-case total probe wait: STARTUP_PROBE_WAIT_MS + STARTUP_PROBE_RECOVERY_WAIT_MS.
 const STARTUP_PROBE_RECOVERY_WAIT_MS: u64 = 8_000;
-const OPENVINO_PREFLIGHT_BUDGET: Duration = Duration::from_secs(30);
+const OPENVINO_STARTUP_PROBE_WAIT: Duration = Duration::from_secs(30);
+const OPENVINO_PREFLIGHT_BUDGET: Duration = Duration::from_secs(300);
 const OPENVINO_SELECTION_PROFILE: &str = "openvino_native_v1";
+const OPENVINO_CHAT_MODE_STRUCTURED: &str = "structured_messages";
+const OPENVINO_CHAT_MODE_LEGACY_PROMPT: &str = "legacy_prompt";
+const OPENVINO_MAX_TOKENS_HARD_CAP_ENV: &str = "SMOLPC_OPENVINO_MAX_TOKENS_HARD_CAP";
+const OPENVINO_MAX_TOKENS_HARD_CAP_DEFAULT: usize = 8192;
 
 #[derive(Debug, Clone)]
 struct DirectMlCandidate {
@@ -536,13 +544,33 @@ fn parse_dml_device_id_env() -> Option<i32> {
         .and_then(|v| v.parse::<i32>().ok())
 }
 
+fn current_openvino_tuning_status() -> Option<BackendOpenVinoTuningStatus> {
+    resolve_openvino_npu_tuning()
+        .ok()
+        .map(|tuning| BackendOpenVinoTuningStatus {
+            max_prompt_len: Some(tuning.max_prompt_len),
+            min_response_len: Some(tuning.min_response_len),
+        })
+}
+
 fn model_requires_directml(model_id: &str) -> bool {
     matches!(model_id, "qwen3-4b-instruct-2507")
+}
+
+fn model_requires_openvino(model_id: &str) -> bool {
+    matches!(model_id, "qwen3-4b-int4-ov" | "qwen3-4b-int4-ov-npu")
 }
 
 fn directml_required_error(model_id: &str, reason: &str) -> String {
     format!(
         "Model '{}' currently requires DirectML backend in shared engine: {}",
+        model_id, reason
+    )
+}
+
+fn openvino_required_error(model_id: &str, reason: &str) -> String {
+    format!(
+        "Model '{}' currently requires OpenVINO NPU backend in shared engine: {}",
         model_id, reason
     )
 }
@@ -1141,6 +1169,8 @@ impl EngineState {
             available_backends: vec![InferenceBackend::Cpu],
             selection_state: Some(BackendSelectionState::Pending),
             selection_reason: Some("startup_probe_pending".to_string()),
+            openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
+            openvino_tuning: current_openvino_tuning_status(),
             store_path: store_path.as_ref().map(|path| path.display().to_string()),
             ..Default::default()
         };
@@ -1169,6 +1199,10 @@ impl EngineState {
 
     fn runtime_bundles(&self) -> &ResolvedRuntimeBundles {
         &self.runtime_bundles
+    }
+
+    async fn active_backend(&self) -> Option<InferenceBackend> {
+        self.backend_status.lock().await.active_backend
     }
 
     fn openvino_cache_dir(&self, model_id: &str, artifacts: &ModelLaneArtifacts) -> PathBuf {
@@ -1202,8 +1236,9 @@ impl EngineState {
         let bundle = self.runtime_bundles().openvino.clone();
         let cache_dir = self.openvino_cache_dir(model_id, artifacts);
         let probe = probe.clone();
+        let model_id = model_id.to_string();
         let task = tokio::task::spawn_blocking(move || {
-            run_openvino_preflight(&bundle, &artifact, &probe, &cache_dir)
+            run_openvino_preflight(&bundle, &model_id, &artifact, &probe, &cache_dir)
         });
 
         match timeout(OPENVINO_PREFLIGHT_BUDGET, task).await {
@@ -1226,6 +1261,7 @@ impl EngineState {
     ) -> BackendDecisionKey {
         let directml_candidate = probe.directml_candidate.as_ref();
         let openvino_probe = openvino_probe.filter(|probe| probe.device_visible);
+        let openvino_tuning = resolve_openvino_npu_tuning().ok();
         BackendDecisionKey {
             model_id: model_id.to_string(),
             model_artifact_fingerprint: artifacts.fingerprint.clone(),
@@ -1259,6 +1295,13 @@ impl EngineState {
             gpu_device_id: selected_device_id,
             npu_adapter_identity: openvino_probe.and_then(|probe| probe.adapter_identity.clone()),
             npu_driver_version: openvino_probe.and_then(|probe| probe.driver_version.clone()),
+            openvino_npu_max_prompt_len: openvino_tuning
+                .as_ref()
+                .map(|tuning| tuning.max_prompt_len),
+            openvino_npu_min_response_len: openvino_tuning
+                .as_ref()
+                .map(|tuning| tuning.min_response_len),
+            openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
             selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
         }
     }
@@ -1644,6 +1687,7 @@ impl EngineState {
         }
         let directml_required =
             model_requires_directml(&model_id) || startup_mode.requires_directml();
+        let openvino_required = model_requires_openvino(&model_id);
         let model_def = ModelRegistry::get_model(&model_id)
             .ok_or_else(|| format!("Unknown model ID: {}", model_id))?;
         let artifacts = resolve_model_lane_artifacts(&model_def.directory);
@@ -1657,8 +1701,14 @@ impl EngineState {
         let probe = self
             .wait_for_startup_probe_with_recovery(directml_required)
             .await;
+        let openvino_probe_budget =
+            if openvino_required || force_override == Some(InferenceBackend::OpenVinoNpu) {
+                OPENVINO_STARTUP_PROBE_WAIT
+            } else {
+                Duration::from_millis(STARTUP_PROBE_WAIT_MS)
+            };
         let openvino_probe = self
-            .wait_for_openvino_startup_probe(Duration::from_millis(STARTUP_PROBE_WAIT_MS))
+            .wait_for_openvino_startup_probe(openvino_probe_budget)
             .await;
 
         let directml_detected = probe.directml_candidate.is_some();
@@ -1672,6 +1722,18 @@ impl EngineState {
             return Err(directml_required_error(
                 &model_id,
                 "forced CPU mode is not supported for this model",
+            ));
+        }
+        if openvino_required && force_override == Some(InferenceBackend::Cpu) {
+            return Err(openvino_required_error(
+                &model_id,
+                "forced CPU mode is not supported for this model",
+            ));
+        }
+        if openvino_required && force_override == Some(InferenceBackend::DirectML) {
+            return Err(openvino_required_error(
+                &model_id,
+                "forced DirectML mode is not supported for this model",
             ));
         }
 
@@ -1696,6 +1758,8 @@ impl EngineState {
             let mut status = BackendStatus {
                 selection_state: Some(selection_state),
                 selection_reason: Some(selection_reason),
+                openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
+                openvino_tuning: current_openvino_tuning_status(),
                 force_override,
                 store_path: self
                     .store_path
@@ -1853,7 +1917,9 @@ impl EngineState {
             }
         }
 
-        if force_override == Some(InferenceBackend::OpenVinoNpu) && openvino_ready.is_none() {
+        if (force_override == Some(InferenceBackend::OpenVinoNpu) || openvino_required)
+            && openvino_ready.is_none()
+        {
             let selection_reason = openvino_reason_override
                 .as_ref()
                 .map(decision_reason_code)
@@ -1863,10 +1929,16 @@ impl EngineState {
                         .unwrap_or("openvino_npu_forced_activation_failed")
                 })
                 .to_string();
-            let error = openvino_failure_message
+            let detail = openvino_failure_message
                 .clone()
                 .or_else(|| artifacts.openvino_message.clone())
                 .unwrap_or_else(|| format!("OpenVINO lane is unavailable: {selection_reason}"));
+            let error =
+                if openvino_required && force_override != Some(InferenceBackend::OpenVinoNpu) {
+                    openvino_required_error(&model_id, &detail)
+                } else {
+                    detail
+                };
 
             let mut status = make_status(
                 BackendSelectionState::Error,
@@ -2131,6 +2203,8 @@ impl EngineState {
             selection_fingerprint: Some(decision_key.fingerprint()),
             decision_key: Some(decision_key.clone()),
             last_decision: Some(BackendDecision::new(active_backend, active_reason, None)),
+            openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
+            openvino_tuning: current_openvino_tuning_status(),
             failure_counters: failure_counters.clone(),
             force_override,
             store_path: self
@@ -2356,6 +2430,71 @@ impl EngineState {
         Ok(metrics)
     }
 
+    async fn generate_text_messages(
+        &self,
+        messages: &[InferenceChatMessage],
+        config: Option<GenerationConfig>,
+    ) -> Result<GenerationResult, String> {
+        let (_permit, cancelled) = self.begin_generation()?;
+        let mut text = String::new();
+        let result = {
+            let adapter_guard = self.runtime_adapter.lock().await;
+            let adapter = adapter_guard
+                .as_ref()
+                .ok_or_else(|| "No model loaded. Call /engine/load first.".to_string())?;
+            adapter
+                .generate_stream_messages(messages, config, cancelled.clone(), |token| {
+                    text.push_str(&token)
+                })
+                .await
+        };
+        let metrics = match result {
+            Ok(metrics) => metrics,
+            Err(error) => {
+                self.try_runtime_fallback_after_directml_failure(&error)
+                    .await;
+                return Err(error);
+            }
+        };
+        if cancelled.load(Ordering::SeqCst) {
+            return Err("INFERENCE_GENERATION_CANCELLED: Generation cancelled".to_string());
+        }
+        Ok(GenerationResult { text, metrics })
+    }
+
+    async fn generate_stream_messages<F>(
+        &self,
+        messages: &[InferenceChatMessage],
+        config: Option<GenerationConfig>,
+        on_token: F,
+    ) -> Result<GenerationMetrics, String>
+    where
+        F: FnMut(String),
+    {
+        let (_permit, cancelled) = self.begin_generation()?;
+        let result = {
+            let adapter_guard = self.runtime_adapter.lock().await;
+            let adapter = adapter_guard
+                .as_ref()
+                .ok_or_else(|| "No model loaded. Call /engine/load first.".to_string())?;
+            adapter
+                .generate_stream_messages(messages, config, cancelled.clone(), on_token)
+                .await
+        };
+        let metrics = match result {
+            Ok(metrics) => metrics,
+            Err(error) => {
+                self.try_runtime_fallback_after_directml_failure(&error)
+                    .await;
+                return Err(error);
+            }
+        };
+        if cancelled.load(Ordering::SeqCst) {
+            return Err("INFERENCE_GENERATION_CANCELLED: Generation cancelled".to_string());
+        }
+        Ok(metrics)
+    }
+
     fn cancel(&self) {
         if let Some(token) = lock_cancel(&self.active_cancel).clone() {
             token.store(true, Ordering::SeqCst);
@@ -2504,6 +2643,11 @@ enum StreamMessage {
     Error { message: String, code: &'static str },
 }
 
+enum CompletionInput {
+    Prompt(String),
+    Messages(Vec<InferenceChatMessage>),
+}
+
 struct CancelOnDrop {
     engine: Arc<EngineState>,
 }
@@ -2559,6 +2703,18 @@ fn looks_like_chatml_prompt(content: &str) -> bool {
     content.contains("<|im_start|>") && content.contains("<|im_end|>")
 }
 
+fn is_preformatted_chatml_single_user_message(messages: &[ChatCompletionMessage]) -> bool {
+    if messages.len() != 1 {
+        return false;
+    }
+    let only = &messages[0];
+    if !only.role.trim().eq_ignore_ascii_case("user") {
+        return false;
+    }
+    let content = only.content.clone().unwrap_or_default();
+    !content.trim().is_empty() && looks_like_chatml_prompt(&content)
+}
+
 fn request_to_prompt(messages: &[ChatCompletionMessage]) -> Result<String, String> {
     if messages.is_empty() {
         return Err("messages cannot be empty".to_string());
@@ -2602,11 +2758,62 @@ fn request_to_prompt(messages: &[ChatCompletionMessage]) -> Result<String, Strin
     Ok(prompt)
 }
 
-fn request_to_config(request: &ChatCompletionRequest) -> Option<GenerationConfig> {
+fn request_to_structured_messages(
+    messages: &[ChatCompletionMessage],
+) -> Result<Vec<InferenceChatMessage>, String> {
+    if messages.is_empty() {
+        return Err("messages cannot be empty".to_string());
+    }
+
+    let mut out = Vec::new();
+    for message in messages {
+        let content = message.content.clone().unwrap_or_default();
+        if content.is_empty() {
+            continue;
+        }
+
+        let role = match message.role.trim().to_ascii_lowercase().as_str() {
+            "system" => "system",
+            "user" => "user",
+            "assistant" => "assistant",
+            other => return Err(format!("unsupported message role: {other}")),
+        };
+        out.push(InferenceChatMessage {
+            role: role.to_string(),
+            content,
+        });
+    }
+
+    if out.is_empty() {
+        return Err("messages must contain at least one non-empty content item".to_string());
+    }
+    Ok(out)
+}
+
+fn max_tokens_hard_cap() -> usize {
+    std::env::var(OPENVINO_MAX_TOKENS_HARD_CAP_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(OPENVINO_MAX_TOKENS_HARD_CAP_DEFAULT)
+}
+
+fn request_to_config(request: &ChatCompletionRequest) -> Result<Option<GenerationConfig>, String> {
     let mut c = GenerationConfig::default();
     let mut changed = false;
     if let Some(v) = request.max_tokens {
-        c.max_length = v;
+        if v == 0 {
+            return Err("max_tokens must be greater than zero".to_string());
+        }
+        let hard_cap = max_tokens_hard_cap();
+        c.max_length = v.min(hard_cap);
+        if v > hard_cap {
+            log::info!(
+                "Capping max_tokens from {} to backend hard cap {}",
+                v,
+                hard_cap
+            );
+        }
         changed = true;
     }
     if let Some(v) = request.temperature {
@@ -2630,9 +2837,9 @@ fn request_to_config(request: &ChatCompletionRequest) -> Option<GenerationConfig
         changed = true;
     }
     if changed {
-        Some(c)
+        Ok(Some(c))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -2856,9 +3063,33 @@ async fn v1_chat_completions(
 
     drop(queue_permit);
 
-    let prompt = request_to_prompt(&req.messages)
+    let config = request_to_config(&req)
         .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
-    let config = request_to_config(&req);
+    let openvino_active =
+        state.engine.active_backend().await == Some(InferenceBackend::OpenVinoNpu);
+    let use_legacy_prompt = is_preformatted_chatml_single_user_message(&req.messages);
+    let completion_input = if openvino_active && !use_legacy_prompt {
+        let messages = request_to_structured_messages(&req.messages)
+            .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
+        (
+            OPENVINO_CHAT_MODE_STRUCTURED,
+            CompletionInput::Messages(messages),
+        )
+    } else {
+        let prompt = request_to_prompt(&req.messages)
+            .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
+        let mode = if use_legacy_prompt {
+            OPENVINO_CHAT_MODE_LEGACY_PROMPT
+        } else {
+            OPENVINO_CHAT_MODE_STRUCTURED
+        };
+        (mode, CompletionInput::Prompt(prompt))
+    };
+    if openvino_active {
+        let mut backend_status = state.engine.backend_status.lock().await;
+        backend_status.openvino_message_mode = Some(completion_input.0.to_string());
+    }
+    let completion_input = completion_input.1;
     let model_name = req.model.unwrap_or_else(|| "smolpc-engine".to_string());
     let request_id = format!("chatcmpl-{}", Utc::now().timestamp_millis());
     let created = Utc::now().timestamp();
@@ -2867,13 +3098,25 @@ async fn v1_chat_completions(
         let (tx, mut rx) = mpsc::unbounded_channel::<StreamMessage>();
         let engine = state.engine.clone();
         let activity = state.last_activity_ms.clone();
+        let input = completion_input;
         tokio::spawn(async move {
             let _permit = gen_permit;
-            let result = engine
-                .generate_stream(&prompt, config, |t| {
-                    let _ = tx.send(StreamMessage::Token(t));
-                })
-                .await;
+            let result = match input {
+                CompletionInput::Prompt(prompt) => {
+                    engine
+                        .generate_stream(&prompt, config, |t| {
+                            let _ = tx.send(StreamMessage::Token(t));
+                        })
+                        .await
+                }
+                CompletionInput::Messages(messages) => {
+                    engine
+                        .generate_stream_messages(&messages, config, |t| {
+                            let _ = tx.send(StreamMessage::Token(t));
+                        })
+                        .await
+                }
+            };
             match result {
                 Ok(metrics) => {
                     let _ = tx.send(StreamMessage::Metrics(metrics));
@@ -2959,16 +3202,18 @@ async fn v1_chat_completions(
             .into_response());
     }
 
-    let result = state
-        .engine
-        .generate_text(&prompt, config)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse { error: e }),
-            )
-        })?;
+    let result = match completion_input {
+        CompletionInput::Prompt(prompt) => state.engine.generate_text(&prompt, config).await,
+        CompletionInput::Messages(messages) => {
+            state.engine.generate_text_messages(&messages, config).await
+        }
+    }
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     drop(gen_permit);
 
     let response = serde_json::json!({
@@ -3110,6 +3355,54 @@ mod tests {
     }
 
     #[test]
+    fn request_to_config_rejects_zero_max_tokens() {
+        let _guard = lock_env();
+        std::env::remove_var(OPENVINO_MAX_TOKENS_HARD_CAP_ENV);
+        let request = ChatCompletionRequest {
+            model: None,
+            messages: vec![ChatCompletionMessage {
+                role: "user".to_string(),
+                content: Some("hi".to_string()),
+            }],
+            stream: None,
+            max_tokens: Some(0),
+            temperature: None,
+            top_k: None,
+            top_p: None,
+            repetition_penalty: None,
+            repetition_penalty_last_n: None,
+        };
+
+        let error = request_to_config(&request).expect_err("zero max_tokens should fail");
+        assert!(error.contains("max_tokens"));
+    }
+
+    #[test]
+    fn request_to_config_caps_max_tokens_to_hard_limit() {
+        let _guard = lock_env();
+        std::env::remove_var(OPENVINO_MAX_TOKENS_HARD_CAP_ENV);
+        let request = ChatCompletionRequest {
+            model: None,
+            messages: vec![ChatCompletionMessage {
+                role: "user".to_string(),
+                content: Some("hi".to_string()),
+            }],
+            stream: None,
+            max_tokens: Some(99_999),
+            temperature: None,
+            top_k: None,
+            top_p: None,
+            repetition_penalty: None,
+            repetition_penalty_last_n: None,
+        };
+
+        let config = request_to_config(&request)
+            .expect("config parse")
+            .expect("config");
+        assert_eq!(config.max_length, OPENVINO_MAX_TOKENS_HARD_CAP_DEFAULT);
+    }
+
+    #[test]
     fn auth_compare_is_constant_time_functionally() {
         assert!(constant_time_eq(b"abc", b"abc"));
         assert!(!constant_time_eq(b"abc", b"abd"));
@@ -3238,6 +3531,9 @@ mod tests {
                 gpu_device_id: Some(0),
                 npu_adapter_identity: None,
                 npu_driver_version: None,
+                openvino_npu_max_prompt_len: Some(512),
+                openvino_npu_min_response_len: Some(1024),
+                openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
                 selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(
@@ -3280,6 +3576,9 @@ mod tests {
                 gpu_device_id: Some(0),
                 npu_adapter_identity: Some("openvino:npu:intel_npu".to_string()),
                 npu_driver_version: Some("32.0.100.3104".to_string()),
+                openvino_npu_max_prompt_len: Some(512),
+                openvino_npu_min_response_len: Some(1024),
+                openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
                 selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(
@@ -3317,6 +3616,9 @@ mod tests {
                 gpu_device_id: Some(0),
                 npu_adapter_identity: Some("openvino:npu:intel_npu".to_string()),
                 npu_driver_version: Some("32.0.100.3104".to_string()),
+                openvino_npu_max_prompt_len: Some(512),
+                openvino_npu_min_response_len: Some(1024),
+                openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
                 selection_profile: Some(OPENVINO_SELECTION_PROFILE.to_string()),
             },
             persisted_decision: Some(BackendDecision::new(
@@ -3481,6 +3783,94 @@ mod tests {
     }
 
     #[test]
+    fn check_model_response_reports_openvino_only_model_readiness() {
+        let _guard = lock_env();
+        let temp = tempdir().expect("temp dir");
+        let resource_dir = temp.path().join("resources");
+        let libs = resource_dir.join("libs");
+        let models_dir = temp.path().join("models");
+        let model_dir = models_dir.join("qwen3-4b-int4-ov");
+        let openvino_dir = model_dir.join("openvino_npu");
+
+        create_ort_files(
+            &libs,
+            &[
+                "onnxruntime.dll",
+                "onnxruntime_providers_shared.dll",
+                "onnxruntime-genai.dll",
+                "DirectML.dll",
+            ],
+        );
+        create_openvino_files(&libs.join("openvino"));
+        fs::create_dir_all(&openvino_dir).expect("create openvino dir");
+        fs::write(openvino_dir.join("openvino_model.xml"), []).expect("write openvino model");
+        fs::write(openvino_dir.join("openvino_model.bin"), []).expect("write openvino weights");
+        fs::write(openvino_dir.join("openvino_tokenizer.xml"), []).expect("write tokenizer xml");
+        fs::write(openvino_dir.join("openvino_tokenizer.bin"), []).expect("write tokenizer bin");
+        fs::write(openvino_dir.join("openvino_detokenizer.xml"), [])
+            .expect("write detokenizer xml");
+        fs::write(openvino_dir.join("openvino_detokenizer.bin"), [])
+            .expect("write detokenizer bin");
+        fs::write(openvino_dir.join("openvino_config.json"), []).expect("write ov config");
+        fs::write(openvino_dir.join("generation_config.json"), [])
+            .expect("write generation config");
+        fs::write(openvino_dir.join("config.json"), []).expect("write config");
+        fs::write(openvino_dir.join("tokenizer.json"), []).expect("write tokenizer");
+        fs::write(openvino_dir.join("tokenizer_config.json"), []).expect("write tokenizer config");
+        fs::write(openvino_dir.join("special_tokens_map.json"), [])
+            .expect("write special tokens map");
+        fs::write(openvino_dir.join("chat_template.jinja"), []).expect("write chat template");
+        fs::write(openvino_dir.join("added_tokens.json"), []).expect("write added tokens");
+        fs::write(openvino_dir.join("merges.txt"), []).expect("write merges");
+        fs::write(openvino_dir.join("vocab.json"), []).expect("write vocab");
+        fs::write(
+            openvino_dir.join("manifest.json"),
+            br#"{"entrypoint":"openvino_model.xml","required_files":["openvino_model.bin","openvino_tokenizer.xml","openvino_tokenizer.bin","openvino_detokenizer.xml","openvino_detokenizer.bin","openvino_config.json","generation_config.json","config.json","tokenizer.json","tokenizer_config.json","special_tokens_map.json","chat_template.jinja","added_tokens.json","merges.txt","vocab.json"]}"#,
+        )
+        .expect("write openvino manifest");
+
+        let models_guard = EnvVarGuard::set("SMOLPC_MODELS_DIR", models_dir.as_os_str());
+        let bundles =
+            resolve_runtime_bundles_for_mode(Some(&resource_dir), RuntimeLoadMode::Production);
+        let probe = BackendProbeResult {
+            available_backends: vec![InferenceBackend::Cpu, InferenceBackend::DirectML],
+            directml_device_count: 1,
+            directml_candidate: Some(DirectMlCandidate {
+                device_id: 0,
+                device_name: "Intel Arc".to_string(),
+                adapter_identity: "intel:arc".to_string(),
+                driver_version: "31.0.101.5522".to_string(),
+            }),
+            npu_hardware_detected: true,
+        };
+        let openvino_probe = OpenVinoStartupProbeResult {
+            hardware_detected: true,
+            startup_ready: true,
+            device_visible: true,
+            adapter_identity: Some("openvino:npu:intel_npu".to_string()),
+            device_name: Some("Intel NPU".to_string()),
+            driver_version: Some("32.0.100.3104".to_string()),
+            failure_class: None,
+            failure_message: None,
+        };
+
+        let response = build_check_model_response(
+            "qwen3-4b-int4-ov",
+            &bundles,
+            Some(&probe),
+            Some(&openvino_probe),
+        );
+        drop(models_guard);
+
+        assert!(response.lanes.openvino_npu.ready);
+        assert_eq!(response.lanes.openvino_npu.reason, "ready");
+        assert!(!response.lanes.directml.ready);
+        assert_eq!(response.lanes.directml.reason, "artifact_missing");
+        assert!(!response.lanes.cpu.ready);
+        assert_eq!(response.lanes.cpu.reason, "artifact_missing");
+    }
+
+    #[test]
     fn process_idle_exit_is_disabled_by_default() {
         let _guard = lock_env();
         let env_guard = EnvVarGuard::unset("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS");
@@ -3545,11 +3935,18 @@ mod tests {
             "openvino.dll",
             "openvino_c.dll",
             "openvino_intel_npu_plugin.dll",
+            "openvino_intel_npu_compiler.dll",
             "openvino_intel_cpu_plugin.dll",
             "openvino_ir_frontend.dll",
             "openvino_genai.dll",
+            "openvino_genai_c.dll",
             "openvino_tokenizers.dll",
             "tbb12.dll",
+            "tbbbind_2_5.dll",
+            "tbbmalloc.dll",
+            "tbbmalloc_proxy.dll",
+            "icudt70.dll",
+            "icuuc70.dll",
         ] {
             fs::write(root.join(file), []).expect("write openvino runtime file");
         }
