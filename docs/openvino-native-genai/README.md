@@ -19,11 +19,12 @@ As of 2026-03-12, this branch has completed the first native runtime-activation 
 - successful OpenVINO preflight now activates `runtime_engine=ov_genai_npu`
 - automatic selection now prefers `openvino_npu -> directml -> cpu` when the OpenVINO lane is viable
 - the selection fingerprint now uses the `openvino_native_v1` profile so stale pre-activation records do not block rollout
-- `npm run runtime:setup:openvino` now stages the app-local OpenVINO runtime bundle under `apps/codehelper/src-tauri/libs/openvino`
+- `npm run runtime:setup:openvino` now validates the staged Windows GenAI DLL exports before copying files into `apps/codehelper/src-tauri/libs/openvino`
 - `npm run model:setup:qwen3:openvino` now stages the official `OpenVINO/Qwen3-4B-int4-ov` artifact into `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-int4-ov/openvino_npu`
 
 Still pending for the remaining Phase 1 / Phase 1b work:
 
+- archive-based Windows OpenVINO GenAI bundle sourcing, because the current PyPI `openvino-genai` wheel does not expose the required `ov_genai_*` C API exports for the native adapter
 - exact-parity OpenVINO export for `qwen3-4b-instruct-2507` if benchmark parity across lanes is still required
 - default catalog migration away from `qwen3-4b-instruct-2507`
 - final Intel NPU validation and installer-time bundle population
