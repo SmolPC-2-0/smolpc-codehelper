@@ -1,9 +1,21 @@
-# MCP Server Resources (Placeholder)
+# MCP Server Resources
 
-Phase 1 placeholder for LibreOffice MCP assets.
+This directory is reserved for LibreOffice MCP Python runtime assets used by the app.
 
-Planned migration source:
+Planning reference:
 
-1. /Users/mts/smolpc/smolpc-libreoffice/tauri-app/resources/mcp_server
+1. `apps/libreoffice-assistant/MIGRATION_PLAN.md` (Phase 2 MCP runtime port)
 
-Do not wire runtime startup from this folder until Phase 2/3 backend migration.
+Source import baseline:
+
+1. `/Users/mts/smolpc/smolpc-libreoffice/tauri-app/src-tauri/resources/mcp_server/main.py`
+2. `/Users/mts/smolpc/smolpc-libreoffice/tauri-app/src-tauri/resources/mcp_server/libre.py`
+3. `/Users/mts/smolpc/smolpc-libreoffice/tauri-app/src-tauri/resources/mcp_server/helper.py`
+4. `/Users/mts/smolpc/smolpc-libreoffice/tauri-app/src-tauri/resources/mcp_server/helper_utils.py`
+5. `/Users/mts/smolpc/smolpc-libreoffice/tauri-app/src-tauri/resources/mcp_server/helper_test_functions.py`
+
+Notes:
+
+1. Source `libre.py` currently exposes 27 active MCP tools.
+2. Source stack communicates via stdio (Rust <-> Python MCP) and socket bridge (`libre.py` <-> `helper.py` on `localhost:8765`).
+3. Keep this integration engine-only in this repo; do not add Ollama runtime dependencies while porting.

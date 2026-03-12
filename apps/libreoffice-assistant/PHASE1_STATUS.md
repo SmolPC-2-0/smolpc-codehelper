@@ -1,5 +1,9 @@
 # LibreOffice Assistant Phase 1 Status
 
+Primary planning doc for next phases:
+
+1. `apps/libreoffice-assistant/MIGRATION_PLAN.md`
+
 ## Implemented in this branch
 
 1. App scaffold and workspace registration (`npm` + Cargo workspaces).
@@ -33,6 +37,8 @@
 6. Rust unit tests for desired-model restore + runtime checklist evaluation.
 7. Windows verification runbook:
    - `apps/libreoffice-assistant/WINDOWS_PHASE1_VERIFICATION.md`
+8. Source repo audit completed for migration planning:
+   - `apps/libreoffice-assistant/LIBREOFFICE_SOURCE_REPO_ANALYSIS.md`
 
 ## Validation run (local)
 
@@ -43,10 +49,17 @@
 
 All passed.
 
-## Remaining Phase 1 scope
+## Source audit findings applied (2026-03-12)
 
-1. Replace temporary UI with LibreOffice-task-specific UX and prompt templates.
-2. Integrate real LibreOffice-side tool bridge (UNO/MCP process wiring) once repo/code is provided.
-3. End-to-end runtime verification on Windows target hardware (DML-first lane checks).
-4. Capture and attach first real issue-report payload generated from a failing run.
-5. Capture and attach first exported evidence-bundle JSON from a Windows run.
+From `/Users/mts/smolpc/smolpc-libreoffice`:
+
+1. MCP/UNO stack is ready for reuse and includes 27 active tools in `libre.py`.
+2. Source app still contains legacy Ollama dual-provider wiring (Rust commands/services + settings UI).
+3. Source shared-engine layer is HTTP-based with compatibility parsing; this repo should keep the typed `smolpc-engine-client` path.
+4. Migration should import MCP assets + chat/tool UX while keeping engine-only runtime in unified launcher.
+
+## Next implementation scope (post-Phase 1)
+
+Tracked in:
+
+1. `apps/libreoffice-assistant/MIGRATION_PLAN.md`
