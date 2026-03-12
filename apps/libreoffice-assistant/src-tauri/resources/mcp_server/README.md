@@ -14,6 +14,10 @@ Source import baseline:
 4. `/Users/mts/smolpc/smolpc-libreoffice/tauri-app/src-tauri/resources/mcp_server/helper_utils.py`
 5. `/Users/mts/smolpc/smolpc-libreoffice/tauri-app/src-tauri/resources/mcp_server/helper_test_functions.py`
 
+Import status:
+
+1. Imported into this repo on 2026-03-12 for Phase 2 migration work.
+
 Notes:
 
 1. Source `libre.py` currently exposes 27 active MCP tools.

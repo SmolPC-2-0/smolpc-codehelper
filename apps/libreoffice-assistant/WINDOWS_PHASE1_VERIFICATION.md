@@ -2,6 +2,10 @@
 
 Use this runbook on a Windows test machine to capture review-ready evidence.
 
+For MCP bridge validation added in Phase 2, use:
+
+1. `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md`
+
 ## Preconditions
 
 1. LibreOffice Assistant build from branch `codex/libreoffice-port-track-a` is installed or running via `tauri:dev:libreoffice`.

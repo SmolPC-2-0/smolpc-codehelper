@@ -37,7 +37,9 @@ Primary planning doc for next phases:
 6. Rust unit tests for desired-model restore + runtime checklist evaluation.
 7. Windows verification runbook:
    - `apps/libreoffice-assistant/WINDOWS_PHASE1_VERIFICATION.md`
-8. Source repo audit completed for migration planning:
+8. Windows Phase 2 MCP verification runbook:
+   - `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md`
+9. Source repo audit completed for migration planning:
    - `apps/libreoffice-assistant/LIBREOFFICE_SOURCE_REPO_ANALYSIS.md`
 
 ## Validation run (local)
@@ -63,3 +65,22 @@ From `/Users/mts/smolpc/smolpc-libreoffice`:
 Tracked in:
 
 1. `apps/libreoffice-assistant/MIGRATION_PLAN.md`
+
+## Phase 2 progress snapshot (2026-03-12)
+
+1. MCP runtime assets imported into `src-tauri/resources/mcp_server`.
+2. MCP Rust model/service modules added:
+   - `src-tauri/src/models/mcp.rs`
+   - `src-tauri/src/services/mcp_client.rs`
+3. Tauri MCP commands added and registered:
+   - `start_mcp_server`
+   - `check_mcp_status`
+   - `stop_mcp_server`
+   - `list_mcp_tools`
+   - `call_mcp_tool`
+4. Frontend MCP diagnostics panel added to `src/App.svelte`.
+5. Post-change validation passed:
+   - `cargo check -p smolpc-libreoffice-assistant`
+   - `cargo test -p smolpc-libreoffice-assistant --lib`
+   - `npm run check:libreoffice`
+   - `npm run build:libreoffice`

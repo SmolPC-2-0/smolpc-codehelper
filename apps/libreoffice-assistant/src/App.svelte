@@ -99,6 +99,27 @@
     integration_issue_report: IntegrationIssueReport;
   };
 
+  type McpStatus = {
+    running: boolean;
+    error_message?: string | null;
+  };
+
+  type McpTool = {
+    name: string;
+    description: string;
+    input_schema?: unknown;
+  };
+
+  type ToolContent = {
+    type: string;
+    text: string;
+  };
+
+  type ToolResult = {
+    content: ToolContent[];
+    is_error?: boolean;
+  };
+
   let loadingBootstrap = $state(true);
   let actionBusy = $state(false);
   let commandError = $state<string | null>(null);
@@ -120,6 +141,11 @@
   let integrationIssueReport = $state<IntegrationIssueReport | null>(null);
   let runtimeVerification = $state<RuntimeVerificationReport | null>(null);
   let evidenceExportPath = $state<string | null>(null);
+  let mcpStatus = $state<McpStatus | null>(null);
+  let mcpTools = $state<McpTool[]>([]);
+  let selectedMcpTool = $state('');
+  let mcpArguments = $state('{}');
+  let mcpToolResult = $state<ToolResult | null>(null);
 
   function formatError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -441,12 +467,93 @@
     }
   }
 
+  async function refreshMcpStatus(): Promise<void> {
+    try {
+      mcpStatus = await invoke<McpStatus>('check_mcp_status');
+    } catch (error) {
+      commandError = normalizeEngineError(formatError(error));
+    }
+  }
+
+  async function startMcpServer(): Promise<void> {
+    actionBusy = true;
+    clearFeedback();
+    try {
+      mcpStatus = await invoke<McpStatus>('start_mcp_server');
+      if (mcpStatus.running) {
+        await loadMcpTools();
+        actionMessage = `MCP server started (${mcpTools.length} tools loaded).`;
+      } else {
+        actionMessage = 'MCP server failed to start.';
+      }
+    } catch (error) {
+      commandError = normalizeEngineError(formatError(error));
+    } finally {
+      actionBusy = false;
+    }
+  }
+
+  async function stopMcpServer(): Promise<void> {
+    actionBusy = true;
+    clearFeedback();
+    try {
+      mcpStatus = await invoke<McpStatus>('stop_mcp_server');
+      mcpTools = [];
+      selectedMcpTool = '';
+      mcpToolResult = null;
+      actionMessage = 'MCP server stop requested.';
+    } catch (error) {
+      commandError = normalizeEngineError(formatError(error));
+    } finally {
+      actionBusy = false;
+    }
+  }
+
+  async function loadMcpTools(): Promise<void> {
+    try {
+      mcpTools = await invoke<McpTool[]>('list_mcp_tools');
+      if (!mcpTools.some((tool) => tool.name === selectedMcpTool) && mcpTools.length > 0) {
+        selectedMcpTool = mcpTools[0].name;
+      }
+    } catch (error) {
+      commandError = normalizeEngineError(formatError(error));
+    }
+  }
+
+  async function callSelectedMcpTool(): Promise<void> {
+    if (!selectedMcpTool.trim()) {
+      commandError = 'Select an MCP tool before invoking.';
+      return;
+    }
+
+    actionBusy = true;
+    clearFeedback();
+    try {
+      const parsedArgs = mcpArguments.trim()
+        ? (JSON.parse(mcpArguments) as unknown)
+        : {};
+      mcpToolResult = await invoke<ToolResult>('call_mcp_tool', {
+        name: selectedMcpTool,
+        arguments: parsedArgs
+      });
+      actionMessage = `MCP tool '${selectedMcpTool}' executed.`;
+    } catch (error) {
+      commandError = normalizeEngineError(formatError(error));
+    } finally {
+      actionBusy = false;
+    }
+  }
+
   onMount(async () => {
     clearFeedback();
     await refreshBootstrapStatus();
     await refreshModels();
     await Promise.all([refreshCurrentModel(), refreshBackendStatus()]);
     await refreshReadiness();
+    await refreshMcpStatus();
+    if (mcpStatus?.running) {
+      await loadMcpTools();
+    }
   });
 </script>
 
@@ -604,6 +711,58 @@
       </p>
     {:else}
       <p class="muted">No backend status snapshot yet.</p>
+    {/if}
+  </section>
+
+  <section class="panel">
+    <h2>MCP Bridge</h2>
+    <p class="muted">
+      Phase 2 diagnostics for LibreOffice MCP runtime startup and tool invocation.
+    </p>
+    <div class="actions">
+      <button type="button" onclick={() => void refreshMcpStatus()} disabled={actionBusy}>Refresh MCP Status</button>
+      <button type="button" onclick={() => void startMcpServer()} disabled={actionBusy}>
+        Start MCP Server
+      </button>
+      <button type="button" onclick={() => void stopMcpServer()} disabled={actionBusy || !mcpStatus?.running}>
+        Stop MCP Server
+      </button>
+      <button type="button" onclick={() => void loadMcpTools()} disabled={actionBusy || !mcpStatus?.running}>
+        Refresh MCP Tools
+      </button>
+    </div>
+    <p class="kv">running: <code>{mcpStatus?.running ? 'true' : 'false'}</code></p>
+    <p class="kv">error: <code>{mcpStatus?.error_message ?? 'none'}</code></p>
+    <p class="kv">tools_loaded: <code>{mcpTools.length}</code></p>
+    <div class="row">
+      <label for="mcp-tool">Tool</label>
+      <select id="mcp-tool" bind:value={selectedMcpTool} disabled={actionBusy || mcpTools.length === 0}>
+        {#if mcpTools.length === 0}
+          <option value="">(no tools loaded)</option>
+        {:else}
+          {#each mcpTools as tool}
+            <option value={tool.name}>{tool.name}</option>
+          {/each}
+        {/if}
+      </select>
+    </div>
+    <div class="row stacked">
+      <label for="mcp-args">Tool Arguments (JSON)</label>
+      <textarea id="mcp-args" bind:value={mcpArguments} rows="4" disabled={actionBusy}></textarea>
+    </div>
+    <div class="actions">
+      <button
+        type="button"
+        onclick={() => void callSelectedMcpTool()}
+        disabled={actionBusy || !mcpStatus?.running || !selectedMcpTool}
+      >
+        Invoke MCP Tool
+      </button>
+    </div>
+    {#if mcpToolResult}
+      <pre>{JSON.stringify(mcpToolResult, null, 2)}</pre>
+    {:else}
+      <p class="muted">No MCP tool result yet.</p>
     {/if}
   </section>
 

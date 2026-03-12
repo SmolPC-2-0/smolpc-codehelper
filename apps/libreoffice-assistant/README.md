@@ -10,6 +10,7 @@ Use these docs in order:
 2. `apps/libreoffice-assistant/LIBREOFFICE_SOURCE_REPO_ANALYSIS.md` (detailed source audit)
 3. `apps/libreoffice-assistant/PHASE1_STATUS.md` (implemented baseline + validations)
 4. `apps/libreoffice-assistant/WINDOWS_PHASE1_VERIFICATION.md` (verification runbook)
+5. `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md` (MCP bridge Windows test runbook)
 
 ## Current migration status
 
@@ -26,6 +27,10 @@ Phase 1 shared-engine baseline is implemented in this app:
    - `create_integration_issue_report`
    - `run_runtime_verification_checklist`
    - `export_phase1_evidence_bundle`
+5. Phase 2 MCP bridge baseline now wired:
+   - Python MCP assets imported under `src-tauri/resources/mcp_server`
+   - Rust MCP commands (`start/check/stop/list/call`) registered
+   - MCP diagnostics/tool-call panel added to `src/App.svelte`
 
 ## Source migration baseline
 

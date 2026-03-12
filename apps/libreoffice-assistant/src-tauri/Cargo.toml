@@ -22,5 +22,6 @@ tauri = { version = "2.6.2", features = [] }
 tauri-plugin-log = "2"
 dirs = "6"
 tokio = { version = "1", features = ["full"] }
+anyhow = "1"
 smolpc-engine-client = { path = "../../../engine/crates/smolpc-engine-client" }
 smolpc-engine-core = { path = "../../../engine/crates/smolpc-engine-core" }

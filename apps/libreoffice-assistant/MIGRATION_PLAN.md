@@ -34,9 +34,8 @@ Implemented:
 
 Not implemented yet:
 
-1. MCP process + tool command surface in this app.
-2. Ported Python MCP/UNO runtime assets in this app.
-3. End-to-end chat tool loop from source app, adapted to engine-only backend.
+1. End-to-end MCP startup/tool-call validation evidence from a Windows run.
+2. End-to-end chat tool loop from source app, adapted to engine-only backend.
 
 ## Migration phases
 
@@ -52,7 +51,7 @@ Acceptance:
 
 1. Local checks and tests pass (see `PHASE1_STATUS.md`).
 
-### Phase 2: MCP runtime port and bridge (next)
+### Phase 2: MCP runtime port and bridge (in progress)
 
 Goal:
 
@@ -81,6 +80,40 @@ Acceptance:
 1. `start_mcp_server` returns running state.
 2. `list_mcp_tools` returns non-empty tool list.
 3. One safe/read-only MCP call succeeds from UI.
+
+Progress update (2026-03-12):
+
+1. Imported MCP runtime assets into `src-tauri/resources/mcp_server`:
+   - `main.py`
+   - `libre.py`
+   - `helper.py`
+   - `helper_utils.py`
+   - `helper_test_functions.py`
+2. Added Rust MCP model/service modules:
+   - `src-tauri/src/models/mcp.rs`
+   - `src-tauri/src/services/mcp_client.rs`
+3. Wired Tauri MCP commands in backend:
+   - `start_mcp_server`
+   - `check_mcp_status`
+   - `stop_mcp_server`
+   - `list_mcp_tools`
+   - `call_mcp_tool`
+4. Added MCP diagnostics panel in frontend `src/App.svelte`:
+   - status refresh/start/stop actions
+   - tool list refresh/select
+   - tool-call JSON invocation and result panel
+5. Validation run completed after integration changes:
+   - `cargo check -p smolpc-libreoffice-assistant`
+   - `cargo test -p smolpc-libreoffice-assistant --lib`
+   - `npm run check:libreoffice`
+   - `npm run build:libreoffice`
+
+Remaining Phase 2 acceptance work:
+
+1. Run app in `tauri dev` and verify real MCP startup against local Python/LibreOffice environment.
+2. Execute one read-only MCP tool call end-to-end from UI and capture result evidence.
+3. Follow Windows runbook:
+   - `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md`
 
 ### Phase 3: Chat/tool workflow port
 
@@ -148,3 +181,4 @@ Use docs in this order:
 2. `LIBREOFFICE_SOURCE_REPO_ANALYSIS.md` for source audit details and mapping rationale.
 3. `PHASE1_STATUS.md` for completed baseline and validation evidence.
 4. `WINDOWS_PHASE1_VERIFICATION.md` for runtime evidence capture steps.
+5. `WINDOWS_PHASE2_MCP_VERIFICATION.md` for MCP bridge validation on Windows.

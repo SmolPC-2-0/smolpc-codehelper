@@ -1,3 +1,8 @@
+mod models;
+mod services;
+
+use crate::models::mcp::{McpTool, ToolResult};
+use crate::services::mcp_client::McpClient;
 use smolpc_engine_client::{
     connect_or_spawn, engine_api_major_compatible, expected_engine_api_major,
     read_runtime_env_overrides, version_major, EngineClient, EngineConnectOptions, StartupMode,
@@ -136,11 +141,23 @@ impl Default for EngineBridgeState {
     }
 }
 
+#[derive(Default)]
+pub struct McpRuntimeState {
+    client: Arc<McpClient>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct McpStatus {
+    running: bool,
+    error_message: Option<String>,
+}
+
 fn phase_one_notes() -> Vec<String> {
     vec![
         "Frontend shell created under apps/libreoffice-assistant/src".to_string(),
         "Tauri backend shell created under apps/libreoffice-assistant/src-tauri".to_string(),
-        "MCP resource path reserved at src-tauri/resources/mcp_server".to_string(),
+        "MCP runtime assets staged under src-tauri/resources/mcp_server".to_string(),
+        "Phase 2 MCP bridge commands wired (start/check/stop/list/call)".to_string(),
         "Shared engine bootstrap/status bridge wired through smolpc-engine-client".to_string(),
     ]
 }
@@ -517,6 +534,37 @@ fn phase1_evidence_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String>
     Ok(app_data_dir.join("phase1-evidence"))
 }
 
+fn get_mcp_resource_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if cfg!(debug_assertions) {
+        let current_dir =
+            std::env::current_dir().map_err(|error| format!("Failed to get cwd: {error}"))?;
+        let direct = current_dir.join("resources/mcp_server");
+        if direct.exists() {
+            return Ok(direct);
+        }
+        let parent = current_dir.join("../resources/mcp_server");
+        if parent.exists() {
+            log::info!("Using parent MCP resource path: {}", parent.display());
+            return Ok(parent);
+        }
+        return Ok(direct);
+    }
+
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| format!("Failed to resolve bundled resources path: {error}"))?;
+    Ok(resource_dir.join("mcp_server"))
+}
+
+fn default_python_command() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "python"
+    } else {
+        "python3"
+    }
+}
+
 async fn build_integration_issue_report(
     client: &EngineClient,
     app_handle: &tauri::AppHandle,
@@ -837,6 +885,102 @@ async fn check_model_exists(
 }
 
 #[tauri::command]
+async fn start_mcp_server(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, McpRuntimeState>,
+    python_path: Option<String>,
+) -> Result<McpStatus, String> {
+    let mcp_dir = get_mcp_resource_path(&app_handle)?;
+    let env_python = std::env::var("SMOLPC_PYTHON_PATH").ok();
+    let selected_python = python_path
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .or(env_python.as_deref())
+        .unwrap_or(default_python_command());
+
+    match state.client.start(Some(selected_python), mcp_dir) {
+        Ok(_) => {
+            if let Err(error) = state.client.initialize() {
+                log::error!("Failed to initialize MCP: {}", error);
+                return Ok(McpStatus {
+                    running: false,
+                    error_message: Some(format!("Failed to initialize MCP: {error}")),
+                });
+            }
+
+            if let Err(error) = state.client.list_tools() {
+                log::warn!("Failed to load MCP tools after startup: {}", error);
+            }
+
+            Ok(McpStatus {
+                running: true,
+                error_message: None,
+            })
+        }
+        Err(error) => Ok(McpStatus {
+            running: false,
+            error_message: Some(format!("Failed to start MCP server: {error}")),
+        }),
+    }
+}
+
+#[tauri::command]
+async fn check_mcp_status(state: tauri::State<'_, McpRuntimeState>) -> Result<McpStatus, String> {
+    let running = state.client.is_running();
+    Ok(McpStatus {
+        running,
+        error_message: if running {
+            None
+        } else {
+            Some("MCP server is not running".to_string())
+        },
+    })
+}
+
+#[tauri::command]
+async fn stop_mcp_server(state: tauri::State<'_, McpRuntimeState>) -> Result<McpStatus, String> {
+    match state.client.stop() {
+        Ok(_) => Ok(McpStatus {
+            running: false,
+            error_message: None,
+        }),
+        Err(error) => Ok(McpStatus {
+            running: true,
+            error_message: Some(format!("Failed to stop MCP server: {error}")),
+        }),
+    }
+}
+
+#[tauri::command]
+async fn list_mcp_tools(state: tauri::State<'_, McpRuntimeState>) -> Result<Vec<McpTool>, String> {
+    let cached = state.client.get_tools();
+    if !cached.is_empty() {
+        return Ok(cached);
+    }
+
+    if !state.client.is_running() {
+        return Ok(Vec::new());
+    }
+
+    state
+        .client
+        .list_tools()
+        .map_err(|error| format!("Failed to list MCP tools: {error}"))
+}
+
+#[tauri::command]
+async fn call_mcp_tool(
+    state: tauri::State<'_, McpRuntimeState>,
+    name: String,
+    arguments: serde_json::Value,
+) -> Result<ToolResult, String> {
+    state
+        .client
+        .call_tool(name, arguments)
+        .map_err(|error| format!("MCP tool call failed: {error}"))
+}
+
+#[tauri::command]
 async fn create_integration_issue_report(
     request_payload: Option<serde_json::Value>,
     http_status: Option<u16>,
@@ -938,6 +1082,7 @@ pub fn run() {
             Ok(())
         })
         .manage(EngineBridgeState::default())
+        .manage(McpRuntimeState::default())
         .invoke_handler(tauri::generate_handler![
             get_bootstrap_status,
             ensure_engine_started,
@@ -952,6 +1097,11 @@ pub fn run() {
             get_inference_backend_status,
             check_model_readiness,
             check_model_exists,
+            start_mcp_server,
+            check_mcp_status,
+            stop_mcp_server,
+            list_mcp_tools,
+            call_mcp_tool,
             create_integration_issue_report,
             run_runtime_verification_checklist,
             export_phase1_evidence_bundle

@@ -4681,6 +4681,7 @@ dependencies = [
 name = "smolpc-libreoffice-assistant"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "dirs",
  "log",
  "serde",
