@@ -35,8 +35,7 @@
       "WebFetch(domain:ort.pyke.io)",
       "mcp__serena__list_dir",
       "mcp__serena__check_onboarding_performed",
-      "mcp__serena__get_symbols_overview",
-      "Bash(cd \"C:/Users/siddh/Desktop/smolpc-codehelper/launcher\" && npx svelte-check --tsconfig ./tsconfig.json 2>&1)"
+      "mcp__serena__get_symbols_overview"
     ],
     "deny": [],
     "ask": []

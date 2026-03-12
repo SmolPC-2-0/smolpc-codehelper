@@ -105,10 +105,16 @@ pub async fn launcher_register_manual_path(
 }
 
 #[tauri::command]
-pub fn launcher_pick_manual_exe() -> Result<Option<String>, String> {
-    Ok(rfd::FileDialog::new()
-        .set_title("Select App Executable")
-        .add_filter("Executable", &["exe"])
-        .pick_file()
-        .map(|path| path.display().to_string()))
+pub async fn launcher_pick_manual_exe() -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(|| {
+        Ok::<Option<String>, String>(
+            rfd::FileDialog::new()
+                .set_title("Select App Executable")
+                .add_filter("Executable", &["exe"])
+                .pick_file()
+                .map(|path| path.display().to_string()),
+        )
+    })
+    .await
+    .map_err(|error| format!("Failed to join manual picker task: {error}"))?
 }

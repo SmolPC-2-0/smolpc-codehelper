@@ -15,18 +15,26 @@ use tauri::Manager;
 
 /// Resolve the `libs/` directory that contains bundled runtime DLLs.
 /// In dev: `launcher/src-tauri/libs/`
-/// In production: Tauri resource dir `libs/`
-fn resolve_libs_dir(app: &tauri::App) -> Option<PathBuf> {
-    let candidates = [
-        // Production: resource_dir/libs/
-        app.path().resource_dir().ok().map(|d| d.join("libs")),
-        // Dev: CARGO_MANIFEST_DIR/libs/
-        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("libs")),
-    ];
+/// In production: next to the packaged executable under `resources/libs/`
+fn resolve_libs_dir() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            candidates.push(exe_dir.join("resources").join("libs"));
+            candidates.push(exe_dir.join("Resources").join("libs"));
+            candidates.push(exe_dir.join("libs"));
+            if let Some(parent) = exe_dir.parent() {
+                candidates.push(parent.join("resources").join("libs"));
+                candidates.push(parent.join("Resources").join("libs"));
+            }
+        }
+    }
+
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("libs"));
 
     candidates
         .into_iter()
-        .flatten()
         .find(|dir| dir.join("onnxruntime.dll").exists())
 }
 
@@ -37,8 +45,8 @@ fn resolve_libs_dir(app: &tauri::App) -> Option<PathBuf> {
 /// Sets:
 /// - `ORT_DYLIB_PATH`      → onnxruntime.dll (used by the `ort` crate)
 /// - `SMOLPC_GENAI_DYLIB`  → onnxruntime-genai.dll (used by GenAI DirectML backend)
-fn configure_runtime_dlls(app: &tauri::App) {
-    let Some(libs_dir) = resolve_libs_dir(app) else {
+pub fn configure_runtime_dlls_early() {
+    let Some(libs_dir) = resolve_libs_dir() else {
         log::warn!("Could not find bundled libs/ directory; engine host may fail to start");
         return;
     };
@@ -85,8 +93,6 @@ pub fn run() {
                         .build(),
                 )?;
             }
-
-            configure_runtime_dlls(app);
 
             // Eager engine start — non-blocking, UI loads immediately.
             // Restored so launcher boot still warms the engine even if frontend only polls status.

@@ -715,8 +715,16 @@ async fn resolve_installer_path(
         return download_installer(app_id, installer).await;
     }
 
-    if let Some(stripped) = url.strip_prefix("file://") {
-        let path = PathBuf::from(stripped);
+    if has_url_prefix(url, "file://") {
+        let file_url = reqwest::Url::parse(url).map_err(|error| {
+            format!("Invalid file:// installer URL '{}': {error}", installer.url)
+        })?;
+        let path = file_url.to_file_path().map_err(|_| {
+            format!(
+                "Installer URL '{}' is not a valid local file path",
+                installer.url
+            )
+        })?;
         if !path.exists() {
             return Err(format!("Installer path does not exist: {}", path.display()));
         }
