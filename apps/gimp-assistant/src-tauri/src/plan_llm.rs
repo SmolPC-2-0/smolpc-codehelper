@@ -1,5 +1,4 @@
-use crate::plan_schema::{ActionPlan, Op, Target};
-use serde_json::json;
+use crate::plan_schema::ActionPlan;
 use smolpc_engine_client::EngineClient;
 
 fn planner_prompt(user_text: &str) -> String {

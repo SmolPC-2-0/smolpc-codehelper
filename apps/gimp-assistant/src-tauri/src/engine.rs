@@ -4,6 +4,7 @@ use tokio::sync::Mutex;
 
 use serde_json::{json, Value};
 use smolpc_engine_client::{connect_or_spawn, EngineClient, EngineConnectOptions, RuntimeModePreference};
+use tauri::Manager;
 
 const DEFAULT_ENGINE_PORT: u16 = 19432;
 
