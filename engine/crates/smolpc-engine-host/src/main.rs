@@ -308,6 +308,7 @@ const STARTUP_PROBE_WAIT_MS: u64 = 1_500;
 /// Extended probe budget for DirectML startup.
 /// Worst-case total probe wait: STARTUP_PROBE_WAIT_MS + STARTUP_PROBE_RECOVERY_WAIT_MS.
 const STARTUP_PROBE_RECOVERY_WAIT_MS: u64 = 8_000;
+const OPENVINO_STARTUP_PROBE_WAIT: Duration = Duration::from_secs(30);
 const OPENVINO_PREFLIGHT_BUDGET: Duration = Duration::from_secs(300);
 const OPENVINO_SELECTION_PROFILE: &str = "openvino_native_v1";
 
@@ -1673,8 +1674,14 @@ impl EngineState {
         let probe = self
             .wait_for_startup_probe_with_recovery(directml_required)
             .await;
+        let openvino_probe_budget =
+            if openvino_required || force_override == Some(InferenceBackend::OpenVinoNpu) {
+                OPENVINO_STARTUP_PROBE_WAIT
+            } else {
+                Duration::from_millis(STARTUP_PROBE_WAIT_MS)
+            };
         let openvino_probe = self
-            .wait_for_openvino_startup_probe(Duration::from_millis(STARTUP_PROBE_WAIT_MS))
+            .wait_for_openvino_startup_probe(openvino_probe_budget)
             .await;
 
         let directml_detected = probe.directml_candidate.is_some();
