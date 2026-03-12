@@ -46,6 +46,67 @@ function Copy-RequiredFile {
     Copy-Item -Force $Source $Destination
 }
 
+function Test-OpenVinoGenAiExports {
+    param([string]$PythonTarget)
+
+    $validationScriptPath = Join-Path $PythonTarget "smolpc-openvino-export-check.py"
+    $validationScript = @'
+import ctypes
+import os
+import pathlib
+import sys
+
+python_target = pathlib.Path(sys.argv[1])
+search_dirs = [
+    python_target / "openvino" / "libs",
+    python_target / "openvino_genai",
+    python_target / "openvino_tokenizers" / "lib",
+]
+for directory in search_dirs:
+    os.add_dll_directory(str(directory))
+
+dll = ctypes.WinDLL(str(python_target / "openvino_genai" / "openvino_genai.dll"))
+required = [
+    "ov_genai_llm_pipeline_create",
+    "ov_genai_llm_pipeline_free",
+    "ov_genai_llm_pipeline_generate",
+    "ov_genai_generation_config_create",
+    "ov_genai_generation_config_set_max_new_tokens",
+]
+missing = []
+for symbol in required:
+    try:
+        getattr(dll, symbol)
+    except AttributeError:
+        missing.append(symbol)
+
+if missing:
+    sys.stderr.write(
+        "openvino_genai.dll is missing required C API exports: "
+        + ", ".join(missing)
+        + "\n"
+    )
+    sys.exit(3)
+'@
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($validationScriptPath, $validationScript, $utf8NoBom)
+
+    try {
+        & python $validationScriptPath $PythonTarget
+        if ($LASTEXITCODE -ne 0) {
+            throw (
+                "Installed OpenVINO packages did not provide the required GenAI C API exports. " +
+                "The current staged Windows PyPI bundle is not compatible with the native runtime adapter."
+            )
+        }
+    } finally {
+        if (Test-Path $validationScriptPath) {
+            Remove-Item -LiteralPath $validationScriptPath -Force
+        }
+    }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $bundleRoot = Resolve-TargetPath -Path $BundleRoot -RepoRoot $repoRoot
 $pythonTarget = Join-Path $env:TEMP ("smolpc-openvino-runtime-" + [Guid]::NewGuid().ToString("N"))
@@ -85,6 +146,8 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to install the pinned OpenVINO packages for bundle staging."
     }
+
+    Test-OpenVinoGenAiExports -PythonTarget $pythonTarget
 
     foreach ($file in $requiredFiles) {
         $source = Join-Path $pythonTarget $file.Source
