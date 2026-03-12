@@ -7,6 +7,7 @@ const SHARED_MODELS_DIR: &str = "models";
 const LEGACY_MODEL_FILENAME: &str = "model.onnx";
 const TOKENIZER_FILENAME: &str = "tokenizer.json";
 const GENAI_CONFIG_FILENAME: &str = "genai_config.json";
+const OPENVINO_MANIFEST_FILENAME: &str = "manifest.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelArtifactBackend {
@@ -88,6 +89,10 @@ impl ModelLoader {
         Self::model_path(model_name).join(ModelArtifactBackend::DirectML.as_dir())
     }
 
+    pub fn openvino_dir(model_name: &str) -> PathBuf {
+        Self::model_path(model_name).join("openvino_npu")
+    }
+
     fn directml_genai_config_file(model_name: &str) -> PathBuf {
         Self::directml_dir(model_name).join(GENAI_CONFIG_FILENAME)
     }
@@ -104,6 +109,10 @@ impl ModelLoader {
         ];
 
         required.into_iter().filter(|path| !path.exists()).collect()
+    }
+
+    pub fn openvino_manifest_file(model_name: &str) -> PathBuf {
+        Self::openvino_dir(model_name).join(OPENVINO_MANIFEST_FILENAME)
     }
 
     /// Resolve the CPU model path with backward compatibility.
@@ -252,6 +261,12 @@ mod tests {
     fn backend_dir_names_are_stable() {
         assert_eq!(ModelArtifactBackend::Cpu.as_dir(), "cpu");
         assert_eq!(ModelArtifactBackend::DirectML.as_dir(), "dml");
+    }
+
+    #[test]
+    fn openvino_manifest_file_uses_lane_directory() {
+        let path = ModelLoader::openvino_manifest_file("qwen2.5-coder-1.5b");
+        assert!(path.ends_with("qwen2.5-coder-1.5b/openvino_npu/manifest.json"));
     }
 
     #[test]

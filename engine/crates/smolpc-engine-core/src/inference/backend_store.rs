@@ -175,6 +175,9 @@ mod tests {
             gpu_device_id: Some(0),
             npu_adapter_identity: Some("intel:npu".to_string()),
             npu_driver_version: Some("32.0.100.3104".to_string()),
+            openvino_npu_max_prompt_len: Some(256),
+            openvino_npu_min_response_len: Some(8),
+            openvino_message_mode: Some("structured_messages".to_string()),
             selection_profile: Some("default".to_string()),
         }
     }
@@ -224,7 +227,10 @@ mod tests {
         let key_b = decision_key("31.0.101.5590");
 
         store.upsert(decision_record(key_a.clone(), Some(InferenceBackend::Cpu)));
-        store.upsert(decision_record(key_b.clone(), Some(InferenceBackend::DirectML)));
+        store.upsert(decision_record(
+            key_b.clone(),
+            Some(InferenceBackend::DirectML),
+        ));
         store.persist().expect("persist");
 
         let reloaded = BackendStore::load(&path).expect("reload");
@@ -240,9 +246,10 @@ mod tests {
         let mut store = BackendStore::load(&path).expect("load");
         let key = decision_key("31.0.101.5522");
         let mut record = decision_record(key.clone(), None);
-        record
-            .failure_counters
-            .record_directml_failure(crate::inference::backend::DirectMLFailureStage::Init, "init");
+        record.failure_counters.record_directml_failure(
+            crate::inference::backend::DirectMLFailureStage::Init,
+            "init",
+        );
 
         store.upsert(record);
         store.persist().expect("persist");

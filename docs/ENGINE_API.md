@@ -1,6 +1,6 @@
 # SmolPC Engine HTTP API (v1)
 
-> Status note (2026-03-10): this document describes the current implemented API on this branch. The engine status and model-readiness surface are now lane-based, and the OpenVINO artifact/startup-probe scaffolding is wired. Native `openvino_npu` activation is still not implemented, so successful OpenVINO selection does not happen yet.
+> Status note (2026-03-12): this document describes the current implemented API on this branch. The engine status and model-readiness surface is lane-based, and native `openvino_npu` activation is now implemented behind the existing startup-probe and preflight gates.
 
 All endpoints are localhost-only and require a bearer token:
 
@@ -51,8 +51,7 @@ Default base URL: `http://127.0.0.1:19432`
     - `null`
   - Top-level backend fields:
     - `backend_status.runtime_engine`
-      - Current implemented values: `ort_cpu`, `genai_dml`, `null`
-      - Reserved for future OpenVINO lane: `ov_genai_npu`
+      - Current implemented values: `ort_cpu`, `genai_dml`, `ov_genai_npu`, `null`
     - `backend_status.selection_state`: `pending | ready | fallback | error`
     - `backend_status.selection_reason`: host-side reason code for the latest backend decision
     - `backend_status.decision_persistence_state`: `none | persisted | temporary_fallback`
@@ -108,7 +107,8 @@ Default base URL: `http://127.0.0.1:19432`
     - `directml` lane startup detection is implemented.
     - `directml` lane preflight becomes `ready` only after a successful DirectML model load.
     - `openvino_npu` lane bundle/artifact readiness and startup-probe truth are reported now.
-    - `openvino_npu` preflight state plumbing exists, but native OpenVINO activation is still unavailable, so `runtime_engine` remains `ort_cpu` or `genai_dml`.
+    - `openvino_npu` lane preflight now reflects real compile plus first-token smoke tests during `/engine/load`.
+    - successful OpenVINO preflight can activate `runtime_engine=ov_genai_npu`.
 
 - `POST /engine/ensure-started`
   - Body:
@@ -181,7 +181,6 @@ Default base URL: `http://127.0.0.1:19432`
     - `artifact_incomplete`
     - `startup_probe_pending`
     - `startup_probe_failed`
-    - `runtime_unavailable`
     - `directml_candidate_missing`
     - bundle validation failure codes such as `missing_root`, `directml_missing`, `openvino_npu_plugin_missing`
     - blocking OpenVINO startup-probe failure classes such as `no_npu_hardware`, `openvino_npu_driver_missing`, and `openvino_npu_plugin_unavailable`
@@ -203,8 +202,8 @@ Default base URL: `http://127.0.0.1:19432`
       - then `startup_probe_pending` while the async OpenVINO startup probe is still running
       - then a blocking OpenVINO startup-probe failure class when the startup probe completed but the lane is unusable
       - then `startup_probe_failed` if the startup probe completed without a usable result but without a classified blocking failure
-      - then `runtime_unavailable`
-      - `openvino_npu.ready` remains `false` in the current branch because native OpenVINO activation is not implemented yet
+      - otherwise `ready`
+      - `openvino_npu.ready=true` means the lane is viable enough to attempt `/engine/load`; model load still performs the final native OpenVINO preflight
 
 - `POST /engine/shutdown`
   - Graceful daemon shutdown.
@@ -251,9 +250,9 @@ Default base URL: `http://127.0.0.1:19432`
 ## Backend Selection Policy (Windows)
 
 - `engine-host` remains the sole selector, probe owner, fallback owner, and persistence owner.
-- Current implemented automatic selection is still `directml -> cpu`.
+- Current implemented automatic selection is `openvino_npu -> directml -> cpu` when the OpenVINO lane passes preflight.
 - `engine-host` already runs async DirectML and OpenVINO startup probes and folds those results into lane status.
-- `openvino_npu` is present in status and readiness surfaces now, but it is not successfully selected or initialized yet.
+- `openvino_npu` is now a live runtime lane and can be selected or forced when preflight succeeds.
 - Runtime loading policy:
   - production uses app-local absolute runtime bundle paths only
   - production does not fall back to `PATH`, bare DLL names, or user-installed ORT/OpenVINO copies
@@ -265,7 +264,8 @@ Default base URL: `http://127.0.0.1:19432`
   - invalid forced device ids fail with explicit load error `invalid_directml_device_id`
 - Runtime failure handling:
   - if DirectML fails during initialization or generation, host can fall back to CPU for the current load
-  - OpenVINO lane attempts can already mark the current load as `temporary_fallback`, but the current branch still resolves to `directml` or `cpu` because native activation is unavailable
+  - OpenVINO preflight timeouts mark the current load as `temporary_fallback` without overwriting a prior good OpenVINO record
+  - OpenVINO compile/runtime preflight failures fall through to `directml` or `cpu` unless OpenVINO was explicitly forced
   - `backend_status.decision_persistence_state=temporary_fallback` means the current active backend is a fallback without overwriting a previously persisted eligible record
   - repeated DirectML failures still demote to persisted CPU after the existing threshold is reached
 

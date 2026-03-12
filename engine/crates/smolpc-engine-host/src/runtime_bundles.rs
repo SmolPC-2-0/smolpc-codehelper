@@ -292,20 +292,34 @@ fn build_openvino_bundle(bundle_root: PathBuf) -> OpenVinoRuntimeBundle {
     let openvino_dll = bundle_root.join("openvino.dll");
     let openvino_c_dll = bundle_root.join("openvino_c.dll");
     let npu_plugin = bundle_root.join("openvino_intel_npu_plugin.dll");
+    let npu_compiler = bundle_root.join("openvino_intel_npu_compiler.dll");
     let cpu_plugin = bundle_root.join("openvino_intel_cpu_plugin.dll");
     let ir_frontend = bundle_root.join("openvino_ir_frontend.dll");
     let genai_dll = bundle_root.join("openvino_genai.dll");
+    let genai_c_dll = bundle_root.join("openvino_genai_c.dll");
     let tokenizers_dll = bundle_root.join("openvino_tokenizers.dll");
     let tbb_dll = bundle_root.join("tbb12.dll");
+    let tbbbind_dll = bundle_root.join("tbbbind_2_5.dll");
+    let tbbmalloc_dll = bundle_root.join("tbbmalloc.dll");
+    let tbbmalloc_proxy_dll = bundle_root.join("tbbmalloc_proxy.dll");
+    let icudt_dll = bundle_root.join("icudt70.dll");
+    let icuuc_dll = bundle_root.join("icuuc70.dll");
     let required_files = vec![
         RequiredRuntimeFile::new("openvino.dll", openvino_dll.clone()),
         RequiredRuntimeFile::new("openvino_c.dll", openvino_c_dll.clone()),
         RequiredRuntimeFile::new("openvino_intel_npu_plugin.dll", npu_plugin.clone()),
+        RequiredRuntimeFile::new("openvino_intel_npu_compiler.dll", npu_compiler.clone()),
         RequiredRuntimeFile::new("openvino_intel_cpu_plugin.dll", cpu_plugin.clone()),
         RequiredRuntimeFile::new("openvino_ir_frontend.dll", ir_frontend.clone()),
         RequiredRuntimeFile::new("openvino_genai.dll", genai_dll.clone()),
+        RequiredRuntimeFile::new("openvino_genai_c.dll", genai_c_dll.clone()),
         RequiredRuntimeFile::new("openvino_tokenizers.dll", tokenizers_dll.clone()),
         RequiredRuntimeFile::new("tbb12.dll", tbb_dll.clone()),
+        RequiredRuntimeFile::new("tbbbind_2_5.dll", tbbbind_dll.clone()),
+        RequiredRuntimeFile::new("tbbmalloc.dll", tbbmalloc_dll.clone()),
+        RequiredRuntimeFile::new("tbbmalloc_proxy.dll", tbbmalloc_proxy_dll.clone()),
+        RequiredRuntimeFile::new("icudt70.dll", icudt_dll.clone()),
+        RequiredRuntimeFile::new("icuuc70.dll", icuuc_dll.clone()),
     ];
     let version_metadata = vec![
         RuntimeVersionMetadata::new("openvino-runtime", OPENVINO_RUNTIME_VERSION),
@@ -333,6 +347,12 @@ fn build_openvino_bundle(bundle_root: PathBuf) -> OpenVinoRuntimeBundle {
         })
         .or_else(|| {
             missing_file(
+                &npu_compiler,
+                BundleValidationFailureClass::OpenVinoNpuPluginMissing,
+            )
+        })
+        .or_else(|| {
+            missing_file(
                 &cpu_plugin,
                 BundleValidationFailureClass::OpenVinoCpuPluginMissing,
             )
@@ -351,11 +371,47 @@ fn build_openvino_bundle(bundle_root: PathBuf) -> OpenVinoRuntimeBundle {
         })
         .or_else(|| {
             missing_file(
+                &genai_c_dll,
+                BundleValidationFailureClass::OpenVinoGenAiCApiMissing,
+            )
+        })
+        .or_else(|| {
+            missing_file(
                 &tokenizers_dll,
                 BundleValidationFailureClass::OpenVinoTokenizersMissing,
             )
         })
-        .or_else(|| missing_file(&tbb_dll, BundleValidationFailureClass::OpenVinoTbbMissing));
+        .or_else(|| {
+            missing_file(
+                &icudt_dll,
+                BundleValidationFailureClass::OpenVinoTokenizersMissing,
+            )
+        })
+        .or_else(|| {
+            missing_file(
+                &icuuc_dll,
+                BundleValidationFailureClass::OpenVinoTokenizersMissing,
+            )
+        })
+        .or_else(|| missing_file(&tbb_dll, BundleValidationFailureClass::OpenVinoTbbMissing))
+        .or_else(|| {
+            missing_file(
+                &tbbbind_dll,
+                BundleValidationFailureClass::OpenVinoTbbMissing,
+            )
+        })
+        .or_else(|| {
+            missing_file(
+                &tbbmalloc_dll,
+                BundleValidationFailureClass::OpenVinoTbbMissing,
+            )
+        })
+        .or_else(|| {
+            missing_file(
+                &tbbmalloc_proxy_dll,
+                BundleValidationFailureClass::OpenVinoTbbMissing,
+            )
+        });
     let fingerprint = RuntimeBundleFingerprint::new(
         RuntimeFamily::OpenVino,
         canonical_root.clone(),
@@ -370,11 +426,18 @@ fn build_openvino_bundle(bundle_root: PathBuf) -> OpenVinoRuntimeBundle {
         openvino_dll,
         openvino_c_dll,
         openvino_intel_npu_plugin_dll: npu_plugin,
+        openvino_intel_npu_compiler_dll: npu_compiler,
         openvino_intel_cpu_plugin_dll: cpu_plugin,
         openvino_ir_frontend_dll: ir_frontend,
         openvino_genai_dll: genai_dll,
+        openvino_genai_c_dll: genai_c_dll,
         openvino_tokenizers_dll: tokenizers_dll,
         tbb_dll,
+        tbbbind_dll,
+        tbbmalloc_dll,
+        tbbmalloc_proxy_dll,
+        icudt_dll,
+        icuuc_dll,
         required_files,
         version_metadata,
         npu_validation_failure,
@@ -629,6 +692,42 @@ mod tests {
         assert_eq!(bundle.failure_code(), Some("openvino_npu_plugin_missing"));
     }
 
+    #[test]
+    fn openvino_bundle_missing_compiler_is_reported_as_plugin_failure() {
+        let temp = tempdir().expect("temp dir");
+        let root = temp.path().join("openvino");
+        create_openvino_files(&root);
+        fs::remove_file(root.join("openvino_intel_npu_compiler.dll")).expect("remove npu compiler");
+
+        let bundle = build_openvino_bundle(root);
+        assert!(!bundle.npu_validated());
+        assert_eq!(bundle.failure_code(), Some("openvino_npu_plugin_missing"));
+    }
+
+    #[test]
+    fn openvino_bundle_missing_icu_is_reported_as_tokenizers_failure() {
+        let temp = tempdir().expect("temp dir");
+        let root = temp.path().join("openvino");
+        create_openvino_files(&root);
+        fs::remove_file(root.join("icuuc70.dll")).expect("remove icuuc");
+
+        let bundle = build_openvino_bundle(root);
+        assert!(!bundle.npu_validated());
+        assert_eq!(bundle.failure_code(), Some("openvino_tokenizers_missing"));
+    }
+
+    #[test]
+    fn openvino_bundle_missing_tbb_support_is_reported_as_tbb_failure() {
+        let temp = tempdir().expect("temp dir");
+        let root = temp.path().join("openvino");
+        create_openvino_files(&root);
+        fs::remove_file(root.join("tbbmalloc_proxy.dll")).expect("remove tbbmalloc proxy");
+
+        let bundle = build_openvino_bundle(root);
+        assert!(!bundle.npu_validated());
+        assert_eq!(bundle.failure_code(), Some("openvino_tbb_missing"));
+    }
+
     fn create_ort_files(root: &Path, files: &[&str]) {
         fs::create_dir_all(root).expect("create ort root");
         for file in files {
@@ -642,11 +741,18 @@ mod tests {
             "openvino.dll",
             "openvino_c.dll",
             "openvino_intel_npu_plugin.dll",
+            "openvino_intel_npu_compiler.dll",
             "openvino_intel_cpu_plugin.dll",
             "openvino_ir_frontend.dll",
             "openvino_genai.dll",
+            "openvino_genai_c.dll",
             "openvino_tokenizers.dll",
             "tbb12.dll",
+            "tbbbind_2_5.dll",
+            "tbbmalloc.dll",
+            "tbbmalloc_proxy.dll",
+            "icudt70.dll",
+            "icuuc70.dll",
         ] {
             fs::write(root.join(file), []).expect("write openvino runtime file");
         }

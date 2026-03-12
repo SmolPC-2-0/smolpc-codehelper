@@ -31,6 +31,8 @@ impl InferenceBackend {
 #[serde(rename_all = "snake_case")]
 pub enum DecisionReason {
     DefaultCpu,
+    #[serde(rename = "default_openvino_candidate")]
+    DefaultOpenVinoCandidate,
     #[serde(
         rename = "default_directml_candidate",
         alias = "default_direct_m_l_candidate"
@@ -102,6 +104,12 @@ pub struct BackendDecisionKey {
     #[serde(default)]
     pub npu_driver_version: Option<String>,
     #[serde(default)]
+    pub openvino_npu_max_prompt_len: Option<usize>,
+    #[serde(default)]
+    pub openvino_npu_min_response_len: Option<usize>,
+    #[serde(default)]
+    pub openvino_message_mode: Option<String>,
+    #[serde(default)]
     pub selection_profile: Option<String>,
 }
 
@@ -111,8 +119,16 @@ impl BackendDecisionKey {
             .gpu_device_id
             .map(|id| id.to_string())
             .unwrap_or_else(|| "none".to_string());
+        let openvino_npu_max_prompt_len = self
+            .openvino_npu_max_prompt_len
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let openvino_npu_min_response_len = self
+            .openvino_npu_min_response_len
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string());
         format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             self.model_id,
             self.model_artifact_fingerprint.as_deref().unwrap_or("none"),
             self.app_version,
@@ -121,17 +137,30 @@ impl BackendDecisionKey {
             self.ort_bundle_fingerprint.as_deref().unwrap_or("none"),
             self.openvino_runtime_version.as_deref().unwrap_or("none"),
             self.openvino_genai_version.as_deref().unwrap_or("none"),
-            self.openvino_tokenizers_version.as_deref().unwrap_or("none"),
-            self.openvino_bundle_fingerprint.as_deref().unwrap_or("none"),
+            self.openvino_tokenizers_version
+                .as_deref()
+                .unwrap_or("none"),
+            self.openvino_bundle_fingerprint
+                .as_deref()
+                .unwrap_or("none"),
             self.gpu_adapter_identity.as_deref().unwrap_or("none"),
             self.gpu_driver_version.as_deref().unwrap_or("none"),
             gpu_device_id,
             self.npu_adapter_identity.as_deref().unwrap_or("none"),
             self.npu_driver_version.as_deref().unwrap_or("none"),
+            openvino_npu_max_prompt_len,
+            openvino_npu_min_response_len,
+            self.openvino_message_mode.as_deref().unwrap_or("none"),
             self.selection_profile.as_deref().unwrap_or("none")
         )
         .to_ascii_lowercase()
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct BackendOpenVinoTuningStatus {
+    pub max_prompt_len: Option<usize>,
+    pub min_response_len: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -388,6 +417,8 @@ pub struct BackendStatus {
     pub last_decision: Option<BackendDecision>,
     pub runtime_bundles: BackendRuntimeBundlesStatus,
     pub lanes: BackendLaneStatuses,
+    pub openvino_message_mode: Option<String>,
+    pub openvino_tuning: Option<BackendOpenVinoTuningStatus>,
     pub failure_counters: FailureCounters,
     pub force_override: Option<InferenceBackend>,
     pub store_path: Option<String>,
@@ -474,6 +505,9 @@ mod tests {
             gpu_device_id: Some(0),
             npu_adapter_identity: Some("intel:npu".to_string()),
             npu_driver_version: Some("32.0.100.3104".to_string()),
+            openvino_npu_max_prompt_len: Some(256),
+            openvino_npu_min_response_len: Some(8),
+            openvino_message_mode: Some("structured_messages".to_string()),
             selection_profile: Some("default".to_string()),
         }
     }
@@ -492,6 +526,15 @@ mod tests {
         let key_a = decision_key();
         let mut key_b = key_a.clone();
         key_b.openvino_bundle_fingerprint = Some("openvino-bundle-v2".to_string());
+
+        assert_ne!(key_a.fingerprint(), key_b.fingerprint());
+    }
+
+    #[test]
+    fn decision_key_fingerprint_changes_when_openvino_npu_tuning_changes() {
+        let key_a = decision_key();
+        let mut key_b = key_a.clone();
+        key_b.openvino_npu_max_prompt_len = Some(512);
 
         assert_ne!(key_a.fingerprint(), key_b.fingerprint());
     }

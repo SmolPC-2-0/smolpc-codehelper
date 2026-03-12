@@ -1,6 +1,6 @@
 # Model Strategy
 
-Checked on: 2026-03-09
+Checked on: 2026-03-12
 Primary KPI: best practical performance on weak Intel laptops.
 
 ## Selection Rules
@@ -52,6 +52,20 @@ Why:
 Source:
 
 - https://github.com/openvinotoolkit/openvino/releases/tag/2026.0.0
+
+## Current Qwen3 Smoke-Test Target
+
+`OpenVINO/Qwen3-4B-int4-ov`
+
+Why:
+
+- an official OpenVINO-hosted Qwen3 4B artifact exists today, so the team can validate the native NPU lane without building a custom export first
+- it is provisioned locally as `qwen3-4b-int4-ov` to stay truthful that it is not the same checkpoint as `qwen3-4b-instruct-2507`
+- it is suitable for OpenVINO smoke tests and review builds, but not for exact benchmark-parity claims against the existing `-2507` CPU and DML lanes
+
+Source:
+
+- https://huggingface.co/OpenVINO/Qwen3-4B-int4-ov
 
 ## Export Rules For Native OpenVINO NPU
 
@@ -110,3 +124,7 @@ Manifest requirements:
 4. optional small-model sanity check with `Qwen-2.5-coder-0.5B`
 
 Do not lead Phase 1 with Phi-4-mini for this KPI.
+
+Current repo note:
+
+- `qwen3-4b-int4-ov` is a smoke-test bring-up lane, not the final benchmark-parity answer
