@@ -2,7 +2,7 @@
 
 A desktop app that lets you control GIMP with natural language. Type things like "draw a red circle", "blur the top half", or "rotate 90 degrees" and the app executes them directly in GIMP.
 
-Built with Tauri (Rust backend) + SvelteKit frontend. Talks to GIMP via the [gimp-mcp](https://github.com/anthropics/gimp-mcp) plugin.
+Built with Tauri (Rust backend) + SvelteKit frontend. Talks to GIMP via the [gimp-mcp](https://github.com/maorcc/gimp-mcp) plugin.
 
 Part of the [SmolPC](https://github.com/SmolPC-2-0/smolpc-codehelper) monorepo — lives at `apps/gimp-assistant`.
 
@@ -18,10 +18,7 @@ Part of the [SmolPC](https://github.com/SmolPC-2-0/smolpc-codehelper) monorepo �
   ```bash
   curl -LsSf https://astral.sh/uv/install.sh | sh
   ```
-- **Ollama** *(optional)* — only needed for commands not in the built-in fast paths. Install from [ollama.com](https://ollama.com) and pull a model:
-  ```bash
-  ollama pull llama3.2
-  ```
+- **SmolPC engine** *(optional)* — only needed for commands not in the built-in fast paths. The engine is bundled with the [SmolPC](https://github.com/SmolPC-2-0/smolpc-codehelper) launcher — start it there before using custom commands.
 
 ---
 
@@ -31,7 +28,7 @@ Part of the [SmolPC](https://github.com/SmolPC-2-0/smolpc-codehelper) monorepo �
 
 ```bash
 git clone https://github.com/SmolPC-2-0/smolpc-codehelper
-git clone https://github.com/anthropics/gimp-mcp
+git clone https://github.com/maorcc/gimp-mcp
 ```
 
 ### 2. Install the GIMP plugin
@@ -71,7 +68,7 @@ npm run tauri dev
 3. The header shows GIMP connection status — green means connected
 4. Type a command and press Enter
 
-### Built-in commands (instant, no Ollama needed)
+### Built-in commands (no SmolPC engine needed)
 
 | Command | What it does |
 |---|---|
@@ -89,9 +86,9 @@ npm run tauri dev
 | `crop to square` | Centre-crops to a square |
 | `undo` | Reverts the last change |
 
-### LLM-powered commands (requires Ollama)
+### LLM-powered commands (requires SmolPC engine)
 
-Any command not in the list above is sent to Ollama, which generates GIMP Python code dynamically. Examples:
+Any command not in the list above is sent to the SmolPC engine, which generates GIMP Python code dynamically. Examples:
 
 - `rotate 90 degrees`
 - `flip horizontally`
@@ -102,8 +99,8 @@ Any command not in the list above is sent to Ollama, which generates GIMP Python
 
 ## Troubleshooting
 
-**"Ollama isn't running" message**
-Start Ollama with `ollama serve`, or stick to the built-in commands above — they work without it.
+**"SmolPC engine isn't running" message**
+Launch the SmolPC engine from the SmolPC launcher app, or stick to the built-in commands above — they work without it.
 
 **Header shows "GIMP offline"**
 Make sure GIMP is open, an image is loaded, and the MCP plugin is installed (check Filters menu — you should see an MCP Server option). Restart GIMP if needed.

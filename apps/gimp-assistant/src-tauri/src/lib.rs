@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use serde::Serialize;
 #[derive(Serialize)]
 struct HealthStatus {
-    ollama_reachable: bool,
+    engine_reachable: bool,
     mcp_connected: bool,
     tools_count: u32,
     image_open_ok: bool,
@@ -379,9 +379,9 @@ User request: {user}
 
     let selection_raw = match llm_client::chat(&selector_prompt).await {
         Ok(r) => r,
-        Err(e) if e.contains("localhost:11434") || e.contains("connection refused") || e.contains("error sending request") => {
+        Err(e) if e.contains("smolpc-engine-unavailable") || e.contains("Engine failed to become healthy") => {
             return Ok(json!({
-                "reply": "I don't recognise that command yet, and Ollama isn't running so I can't handle custom requests.\n\nStart Ollama with:\n  ollama serve\n\nOr try one of the built-in commands: draw a circle, blur the image, increase brightness, draw a red heart, blur the top half.",
+                "reply": "I don't recognise that command yet, and the SmolPC engine isn't running so I can't handle custom requests.\n\nMake sure the SmolPC engine is running (launch it from the SmolPC app).\n\nOr try one of the built-in commands: draw a circle, blur the image, increase brightness, draw a red heart, blur the top half.",
                 "undoable": false, "plan": {}, "tool_results": []
             }));
         }
@@ -872,14 +872,11 @@ EXAMPLE — rotate the image 90 degrees clockwise:
 async fn health_check() -> HealthStatus {
     let mut errors = Vec::new();
 
-    // --- Check 1: Ollama reachable ---
-    let ollama_reachable = match reqwest::get("http://localhost:11434").await {
-        Ok(_) => true,
-        Err(e) => {
-            errors.push(format!("Ollama not reachable: {}", e));
-            false
-        }
-    };
+    // --- Check 1: SmolPC engine reachable ---
+    let engine_reachable = llm_client::check_engine_health().await;
+    if !engine_reachable {
+        errors.push("SmolPC engine not reachable — launch it from the SmolPC app".to_string());
+    }
 
     // --- Check 2: MCP server reachable ---
     let mcp_connected = true; // TEMP: replace with real MCP init/ping later
@@ -891,7 +888,7 @@ async fn health_check() -> HealthStatus {
     let image_open_ok = false; // TEMP: replace with get_image_metadata() later
 
     HealthStatus {
-        ollama_reachable,
+        engine_reachable,
         mcp_connected,
         tools_count,
         image_open_ok,
