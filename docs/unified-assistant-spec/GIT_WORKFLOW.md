@@ -223,23 +223,23 @@ These files are edited by multiple workstreams and require coordination:
 |------|-----------|-------------------|
 | `Cargo.toml` (workspace) | Anyone adding crates | Check existing entries first |
 | `CLAUDE.md` | Any session ending | Append, don't overwrite |
-| `unified_docs/CURRENT_STATE.md` | Any session ending | Append to session log section |
-| `unified_docs/LEARNINGS.md` | Any session with new learnings | Append to relevant category |
+| `docs/unified-assistant-spec/CURRENT_STATE.md` | Any session ending | Append to session log section |
+| `docs/unified-assistant-spec/LEARNINGS.md` | Any session with new learnings | Append to relevant category |
 
 ### Rule 3: Read Spec Docs Before Starting
 
 Before any implementation work:
-1. Read `unified_docs/README.md`
-2. Read `unified_docs/ARCHITECTURE.md`
+1. Read `docs/unified-assistant-spec/README.md`
+2. Read `docs/unified-assistant-spec/ARCHITECTURE.md`
 3. Read the spec doc for your workstream
-4. Read `unified_docs/CURRENT_STATE.md` for latest status
+4. Read `docs/unified-assistant-spec/CURRENT_STATE.md` for latest status
 
 ### Rule 4: Update State at Session End
 
 At the end of every session:
 1. Commit all changes
-2. Update `unified_docs/CURRENT_STATE.md` with session summary
-3. Update `unified_docs/LEARNINGS.md` if corrections were made
+2. Update `docs/unified-assistant-spec/CURRENT_STATE.md` with session summary
+3. Update `docs/unified-assistant-spec/LEARNINGS.md` if corrections were made
 4. Push branch
 5. Open PR if work is ready
 

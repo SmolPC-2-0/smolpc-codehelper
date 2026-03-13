@@ -107,7 +107,7 @@
 
 - **No git worktrees** (2026-03): User preference — use separate clones instead. Worktrees have caused issues in this project.
 
-- **Context compaction is the biggest risk** (2026-03): Long AI sessions lose synthesized research when context compacts. Always persist findings to documentation files before they're lost. This entire unified_docs directory was created specifically to prevent research loss.
+- **Context compaction is the biggest risk** (2026-03): Long AI sessions lose synthesized research when context compacts. Always persist findings to documentation files before they're lost. This entire docs/unified-assistant-spec directory was created specifically to prevent research loss.
 
 ---
 

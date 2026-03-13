@@ -146,7 +146,7 @@ and this README's quick-reference table.
 
 **Living documents:** `CURRENT_STATE.md` and `LEARNINGS.md` are updated
 frequently. The other documents are updated when decisions change. All documents
-live in this directory (`/unified_docs/` at workspace root).
+live in this directory (`/docs/unified-assistant-spec/`).
 
 ---
 
@@ -159,7 +159,7 @@ nothing is lost — all prior docs are preserved on `main` and can be referenced
 if needed.
 
 All authoritative documentation for the unified assistant lives exclusively in
-`/unified_docs/`. Future sessions should NOT recreate `/docs/` or reference
+`/docs/unified-assistant-spec/`. Future sessions should NOT recreate `/docs/` or reference
 documents from the `main` branch's `/docs/` unless explicitly checking historical
-context. The spec docs in `/unified_docs/` supersede all prior documentation and
+context. The spec docs in `/docs/unified-assistant-spec/` supersede all prior documentation and
 are based on the current codebase state + completed research + web research findings.

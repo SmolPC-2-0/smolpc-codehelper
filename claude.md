@@ -2,9 +2,9 @@
 
 This file guides Claude Code sessions working on SmolPC Code Helper.
 
-**Last Updated:** 2026-03-12
-**Current Phase:** OpenVINO Native Runtime — Validation & Benchmarking
-**Branch:** `engine/openvino-runtime-activation`
+**Last Updated:** 2026-03-13
+**Current Phase:** Unified Assistant — Specification & Parallel Implementation
+**Branch:** `docs/unified-assistant-spec` (specs), future: `feature/*` workstreams
 
 ---
 
@@ -24,37 +24,39 @@ This file guides Claude Code sessions working on SmolPC Code Helper.
 
 _Updated at end of each session. Provides immediate context without reading external files._
 
-**Phase**: OpenVINO native runtime lane — fully implemented in code, pending real-hardware validation
-**Branch**: `engine/openvino-runtime-activation` (PRs: #50 merged docs, recent activation commits on this branch)
-**Last Session**: 2026-03-12 — Evaluated codebase; OpenVINO FFI layer complete, missing DLL bundle and model artifact on disk
+**Phase**: Unified Assistant — specification complete, parallel implementation ready to begin
+**Branch**: `docs/unified-assistant-spec` (this branch — specifications)
+**Last Session**: 2026-03-13 — Created 12 specification documents crystallizing all research findings
 
-**What's Working**:
+**What's Done**:
 
-- Shared engine architecture: `smolpc-engine-host` (axum HTTP server) + `smolpc-engine-core` (inference) + `smolpc-engine-client` (Tauri adapter)
-- ORT CPU inference with KV Cache + Attention Sinks (Generator, KvCache, InferenceSession, Tokenizer)
-- DirectML inference via ONNX Runtime GenAI native FFI (`GenAiDirectMlGenerator`)
-- Native OpenVINO GenAI NPU inference fully implemented (`OpenVinoGenAiGenerator`) — loads `openvino_genai.dll` + `openvino_c.dll` at runtime, creates `LlmPipeline` targeting `NPU`, streams via `StreamerCallback`, reads native TTFT/throughput metrics
-- Backend selection policy: `openvino_npu → directml → cpu` with persisted decisions keyed by full selection fingerprint
-- Lane-based readiness model in `GET /engine/status` and `POST /engine/check-model`
-- OpenVINO startup probe (NPU detection, device name, driver version, driver floor check)
-- OpenVINO preflight: compile + first-token smoke test under 30s budget
-- Streaming via axum SSE + engine client → Tauri Channel to frontend
-- Frontend (Svelte 5) drives inference via engine client IPC
+- Shared engine architecture fully implemented: `smolpc-engine-host` (axum HTTP on :19432) + `smolpc-engine-core` + `smolpc-engine-client`
+- Three inference backends: ORT CPU, DirectML GenAI FFI, OpenVINO GenAI NPU FFI
+- Backend selection with fingerprint-based caching and lane readiness model
+- GIMP assistant migration complete (PR #58 merged) — engine-client integration working
+- Blender assistant production-ready (v7.0.0) with HTTP bridge + shared engine
+- **12 specification documents** for unified assistant in `docs/unified-assistant-spec/`
+- Research completed: model selection, MCP ecosystem, VS Code extension feasibility, packaging, model export pipeline
 
-**What's Missing Before OpenVINO Runs**:
+**What's In Progress**:
 
-1. `apps/codehelper/src-tauri/libs/openvino/` — OpenVINO 2026.0.0 DLL bundle (8 DLLs, ~200MB)
-2. `%LOCALAPPDATA%/SmolPC/models/<model_id>/openvino_npu/` — OpenVINO IR model artifact + `manifest.json`
+- OpenVINO DLL bundle + model artifact staging (needs Intel NPU hardware to validate)
+- CPU runtime consolidation (migrating off raw `ort` crate to onnxruntime-genai or native OpenVINO)
+- Final model selection (benchmarking blocked on target hardware)
 
-**Next Up**:
+**Next Up — Parallel Workstreams** (branch from this spec branch):
 
-1. **Stage DLL bundle**: download OpenVINO 2026.0.0 + GenAI package → extract 8 DLLs to `libs/openvino/`
-2. **Prepare model artifact**: download `OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov` (or coder variant) from HuggingFace → place in `models/*/openvino_npu/` + write `manifest.json`
-3. **Validate on Windows**: startup probe, preflight (30s budget), first-token, streaming
-4. **Three-way benchmark**: extend `BackendBenchmarkComparison` for `openvino_npu` vs `directml` vs `cpu`
-5. **Catalog migration**: move default model off `qwen3-4b-instruct-2507` to the 1.5B Qwen family
+| Workstream | Branch | Description |
+|---|---|---|
+| Unified frontend | `feature/unified-frontend` | Mode dropdown, shared chat UI, per-mode config |
+| VS Code extension | `feature/vscode-extension` | InlineCompletionProvider + webview chat |
+| MCP client | `feature/mcp-client` | Generalized MCP client (stdio + TCP) |
+| Model export | `feature/model-export` | ONNX + OpenVINO INT4 export pipeline |
+| Installer | `feature/packaging` | NSIS installer, DLL bundling, uv sidecar |
 
-**Blockers**: Needs Intel Core Ultra laptop with NPU hardware + NPU driver ≥ 32.0.100.3104
+**Blockers**: OpenVINO validation needs Intel Core Ultra laptop with NPU driver ≥ 32.0.100.3104
+
+**Full specs**: See `docs/unified-assistant-spec/README.md` for reading order
 
 ---
 
@@ -170,15 +172,26 @@ gh pr create --title "feat: three-way benchmark comparison" --body "..."
 | Type | Pattern | Example |
 |------|---------|---------|
 | Bug fix | `fix/description` | `fix/openvino-preflight-timeout` |
-| Feature | `feature/description` | `feature/three-way-benchmark` |
+| Feature | `feature/description` | `feature/unified-frontend` |
 | Refactor | `refactor/description` | `refactor/bundle-resolution` |
 | Engine | `engine/description` | `engine/openvino-runtime-activation` |
+| Docs/specs | `docs/description` | `docs/unified-assistant-spec` |
+
+**Unified assistant workstreams** (branch from `docs/unified-assistant-spec`):
+
+| Workstream | Branch |
+|---|---|
+| Frontend rewrite | `feature/unified-frontend` |
+| VS Code extension | `feature/vscode-extension` |
+| MCP client | `feature/mcp-client` |
+| Model export pipeline | `feature/model-export` |
+| Installer/packaging | `feature/packaging` |
 
 ---
 
 ## Project Overview
 
-SmolPC Code Helper is an **offline AI coding assistant** for secondary school students (ages 11-18).
+SmolPC Code Helper is an **offline AI coding and creative assistant** for secondary school students (ages 11-18).
 
 **Key Principles:**
 
@@ -186,6 +199,21 @@ SmolPC Code Helper is an **offline AI coding assistant** for secondary school st
 - **Privacy-First**: Student data stays local (GDPR/FERPA)
 - **Budget Hardware**: Must run on 8GB RAM minimum, primary KPI is weak Intel laptops
 - **Partnership Requirements**: Intel NPU (OpenVINO) is the primary acceleration target on Windows
+
+### Unified Assistant Vision
+
+The project is expanding from a code-only assistant to a **unified assistant** with six modes:
+
+| Mode | Integration | Status |
+|---|---|---|
+| Code | VS Code extension (InlineCompletionProvider + webview chat) | Spec complete |
+| GIMP | `maorcc/gimp-mcp` MCP server | PR #58 merged |
+| Blender | Hybrid HTTP bridge + `blender-mcp` | v7.0.0 production |
+| Writer | `patrup/mcp-libre` MCP server | Spec complete |
+| Calc | `patrup/mcp-libre` MCP server | Spec complete |
+| Impress | `patrup/mcp-libre` MCP server | Spec complete |
+
+Two products share one engine: a **Tauri 2 desktop app** (all modes via dropdown) and a **VS Code extension** (Code mode only). Both connect to `smolpc-engine-host` on `:19432`.
 
 ### Current Architecture (Shared Engine)
 
@@ -263,12 +291,29 @@ OpenVINO GenAI handles tokenization itself — no Rust tokenizer needed for the 
 
 ### Detailed Documentation
 
+**Unified Assistant Specs** (canonical — read these first):
+
+| Topic | File |
+|-------|------|
+| Spec index & reading order | `docs/unified-assistant-spec/README.md` |
+| System architecture | `docs/unified-assistant-spec/ARCHITECTURE.md` |
+| Frontend (Tauri app) | `docs/unified-assistant-spec/FRONTEND_SPEC.md` |
+| VS Code extension | `docs/unified-assistant-spec/VSCODE_EXTENSION_SPEC.md` |
+| MCP integration | `docs/unified-assistant-spec/MCP_INTEGRATION.md` |
+| Model selection & export | `docs/unified-assistant-spec/MODEL_STRATEGY.md` |
+| Packaging & distribution | `docs/unified-assistant-spec/PACKAGING.md` |
+| Git workflow | `docs/unified-assistant-spec/GIT_WORKFLOW.md` |
+| Code conventions | `docs/unified-assistant-spec/CODE_CONVENTIONS.md` |
+| Learnings (living) | `docs/unified-assistant-spec/LEARNINGS.md` |
+| Current state (living) | `docs/unified-assistant-spec/CURRENT_STATE.md` |
+| External resources | `docs/unified-assistant-spec/RESOURCES.md` |
+
+**Legacy docs** (on `main` branch, for historical context only):
+
 | Topic | File |
 |-------|------|
 | OpenVINO plan | `docs/openvino-native-genai/PLAN.md` |
-| Model strategy | `docs/openvino-native-genai/MODEL_STRATEGY.md` |
 | Engine API surface | `docs/openvino-native-genai/ENGINE_SURFACE_TARGET.md` |
-| Research baseline | `docs/openvino-native-genai/RESEARCH_SUMMARY_2026-03-09.md` |
 
 ---
 
@@ -465,12 +510,24 @@ docs(engine): update PLAN.md with validation results
 
 ## Resources
 
+**Full resource list with caveats**: See `docs/unified-assistant-spec/RESOURCES.md`
+
+**Quick links:**
+
 - [OpenVINO 2026.0.0 Release](https://github.com/openvinotoolkit/openvino/releases/tag/2026.0.0)
 - [OpenVINO GenAI NPU Guide](https://docs.openvino.ai/2025/openvino-workflow-generative/inference-with-genai/inference-with-genai-on-npu.html)
 - [OpenVINO Local Distribution](https://docs.openvino.ai/2025/openvino-workflow/deployment-locally/local-distribution-libraries.html)
-- [HuggingFace: OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov](https://huggingface.co/OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov)
-- [HuggingFace: OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int4-ov](https://huggingface.co/OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int4-ov)
+- [ONNX Runtime GenAI — Build Models](https://onnxruntime.ai/docs/genai/howto/build-model.html)
+- [ONNX Runtime GenAI — Config Reference](https://onnxruntime.ai/docs/genai/reference/config.html)
 - [Tauri 2 Docs](https://v2.tauri.app/)
+- [Tauri Windows Installer](https://v2.tauri.app/distribute/windows-installer/)
+- [Tauri Code Signing](https://v2.tauri.app/distribute/sign/windows/)
 - [Svelte 5 Runes](https://svelte.dev/docs/svelte/what-are-runes)
-- [ONNX Runtime Rust (ort)](https://docs.rs/ort/)
 - [Tailwind CSS 4](https://tailwindcss.com/docs)
+- [VS Code Extension API](https://code.visualstudio.com/api)
+- [ONNX Runtime Rust (ort)](https://docs.rs/ort/)
+- [GIMP MCP Server](https://github.com/maorcc/gimp-mcp)
+- [Blender MCP Server](https://github.com/ahujasid/blender-mcp)
+- [LibreOffice MCP Server](https://github.com/patrup/mcp-libre)
+- [BFCL Leaderboard](https://gorilla.cs.berkeley.edu/leaderboard.html)
+- [Azure Trusted Signing](https://azure.microsoft.com/en-in/pricing/details/trusted-signing/)
