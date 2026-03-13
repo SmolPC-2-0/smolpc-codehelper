@@ -51,7 +51,7 @@
 
 @layer base {
 	* {
-		@apply border-border;
+		border-color: var(--color-border);
 	}
 
 	html,
@@ -65,7 +65,8 @@
 		overflow: hidden;
 		font-family: var(--font-sans);
 		-webkit-font-smoothing: antialiased;
-		@apply bg-background text-foreground;
+		background-color: var(--color-background);
+		color: var(--color-foreground);
 	}
 
 	/* Custom scrollbar */
