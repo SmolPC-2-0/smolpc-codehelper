@@ -1,0 +1,6 @@
+# Large runtime DLLs — not committed to git.
+# Copy from apps/blender-assistant/src-tauri/libs/ or download from
+# https://github.com/microsoft/onnxruntime/releases (v1.23.x+)
+*.dll
+!.gitignore
+!README.md

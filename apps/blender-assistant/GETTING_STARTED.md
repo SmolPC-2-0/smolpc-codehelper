@@ -20,10 +20,12 @@ Expected startup behavior:
 - Bridge starts on `http://127.0.0.1:5179`
 - Shared engine is started/reused and model autoload is attempted
 
-## 2) Install and Enable the Blender Addon
+## 2) Enable the Blender Addon
+
+On desktop app startup, `blender_addon/blender_helper_http.py` is auto-synced into detected Blender user addon folders.
 
 1. Blender -> Edit -> Preferences -> Add-ons
-2. Install `blender_addon/blender_helper_http.py`
+2. Search for `Blender Learning Assistant`
 3. Enable the addon
 4. Open 3D Viewport sidebar (`N`) -> `Learn` tab
 

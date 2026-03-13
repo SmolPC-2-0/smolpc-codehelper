@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod addon_sync;
 mod logger;
 mod ollama;
 mod prompts;
@@ -51,6 +52,39 @@ fn main() {
             let log_file = logger::setup_log_file(&app_data_dir).expect("Failed to setup log file");
             log::info!("Server logs will be written to: {:?}", log_file);
             let _ = logger::append_log_line(&log_file, "Blender Helper backend starting");
+
+            match addon_sync::sync_blender_addon() {
+                Ok(report) => {
+                    if let Some(root) = report.config_root {
+                        log::info!("[AddonSync] Blender config root: {:?}", root);
+                    } else {
+                        log::info!("[AddonSync] Blender config root unavailable for this OS");
+                    }
+
+                    if report.scanned_versions == 0 {
+                        log::info!("[AddonSync] No Blender versions detected; skipped addon sync");
+                    } else {
+                        log::info!(
+                            "[AddonSync] Synced addon across {} Blender version(s): {} updated, {} unchanged, {} failed",
+                            report.scanned_versions,
+                            report.updated_targets.len(),
+                            report.unchanged_targets.len(),
+                            report.failed_targets.len()
+                        );
+                    }
+
+                    for path in report.updated_targets {
+                        log::info!("[AddonSync] Updated addon: {:?}", path);
+                    }
+
+                    for (path, err) in report.failed_targets {
+                        log::warn!("[AddonSync] Failed to sync {:?}: {}", path, err);
+                    }
+                }
+                Err(err) => {
+                    log::warn!("[AddonSync] Failed to scan Blender config directories: {}", err);
+                }
+            }
 
             let rag_dir = get_rag_directory(app);
             log::info!("RAG data directory: {:?}", rag_dir);
