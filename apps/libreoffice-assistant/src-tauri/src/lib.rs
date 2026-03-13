@@ -5,8 +5,8 @@ use crate::models::mcp::{McpTool, ToolResult};
 use crate::services::mcp_client::McpClient;
 use smolpc_engine_client::{
     connect_or_spawn, engine_api_major_compatible, expected_engine_api_major,
-    read_runtime_env_overrides, version_major, EngineClient, EngineConnectOptions, StartupMode,
-    StartupPolicy,
+    read_runtime_env_overrides, version_major, EngineClient, EngineConnectOptions, EngineStatus,
+    StartupMode, StartupPolicy,
 };
 use smolpc_engine_core::inference::backend::{BackendStatus, CheckModelResponse};
 use smolpc_engine_core::models::registry::ModelDefinition;
@@ -299,6 +299,19 @@ fn desired_model_to_restore<'a>(
     }
 }
 
+fn current_model_from_status(status: &EngineStatus) -> Option<String> {
+    status
+        .active_model_id
+        .clone()
+        .or_else(|| status.current_model.clone())
+}
+
+async fn sync_desired_model_from_status(state: &EngineBridgeState, status: &EngineStatus) {
+    if let Some(model_id) = current_model_from_status(status) {
+        *state.desired_model.lock().await = Some(model_id);
+    }
+}
+
 async fn ensure_desired_model_loaded(
     client: &EngineClient,
     state: &EngineBridgeState,
@@ -312,8 +325,10 @@ async fn ensure_desired_model_loaded(
         .status()
         .await
         .map_err(|error| format!("Failed to query engine status before generation: {error}"))?;
+    sync_desired_model_from_status(state, &status).await;
+    let current_model = current_model_from_status(&status);
     let Some(model_to_restore) =
-        desired_model_to_restore(Some(&desired_model), status.current_model.as_deref())
+        desired_model_to_restore(Some(&desired_model), current_model.as_deref())
     else {
         return Ok(());
     };
@@ -326,7 +341,7 @@ async fn ensure_desired_model_loaded(
 
 fn apply_engine_status(
     snapshot: &mut BootstrapEngineSnapshot,
-    status: &smolpc_engine_client::EngineStatus,
+    status: &EngineStatus,
 ) {
     snapshot.state = status.state.clone().or(status.startup_phase.clone());
     snapshot.active_backend = status.active_backend.clone().or_else(|| {
@@ -335,10 +350,7 @@ fn apply_engine_status(
             .active_backend
             .map(|backend| backend.as_str().to_string())
     });
-    snapshot.active_model_id = status
-        .active_model_id
-        .clone()
-        .or(status.current_model.clone());
+    snapshot.active_model_id = current_model_from_status(status);
     snapshot.runtime_engine = status.backend_status.runtime_engine.clone();
     snapshot.selection_reason = status.backend_status.selection_reason.clone();
 
@@ -686,7 +698,10 @@ async fn collect_bootstrap_status(
     }
 
     match client.status().await {
-        Ok(status) => apply_engine_status(&mut engine, &status),
+        Ok(status) => {
+            sync_desired_model_from_status(state, &status).await;
+            apply_engine_status(&mut engine, &status)
+        }
         Err(error) => {
             engine.error = append_error(engine.error, format!("status query failed: {error}"));
         }
@@ -863,7 +878,8 @@ async fn get_current_model(
         .status()
         .await
         .map_err(|error| format!("Failed to query current model: {error}"))?;
-    Ok(status.current_model)
+    sync_desired_model_from_status(&state, &status).await;
+    Ok(current_model_from_status(&status))
 }
 
 #[tauri::command]
@@ -876,6 +892,7 @@ async fn get_inference_backend_status(
         .status()
         .await
         .map_err(|error| format!("Failed to query backend status: {error}"))?;
+    sync_desired_model_from_status(&state, &status).await;
     Ok(status.backend_status)
 }
 
@@ -1133,7 +1150,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_runtime_verification_checks, desired_model_to_restore, sanitize_filename_fragment,
+        build_runtime_verification_checks, current_model_from_status, desired_model_to_restore,
+        sanitize_filename_fragment,
     };
     use smolpc_engine_client::{EngineMeta, EngineStatus};
     use smolpc_engine_core::inference::backend::{
@@ -1222,6 +1240,22 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn current_model_from_status_prefers_active_model_id() {
+        let mut status = sample_status();
+        status.active_model_id = Some("active-model".to_string());
+        status.current_model = Some("current-model".to_string());
+        assert_eq!(current_model_from_status(&status).as_deref(), Some("active-model"));
+    }
+
+    #[test]
+    fn current_model_from_status_falls_back_to_current_model() {
+        let mut status = sample_status();
+        status.active_model_id = None;
+        status.current_model = Some("current-model".to_string());
+        assert_eq!(current_model_from_status(&status).as_deref(), Some("current-model"));
     }
 
     #[test]

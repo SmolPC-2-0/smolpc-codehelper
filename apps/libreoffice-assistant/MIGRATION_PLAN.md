@@ -36,6 +36,11 @@ Implemented:
    - model/tool orchestration preview with JSON fallback tool-call parsing
    - tool-first fast path for CPU machines
    - MCP helper auto-recovery (restart + one retry)
+6. Phase 3 reliability patch applied for Windows lane stability:
+   - backend model-state sync now derives current model from `active_model_id || current_model`
+   - desired model is synchronized from engine status/ensure-started probes
+   - frontend lane-aware model selection prefers CPU-safe model on CPU lane
+   - generation/workflow turns retry once after automatic model reload on `No model loaded`
 
 Not implemented yet:
 
@@ -163,11 +168,25 @@ Progress update (2026-03-12, CPU lane):
    - `list_documents` tool call succeeds and returns expected document list
    - local fallback summary produced successfully when summary model turn times out
 
+Progress update (2026-03-13, reliability hardening):
+
+1. Backend model-state alignment updates in `src-tauri/src/lib.rs`:
+   - normalized active model derivation (`active_model_id` fallback to `current_model`)
+   - synced desired model cache from status-driven probes
+2. Frontend resilience updates in `src/App.svelte`:
+   - lane-aware model selection (`qwen2.5-coder-1.5b` preferred on CPU lane)
+   - automatic one-time model reload + retry on `No model loaded` during generation/workflow
+3. Workflow runbook now includes lane-specific model guidance and terminal fallback checks:
+   - `apps/libreoffice-assistant/WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md`
+4. Teammate matrix template added:
+   - `apps/libreoffice-assistant/WINDOWS_PHASE3_TEAMMATE_RESULTS_TEMPLATE.md`
+
 Remaining Phase 3 acceptance work:
 
 1. Validate full model-assisted loop (no fallback summary) on at least one faster Windows machine.
 2. Capture artifacts from teammate runs using `WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md`.
-3. Promote preview workflow into final chat UX/store migration from source app.
+3. Consolidate teammate matrix outputs using `WINDOWS_PHASE3_TEAMMATE_RESULTS_TEMPLATE.md`.
+4. Promote preview workflow into final chat UX/store migration from source app.
 
 ### Phase 4: Packaging and hardening
 
@@ -215,3 +234,4 @@ Use docs in this order:
 4. `WINDOWS_PHASE1_VERIFICATION.md` for runtime evidence capture steps.
 5. `WINDOWS_PHASE2_MCP_VERIFICATION.md` for MCP bridge validation on Windows.
 6. `WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md` for Phase 3 chat/tool workflow validation matrix.
+7. `WINDOWS_PHASE3_TEAMMATE_RESULTS_TEMPLATE.md` for teammate result capture format.

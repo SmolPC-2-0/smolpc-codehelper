@@ -154,6 +154,8 @@
   const PHASE3_MAX_TOOL_CHAIN_DEPTH = 4;
   const PHASE3_MAX_TOOL_CALLS_PER_RESPONSE = 1;
   const PHASE3_MODEL_TURN_TIMEOUT_MS = 45000;
+  const MODEL_LOAD_TIMEOUT_MS = 120000;
+  const CPU_SAFE_MODEL_ID = 'qwen2.5-coder-1.5b';
   const PHASE3_WORKFLOW_CONFIG: GenerationConfig = {
     max_length: 64,
     temperature: 0.0,
@@ -241,6 +243,130 @@ If no tool call is needed, respond with the final user-facing answer in plain te
           reject(error);
         });
     });
+  }
+
+  function isNoModelLoadedError(message: string): boolean {
+    const lowered = message.toLowerCase();
+    return lowered.includes('no model loaded') || lowered.includes('/engine/load first');
+  }
+
+  function backendLanePreference(): 'cpu' | 'directml' | 'auto' {
+    const backend = (backendStatus?.active_backend ?? '').toLowerCase();
+    if (backend === 'cpu') {
+      return 'cpu';
+    }
+    if (backend === 'directml') {
+      return 'directml';
+    }
+    return 'auto';
+  }
+
+  function isModelReadyForLane(
+    modelReadiness: CheckModelResponse,
+    lane: 'cpu' | 'directml' | 'auto'
+  ): boolean {
+    if (lane === 'cpu') {
+      return modelReadiness.lanes.cpu.ready;
+    }
+    if (lane === 'directml') {
+      return modelReadiness.lanes.directml.ready;
+    }
+    return (
+      modelReadiness.lanes.directml.ready ||
+      modelReadiness.lanes.cpu.ready ||
+      modelReadiness.lanes.openvino_npu.ready
+    );
+  }
+
+  function uniqueModelCandidates(candidates: string[]): string[] {
+    const seen = new Set<string>();
+    const unique: string[] = [];
+    for (const candidate of candidates) {
+      if (!candidate || seen.has(candidate)) {
+        continue;
+      }
+      seen.add(candidate);
+      unique.push(candidate);
+    }
+    return unique;
+  }
+
+  async function resolveLaneCompatibleModel(preferredModelId?: string | null): Promise<string | null> {
+    if (models.length === 0) {
+      await refreshModels();
+    }
+    if (models.length === 0) {
+      return null;
+    }
+
+    const lane = backendLanePreference();
+    const availableModelIds = models.map((model) => model.id);
+    const preferred = preferredModelId?.trim() ? preferredModelId.trim() : selectedModelId;
+    const baseCandidates =
+      lane === 'cpu'
+        ? [preferred, CPU_SAFE_MODEL_ID, ...availableModelIds]
+        : [preferred, ...availableModelIds];
+    const orderedCandidates = uniqueModelCandidates(
+      baseCandidates.filter((candidate): candidate is string => Boolean(candidate && candidate.trim()))
+    );
+
+    for (const modelId of orderedCandidates) {
+      try {
+        const modelReadiness = await invoke<CheckModelResponse>('check_model_readiness', { modelId });
+        if (isModelReadyForLane(modelReadiness, lane)) {
+          return modelId;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return availableModelIds[0] ?? null;
+  }
+
+  async function loadModelById(modelId: string, contextLabel: string): Promise<void> {
+    selectedModelId = modelId;
+    actionMessage = await withTimeout(
+      invoke<string>('load_model', { modelId }),
+      MODEL_LOAD_TIMEOUT_MS,
+      `Model load timed out after ${MODEL_LOAD_TIMEOUT_MS / 1000}s while ${contextLabel}.`
+    );
+    await Promise.all([
+      refreshBootstrapStatus(),
+      refreshCurrentModel(),
+      refreshBackendStatus(),
+      refreshReadiness()
+    ]);
+  }
+
+  async function runWithModelReloadRetry<T>(
+    operation: () => Promise<T>,
+    contextLabel: string,
+    traceLabel?: string
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      const message = normalizeEngineError(formatError(error));
+      if (!isNoModelLoadedError(message)) {
+        throw error;
+      }
+
+      const fallbackModelId = await resolveLaneCompatibleModel(selectedModelId);
+      if (!fallbackModelId) {
+        throw new Error(`${message} No lane-compatible model is available to reload.`);
+      }
+
+      await loadModelById(fallbackModelId, contextLabel);
+      if (traceLabel) {
+        pushWorkflowTrace(
+          `${traceLabel}: detected unloaded model state; auto-reloaded '${fallbackModelId}' and retrying.`
+        );
+      } else {
+        actionMessage = `Model '${fallbackModelId}' was auto-reloaded while ${contextLabel}.`;
+      }
+      return await operation();
+    }
   }
 
   function chooseNonNullSchema(schema: JsonSchema | undefined): JsonSchema | undefined {
@@ -504,7 +630,15 @@ If no tool call is needed, respond with the final user-facing answer in plain te
     clearFeedback();
     try {
       bootstrap = await invoke<BootstrapStatus>('ensure_engine_started');
-      actionMessage = 'Engine ensure-started completed.';
+      await Promise.all([refreshBackendStatus(), refreshModels(), refreshCurrentModel()]);
+      const startupModelId = await resolveLaneCompatibleModel(selectedModelId);
+      if (startupModelId) {
+        selectedModelId = startupModelId;
+        await refreshReadiness();
+      }
+      actionMessage = startupModelId
+        ? `Engine ensure-started completed. Suggested model for this lane: '${startupModelId}'.`
+        : 'Engine ensure-started completed.';
     } catch (error) {
       commandError = normalizeEngineError(formatError(error));
     } finally {
@@ -563,17 +697,7 @@ If no tool call is needed, respond with the final user-facing answer in plain te
     clearFeedback();
     actionMessage = `Loading model '${selectedModelId}'...`;
     try {
-      actionMessage = await withTimeout(
-        invoke<string>('load_model', { modelId: selectedModelId }),
-        120000,
-        "Model load timed out after 120s. Check backend logs and retry."
-      );
-      await Promise.all([
-        refreshBootstrapStatus(),
-        refreshCurrentModel(),
-        refreshBackendStatus(),
-        refreshReadiness()
-      ]);
+      await loadModelById(selectedModelId, 'loading selected model');
     } catch (error) {
       commandError = normalizeEngineError(formatError(error));
     } finally {
@@ -612,7 +736,10 @@ If no tool call is needed, respond with the final user-facing answer in plain te
     lastMetrics = null;
 
     try {
-      const result = await invoke<GenerationResult>('generate_text', { prompt });
+      const result = await runWithModelReloadRetry(
+        () => invoke<GenerationResult>('generate_text', { prompt }),
+        'running non-stream generation'
+      );
       generatedText = result.text;
       lastMetrics = result.metrics;
       actionMessage = 'Non-stream generation completed.';
@@ -643,10 +770,14 @@ If no tool call is needed, respond with the final user-facing answer in plain te
     };
 
     try {
-      const metrics = await invoke<GenerationMetrics>('inference_generate', {
-        prompt,
-        onToken: onTokenChannel
-      });
+      const metrics = await runWithModelReloadRetry(
+        () =>
+          invoke<GenerationMetrics>('inference_generate', {
+            prompt,
+            onToken: onTokenChannel
+          }),
+        'running streaming generation'
+      );
       generatedText = streamingText;
       lastMetrics = metrics;
       actionMessage = 'Streaming generation completed.';
@@ -918,13 +1049,18 @@ If no tool call is needed, respond with the final user-facing answer in plain te
       for (let depth = 1; depth <= PHASE3_MAX_TOOL_CHAIN_DEPTH; depth += 1) {
         workflowDepthUsed = depth;
         pushWorkflowTrace(`Turn ${depth}: requesting model response...`);
-        const modelResult = await withTimeout(
-          invoke<GenerationResult>('generate_text_with_config', {
-            prompt: buildChatMlPrompt(turns),
-            config: PHASE3_WORKFLOW_CONFIG
-          }),
-          PHASE3_MODEL_TURN_TIMEOUT_MS,
-          `Turn ${depth} timed out after ${PHASE3_MODEL_TURN_TIMEOUT_MS / 1000}s.`
+        const modelResult = await runWithModelReloadRetry(
+          () =>
+            withTimeout(
+              invoke<GenerationResult>('generate_text_with_config', {
+                prompt: buildChatMlPrompt(turns),
+                config: PHASE3_WORKFLOW_CONFIG
+              }),
+              PHASE3_MODEL_TURN_TIMEOUT_MS,
+              `Turn ${depth} timed out after ${PHASE3_MODEL_TURN_TIMEOUT_MS / 1000}s.`
+            ),
+          `running workflow model turn ${depth}`,
+          `Turn ${depth}`
         );
         lastMetrics = modelResult.metrics;
         const assistantText = modelResult.text.trim();
@@ -1044,13 +1180,18 @@ If no tool call is needed, respond with the final user-facing answer in plain te
       ]);
 
       pushWorkflowTrace('Fast path: requesting short summary turn...');
-      const summary = await withTimeout(
-        invoke<GenerationResult>('generate_text_with_config', {
-          prompt: summaryPrompt,
-          config: PHASE3_WORKFLOW_CONFIG
-        }),
-        30000,
-        'Summary turn timed out after 30s.'
+      const summary = await runWithModelReloadRetry(
+        () =>
+          withTimeout(
+            invoke<GenerationResult>('generate_text_with_config', {
+              prompt: summaryPrompt,
+              config: PHASE3_WORKFLOW_CONFIG
+            }),
+            30000,
+            'Summary turn timed out after 30s.'
+          ),
+        'running fast-path summary generation',
+        'Fast path'
       );
       workflowDepthUsed = 2;
       lastMetrics = summary.metrics;
@@ -1085,6 +1226,10 @@ If no tool call is needed, respond with the final user-facing answer in plain te
     await refreshBootstrapStatus();
     await refreshModels();
     await Promise.all([refreshCurrentModel(), refreshBackendStatus()]);
+    const startupModelId = await resolveLaneCompatibleModel(currentModelId ?? selectedModelId);
+    if (startupModelId) {
+      selectedModelId = startupModelId;
+    }
     await refreshReadiness();
     await refreshMcpStatus();
     if (mcpStatus?.running) {

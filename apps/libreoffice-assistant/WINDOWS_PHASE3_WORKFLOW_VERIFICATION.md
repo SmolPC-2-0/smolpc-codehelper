@@ -31,12 +31,17 @@ Verify that the app can:
 
 1. Click `Ensure Engine Started`.
 2. Click `Refresh Models`.
-3. Select and load `qwen3-4b-instruct-2507`.
-4. In `MCP Bridge`:
+3. Click `Refresh Backend Status`.
+4. Select model by active lane:
+   - If `active_backend: cpu`, load `qwen2.5-coder-1.5b` (CPU-safe baseline).
+   - If `active_backend: directml`, load `qwen3-4b-instruct-2507`.
+   - If lane is unclear, use `check_model_readiness` and pick a model ready for that lane.
+5. Click `Load Model`.
+6. In `MCP Bridge`:
    - `Refresh MCP Status`
    - `Start MCP Server` if needed
    - `Refresh MCP Tools`
-5. Confirm:
+7. Confirm:
    - `running: true`
    - `tools_loaded > 0`
 
@@ -111,6 +116,31 @@ For each machine/lane tested:
    - exact error text
    - terminal log excerpt around failure
    - issue report JSON from app UI
+
+## Terminal fallback when UI appears stuck
+
+If UI shows `loading model` for too long, or generation reports `No model loaded`, verify and recover via terminal:
+
+1. Read engine status:
+
+```powershell
+$token = (Get-Content "$env:LOCALAPPDATA\SmolPC\engine-runtime\engine-token.txt" -Raw).Trim()
+$h = @{ Authorization = "Bearer $token" }
+Invoke-RestMethod "http://127.0.0.1:19432/engine/status" -Headers $h |
+  Select-Object current_model,@{n="backend";e={$_.backend_status.active_backend}},@{n="reason";e={$_.backend_status.selection_reason}}
+```
+
+2. If `current_model` is empty, load the lane-compatible model explicitly:
+
+```powershell
+# CPU lane
+Invoke-RestMethod "http://127.0.0.1:19432/engine/load" -Method Post -Headers $h -ContentType "application/json" -Body '{"model_id":"qwen2.5-coder-1.5b"}'
+
+# DirectML lane
+Invoke-RestMethod "http://127.0.0.1:19432/engine/load" -Method Post -Headers $h -ContentType "application/json" -Body '{"model_id":"qwen3-4b-instruct-2507"}'
+```
+
+3. Re-run `engine/status` and continue workflow validation once `current_model` is non-empty.
 
 ## Notes
 

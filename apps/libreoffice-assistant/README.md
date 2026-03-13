@@ -12,6 +12,7 @@ Use these docs in order:
 4. `apps/libreoffice-assistant/WINDOWS_PHASE1_VERIFICATION.md` (verification runbook)
 5. `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md` (MCP bridge Windows test runbook)
 6. `apps/libreoffice-assistant/WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md` (chat/tool workflow Windows runbook)
+7. `apps/libreoffice-assistant/WINDOWS_PHASE3_TEAMMATE_RESULTS_TEMPLATE.md` (teammate matrix result template)
 
 ## Current migration status
 
