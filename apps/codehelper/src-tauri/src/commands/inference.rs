@@ -260,6 +260,10 @@ fn desired_model_to_restore<'a>(
     }
 }
 
+pub(super) async fn set_desired_model(state: &InferenceState, model_id: Option<String>) {
+    *state.desired_model.lock().await = model_id;
+}
+
 async fn ensure_desired_model_loaded(
     client: &EngineClient,
     state: &InferenceState,
@@ -332,7 +336,7 @@ pub async fn load_model(
         log::error!("Model load failed for {}: {}", model_id, e);
         format!("Failed to load model: {e}")
     })?;
-    *state.desired_model.lock().await = Some(model_id.clone());
+    set_desired_model(&state, Some(model_id.clone())).await;
     if let Ok(status) = client.status().await {
         log::info!(
             "Model loaded: model={} backend={:?} runtime_engine={:?} selection_reason={:?}",
@@ -355,7 +359,7 @@ pub async fn unload_model(
         .unload_model(false)
         .await
         .map_err(|e| format!("Failed to unload model: {e}"))?;
-    *state.desired_model.lock().await = None;
+    set_desired_model(&state, None).await;
     Ok("Model unloaded successfully".to_string())
 }
 
@@ -443,7 +447,7 @@ pub async fn set_inference_runtime_mode(
                     .load_model(model_id)
                     .await
                     .map_err(|e| format!("Failed to load model after mode switch: {e}"))?;
-                *state.desired_model.lock().await = Some(model_id.to_string());
+                set_desired_model(&state, Some(model_id.to_string())).await;
             }
         }
 

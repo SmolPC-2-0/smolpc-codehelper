@@ -36,6 +36,7 @@ nul
 
 # Local/generated artifacts
 /cache_dir/
+/apps/codehelper/cache_dir/
 /apps/codehelper/scripts/src-tauri/
 /tmp/
 /src-tauri/

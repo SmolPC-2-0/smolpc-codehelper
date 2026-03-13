@@ -17,7 +17,7 @@
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
-	import type { GenerationConfig } from '$lib/types/inference';
+	import type { CheckModelResponse, GenerationConfig, InferenceRuntimeMode } from '$lib/types/inference';
 
 	let messagesContainer: HTMLDivElement | undefined = $state();
 	let cancelRequested = $state(false);
@@ -158,50 +158,86 @@ Teaching rules:
 
 		const chatId = activeChat.id;
 		const messageId = assistantMessage.id;
+		let bufferedTokens = '';
+		let flushHandle: ReturnType<typeof setTimeout> | null = null;
 
 		try {
 			const prompt = buildChatMLPrompt(content, historyBeforeMessage);
+			const sampling = preferredSampling();
 			const config: Partial<GenerationConfig> = {
-				max_length: 2048,
-				temperature: settingsStore.temperature,
-				top_k: 40,
-				top_p: 0.85,
-				repetition_penalty: 1.15,
-				repetition_penalty_last_n: 128
+				max_length: preferredMaxLength(),
+				temperature: sampling.temperature,
+				top_k: sampling.top_k,
+				top_p: sampling.top_p,
+				repetition_penalty: sampling.repetition_penalty,
+				repetition_penalty_last_n: sampling.repetition_penalty_last_n
+			};
+
+			const flushBufferedTokens = () => {
+				if (!bufferedTokens) return;
+
+				const streamingChat = chatsStore.chats.find((chat) => chat.id === chatId);
+				if (!streamingChat) {
+					bufferedTokens = '';
+					return;
+				}
+
+				const streamingMessage = streamingChat.messages.find((msg) => msg.id === messageId);
+				if (!streamingMessage || !streamingMessage.isStreaming) {
+					bufferedTokens = '';
+					return;
+				}
+
+				chatsStore.updateMessage(chatId, messageId, {
+					content: streamingMessage.content + bufferedTokens
+				});
+				bufferedTokens = '';
+
+				if (currentChat?.id === chatId) {
+					scrollToBottom();
+				}
+			};
+
+			const scheduleFlush = () => {
+				if (flushHandle !== null) return;
+				flushHandle = setTimeout(() => {
+					flushHandle = null;
+					flushBufferedTokens();
+				}, 60);
 			};
 
 			await inferenceStore.generateStream(
 				prompt,
 				(token: string) => {
 					if (cancelRequested) return;
-
-					const streamingChat = chatsStore.chats.find((chat) => chat.id === chatId);
-					if (!streamingChat) return;
-
-					const streamingMessage = streamingChat.messages.find((msg) => msg.id === messageId);
-					if (!streamingMessage || !streamingMessage.isStreaming) return;
-
-					chatsStore.updateMessage(chatId, messageId, {
-						content: streamingMessage.content + token
-					});
-
-					if (currentChat?.id === chatId) {
-						scrollToBottom();
-					}
+					bufferedTokens += token;
+					scheduleFlush();
 				},
 				config
 			);
+			if (flushHandle !== null) {
+				clearTimeout(flushHandle);
+				flushHandle = null;
+			}
+			flushBufferedTokens();
 
 			chatsStore.updateMessage(chatId, messageId, {
 				isStreaming: false
 			});
 		} catch (error) {
+			if (flushHandle !== null) {
+				clearTimeout(flushHandle);
+				flushHandle = null;
+			}
 			console.error('Generation error:', error);
 			chatsStore.updateMessage(chatId, messageId, {
 				content: `Error: ${error}`,
 				isStreaming: false
 			});
 		} finally {
+			if (flushHandle !== null) {
+				clearTimeout(flushHandle);
+			}
 			currentStreamingChatId = null;
 			currentStreamingMessageId = null;
 		}
@@ -358,6 +394,90 @@ Teaching rules:
 		bottomOffset = Math.max(0, windowHeight - visualViewportHeight);
 	}
 
+	function preferredMaxLength(): number {
+		const status = inferenceStore.status;
+		const cpuRuntime = status.runtimeMode === 'cpu' || status.activeBackend === 'cpu';
+		return cpuRuntime ? 160 : 2048;
+	}
+
+	function preferredSampling(): Pick<
+		GenerationConfig,
+		'temperature' | 'top_k' | 'top_p' | 'repetition_penalty' | 'repetition_penalty_last_n'
+	> {
+		const status = inferenceStore.status;
+		const cpuRuntime = status.runtimeMode === 'cpu' || status.activeBackend === 'cpu';
+		if (cpuRuntime) {
+			return {
+				temperature: Math.min(settingsStore.temperature, 0.55),
+				top_k: 24,
+				top_p: 0.8,
+				repetition_penalty: 1.1,
+				repetition_penalty_last_n: 64
+			};
+		}
+
+		return {
+			temperature: settingsStore.temperature,
+			top_k: 40,
+			top_p: 0.85,
+			repetition_penalty: 1.15,
+			repetition_penalty_last_n: 128
+		};
+	}
+
+	function isModelReadyForMode(
+		readiness: CheckModelResponse | null,
+		mode: InferenceRuntimeMode
+	): boolean {
+		if (!readiness) {
+			return false;
+		}
+
+		if (mode === 'cpu') {
+			return readiness.lanes.cpu.ready;
+		}
+
+		if (mode === 'dml') {
+			return readiness.lanes.directml.ready;
+		}
+
+		return (
+			readiness.lanes.directml.ready ||
+			readiness.lanes.cpu.ready ||
+			readiness.lanes.openvino_npu.ready
+		);
+	}
+
+	async function resolveStartupModelId(availableModelIds: string[]): Promise<string | null> {
+		if (availableModelIds.length === 0) {
+			return null;
+		}
+
+		const preferred = availableModelIds.includes(settingsStore.selectedModel)
+			? settingsStore.selectedModel
+			: availableModelIds[0] ?? null;
+
+		if (!preferred) {
+			return null;
+		}
+
+		const mode = inferenceStore.runtimeMode;
+		const preferredReadiness = await inferenceStore.checkModelReadiness(preferred);
+		if (isModelReadyForMode(preferredReadiness, mode)) {
+			return preferred;
+		}
+
+		for (const modelId of availableModelIds) {
+			if (modelId === preferred) continue;
+			const readiness = await inferenceStore.checkModelReadiness(modelId);
+			if (isModelReadyForMode(readiness, mode)) {
+				return modelId;
+			}
+		}
+
+		return preferred;
+	}
+
 	onMount(() => {
 		calculateBottomOffset();
 
@@ -367,16 +487,36 @@ Teaching rules:
 
 		async function initInference() {
 			await inferenceStore.listModels();
-			const availableModelIds = new Set(inferenceStore.availableModels.map((model) => model.id));
-			const selectedModelId = availableModelIds.has(settingsStore.selectedModel)
-				? settingsStore.selectedModel
-				: inferenceStore.availableModels[0]?.id ?? null;
+			await inferenceStore.refreshBackendStatus();
+			const availableModelIds = inferenceStore.availableModels.map((model) => model.id);
+			const selectedModelId = await resolveStartupModelId(availableModelIds);
 
-			await inferenceStore.ensureStarted({
+			let startup = await inferenceStore.ensureStarted({
 				mode: 'auto',
 				startup_policy: selectedModelId ? { default_model_id: selectedModelId } : null
 			});
 			await inferenceStore.syncStatus();
+
+			// Retry once with a fallback model when the preferred selection is not viable
+			// for the current runtime mode (for example CPU mode with a DML-only model).
+			if (startup?.state === 'failed' && selectedModelId) {
+				const fallbackIds = availableModelIds.filter((id) => id !== selectedModelId);
+				for (const fallbackModelId of fallbackIds) {
+					const readiness = await inferenceStore.checkModelReadiness(fallbackModelId);
+					if (!isModelReadyForMode(readiness, inferenceStore.runtimeMode)) {
+						continue;
+					}
+
+					startup = await inferenceStore.ensureStarted({
+						mode: 'auto',
+						startup_policy: { default_model_id: fallbackModelId }
+					});
+					await inferenceStore.syncStatus();
+					if (startup?.state === 'ready') {
+						break;
+					}
+				}
+			}
 
 			if (inferenceStore.currentModel) {
 				settingsStore.setModel(inferenceStore.currentModel);

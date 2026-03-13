@@ -1,4 +1,6 @@
-use super::inference::{apply_runtime_mode_preference, resolve_client, InferenceState};
+use super::inference::{
+    apply_runtime_mode_preference, resolve_client, set_desired_model, InferenceState,
+};
 use chrono::Utc;
 use smolpc_engine_client::{
     read_runtime_env_overrides, EngineStatus, RuntimeModePreference, StartupMode, StartupPolicy,
@@ -197,6 +199,13 @@ fn map_engine_status_to_readiness(status: &EngineStatus) -> EngineReadinessDto {
     }
 }
 
+fn current_model_from_status(status: &EngineStatus) -> Option<String> {
+    status
+        .active_model_id
+        .clone()
+        .or_else(|| status.current_model.clone())
+}
+
 #[tauri::command]
 pub async fn engine_status(
     app_handle: tauri::AppHandle,
@@ -207,6 +216,9 @@ pub async fn engine_status(
         .status()
         .await
         .map_err(|error| format!("Failed to query engine status: {error}"))?;
+    if let Some(model_id) = current_model_from_status(&status) {
+        set_desired_model(&state, Some(model_id)).await;
+    }
     Ok(map_engine_status_to_readiness(&status))
 }
 
@@ -224,11 +236,19 @@ pub async fn engine_ensure_started(
     let startup_policy = normalize_startup_policy(&request);
 
     match client.ensure_started(startup_mode, startup_policy).await {
-        Ok(status) => Ok(map_engine_status_to_readiness(&status)),
+        Ok(status) => {
+            if let Some(model_id) = current_model_from_status(&status) {
+                set_desired_model(&state, Some(model_id)).await;
+            }
+            Ok(map_engine_status_to_readiness(&status))
+        }
         Err(error) => {
             let error_message = error.to_string();
             match client.status().await {
                 Ok(status) => {
+                    if let Some(model_id) = current_model_from_status(&status) {
+                        set_desired_model(&state, Some(model_id)).await;
+                    }
                     let readiness = map_engine_status_to_readiness(&status);
                     if readiness.state == "failed" {
                         if readiness.error_message.is_some() {
