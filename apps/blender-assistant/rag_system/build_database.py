@@ -10,7 +10,6 @@ import json
 import requests
 from bs4 import BeautifulSoup
 from pathlib import Path
-import pickle
 import numpy as np
 try:
     from sentence_transformers import SentenceTransformer
@@ -151,13 +150,7 @@ class BlenderDocsIndexer:
         np.save(embeddings_file, embeddings)
         print(f"\n[OK] Embeddings saved: {embeddings_file}")
 
-        # Save metadata
-        metadata_file = self.db_path / "metadata.pkl"
-        with open(metadata_file, 'wb') as f:
-            pickle.dump(all_chunks, f)
-        print(f"[OK] Metadata saved: {metadata_file}")
-
-        # Save JSON metadata for Rust Tier 2 loader
+        # Save JSON metadata used by both Python and Rust loaders.
         metadata_json_file = self.db_path / "metadata.json"
         with open(metadata_json_file, 'w', encoding='utf-8') as f:
             json.dump(all_chunks, f, ensure_ascii=False)

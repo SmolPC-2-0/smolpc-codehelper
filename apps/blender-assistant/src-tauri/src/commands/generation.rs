@@ -1,6 +1,6 @@
+use crate::engine_integration;
 use crate::ollama::{self, OllamaMetrics};
 use crate::prompts::build_question_prompts;
-use crate::shared_engine;
 use crate::state::{BackendState, GenerationBackend, SceneData};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -85,7 +85,8 @@ pub async fn assistant_stream_ask(
         return Err("Question too long (max 10,000 characters)".to_string());
     }
 
-    let effective_scene_context = super::assistant::resolve_scene_context(&backend_state, scene_context);
+    let effective_scene_context =
+        super::assistant::resolve_scene_context(&backend_state, scene_context);
     let rag = super::assistant::retrieve_contexts_for_question(&backend_state, question, 3)?;
     let (system_prompt, user_prompt) =
         build_question_prompts(question, effective_scene_context.as_ref(), &rag.contexts);
@@ -126,7 +127,7 @@ pub async fn execute_stream_generation(
         }
         GenerationBackend::SharedEngine => {
             let token_channel = on_token.clone();
-            let mut engine_result = shared_engine::stream_chat(
+            let mut engine_result = engine_integration::stream_chat(
                 &system_prompt,
                 &user_prompt,
                 Arc::clone(&cancelled),
@@ -139,11 +140,11 @@ pub async fn execute_stream_generation(
             .await;
 
             if let Err(err) = &engine_result {
-                if shared_engine::is_model_not_loaded_error(err) {
+                if engine_integration::is_model_not_loaded_error(err) {
                     log::info!(
                         "[SharedEngine] Model not loaded during generation, attempting autoload"
                     );
-                    match shared_engine::ensure_model_loaded().await {
+                    match engine_integration::ensure_model_loaded().await {
                         Ok(model_id) => {
                             backend_state.set_loaded_model_id(Some(model_id.clone()));
                             log::info!(
@@ -151,7 +152,7 @@ pub async fn execute_stream_generation(
                                 model_id
                             );
                             let retry_channel = on_token.clone();
-                            engine_result = shared_engine::stream_chat(
+                            engine_result = engine_integration::stream_chat(
                                 &system_prompt,
                                 &user_prompt,
                                 Arc::clone(&cancelled),
@@ -164,18 +165,15 @@ pub async fn execute_stream_generation(
                             .await;
                         }
                         Err(load_err) => {
-                            return Err(format!(
-                                "{} (model autoload failed: {})",
-                                err, load_err
-                            ));
+                            return Err(format!("{} (model autoload failed: {})", err, load_err));
                         }
                     }
                 }
             }
 
             match engine_result {
-                Err(err) if shared_engine::is_engine_connection_error(&err) => {
-                    shared_engine::invalidate_availability_cache();
+                Err(err) if engine_integration::is_engine_connection_error(&err) => {
+                    engine_integration::invalidate_availability_cache();
                     if crate::state::allow_ollama_fallback() {
                         log::info!(
                             "[SharedEngine] Engine unreachable during generation, falling back to Ollama"
@@ -195,7 +193,9 @@ pub async fn execute_stream_generation(
                             )
                             .await
                         } else {
-                            log::info!("[SharedEngine] Ollama also not available, returning engine error");
+                            log::info!(
+                                "[SharedEngine] Ollama also not available, returning engine error"
+                            );
                             Err(err)
                         }
                     } else {
@@ -259,9 +259,7 @@ pub async fn inference_generate(
 }
 
 #[tauri::command]
-pub async fn inference_cancel(
-    generation_state: State<'_, GenerationState>,
-) -> Result<(), String> {
+pub async fn inference_cancel(generation_state: State<'_, GenerationState>) -> Result<(), String> {
     cancel_internal(&generation_state)
 }
 
@@ -293,13 +291,25 @@ pub async fn set_generation_backend_internal(
     }
 
     if parsed == GenerationBackend::SharedEngine {
-        if !shared_engine::is_engine_available().await {
-            return Err("Shared engine backend requested but engine is not available".to_string());
+        if !engine_integration::is_engine_available().await {
+            engine_integration::ensure_engine_running(None)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "Shared engine backend requested but engine startup failed: {}",
+                        e
+                    )
+                })?;
         }
 
-        let model_id = shared_engine::ensure_model_loaded()
+        let model_id = engine_integration::ensure_model_loaded()
             .await
-            .map_err(|e| format!("Shared engine backend requested but model autoload failed: {}", e))?;
+            .map_err(|e| {
+                format!(
+                    "Shared engine backend requested but model autoload failed: {}",
+                    e
+                )
+            })?;
         state.set_loaded_model_id(Some(model_id));
     }
 

@@ -1,7 +1,7 @@
+use crate::engine_integration;
 use crate::ollama;
 use crate::prompts::{build_question_prompts, build_scene_analysis_prompts};
 use crate::rag::types::RagContext;
-use crate::shared_engine;
 use crate::state::{BackendState, GenerationBackend, SceneData};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -75,7 +75,10 @@ pub struct AssistantStatusResponse {
     pub rag_error: Option<String>,
 }
 
-pub fn resolve_scene_context(state: &BackendState, scene_context: Option<SceneData>) -> Option<SceneData> {
+pub fn resolve_scene_context(
+    state: &BackendState,
+    scene_context: Option<SceneData>,
+) -> Option<SceneData> {
     if scene_context.is_some() {
         return scene_context;
     }
@@ -139,7 +142,10 @@ pub fn retrieve_contexts_for_question(
     retrieve_contexts(state, question, n_results)
 }
 
-pub async fn ask_internal(state: &BackendState, request: AskRequest) -> Result<AskResponse, String> {
+pub async fn ask_internal(
+    state: &BackendState,
+    request: AskRequest,
+) -> Result<AskResponse, String> {
     let question = request.question.trim();
     if question.is_empty() {
         return Err("No question provided".to_string());
@@ -165,7 +171,9 @@ pub async fn ask_internal(state: &BackendState, request: AskRequest) -> Result<A
     .await?;
 
     if is_degenerate_response(&answer) {
-        log::warn!("[Assistant] Detected low-quality repetitive answer; retrying without RAG context");
+        log::warn!(
+            "[Assistant] Detected low-quality repetitive answer; retrying without RAG context"
+        );
         let (retry_system_prompt, retry_user_prompt) =
             build_question_prompts(question, scene_context.as_ref(), &[]);
 
@@ -260,7 +268,7 @@ pub async fn assistant_status_internal(
             ollama::is_ollama_available().await,
             std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| ollama::DEFAULT_MODEL.to_string()),
         ),
-        GenerationBackend::SharedEngine => match shared_engine::engine_status().await {
+        GenerationBackend::SharedEngine => match engine_integration::engine_status().await {
             Ok(info) => (
                 info.connected,
                 info.current_model
@@ -337,15 +345,16 @@ async fn run_chat_completion(
             ollama::chat_once(system_prompt, user_prompt, model_override, temperature).await
         }
         GenerationBackend::SharedEngine => {
-            let mut engine_result = shared_engine::chat_once(system_prompt, user_prompt, temperature).await;
+            let mut engine_result =
+                engine_integration::chat_once(system_prompt, user_prompt, temperature).await;
 
             if let Err(err) = &engine_result {
-                if shared_engine::is_model_not_loaded_error(err) {
+                if engine_integration::is_model_not_loaded_error(err) {
                     log::info!(
                         "[SharedEngine] Model not loaded during {}, attempting autoload",
                         operation
                     );
-                    match shared_engine::ensure_model_loaded().await {
+                    match engine_integration::ensure_model_loaded().await {
                         Ok(model_id) => {
                             state.set_loaded_model_id(Some(model_id.clone()));
                             log::info!(
@@ -353,14 +362,15 @@ async fn run_chat_completion(
                                 model_id,
                                 operation
                             );
-                            engine_result =
-                                shared_engine::chat_once(system_prompt, user_prompt, temperature).await;
+                            engine_result = engine_integration::chat_once(
+                                system_prompt,
+                                user_prompt,
+                                temperature,
+                            )
+                            .await;
                         }
                         Err(load_err) => {
-                            return Err(format!(
-                                "{} (model autoload failed: {})",
-                                err, load_err
-                            ));
+                            return Err(format!("{} (model autoload failed: {})", err, load_err));
                         }
                     }
                 }
@@ -368,8 +378,8 @@ async fn run_chat_completion(
 
             match engine_result {
                 Ok(answer) => Ok(answer),
-                Err(err) if shared_engine::is_engine_connection_error(&err) => {
-                    shared_engine::invalidate_availability_cache();
+                Err(err) if engine_integration::is_engine_connection_error(&err) => {
+                    engine_integration::invalidate_availability_cache();
                     if crate::state::allow_ollama_fallback() {
                         log::info!(
                             "[SharedEngine] Engine unreachable during {}, falling back to Ollama",

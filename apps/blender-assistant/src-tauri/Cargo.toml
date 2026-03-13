@@ -13,8 +13,10 @@ log = "0.4"
 env_logger = "0.11"
 futures-util = "0.3"
 axum = "0.8"
-serde-pickle = "1.2"
 rand = "0.8"
+dirs = "6"
+smolpc-engine-client = { path = "../../../engine/crates/smolpc-engine-client" }
+smolpc-engine-core = { path = "../../../engine/crates/smolpc-engine-core" }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
