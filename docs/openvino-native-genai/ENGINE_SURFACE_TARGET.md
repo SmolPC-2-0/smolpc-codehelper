@@ -1,6 +1,6 @@
 # Engine Surface Target
 
-Checked on: 2026-03-10
+Checked on: 2026-03-12
 Purpose: define the target engine status and model-readiness contract for the native OpenVINO rollout, and record the implemented branch baseline that the remaining Phase 1 work should assume.
 
 ## Principles
@@ -11,7 +11,7 @@ Purpose: define the target engine status and model-readiness contract for the na
 - temporary fallback is distinguishable from persisted selection
 - `engine-host` remains the only selector, probe owner, and persistence owner
 
-## Implemented Baseline (2026-03-10)
+## Implemented Baseline (2026-03-12)
 
 ### `GET /engine/status`
 
@@ -75,8 +75,9 @@ Current truthfulness limits:
 - `directml` preflight is only reported after an actual DirectML load attempt
 - `openvino_npu` bundle/artifact readiness is reported now
 - `openvino_npu` startup-probe truth is reported now (`detected`, `device_name`, `driver_version`, `startup_probe_state`, `last_failure_class`)
-- `runtime_engine` currently emits `ort_cpu` or `genai_dml`; `ov_genai_npu` is not emitted yet
-- preflight state plumbing exists, but the current branch bottoms out at `runtime_unavailable` because native OpenVINO activation is not implemented yet
+- `runtime_engine` now emits `ort_cpu`, `genai_dml`, or `ov_genai_npu`
+- `openvino_npu.preflight_state` now reflects real compile plus first-token preflight during `/engine/load`
+- selector handoff now prefers `openvino_npu -> directml -> cpu` when the OpenVINO lane passes preflight
 
 ### `POST /engine/check-model`
 
@@ -129,7 +130,6 @@ Current reason codes include:
 - `artifact_incomplete`
 - `startup_probe_pending`
 - `startup_probe_failed`
-- `runtime_unavailable`
 - `directml_candidate_missing`
 - runtime-bundle validation failure codes such as `missing_root`, `directml_missing`, `openvino_npu_plugin_missing`
 - blocking OpenVINO startup-probe failure classes such as `no_npu_hardware`, `openvino_npu_driver_missing`, and `openvino_npu_plugin_unavailable`
@@ -153,8 +153,8 @@ Current implemented reason semantics:
   - then `startup_probe_pending` while the async OpenVINO startup probe is still running
   - then a blocking OpenVINO startup-probe failure class when the startup probe completed but the lane is unusable
   - then `startup_probe_failed` if the startup probe completed without a usable result but also without a blocking classified failure
-  - then `runtime_unavailable`
-  - `ready` remains `false` in the current branch because native OpenVINO activation is not implemented yet
+  - otherwise `ready`
+  - OpenVINO lane `ready=true` means the lane is viable enough to attempt `/engine/load`; the final native preflight still runs during model load
 
 ## Remaining Target For The Rest Of Phase 1
 
@@ -162,17 +162,15 @@ Current implemented reason semantics:
 
 The remaining Phase 1 work still needs to make the implemented baseline fully match the final target by adding:
 
-- truthful `openvino_npu.preflight_state`
-- real `runtime_engine=ov_genai_npu`
-- actual lane selection order `openvino_npu -> directml -> cpu`
+- cache-state truth for the OpenVINO lane
+- final Intel NPU validation against the real bundled runtime/model inventory
 
 ### `POST /engine/check-model`
 
 The remaining Phase 1 work still needs:
 
-- `openvino_npu.ready=true` when startup probe and preflight both pass
-- `reason=preflight_not_run`, `timeout`, and other OpenVINO-specific readiness reasons once a native OpenVINO runtime exists
-- readiness that reflects OpenVINO model-preflight truth, not only bundle/artifact truth
+- any explicit preflight-on-demand readiness API if product needs readiness to include the model-scoped OpenVINO smoke test
+- validation that app-local bundle staging matches the current contract on target Intel laptops
 
 ## Failure-Class Vocabulary
 

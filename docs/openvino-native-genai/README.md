@@ -1,27 +1,39 @@
 # Native OpenVINO GenAI Plan Pack
 
-Checked on: 2026-03-10
+Checked on: 2026-03-12
 Scope: Windows x64 only, canonical planning + contract docs, weak Intel laptops are the primary KPI.
 
 This folder is the canonical plan pack for the SmolPC Intel acceleration path.
 
 ## Implementation Status
 
-As of 2026-03-10, this branch is beyond the Phase 0 prerequisite baseline and has most of the OpenVINO bring-up scaffolding wired:
+As of 2026-03-12, this branch has completed native runtime activation and Windows archive-based runtime bring-up for the OpenVINO smoke path:
 
 - selection persistence is keyed by full fingerprint and keeps multiple records per model
 - `GET /engine/status` is lane-based instead of DML-only
 - `POST /engine/check-model` reports readiness by lane instead of a single boolean
 - `openvino_npu/manifest.json` inspection and artifact validation are implemented
 - an async OpenVINO startup probe classifies hardware, device visibility, driver version, and startup failure class
-- model load now applies the OpenVINO preflight budget and `temporary_fallback` status plumbing before falling through to `directml` or `cpu`
+- a native OpenVINO GenAI runtime adapter is implemented in `engine-core`
+- model load now runs real OpenVINO compile plus first-token preflight under the `30 seconds` budget
+- successful OpenVINO preflight now activates `runtime_engine=ov_genai_npu`
+- automatic selection now prefers `openvino_npu -> directml -> cpu` when the OpenVINO lane is viable
+- the selection fingerprint now uses the `openvino_native_v1` profile so stale pre-activation records do not block rollout
+- `npm run runtime:setup:openvino` now downloads the official 2026 Windows OpenVINO GenAI archive, verifies its SHA256, validates the `openvino_genai_c.dll` exports, and stages the app-local bundle into `apps/codehelper/src-tauri/libs/openvino`
+- `npm run model:setup:qwen3:openvino` now stages the official `OpenVINO/Qwen3-4B-int4-ov` artifact into `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-int4-ov/openvino_npu`
+- the native OpenVINO lane now applies NPU creation defaults that work on this PC:
+  - `MAX_PROMPT_LEN=512`
+  - `MIN_RESPONSE_LEN=1024`
+- those NPU defaults can be overridden for debugging with:
+  - `SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN`
+  - `SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN`
 
 Still pending for the remaining Phase 1 / Phase 1b work:
 
-- native `openvino_npu` runtime activation and `runtime_engine=ov_genai_npu`
-- successful OpenVINO compile and first-token preflight
-- automatic live selection order `openvino_npu -> directml -> cpu`
-- lane-specific manifest rollout and default catalog migration away from `qwen3-4b-instruct-2507`
+- final end-to-end Intel NPU validation inside the full app flow on this machine
+- exact-parity OpenVINO export for `qwen3-4b-instruct-2507` if benchmark parity across lanes is still required
+- default catalog migration away from `qwen3-4b-instruct-2507`
+- installer-time OpenVINO bundle population
 - workload tuning, cache policy, and prompt-default calibration
 
 ## Final Decision
@@ -32,6 +44,15 @@ Still pending for the remaining Phase 1 / Phase 1b work:
 - Removed from scope: `ORT + OpenVINO EP`
 
 OpenVINO is native GenAI exclusive in this plan. Do not plan or implement an ORT/OpenVINO EP lane unless the plan is explicitly reopened.
+
+## Windows Bring-Up Baseline
+
+Windows native staging uses the official 2026 OpenVINO GenAI archive, not the PyPI wheels. The wheel-based `openvino-genai` package does not expose the `ov_genai_*` C ABI that the Rust adapter calls, while the archive ships `openvino_genai_c.dll` and the native headers needed for this integration.
+
+Primary 2026 references for this repo state:
+- OpenVINO GenAI install guide: `https://docs.openvino.ai/2026/get-started/install-openvino/install-openvino-genai.html`
+- OpenVINO GenAI on NPU: `https://docs.openvino.ai/2026/openvino-workflow-generative/inference-with-genai/inference-with-genai-on-npu.html`
+- Upstream C samples: `https://github.com/openvinotoolkit/openvino.genai/tree/master/samples/c`
 
 ## Folder Layout
 
@@ -62,11 +83,10 @@ This pack is intentionally structured for short-lived, focused implementation-pl
 
 Recommended planning boundaries:
 
-1. native OpenVINO runtime adapter implementation and successful activation
-2. automatic selector handoff to `openvino_npu -> directml -> cpu` after successful OpenVINO preflight
-3. model manifests, artifact layout, and default catalog migration
+1. lane-specific manifests, artifact layout, and default catalog migration
+2. exact-parity OpenVINO export and benchmark refresh
+3. Intel NPU validation and packaging hardening
 4. workload tuning, cache policy, and prompt-default calibration
-5. benchmark refresh so users can compare inference/runtime choices on their own machine
 
 Each future Codex session should take one workstream or one subsection of a phase, produce an implementation plan for that slice only, and stop before broad execution planning.
 

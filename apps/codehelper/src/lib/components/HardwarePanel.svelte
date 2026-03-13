@@ -284,7 +284,17 @@
 								</span>
 							</div>
 							<div class="grid grid-cols-3 gap-2">
-								<span class="text-muted-foreground">Details:</span>
+								<span class="text-muted-foreground">Identifier:</span>
+								<span class="col-span-2 font-mono text-xs">{hardwareStore.info.npu.identifier}</span>
+							</div>
+							{#if hardwareStore.info.npu.driver_version}
+								<div class="grid grid-cols-3 gap-2">
+									<span class="text-muted-foreground">Driver:</span>
+									<span class="col-span-2">{hardwareStore.info.npu.driver_version}</span>
+								</div>
+							{/if}
+							<div class="grid grid-cols-3 gap-2">
+								<span class="text-muted-foreground">Summary:</span>
 								<span class="col-span-2">{hardwareStore.info.npu.details}</span>
 							</div>
 							<div class="grid grid-cols-3 gap-2">
@@ -338,6 +348,31 @@
 			var(--surface-floating);
 		box-shadow: var(--shadow-strong);
 		backdrop-filter: blur(14px);
+	}
+
+	.hardware-panel .grid.grid-cols-3 {
+		grid-template-columns: minmax(6.25rem, 34%) minmax(0, 1fr) minmax(0, 1fr);
+	}
+
+	.hardware-panel .grid.grid-cols-3 > .col-span-2 {
+		min-width: 0;
+		overflow-wrap: anywhere;
+		word-break: break-word;
+	}
+
+	.hardware-panel .grid.grid-cols-3 > .font-mono {
+		word-break: break-all;
+	}
+
+	@media (max-width: 560px) {
+		.hardware-panel .grid.grid-cols-3 {
+			grid-template-columns: minmax(0, 1fr);
+			gap: 0.2rem;
+		}
+
+		.hardware-panel .grid.grid-cols-3 > .col-span-2 {
+			grid-column: 1 / -1;
+		}
 	}
 
 	@media (max-width: 920px) {

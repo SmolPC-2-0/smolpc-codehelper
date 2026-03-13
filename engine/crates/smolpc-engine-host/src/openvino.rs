@@ -1,10 +1,44 @@
+#[cfg(target_os = "windows")]
 use smolpc_engine_core::inference::{
-    OpenVinoRuntimeBundle, OpenVinoRuntimeLoader,
+    OpenVinoGenAiGenerator, OpenVinoGenerationControls, OpenVinoNpuPipelineConfig,
 };
+use smolpc_engine_core::inference::{OpenVinoRuntimeBundle, OpenVinoRuntimeLoader};
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
 const OPENVINO_NPU_DRIVER_RECOMMENDED_FLOOR: &str = "32.0.100.3104";
+const OPENVINO_NPU_MAX_PROMPT_LEN_ENV: &str = "SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN";
+const OPENVINO_NPU_MIN_RESPONSE_LEN_ENV: &str = "SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN";
+const DEFAULT_OPENVINO_NPU_MAX_PROMPT_LEN: usize = 512;
+const DEFAULT_OPENVINO_NPU_MIN_RESPONSE_LEN: usize = 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpenVinoNpuTuning {
+    pub max_prompt_len: usize,
+    pub min_response_len: usize,
+}
+
+impl Default for OpenVinoNpuTuning {
+    fn default() -> Self {
+        Self {
+            max_prompt_len: DEFAULT_OPENVINO_NPU_MAX_PROMPT_LEN,
+            min_response_len: DEFAULT_OPENVINO_NPU_MIN_RESPONSE_LEN,
+        }
+    }
+}
+
+impl OpenVinoNpuTuning {
+    #[cfg(target_os = "windows")]
+    fn pipeline_config(
+        self,
+        cache_dir: &Path,
+        generation_controls: OpenVinoGenerationControls,
+    ) -> OpenVinoNpuPipelineConfig {
+        OpenVinoNpuPipelineConfig::new(cache_dir, self.max_prompt_len, self.min_response_len)
+            .with_generation_controls(generation_controls)
+            .with_disable_thinking(true)
+    }
+}
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default)]
@@ -37,6 +71,7 @@ pub enum OpenVinoArtifactCheck {
 }
 
 impl OpenVinoArtifactCheck {
+    #[cfg(test)]
     pub fn is_ready(&self) -> bool {
         matches!(self, Self::Ready(_))
     }
@@ -64,9 +99,7 @@ impl OpenVinoArtifactCheck {
                 manifest_path.display()
             )),
             Self::Invalid { message, .. } => Some(message.clone()),
-            Self::Incomplete {
-                missing_files, ..
-            } => Some(format!(
+            Self::Incomplete { missing_files, .. } => Some(format!(
                 "OpenVINO manifest references missing files: {}",
                 missing_files
                     .iter()
@@ -113,13 +146,15 @@ pub struct OpenVinoStartupProbeResult {
     pub failure_message: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenVinoPreflightReady {
+    #[cfg(target_os = "windows")]
+    pub generator: OpenVinoGenAiGenerator,
+}
+
 pub enum OpenVinoPreflightResult {
-    Ready,
+    Ready(OpenVinoPreflightReady),
     Timeout,
-    #[allow(dead_code)]
     Failed { class: String, message: String },
-    RuntimeUnavailable,
 }
 
 pub fn inspect_openvino_artifact(manifest_path: &Path) -> OpenVinoArtifactCheck {
@@ -142,7 +177,9 @@ pub fn inspect_openvino_artifact(manifest_path: &Path) -> OpenVinoArtifactCheck 
         }
     };
 
-    let manifest = match serde_json::from_str::<OpenVinoLaneManifest>(&raw) {
+    let raw = raw.strip_prefix('\u{feff}').unwrap_or(&raw);
+
+    let manifest = match serde_json::from_str::<OpenVinoLaneManifest>(raw) {
         Ok(manifest) => manifest,
         Err(error) => {
             return OpenVinoArtifactCheck::Invalid {
@@ -275,7 +312,6 @@ pub fn probe_openvino_startup(
                 .full_device_name
                 .clone()
                 .or_else(|| npu_device_name.clone());
-            let advisory = classify_driver_diagnostic(driver_version.as_deref());
             let adapter_identity = full_device_name.as_ref().map(|device_name| {
                 let device_name = device_name.trim().to_ascii_lowercase().replace(' ', "_");
                 let runtime_name = npu_device_name
@@ -285,6 +321,42 @@ pub fn probe_openvino_startup(
                     .to_ascii_lowercase();
                 format!("openvino:{runtime_name}:{device_name}")
             });
+            let npu_tuning = match resolve_openvino_npu_tuning() {
+                Ok(tuning) => tuning,
+                Err(error) => {
+                    return OpenVinoStartupProbeResult {
+                        hardware_detected,
+                        device_visible: true,
+                        adapter_identity,
+                        device_name: full_device_name,
+                        driver_version,
+                        failure_class: Some("openvino_npu_config_invalid".to_string()),
+                        failure_message: Some(error),
+                        ..Default::default()
+                    };
+                }
+            };
+            if let Err(error) = OpenVinoGenAiGenerator::runtime_available(bundle) {
+                let (failure_class, failure_message) =
+                    classify_openvino_runtime_activation_error(&error);
+                return OpenVinoStartupProbeResult {
+                    hardware_detected,
+                    device_visible: true,
+                    adapter_identity,
+                    device_name: full_device_name,
+                    driver_version,
+                    failure_class: Some(failure_class),
+                    failure_message: Some(failure_message),
+                    ..Default::default()
+                };
+            }
+
+            let advisory = classify_driver_diagnostic(driver_version.as_deref());
+            log::info!(
+                "OpenVINO NPU tuning resolved: max_prompt_len={}, min_response_len={}",
+                npu_tuning.max_prompt_len,
+                npu_tuning.min_response_len,
+            );
 
             OpenVinoStartupProbeResult {
                 hardware_detected,
@@ -313,19 +385,81 @@ pub fn is_blocking_openvino_probe_failure(class: &str) -> bool {
     )
 }
 
-pub fn openvino_runtime_activation_available() -> bool {
-    false
-}
-
 pub fn run_openvino_preflight(
-    _artifact: &OpenVinoReadyArtifact,
-    _probe: &OpenVinoStartupProbeResult,
+    bundle: &OpenVinoRuntimeBundle,
+    model_id: &str,
+    artifact: &OpenVinoReadyArtifact,
+    probe: &OpenVinoStartupProbeResult,
+    cache_dir: &Path,
 ) -> OpenVinoPreflightResult {
-    if !openvino_runtime_activation_available() {
-        return OpenVinoPreflightResult::RuntimeUnavailable;
+    if !probe.startup_ready || !probe.device_visible {
+        return OpenVinoPreflightResult::Failed {
+            class: "openvino_npu_startup_probe_failed".to_string(),
+            message: probe.failure_message.clone().unwrap_or_else(|| {
+                "OpenVINO startup probe did not expose a usable NPU device".to_string()
+            }),
+        };
     }
 
-    OpenVinoPreflightResult::Ready
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (bundle, model_id, artifact, cache_dir);
+        return OpenVinoPreflightResult::Failed {
+            class: "openvino_npu_platform_unsupported".to_string(),
+            message: "OpenVINO NPU runtime is only supported on Windows".to_string(),
+        };
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let tuning = match resolve_openvino_npu_tuning() {
+            Ok(tuning) => tuning,
+            Err(message) => {
+                return OpenVinoPreflightResult::Failed {
+                    class: "openvino_npu_config_invalid".to_string(),
+                    message,
+                };
+            }
+        };
+        let Some(model_dir) = artifact.manifest_path.parent() else {
+            return OpenVinoPreflightResult::Failed {
+                class: "openvino_npu_compile_failed".to_string(),
+                message: format!(
+                    "Invalid OpenVINO manifest path: {}",
+                    artifact.manifest_path.display()
+                ),
+            };
+        };
+
+        let generation_controls = openvino_generation_controls_for_model(model_id);
+        log::info!(
+            "OpenVINO generation controls for {}: eos_token_id={:?}, min_new_tokens={:?}, stop_token_ids={:?}, stop_strings={:?}, ignore_eos={:?}",
+            model_id,
+            generation_controls.eos_token_id,
+            generation_controls.min_new_tokens,
+            generation_controls.stop_token_ids,
+            generation_controls.stop_strings,
+            generation_controls.ignore_eos
+        );
+        let pipeline_config = tuning.pipeline_config(cache_dir, generation_controls);
+        let generator = match OpenVinoGenAiGenerator::new(bundle, model_dir, &pipeline_config) {
+            Ok(generator) => generator,
+            Err(message) => {
+                return OpenVinoPreflightResult::Failed {
+                    class: "openvino_npu_compile_failed".to_string(),
+                    message,
+                }
+            }
+        };
+
+        match generator.run_preflight("Warmup preflight") {
+            Ok(_) => OpenVinoPreflightResult::Ready(OpenVinoPreflightReady { generator }),
+            Err(message) => OpenVinoPreflightResult::Failed {
+                class: "openvino_npu_runtime_failed".to_string(),
+                message,
+            },
+        }
+    }
 }
 
 fn is_safe_relative_path(path: &Path) -> bool {
@@ -354,9 +488,76 @@ fn classify_driver_diagnostic(driver_version: Option<&str>) -> Option<(String, S
         }
         _ => Some((
             "openvino_npu_driver_unknown".to_string(),
-            "OpenVINO exposed an NPU device, but the NPU driver version was unreadable"
-                .to_string(),
+            "OpenVINO exposed an NPU device, but the NPU driver version was unreadable".to_string(),
         )),
+    }
+}
+
+fn classify_openvino_runtime_activation_error(error: &str) -> (String, String) {
+    if error.contains("Missing symbol ov_genai_")
+        || (error.contains("ov_genai_") && error.contains("GetProcAddress failed"))
+    {
+        return (
+            "openvino_genai_c_api_missing".to_string(),
+            format!(
+                "The staged openvino_genai_c.dll is missing the required ov_genai_* C API exports for the native adapter: {error}"
+            ),
+        );
+    }
+
+    (
+        "openvino_genai_runtime_unavailable".to_string(),
+        format!("OpenVINO GenAI runtime activation failed: {error}"),
+    )
+}
+
+pub fn resolve_openvino_npu_tuning() -> Result<OpenVinoNpuTuning, String> {
+    Ok(OpenVinoNpuTuning {
+        max_prompt_len: parse_positive_env_usize(
+            OPENVINO_NPU_MAX_PROMPT_LEN_ENV,
+            DEFAULT_OPENVINO_NPU_MAX_PROMPT_LEN,
+        )?,
+        min_response_len: parse_positive_env_usize(
+            OPENVINO_NPU_MIN_RESPONSE_LEN_ENV,
+            DEFAULT_OPENVINO_NPU_MIN_RESPONSE_LEN,
+        )?,
+    })
+}
+
+fn parse_positive_env_usize(name: &str, default: usize) -> Result<usize, String> {
+    let Some(raw) = std::env::var(name).ok() else {
+        return Ok(default);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(default);
+    }
+
+    let value = trimmed
+        .parse::<usize>()
+        .map_err(|error| format!("{name} must be a positive integer, got '{trimmed}': {error}"))?;
+    if value == 0 {
+        return Err(format!("{name} must be greater than zero, got '{trimmed}'"));
+    }
+    Ok(value)
+}
+
+#[cfg(target_os = "windows")]
+fn openvino_generation_controls_for_model(model_id: &str) -> OpenVinoGenerationControls {
+    let qwen3_eos_only = matches!(model_id, "qwen3-4b-int4-ov" | "qwen3-4b-int4-ov-npu");
+    OpenVinoGenerationControls {
+        // Qwen chat template EOS token (<|im_end|>) is 151645.
+        // Set explicit EOS because OpenVINO C config is built manually and does not
+        // implicitly inherit generation_config.json defaults.
+        eos_token_id: qwen3_eos_only.then_some(151645),
+        min_new_tokens: Some(1),
+        // Both token IDs for belt-and-suspenders: <|im_end|>=151645, <|endoftext|>=151643
+        stop_token_ids: qwen3_eos_only.then_some(vec![151643, 151645]),
+        // stop_strings operates on accumulated decoded text (incl. special tokens) — catches
+        // <|im_end|> even when the NPU StaticLLMPipeline doesn't honour stop_token_ids reliably.
+        stop_strings: qwen3_eos_only
+            .then_some(vec!["<|im_end|>".to_string(), "<|endoftext|>".to_string()]),
+        ignore_eos: Some(false),
     }
 }
 
@@ -377,8 +578,12 @@ fn parse_version(raw: &str) -> Option<Vec<u32>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{inspect_openvino_artifact, version_is_older_than};
+    use super::{
+        classify_openvino_runtime_activation_error, inspect_openvino_artifact,
+        resolve_openvino_npu_tuning, version_is_older_than,
+    };
     use std::fs;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
 
     #[test]
@@ -396,8 +601,22 @@ mod tests {
         let temp = tempdir().expect("tempdir");
         let manifest_path = temp.path().join("manifest.json");
         fs::write(temp.path().join("model.xml"), []).expect("write model");
-        fs::write(&manifest_path, r#"{"required_files":["model.xml"]}"#)
-            .expect("write manifest");
+        fs::write(&manifest_path, r#"{"required_files":["model.xml"]}"#).expect("write manifest");
+
+        let artifact = inspect_openvino_artifact(&manifest_path);
+        assert!(artifact.is_ready());
+    }
+
+    #[test]
+    fn openvino_manifest_tolerates_utf8_bom() {
+        let temp = tempdir().expect("tempdir");
+        let manifest_path = temp.path().join("manifest.json");
+        fs::write(temp.path().join("model.xml"), []).expect("write model");
+        fs::write(
+            &manifest_path,
+            b"\xEF\xBB\xBF{\"required_files\":[\"model.xml\"]}",
+        )
+        .expect("write manifest");
 
         let artifact = inspect_openvino_artifact(&manifest_path);
         assert!(artifact.is_ready());
@@ -408,5 +627,55 @@ mod tests {
         assert!(version_is_older_than("32.0.100.3103", "32.0.100.3104"));
         assert!(!version_is_older_than("32.0.100.3104", "32.0.100.3104"));
         assert!(!version_is_older_than("32.0.100.3105", "32.0.100.3104"));
+    }
+
+    #[test]
+    fn openvino_runtime_activation_symbol_errors_are_classified() {
+        let (class, message) = classify_openvino_runtime_activation_error(
+            "Missing symbol ov_genai_llm_pipeline_create: GetProcAddress failed",
+        );
+
+        assert_eq!(class, "openvino_genai_c_api_missing");
+        assert!(message.contains("ov_genai_*"));
+    }
+
+    #[test]
+    fn openvino_npu_tuning_uses_defaults_when_env_is_unset() {
+        let _guard = env_lock().lock().expect("env lock");
+        std::env::remove_var("SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN");
+        std::env::remove_var("SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN");
+
+        let tuning = resolve_openvino_npu_tuning().expect("default tuning");
+        assert_eq!(tuning.max_prompt_len, 512);
+        assert_eq!(tuning.min_response_len, 1024);
+    }
+
+    #[test]
+    fn openvino_npu_tuning_rejects_invalid_env() {
+        let _guard = env_lock().lock().expect("env lock");
+        std::env::set_var("SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN", "bad");
+        std::env::remove_var("SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN");
+
+        let err = resolve_openvino_npu_tuning().expect_err("invalid env should fail");
+        assert!(err.contains("SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN"));
+
+        std::env::remove_var("SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN");
+    }
+
+    #[test]
+    fn openvino_npu_tuning_rejects_zero() {
+        let _guard = env_lock().lock().expect("env lock");
+        std::env::set_var("SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN", "0");
+        std::env::remove_var("SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN");
+
+        let err = resolve_openvino_npu_tuning().expect_err("zero should fail");
+        assert!(err.contains("greater than zero"));
+
+        std::env::remove_var("SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN");
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
     }
 }

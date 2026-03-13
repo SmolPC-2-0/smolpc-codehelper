@@ -23,6 +23,125 @@ fn non_empty_string(value: Option<String>) -> Option<String> {
     })
 }
 
+fn normalize_whitespace(value: &str) -> Option<String> {
+    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!collapsed.is_empty()).then_some(collapsed)
+}
+
+fn normalize_identifier_component(value: &str) -> Option<String> {
+    let normalized = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else if matches!(ch, ':' | '.' | '-' | '_') {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string();
+
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn confidence_rank(confidence: &NpuConfidence) -> u32 {
+    match confidence {
+        NpuConfidence::High => 3,
+        NpuConfidence::Medium => 2,
+        NpuConfidence::Low => 1,
+    }
+}
+
+fn build_npu_candidate(npu: &hardware_query::NPUInfo) -> (NpuInfo, u32) {
+    let vendor = normalize_whitespace(&npu.vendor().to_string()).unwrap_or("Unknown".to_string());
+    let model = normalize_whitespace(npu.model_name()).unwrap_or("NPU".to_string());
+    let driver_version = non_empty_string(npu.driver_version.clone());
+    let pci_device_id = non_empty_string(npu.pci_device_id.clone());
+    let usb_device_id = non_empty_string(npu.usb_device_id.clone());
+    let tops = npu
+        .tops_performance()
+        .filter(|value| value.is_finite() && *value > 0.0);
+
+    let display_name = if vendor.eq_ignore_ascii_case("unknown") {
+        model.clone()
+    } else if model
+        .to_ascii_lowercase()
+        .starts_with(&vendor.to_ascii_lowercase())
+    {
+        model.clone()
+    } else {
+        format!("{vendor} {model}")
+    };
+
+    let identifier = if let Some(pci) = pci_device_id
+        .as_deref()
+        .and_then(normalize_identifier_component)
+    {
+        format!("pci:{pci}")
+    } else if let Some(usb) = usb_device_id
+        .as_deref()
+        .and_then(normalize_identifier_component)
+    {
+        format!("usb:{usb}")
+    } else {
+        let vendor_component =
+            normalize_identifier_component(&vendor).unwrap_or_else(|| "unknown".to_string());
+        let model_component =
+            normalize_identifier_component(&model).unwrap_or_else(|| "npu".to_string());
+        format!("{vendor_component}:{model_component}")
+    };
+
+    let confidence = if pci_device_id.is_some() || usb_device_id.is_some() {
+        NpuConfidence::High
+    } else if driver_version.is_some() || tops.is_some() {
+        NpuConfidence::Medium
+    } else {
+        NpuConfidence::Low
+    };
+
+    let mut summary_parts = vec![display_name];
+    if let Some(value) = tops {
+        summary_parts.push(format!("{value:.1} TOPS"));
+    }
+    if let Some(driver) = driver_version.as_ref() {
+        summary_parts.push(format!("Driver {driver}"));
+    }
+    if let Some(pci) = pci_device_id.as_ref() {
+        summary_parts.push(format!("PCI {pci}"));
+    }
+    if let Some(usb) = usb_device_id.as_ref() {
+        summary_parts.push(format!("USB {usb}"));
+    }
+    let details = summary_parts.join(" | ");
+
+    let method = match confidence {
+        NpuConfidence::High => "hardware-query offline detection (device-id confirmed)",
+        NpuConfidence::Medium => "hardware-query offline detection (driver/perf corroborated)",
+        NpuConfidence::Low => "hardware-query offline detection (heuristic)",
+    }
+    .to_string();
+
+    let score = confidence_rank(&confidence) * 100
+        + u32::from(driver_version.is_some()) * 20
+        + u32::from(tops.is_some()) * 10
+        + tops.map(|value| value.max(0.0).min(99.0) as u32).unwrap_or(0);
+
+    (
+        NpuInfo {
+            detected: true,
+            confidence,
+            identifier,
+            driver_version,
+            details,
+            method,
+        },
+        score,
+    )
+}
+
 /// Main entry point for hardware detection using hardware-query crate
 /// Detects CPU, GPU, and NPU information offline
 pub async fn detect_all() -> Result<HardwareInfo, HardwareError> {
@@ -183,7 +302,9 @@ fn convert_gpu_info(hw_info: &hardware_query::HardwareInfo) -> Vec<GpuInfo> {
                 vram_mb,
                 temperature_c: gpu.temperature().map(|t| t as u32),
                 utilization_percent: gpu.usage_percent().map(|u| u as u32),
-                cuda_compute_capability: gpu.cuda_capability().map(std::string::ToString::to_string),
+                cuda_compute_capability: gpu
+                    .cuda_capability()
+                    .map(std::string::ToString::to_string),
             }
         })
         .collect()
@@ -195,20 +316,22 @@ fn convert_npu_info(hw_info: &hardware_query::HardwareInfo) -> Option<NpuInfo> {
         return None;
     }
 
-    let npu = &hw_info.npus()[0]; // Use first NPU
- 
-    let details = if let Some(tops) = npu.tops_performance() {
-        format!("{} - {:.1} TOPS", npu.model_name(), tops)
-    } else {
-        format!("{} {}", npu.vendor(), npu.model_name())
-    };
+    let selected = hw_info
+        .npus()
+        .iter()
+        .map(build_npu_candidate)
+        .max_by(|(info_a, score_a), (info_b, score_b)| {
+            score_a
+                .cmp(score_b)
+                .then_with(|| info_a.identifier.cmp(&info_b.identifier))
+        })
+        .map(|(info, _)| info);
 
-    Some(NpuInfo {
-        detected: true,
-        confidence: NpuConfidence::High, // hardware-query provides actual detection
-        details,
-        method: "hardware-query offline detection".to_string(),
-    })
+    if hw_info.npus().len() > 1 {
+        log::debug!("Detected {} NPUs; selected best identifier", hw_info.npus().len());
+    }
+
+    selected
 }
 
 /// Convert hardware-query memory info to our MemoryInfo format
@@ -226,10 +349,10 @@ fn convert_storage_info(hw_info: &hardware_query::HardwareInfo) -> StorageInfo {
     let storage_devices = hw_info.storage_devices();
 
     // Find primary storage device (largest capacity or first device)
-    if let Some(primary) = storage_devices.iter().max_by(|a, b| {
-        a.capacity_gb()
-            .total_cmp(&b.capacity_gb())
-    }) {
+    if let Some(primary) = storage_devices
+        .iter()
+        .max_by(|a, b| a.capacity_gb().total_cmp(&b.capacity_gb()))
+    {
         let total_gb = primary.capacity_gb();
         let available_gb = primary.available_gb();
         let device_name = primary.model().to_string();
@@ -241,7 +364,9 @@ fn convert_storage_info(hw_info: &hardware_query::HardwareInfo) -> StorageInfo {
 
         // Log storage detection results
         if total_gb == 0.0 {
-            log::warn!("Storage capacity detection failed for device '{device_name}' (returned 0.0 GB)");
+            log::warn!(
+                "Storage capacity detection failed for device '{device_name}' (returned 0.0 GB)"
+            );
         } else {
             log::debug!(
                 "Storage detected: {device_name} - {total_gb:.2} GB total, {available_gb:.2} GB available, SSD: {is_ssd}");
