@@ -68,7 +68,7 @@ npm run tauri dev
 3. The header shows GIMP connection status — green means connected
 4. Type a command and press Enter
 
-### Built-in commands (instant, no Ollama needed)
+### Built-in commands (no SmolPC engine needed)
 
 | Command | What it does |
 |---|---|
@@ -88,7 +88,7 @@ npm run tauri dev
 
 ### LLM-powered commands (requires SmolPC engine)
 
-Any command not in the list above is sent to Ollama, which generates GIMP Python code dynamically. Examples:
+Any command not in the list above is sent to the SmolPC engine, which generates GIMP Python code dynamically. Examples:
 
 - `rotate 90 degrees`
 - `flip horizontally`
