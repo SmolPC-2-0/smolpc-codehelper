@@ -193,7 +193,7 @@ export interface BackendStatus {
 	/** Active artifact backend identifier */
 	active_artifact_backend: InferenceBackend | null;
 
-	/** Runtime implementation in use (e.g. "ort_cpu", "genai_dml") */
+	/** Runtime implementation in use (e.g. "ov_genai_cpu", "genai_dml") */
 	runtime_engine: string | null;
 
 	/** Available backend identifiers on current machine */
@@ -324,7 +324,7 @@ export interface InferenceStatus {
 	/** Active artifact backend identifier */
 	activeArtifactBackend: InferenceBackend | null;
 
-	/** Runtime implementation in use (e.g. "ort_cpu", "genai_dml") */
+	/** Runtime implementation in use (e.g. "ov_genai_cpu", "genai_dml") */
 	runtimeEngine: string | null;
 
 	/** Resolved active model path on disk */
