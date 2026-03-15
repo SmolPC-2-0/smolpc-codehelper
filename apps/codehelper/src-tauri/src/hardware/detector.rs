@@ -32,9 +32,7 @@ fn normalize_identifier_component(value: &str) -> Option<String> {
     let normalized = value
         .chars()
         .map(|ch| {
-            if ch.is_ascii_alphanumeric() {
-                ch.to_ascii_lowercase()
-            } else if matches!(ch, ':' | '.' | '-' | '_') {
+            if ch.is_ascii_alphanumeric() || matches!(ch, ':' | '.' | '-' | '_') {
                 ch.to_ascii_lowercase()
             } else {
                 '_'
@@ -65,11 +63,10 @@ fn build_npu_candidate(npu: &hardware_query::NPUInfo) -> (NpuInfo, u32) {
         .tops_performance()
         .filter(|value| value.is_finite() && *value > 0.0);
 
-    let display_name = if vendor.eq_ignore_ascii_case("unknown") {
-        model.clone()
-    } else if model
-        .to_ascii_lowercase()
-        .starts_with(&vendor.to_ascii_lowercase())
+    let display_name = if vendor.eq_ignore_ascii_case("unknown")
+        || model
+            .to_ascii_lowercase()
+            .starts_with(&vendor.to_ascii_lowercase())
     {
         model.clone()
     } else {
@@ -127,7 +124,7 @@ fn build_npu_candidate(npu: &hardware_query::NPUInfo) -> (NpuInfo, u32) {
     let score = confidence_rank(&confidence) * 100
         + u32::from(driver_version.is_some()) * 20
         + u32::from(tops.is_some()) * 10
-        + tops.map(|value| value.max(0.0).min(99.0) as u32).unwrap_or(0);
+        + tops.map(|value| value.clamp(0.0, 99.0) as u32).unwrap_or(0);
 
     (
         NpuInfo {

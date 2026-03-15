@@ -136,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 min = f;
             }
         }
-        println!("nonfinite={} min={} max={}", nonfinite, min, max);
+        println!("nonfinite={nonfinite} min={min} max={max}");
     } else if mode == "decode_zero3" {
         let input_ids = Array2::from_shape_vec((1, 1), vec![25_i64])?;
         let attention_mask = Array2::from_shape_vec((1, 4), vec![1_i64; 4])?;
@@ -159,7 +159,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for layer in 0..28 {
             let zero: Array4<half::f16> = Array4::from_shape_vec(
                 (1, 2, 3, 128),
-                vec![half::f16::from_f32(0.0); 1 * 2 * 3 * 128],
+                vec![half::f16::from_f32(0.0); 2 * 3 * 128],
             )?;
             inputs.push((
                 format!("past_key_values.{layer}.key"),
@@ -202,8 +202,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         println!(
-            "decode_zero3 logits shape {:?}, nonfinite={}, min={}, max={}",
-            shape, nonfinite, row_min, row_max
+            "decode_zero3 logits shape {shape:?}, nonfinite={nonfinite}, min={row_min}, max={row_max}"
         );
     } else {
         println!("unknown ORT_PROBE_MODE='{mode}'");

@@ -285,10 +285,7 @@ async fn ensure_desired_model_loaded(
         return Ok(());
     };
 
-    log::info!(
-        "Restoring desired model '{}' into shared engine before generation",
-        model_to_restore
-    );
+    log::info!("Restoring desired model '{model_to_restore}' into shared engine before generation");
     client
         .load_model(model_to_restore)
         .await
@@ -332,10 +329,10 @@ pub async fn load_model(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<String, String> {
-    log::info!("Loading model via shared engine: {}", model_id);
+    log::info!("Loading model via shared engine: {model_id}");
     let client = resolve_client(&app_handle, &state, false).await?;
     client.load_model(&model_id).await.map_err(|e| {
-        log::error!("Model load failed for {}: {}", model_id, e);
+        log::error!("Model load failed for {model_id}: {e}");
         format!("Failed to load model: {e}")
     })?;
     *state.desired_model.lock().await = Some(model_id.clone());
