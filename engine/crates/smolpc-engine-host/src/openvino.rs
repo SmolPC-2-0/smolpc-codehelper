@@ -1,6 +1,6 @@
 #[cfg(target_os = "windows")]
 use smolpc_engine_core::inference::{
-    OpenVinoGenAiGenerator, OpenVinoGenerationControls, OpenVinoNpuPipelineConfig,
+    OpenVinoGenAiGenerator, OpenVinoGenerationControls, OpenVinoPipelineConfig,
 };
 use smolpc_engine_core::inference::{OpenVinoRuntimeBundle, OpenVinoRuntimeLoader};
 use std::collections::BTreeSet;
@@ -33,8 +33,8 @@ impl OpenVinoNpuTuning {
         self,
         cache_dir: &Path,
         generation_controls: OpenVinoGenerationControls,
-    ) -> OpenVinoNpuPipelineConfig {
-        OpenVinoNpuPipelineConfig::new(cache_dir, self.max_prompt_len, self.min_response_len)
+    ) -> OpenVinoPipelineConfig {
+        OpenVinoPipelineConfig::npu(cache_dir, self.max_prompt_len, self.min_response_len)
             .with_generation_controls(generation_controls)
             .with_disable_thinking(true)
     }
@@ -280,7 +280,7 @@ pub fn probe_openvino_startup(
         };
     }
 
-    if let Some(code) = bundle.failure_code() {
+    if let Some(code) = bundle.npu_failure_code() {
         return OpenVinoStartupProbeResult {
             hardware_detected,
             failure_class: Some(code.to_string()),
@@ -478,8 +478,7 @@ fn classify_driver_diagnostic(driver_version: Option<&str>) -> Option<(String, S
                 Some((
                     "openvino_npu_driver_recommended_update".to_string(),
                     format!(
-                        "Intel NPU driver {version} is below the troubleshooting floor {}",
-                        OPENVINO_NPU_DRIVER_RECOMMENDED_FLOOR
+                        "Intel NPU driver {version} is below the troubleshooting floor {OPENVINO_NPU_DRIVER_RECOMMENDED_FLOOR}"
                     ),
                 ))
             } else {
@@ -543,8 +542,8 @@ fn parse_positive_env_usize(name: &str, default: usize) -> Result<usize, String>
 }
 
 #[cfg(target_os = "windows")]
-fn openvino_generation_controls_for_model(model_id: &str) -> OpenVinoGenerationControls {
-    let qwen3_eos_only = matches!(model_id, "qwen3-4b-int4-ov" | "qwen3-4b-int4-ov-npu");
+pub(crate) fn openvino_generation_controls_for_model(_model_id: &str) -> OpenVinoGenerationControls {
+    let qwen3_eos_only = false;
     OpenVinoGenerationControls {
         // Qwen chat template EOS token (<|im_end|>) is 151645.
         // Set explicit EOS because OpenVINO C config is built manually and does not

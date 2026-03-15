@@ -282,7 +282,7 @@ pub fn brightness_contrast_region(brightness: f64, contrast: f64, region: &str) 
     let mut python_lines = setup_lines(false);
     python_lines.extend(save_clipboard_lines());
     python_lines.extend(region_selection_lines(region));
-    python_lines.push(format!("drawable.brightness_contrast({:.4}, {:.4})", b, c));
+    python_lines.push(format!("drawable.brightness_contrast({b:.4}, {c:.4})"));
     python_lines.push("Gimp.Selection.none(image)".to_string());
     python_lines.push("Gimp.displays_flush()".to_string());
     call_api_exec(python_lines)

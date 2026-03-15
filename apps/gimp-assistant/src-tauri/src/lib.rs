@@ -372,9 +372,8 @@ The response MUST:
 - Contain only JSON
 - Have no explanation, no prose, no backticks, no prefix
 
-User request: {user}
-"#,
-        user = prompt
+User request: {prompt}
+"#
     );
 
     let selection_raw = match llm_client::chat(&selector_prompt).await {
@@ -411,8 +410,7 @@ User request: {user}
         let answer_prompt = format!(
             "You are a helpful assistant that knows about GIMP.\n\
              Answer the user's question in natural language. Do not mention tools.\n\n\
-             User: {user}\nAssistant:",
-            user = prompt
+             User: {prompt}\nAssistant:"
         );
 
         let reply_text = llm_client::chat(&answer_prompt).await?;
@@ -438,7 +436,7 @@ User request: {user}
             r#"
 You write Python console commands to control GIMP 3 via the PyGObject console.
 
-User request: {user}
+User request: {prompt}
 
 Respond ONLY with valid JSON in this format:
 {{
@@ -587,8 +585,7 @@ EXAMPLE — rotate the image 90 degrees clockwise:
     }}
   ]
 }}
-"#,
-            user = prompt
+"#
         );
 
         let plan_raw = llm_client::chat(&planning_prompt).await?;
@@ -637,16 +634,14 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                 .cloned()
                 .unwrap_or_else(|| json!({}));
 
-            let result = mcp::call_tool(&tool_name, arguments.clone())
-                .map(|val| val)
-                .unwrap_or_else(|err| {
-                    json!({
-                        "isError": true,
-                        "content": [
-                            { "text": format!("MCP transport error: {err}"), "type": "text" }
-                        ]
-                    })
-                });
+            let result = mcp::call_tool(&tool_name, arguments.clone()).unwrap_or_else(|err| {
+                json!({
+                    "isError": true,
+                    "content": [
+                        { "text": format!("MCP transport error: {err}"), "type": "text" }
+                    ]
+                })
+            });
 
             tool_results.push(json!({
                 "tool": tool_name,
@@ -683,8 +678,7 @@ EXAMPLE — rotate the image 90 degrees clockwise:
             if is_error {
                 if let Some(msg) = text_opt {
                     reply_text = format!(
-                        "I could not get GIMP info: {}. Please make sure GIMP is open and the MCP Server plugin is running.",
-                        msg
+                        "I could not get GIMP info: {msg}. Please make sure GIMP is open and the MCP Server plugin is running."
                     );
                 } else {
                     reply_text =
@@ -708,11 +702,8 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown platform");
 
-                    reply_text = format!(
-                        "You are using GIMP {version} on {platform}.",
-                        version = version_str,
-                        platform = platform_str
-                    );
+                    reply_text =
+                        format!("You are using GIMP {version_str} on {platform_str}.");
                 }
             }
         }
@@ -738,8 +729,7 @@ EXAMPLE — rotate the image 90 degrees clockwise:
             if is_error {
                 if let Some(msg) = text_opt {
                     reply_text = format!(
-                        "I could not get image metadata: {}. Please make sure an image is open in GIMP.",
-                        msg
+                        "I could not get image metadata: {msg}. Please make sure an image is open in GIMP."
                     );
                 } else {
                     reply_text =
@@ -772,11 +762,7 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                         .unwrap_or("unknown image");
 
                     reply_text = format!(
-                        "Your current image \"{name}\" is {w}×{h} pixels with base type {base}.",
-                        name = basename,
-                        w = width,
-                        h = height,
-                        base = base_type,
+                        "Your current image \"{basename}\" is {width}x{height} pixels with base type {base_type}."
                     );
                 }
             }
@@ -787,11 +773,6 @@ EXAMPLE — rotate the image 90 degrees clockwise:
     for tr in &tool_results {
         if tr.get("tool").and_then(|t| t.as_str()) == Some("call_api") {
             let arguments_val = tr.get("arguments").cloned().unwrap_or_else(|| json!({}));
-            let api_path = arguments_val
-                .get("api_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
             let result_val = tr.get("result").cloned().unwrap_or_else(|| json!({}));
 
             let is_error_flag = result_val
@@ -811,9 +792,8 @@ EXAMPLE — rotate the image 90 degrees clockwise:
                 .and_then(|sc| sc.get("result"))
                 .and_then(|r| r.as_str());
 
-            let looks_like_error =
-                text_msg.map_or(false, |t| t.starts_with("Error:"))
-                    || structured_result.map_or(false, |t| t.starts_with("Error:"));
+            let looks_like_error = text_msg.is_some_and(|t| t.starts_with("Error:"))
+                || structured_result.is_some_and(|t| t.starts_with("Error:"));
 
             if is_error_flag || looks_like_error {
                 let msg = structured_result
@@ -876,7 +856,7 @@ async fn health_check() -> HealthStatus {
     let ollama_reachable = match reqwest::get("http://localhost:11434").await {
         Ok(_) => true,
         Err(e) => {
-            errors.push(format!("Ollama not reachable: {}", e));
+            errors.push(format!("Ollama not reachable: {e}"));
             false
         }
     };
@@ -907,21 +887,21 @@ async fn test_basic_mcp() -> String {
     match mcp_list_tools() {
         Ok(tools) => {
             output.push_str("MCP tools:\n");
-            output.push_str(&format!("{:#?}\n\n", tools));
+            output.push_str(&format!("{tools:#?}\n\n"));
         }
         Err(e) => {
-            output.push_str(&format!("❌ list_tools failed: {}\n\n", e));
+            output.push_str(&format!("List tools failed: {e}\n\n"));
         }
     }
 
     // --- Test 2: get image metadata ---
-    match mcp_list_tools(){
+    match mcp_list_tools() {
         Ok(meta) => {
             output.push_str("Image metadata:\n");
-            output.push_str(&format!("{:#?}\n", meta));
+            output.push_str(&format!("{meta:#?}\n"));
         }
         Err(e) => {
-            output.push_str(&format!("❌ get_image_metadata failed: {}\n", e));
+            output.push_str(&format!("Get image metadata failed: {e}\n"));
         }
     }
 

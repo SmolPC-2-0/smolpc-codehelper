@@ -67,9 +67,7 @@ fn parse_runtime_mode_override(value: &str) -> Option<RuntimeModePreference> {
         "dml" | "directml" => Some(RuntimeModePreference::Dml),
         _ => {
             log::warn!(
-                "Ignoring unsupported {} value '{}'; expected one of: cpu, dml, directml",
-                FORCE_EP_ENV,
-                value
+                "Ignoring unsupported {FORCE_EP_ENV} value '{value}'; expected one of: cpu, dml, directml"
             );
             None
         }
@@ -86,9 +84,7 @@ pub fn read_runtime_env_overrides() -> RuntimeEnvOverrides {
             Ok(parsed) => Some(parsed),
             Err(_) => {
                 log::warn!(
-                    "Ignoring invalid {} value '{}'; expected a signed integer",
-                    DML_DEVICE_ENV,
-                    value
+                    "Ignoring invalid {DML_DEVICE_ENV} value '{value}'; expected a signed integer"
                 );
                 None
             }
@@ -1078,10 +1074,7 @@ fn parse_models_response(
         if let Some(model) = smolpc_engine_core::models::registry::ModelRegistry::get_model(id) {
             out.push(model);
         } else {
-            log::warn!(
-                "Host reported unknown model id '{}' in /v1/models; ignoring entry",
-                id
-            );
+            log::warn!("Host reported unknown model id '{id}' in /v1/models; ignoring entry");
         }
     }
 

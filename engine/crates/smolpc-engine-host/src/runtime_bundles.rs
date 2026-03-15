@@ -1,4 +1,3 @@
-use smolpc_engine_core::inference::backend::ORT_CRATE_VERSION;
 use smolpc_engine_core::inference::runtime_loading::{
     BundleValidationFailureClass, OpenVinoRuntimeBundle, OrtRuntimeBundle, RequiredRuntimeFile,
     RuntimeBundleFingerprint, RuntimeFamily, RuntimeVersionMetadata,
@@ -220,7 +219,13 @@ fn ort_rank(bundle: &OrtRuntimeBundle) -> (u8, bool) {
 }
 
 fn openvino_rank(bundle: &OpenVinoRuntimeBundle) -> (u8, bool) {
-    let readiness = if bundle.npu_validated() { 1 } else { 0 };
+    let readiness = if bundle.npu_validated() {
+        2
+    } else if bundle.cpu_validated() {
+        1
+    } else {
+        0
+    };
     (readiness, bundle.canonical_root.is_some())
 }
 
@@ -243,7 +248,7 @@ fn build_ort_bundle(bundle_root: PathBuf) -> OrtRuntimeBundle {
         RequiredRuntimeFile::new("DirectML.dll", directml_dll.clone()),
     ];
     let version_metadata = vec![
-        RuntimeVersionMetadata::new("ort-crate", ORT_CRATE_VERSION),
+        RuntimeVersionMetadata::new("onnxruntime", "bundled"),
         RuntimeVersionMetadata::new("ort-genai", ORT_GENAI_VERSION),
     ];
     let ort_validation_failure = validate_root(&bundle_root, canonical_root.as_ref())
@@ -326,7 +331,7 @@ fn build_openvino_bundle(bundle_root: PathBuf) -> OpenVinoRuntimeBundle {
         RuntimeVersionMetadata::new("openvino-genai", OPENVINO_GENAI_VERSION),
         RuntimeVersionMetadata::new("openvino-tokenizers", OPENVINO_TOKENIZERS_VERSION),
     ];
-    let npu_validation_failure = validate_root(&bundle_root, canonical_root.as_ref())
+    let cpu_validation_failure = validate_root(&bundle_root, canonical_root.as_ref())
         .or_else(|| {
             missing_file(
                 &openvino_dll,
@@ -337,18 +342,6 @@ fn build_openvino_bundle(bundle_root: PathBuf) -> OpenVinoRuntimeBundle {
             missing_file(
                 &openvino_c_dll,
                 BundleValidationFailureClass::OpenVinoCapiMissing,
-            )
-        })
-        .or_else(|| {
-            missing_file(
-                &npu_plugin,
-                BundleValidationFailureClass::OpenVinoNpuPluginMissing,
-            )
-        })
-        .or_else(|| {
-            missing_file(
-                &npu_compiler,
-                BundleValidationFailureClass::OpenVinoNpuPluginMissing,
             )
         })
         .or_else(|| {
@@ -412,6 +405,19 @@ fn build_openvino_bundle(bundle_root: PathBuf) -> OpenVinoRuntimeBundle {
                 BundleValidationFailureClass::OpenVinoTbbMissing,
             )
         });
+    let npu_validation_failure = cpu_validation_failure
+        .or_else(|| {
+            missing_file(
+                &npu_plugin,
+                BundleValidationFailureClass::OpenVinoNpuPluginMissing,
+            )
+        })
+        .or_else(|| {
+            missing_file(
+                &npu_compiler,
+                BundleValidationFailureClass::OpenVinoNpuPluginMissing,
+            )
+        });
     let fingerprint = RuntimeBundleFingerprint::new(
         RuntimeFamily::OpenVino,
         canonical_root.clone(),
@@ -440,6 +446,7 @@ fn build_openvino_bundle(bundle_root: PathBuf) -> OpenVinoRuntimeBundle {
         icuuc_dll,
         required_files,
         version_metadata,
+        cpu_validation_failure,
         npu_validation_failure,
         fingerprint,
     }
@@ -688,8 +695,9 @@ mod tests {
         fs::remove_file(root.join("openvino_intel_npu_plugin.dll")).expect("remove npu plugin");
 
         let bundle = build_openvino_bundle(root);
+        assert!(bundle.cpu_validated());
         assert!(!bundle.npu_validated());
-        assert_eq!(bundle.failure_code(), Some("openvino_npu_plugin_missing"));
+        assert_eq!(bundle.npu_failure_code(), Some("openvino_npu_plugin_missing"));
     }
 
     #[test]
@@ -700,8 +708,9 @@ mod tests {
         fs::remove_file(root.join("openvino_intel_npu_compiler.dll")).expect("remove npu compiler");
 
         let bundle = build_openvino_bundle(root);
+        assert!(bundle.cpu_validated());
         assert!(!bundle.npu_validated());
-        assert_eq!(bundle.failure_code(), Some("openvino_npu_plugin_missing"));
+        assert_eq!(bundle.npu_failure_code(), Some("openvino_npu_plugin_missing"));
     }
 
     #[test]
