@@ -1,4 +1,6 @@
-export type AppMode = 'code' | 'gimp' | 'blender' | 'writer' | 'calc' | 'impress';
+export const APP_MODES = ['code', 'gimp', 'blender', 'writer', 'calc', 'impress'] as const;
+
+export type AppMode = (typeof APP_MODES)[number];
 
 export type ProviderKind = 'local' | 'mcp' | 'hybrid';
 
@@ -22,4 +24,3 @@ export interface ModeConfigDto {
 	suggestions: string[];
 	capabilities: ModeCapabilitiesDto;
 }
-

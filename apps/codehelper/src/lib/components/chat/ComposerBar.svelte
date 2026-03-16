@@ -7,15 +7,25 @@
 		isLoaded: boolean;
 		isGenerating: boolean;
 		bottomOffset: number;
+		disabledReason?: string | null;
 		onSend: (content: string) => void;
 		onCancel: () => void;
 	}
 
-	let { isLoaded, isGenerating, bottomOffset, onSend, onCancel }: Props = $props();
+	let {
+		isLoaded,
+		isGenerating,
+		bottomOffset,
+		disabledReason = null,
+		onSend,
+		onCancel
+	}: Props = $props();
 
 	const inputPlaceholder = $derived(
 		isGenerating
 			? 'Generating response...'
+			: disabledReason
+				? 'Chat execution is not available in this mode yet.'
 			: !isLoaded
 				? 'Loading model...'
 				: 'Ask a coding question (Shift+Enter for new line)...'
@@ -33,9 +43,13 @@
 			</div>
 		{/if}
 
+		{#if disabledReason && !isGenerating}
+			<p class="composer-shell__note">{disabledReason}</p>
+		{/if}
+
 		<ChatInput
 			{onSend}
-			disabled={!isLoaded || isGenerating}
+			disabled={!isLoaded || isGenerating || !!disabledReason}
 			placeholder={inputPlaceholder}
 		/>
 	</div>
@@ -66,6 +80,13 @@
 		display: flex;
 		justify-content: center;
 		margin-bottom: 0.65rem;
+	}
+
+	.composer-shell__note {
+		margin: 0 0 0.65rem;
+		text-align: center;
+		font-size: 0.78rem;
+		color: var(--color-muted-foreground);
 	}
 
 	:global(.composer-shell__cancel) {

@@ -3,6 +3,7 @@
 	import { chatsStore } from '$lib/stores/chats.svelte';
 	import type { DeletedChatSnapshot } from '$lib/stores/chats.svelte';
 	import type { Chat } from '$lib/types/chat';
+	import type { AppMode } from '$lib/types/mode';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { formatTimestamp, groupChatsByTime } from '$lib/utils/date';
 	import {
@@ -23,10 +24,13 @@
 	import { Button } from '$lib/components/ui/button';
 
 	interface Props {
+		activeMode: AppMode;
+		activeModeLabel: string;
+		activeModeSubtitle: string;
 		onClose?: () => void;
 	}
 
-	let { onClose }: Props = $props();
+	let { activeMode, activeModeLabel, activeModeSubtitle, onClose }: Props = $props();
 
 	let searchQuery = $state('');
 	let showArchived = $state(false);
@@ -40,6 +44,8 @@
 	let undoTimeoutId = $state<number | null>(null);
 
 	const normalizedQuery = $derived(searchQuery.trim().toLowerCase());
+	const currentChatId = $derived(chatsStore.getCurrentChatIdForMode(activeMode));
+	const modeChats = $derived(chatsStore.getChatsForMode(activeMode));
 
 	function chatMatchesQuery(chat: Chat, query: string): boolean {
 		if (!query) return true;
@@ -51,11 +57,11 @@
 	}
 
 	const activeChats = $derived(
-		chatsStore.sortedChats.filter((chat) => !chat.archived && chatMatchesQuery(chat, normalizedQuery))
+		modeChats.filter((chat) => !chat.archived && chatMatchesQuery(chat, normalizedQuery))
 	);
 
 	const archivedChats = $derived(
-		chatsStore.sortedChats.filter((chat) => chat.archived && chatMatchesQuery(chat, normalizedQuery))
+		modeChats.filter((chat) => chat.archived && chatMatchesQuery(chat, normalizedQuery))
 	);
 
 	const pinnedChats = $derived(activeChats.filter((chat) => chat.pinned));
@@ -66,13 +72,13 @@
 	function handleNewChat() {
 		actionsMenuChatId = null;
 		editingChatId = null;
-		chatsStore.createChat(settingsStore.selectedModel);
+		chatsStore.createChat(activeMode, settingsStore.selectedModel);
 	}
 
 	function handleSelectChat(chatId: string) {
 		if (editingChatId) return;
 		actionsMenuChatId = null;
-		chatsStore.setCurrentChat(chatId);
+		chatsStore.setCurrentChat(activeMode, chatId);
 		if (window.innerWidth < 768 && onClose) {
 			onClose();
 		}
@@ -183,8 +189,8 @@
 	<div class="sidebar__header">
 		<div class="sidebar__header-row">
 			<div>
-				<h1>SmolPC Helper</h1>
-				<p>Offline coding assistant workspace</p>
+				<h1>SmolPC Unified Assistant</h1>
+				<p>{activeModeLabel} · {activeModeSubtitle}</p>
 			</div>
 			{#if onClose}
 				<Button
@@ -214,7 +220,7 @@
 				type="search"
 				bind:value={searchQuery}
 				class="sidebar__search-input"
-				placeholder="Search chats, model, content"
+				placeholder={`Search ${activeModeLabel.toLowerCase()} chats`}
 				aria-label="Search chats"
 			/>
 		</div>
@@ -226,7 +232,7 @@
 				<h3 class="sidebar__group-title">Pinned</h3>
 				{#each pinnedChats as chat (chat.id)}
 					<div
-						class={`sidebar__chat-row ${chatsStore.currentChatId === chat.id ? 'sidebar__chat-row--active' : ''}`}
+						class={`sidebar__chat-row ${currentChatId === chat.id ? 'sidebar__chat-row--active' : ''}`}
 					>
 						{#if editingChatId === chat.id}
 							<input
@@ -290,7 +296,7 @@
 				<h3 class="sidebar__group-title">{group.label}</h3>
 				{#each group.chats as chat (chat.id)}
 					<div
-						class={`sidebar__chat-row ${chatsStore.currentChatId === chat.id ? 'sidebar__chat-row--active' : ''}`}
+						class={`sidebar__chat-row ${currentChatId === chat.id ? 'sidebar__chat-row--active' : ''}`}
 					>
 						{#if editingChatId === chat.id}
 							<input

@@ -11,6 +11,7 @@
 	import ConversationView from '$lib/components/chat/ConversationView.svelte';
 	import ComposerBar from '$lib/components/chat/ComposerBar.svelte';
 	import { chatsStore } from '$lib/stores/chats.svelte';
+	import { modeStore } from '$lib/stores/mode.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { inferenceStore } from '$lib/stores/inference.svelte';
 	import { hardwareStore } from '$lib/stores/hardware.svelte';
@@ -18,6 +19,7 @@
 	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
 	import type { GenerationConfig, InferenceChatMessage } from '$lib/types/inference';
+	import type { AppMode } from '$lib/types/mode';
 
 	let messagesContainer: HTMLDivElement | undefined = $state();
 	let cancelRequested = $state(false);
@@ -25,10 +27,22 @@
 	let currentStreamingMessageId = $state<string | null>(null);
 	let bottomOffset = $state(0);
 	let showShortcutsOverlay = $state(false);
+	const NON_CODE_DISABLED_REASON =
+		'This mode is visible in the unified shell, but chat execution is not wired yet.';
 
-	const currentChat = $derived(chatsStore.currentChat);
+	const activeMode = $derived(modeStore.activeMode);
+	const activeModeConfig = $derived(modeStore.activeConfig);
+	const activeModeStatus = $derived(modeStore.activeStatus);
+	const currentChat = $derived(chatsStore.getCurrentChatForMode(activeMode));
 	const messages = $derived(currentChat?.messages ?? []);
 	const hasNoChats = $derived(chatsStore.chats.length === 0);
+	const canUseCodePath = $derived(activeMode === 'code');
+	const modeLabel = $derived(activeModeConfig?.label ?? 'Mode');
+	const modeSubtitle = $derived(activeModeConfig?.subtitle ?? 'Unified assistant workspace');
+	const modeSuggestions = $derived(activeModeConfig?.suggestions ?? []);
+	const showContextControls = $derived(activeModeConfig?.capabilities.showContextControls ?? false);
+	const canExport = $derived(Boolean(activeModeConfig?.capabilities.showExport) && messages.length > 0);
+	const composerDisabledReason = $derived(canUseCodePath ? null : NON_CODE_DISABLED_REASON);
 	const pageTitle = $derived(currentChat?.title ?? 'New Chat');
 	const showBenchmarkPanel = $derived(uiStore.activeOverlay === 'benchmark');
 	const showHardwarePanel = $derived(uiStore.activeOverlay === 'hardware');
@@ -37,6 +51,14 @@
 	const latestAssistantMessageId = $derived(
 		[...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null
 	);
+	const modeStatusLabel = $derived(
+		activeModeStatus?.providerState
+			? activeModeStatus.providerState.state.replace(/_/g, ' ')
+			: modeStore.loading
+				? 'loading'
+				: 'status pending'
+	);
+	const modeStatusDetail = $derived(activeModeStatus?.providerState.detail ?? null);
 
 	function setMessagesContainer(element: HTMLDivElement) {
 		messagesContainer = element;
@@ -132,11 +154,23 @@ Teaching rules:
 		);
 	}
 
+	async function handleModeChange(mode: AppMode) {
+		await modeStore.setActiveMode(mode);
+		uiStore.resetScrollState();
+		uiStore.setShowQuickExamples(true);
+
+		const supportsBenchmark = modeStore.getConfig(mode)?.capabilities.showBenchmarkPanel ?? false;
+		if (!supportsBenchmark && uiStore.activeOverlay === 'benchmark') {
+			uiStore.closeOverlay();
+		}
+	}
+
 	async function handleSendMessage(content: string) {
-		if (!inferenceStore.isLoaded || inferenceStore.isGenerating) return;
+		if (activeMode !== 'code' || !inferenceStore.isLoaded || inferenceStore.isGenerating) return;
 
 		const activeChat =
-			currentChat ?? chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
+			currentChat ??
+			chatsStore.createChat('code', inferenceStore.currentModel ?? settingsStore.selectedModel ?? 'onnx-model');
 		if (!activeChat) return;
 		const historyBeforeMessage = [...activeChat.messages];
 
@@ -236,14 +270,14 @@ Teaching rules:
 	}
 
 	function handleRegenerateMessage(messageId: string) {
-		if (inferenceStore.isGenerating) return;
+		if (activeMode !== 'code' || inferenceStore.isGenerating) return;
 		const sourcePrompt = findNearestUserPrompt(messageId);
 		if (!sourcePrompt) return;
 		handleSendMessage(sourcePrompt);
 	}
 
 	function handleContinueMessage(messageId: string) {
-		if (inferenceStore.isGenerating) return;
+		if (activeMode !== 'code' || inferenceStore.isGenerating) return;
 		const basePrompt = findNearestUserPrompt(messageId);
 		const continuationPrompt = basePrompt
 			? `Continue your previous response to: "${basePrompt}". Expand with more details and an example.`
@@ -252,7 +286,7 @@ Teaching rules:
 	}
 
 	function handleBranchFromMessage(messageId: string) {
-		if (!currentChat) return;
+		if (activeMode !== 'code' || !currentChat) return;
 		const messageIndex = currentChat.messages.findIndex((message) => message.id === messageId);
 		if (messageIndex < 0) return;
 
@@ -260,7 +294,7 @@ Teaching rules:
 		if (branchSource.length === 0) return;
 
 		const targetModel = currentChat.model ?? inferenceStore.currentModel ?? 'onnx-model';
-		const branchChat = chatsStore.createChat(targetModel);
+		const branchChat = chatsStore.createChat(currentChat.mode, targetModel);
 
 		for (const message of branchSource) {
 			chatsStore.addMessage(branchChat.id, {
@@ -276,7 +310,7 @@ Teaching rules:
 	}
 
 	async function handleExportChat() {
-		if (!currentChat || currentChat.messages.length === 0) return;
+		if (activeMode !== 'code' || !currentChat || currentChat.messages.length === 0) return;
 
 		const markdown = [
 			`# ${currentChat.title}`,
@@ -300,6 +334,7 @@ Teaching rules:
 	}
 
 	function handleExampleSelect(prompt: string) {
+		if (activeMode !== 'code') return;
 		handleSendMessage(prompt);
 	}
 
@@ -328,6 +363,9 @@ Teaching rules:
 		const typingInInput = isTypingTarget(event.target);
 
 		if (modifierKey && event.shiftKey && event.key.toLowerCase() === 'b') {
+			if (!(activeModeConfig?.capabilities.showBenchmarkPanel ?? false)) {
+				return;
+			}
 			event.preventDefault();
 			uiStore.toggleOverlay('benchmark');
 			return;
@@ -396,12 +434,21 @@ Teaching rules:
 			}
 		}
 
-		initInference();
-		hardwareStore.getCached();
+		async function initApp() {
+			await modeStore.initialize();
+			await initInference();
+			hardwareStore.getCached();
+			await modeStore.refreshModeStatus();
 
-		if (hasNoChats) {
-			chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
+			if (hasNoChats) {
+				chatsStore.createChat(
+					'code',
+					inferenceStore.currentModel ?? settingsStore.selectedModel ?? 'onnx-model'
+				);
+			}
 		}
+
+		initApp();
 
 		window.addEventListener('keydown', handleKeyDown);
 
@@ -427,6 +474,13 @@ Teaching rules:
 	});
 
 	$effect(() => {
+		const canShowBenchmark = activeModeConfig?.capabilities.showBenchmarkPanel ?? false;
+		if (!canShowBenchmark && uiStore.activeOverlay === 'benchmark') {
+			uiStore.closeOverlay();
+		}
+	});
+
+	$effect(() => {
 		const theme = settingsStore.theme;
 		applyTheme(theme);
 		if (theme !== 'system') {
@@ -442,31 +496,51 @@ Teaching rules:
 	<div
 		class={`sidebar-stage ${uiStore.isSidebarOpen ? 'sidebar-stage--open' : 'sidebar-stage--closed'}`}
 	>
-		<Sidebar onClose={() => uiStore.setSidebarOpen(false)} />
+		<Sidebar
+			activeMode={activeMode}
+			activeModeLabel={modeLabel}
+			activeModeSubtitle={modeSubtitle}
+			onClose={() => uiStore.setSidebarOpen(false)}
+		/>
 	</div>
 
 	<div class="workspace-shell">
 		<WorkspaceHeader
 			title={pageTitle}
+			{modeLabel}
+			modeSubtitle={modeSubtitle}
+			modeStatusLabel={modeStatusLabel}
+			modeStatusDetail={modeStatusDetail}
+			modes={modeStore.modeConfigs}
+			{activeMode}
 			showSidebarToggle={!uiStore.isSidebarOpen}
 			status={inferenceStore.status}
 			modelInfoActive={showModelInfoPanel}
 			hardwareActive={showHardwarePanel}
 			shortcutsOpen={showShortcutsOverlay}
-			canExport={messages.length > 0}
+			{canExport}
 			onOpenSidebar={() => uiStore.setSidebarOpen(true)}
+			onChangeMode={handleModeChange}
 			onToggleModelInfo={() => uiStore.toggleOverlay('modelInfo')}
 			onToggleHardware={() => uiStore.toggleOverlay('hardware')}
 			onToggleShortcuts={() => (showShortcutsOverlay = !showShortcutsOverlay)}
 			onExportChat={handleExportChat}
 		/>
 
-		<WorkspaceControls />
+		<WorkspaceControls showContextControls={showContextControls} />
 
 		<ConversationView
+			mode={activeMode}
+			modeLabel={modeLabel}
+			modeSubtitle={modeSubtitle}
+			suggestions={modeSuggestions}
+			providerState={activeModeStatus?.providerState ?? null}
 			{messages}
 			{latestAssistantMessageId}
 			showQuickExamples={uiStore.showQuickExamples}
+			disabledExamples={!canUseCodePath}
+			disabledReason={composerDisabledReason}
+			showAssistantActions={canUseCodePath}
 			onSelectExample={handleExampleSelect}
 			onToggleExamples={(show) => uiStore.setShowQuickExamples(show)}
 			onUserScrollUp={markScrollIntentUp}
@@ -482,6 +556,7 @@ Teaching rules:
 		<ComposerBar
 			isLoaded={inferenceStore.isLoaded}
 			isGenerating={inferenceStore.isGenerating}
+			disabledReason={composerDisabledReason}
 			{bottomOffset}
 			onSend={handleSendMessage}
 			onCancel={handleCancelGeneration}
