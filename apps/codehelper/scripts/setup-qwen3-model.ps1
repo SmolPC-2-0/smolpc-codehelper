@@ -1,6 +1,6 @@
 param(
     [string]$ModelId = "qwen3-4b-instruct",
-    [string]$OpenVinoRepoId = "OpenVINO/Qwen3-4B-int4-ov",
+    [string]$OpenVinoRepoId = "FluidInference/qwen3-4b-int4-ov-npu",
     [string]$DmlSourceModel = "Qwen/Qwen3-4B-Instruct-2507",
     [ValidateSet("int4", "fp16")]
     [string]$DmlPrecision = "int4",
@@ -49,9 +49,6 @@ Write-Host ""
 # ---------------------------------------------------------------------------
 # OpenVINO IR artifacts (serves CPU + NPU)
 # ---------------------------------------------------------------------------
-# NOTE: OpenVINO/Qwen3-4B-int4-ov is the official Intel INT4_SYM group-size 128
-# export. Confirmed CPU-compatible. NPU compatibility may require a different
-# export — the script will be updated in Phase 2 if needed.
 
 if (-not $SkipOpenVino) {
     Require-PythonModule -ModuleName "huggingface_hub"
