@@ -63,6 +63,10 @@
 
 - **Root Prettier needs a Svelte-only override** (2026-03): The repo-level `.prettierrc` cannot safely apply `prettier-plugin-tailwindcss` to `.svelte` files during root incremental checks. Keep Tailwind's plugin at the top level, but load `prettier-plugin-svelte` inside the `.svelte` override instead.
 
+- **The shell needs local fallback mode configs** (2026-03): If the unified shell relies entirely on `list_modes()` during startup, one command failure can leave the mode selector empty and strand the user in the current mode. Keep a local fallback copy of the six mode configs so the shell stays navigable even when backend mode discovery fails.
+
+- **Top-level async app init should always be caught** (2026-03): The unified shell startup sequence chains several async steps (`modeStore.initialize()`, inference startup, cached hardware load). Calling that sequence without a top-level `.catch()` risks unhandled startup failures that are hard to diagnose. Catch once at the shell entrypoint and surface the warning in the UI.
+
 ---
 
 ## MCP

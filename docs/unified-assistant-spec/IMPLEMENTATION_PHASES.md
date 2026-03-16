@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-16
-**Status:** Phase 2 shell is merged; Phase 2 closeout docs are in progress; Phase 3 Code mode is next
+**Status:** Phase 2 shell and shell follow-up are merged; Phase 3 Code-mode docs preflight is next
 
 ## Phase 0: Documentation Baseline
 
@@ -51,7 +51,7 @@
 
 ## Branch Order After Phase 2
 
-1. `codex/unified-shell-status-docs`
+1. `codex/unified-shell-followups-status-docs`
 2. merge into `docs/unified-assistant-spec`
 3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
 4. `codex/unified-code-mode-docs`
@@ -70,7 +70,7 @@
 
 ## Phase 2: Unified Shell
 
-**Suggested branches:** `codex/unified-shell-docs`, `codex/unified-shell`, then `codex/unified-shell-status-docs`
+**Suggested branches:** `codex/unified-shell-docs`, `codex/unified-shell`, `codex/unified-shell-status-docs`, then `codex/unified-shell-followups-status-docs` as needed
 
 **Scope**
 
@@ -103,6 +103,7 @@
 
 - preflight docs merged into `docs/unified-assistant-spec`, then into `dev/unified-assistant`
 - implementation merged via PR `#64`
+- shell hardening follow-up merged via PR `#65`
 - merged shell capabilities:
   - `AppModeDropdown` in the header
   - per-mode unified chat/history state
@@ -111,6 +112,11 @@
   - visible non-Code placeholder modes with disabled composer
   - existing Codehelper send/generate path preserved only for Code
   - Code-only export, benchmark, and context controls in Phase 2
+- merged shell follow-up behaviors:
+  - explicit top-level init error handling
+  - fallback mode configs if `list_modes` fails
+  - surfaced shell warning/error state in the header
+  - centralized benchmark-overlay capability cleanup
 - CI unblock follow-ups landed with the shell:
   - root `.prettierrc` Svelte override
   - root `eslint.config.mjs`
@@ -123,7 +129,17 @@
 **Scope**
 
 - preserve current Codehelper experience inside the unified shell
-- wire Code mode through the new provider/orchestrator contracts
+- polish Code mode to feel fully intentional inside the unified shell
+- keep the current inference path active rather than activating `assistant_send`
+
+**Phase 3 preflight decisions**
+
+- parity polish, not orchestration activation
+- no backend contract changes
+- Code-only send/regenerate/continue/branch/export behavior remains unchanged
+- Code-mode visible status should prefer real `inferenceStore.status` over scaffold provider copy
+- mode switching during Code generation remains allowed
+- Code-mode shell copy should feel like current Codehelper, not a generic placeholder
 
 **Exit criteria**
 
