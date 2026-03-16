@@ -49,7 +49,7 @@ pub fn validate_path<P: AsRef<Path>>(path: P, app: &AppHandle) -> Result<PathBuf
         match std::fs::canonicalize(base) {
             Ok(base_canonical) => {
                 if canonical.starts_with(&base_canonical) {
-                    log::debug!("Path validated: {:?}", canonical);
+                    log::debug!("Path validated: {canonical:?}");
                     return Ok(canonical);
                 }
             }

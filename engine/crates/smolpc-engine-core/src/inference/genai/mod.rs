@@ -6,4 +6,4 @@ pub mod openvino;
 #[cfg(target_os = "windows")]
 pub use directml::GenAiDirectMlGenerator;
 #[cfg(target_os = "windows")]
-pub use openvino::{OpenVinoGenAiGenerator, OpenVinoGenerationControls, OpenVinoNpuPipelineConfig};
+pub use openvino::{OpenVinoGenAiGenerator, OpenVinoGenerationControls, OpenVinoPipelineConfig};

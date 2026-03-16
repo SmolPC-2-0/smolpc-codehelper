@@ -10,7 +10,7 @@ use std::sync::Mutex;
 fn gimp_mcp_path() -> String {
     std::env::var("GIMP_MCP_PATH").unwrap_or_else(|_| {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        format!("{}/gimp-mcp", home)
+        format!("{home}/gimp-mcp")
     })
 }
 
@@ -234,8 +234,8 @@ pub fn call_tool(name: &str, arguments: Value) -> Result<Value, String> {
 
     #[cfg(debug_assertions)]
     match &result {
-        Ok(_) => eprintln!("[MCP] {} OK ({} ms)", name, start.elapsed().as_millis()),
-        Err(e) => eprintln!("[MCP] {} ERROR: {}", name, e),
+        Ok(_) => eprintln!("[MCP] {name} OK ({} ms)", start.elapsed().as_millis()),
+        Err(e) => eprintln!("[MCP] {name} ERROR: {e}"),
     }
 
     result

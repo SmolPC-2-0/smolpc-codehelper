@@ -108,9 +108,27 @@ struct OpenVinoGenAiApi {
 unsafe impl Send for OpenVinoGenAiApi {}
 unsafe impl Sync for OpenVinoGenAiApi {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OpenVinoDeviceTarget {
+    Cpu,
+    Npu,
+}
+
+impl OpenVinoDeviceTarget {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Cpu => "CPU",
+            Self::Npu => "NPU",
+        }
+    }
+}
+
 impl OpenVinoGenAiApi {
-    fn load(bundle: &OpenVinoRuntimeBundle) -> Result<Arc<Self>, String> {
-        OpenVinoRuntimeLoader::ensure_initialized(bundle)?;
+    fn load(bundle: &OpenVinoRuntimeBundle, target: OpenVinoDeviceTarget) -> Result<Arc<Self>, String> {
+        match target {
+            OpenVinoDeviceTarget::Cpu => OpenVinoRuntimeLoader::ensure_initialized_for_cpu(bundle)?,
+            OpenVinoDeviceTarget::Npu => OpenVinoRuntimeLoader::ensure_initialized_for_npu(bundle)?,
+        };
         let openvino_c = RetainedLibrary::load(&bundle.openvino_c_dll)?;
         let openvino_genai_c = RetainedLibrary::load(&bundle.openvino_genai_c_dll)?;
 
@@ -369,21 +387,34 @@ pub struct OpenVinoGenerationControls {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpenVinoNpuPipelineConfig {
-    pub cache_dir: PathBuf,
-    pub max_prompt_len: usize,
-    pub min_response_len: usize,
-    pub generation_controls: OpenVinoGenerationControls,
-    pub disable_thinking: bool,
+pub enum OpenVinoPipelineConfig {
+    Cpu {
+        generation_controls: OpenVinoGenerationControls,
+        disable_thinking: bool,
+    },
+    Npu {
+        cache_dir: PathBuf,
+        max_prompt_len: usize,
+        min_response_len: usize,
+        generation_controls: OpenVinoGenerationControls,
+        disable_thinking: bool,
+    },
 }
 
-impl OpenVinoNpuPipelineConfig {
-    pub fn new(
+impl OpenVinoPipelineConfig {
+    pub fn cpu() -> Self {
+        Self::Cpu {
+            generation_controls: OpenVinoGenerationControls::default(),
+            disable_thinking: true,
+        }
+    }
+
+    pub fn npu(
         cache_dir: impl Into<PathBuf>,
         max_prompt_len: usize,
         min_response_len: usize,
     ) -> Self {
-        Self {
+        Self::Npu {
             cache_dir: cache_dir.into(),
             max_prompt_len,
             min_response_len,
@@ -393,55 +424,107 @@ impl OpenVinoNpuPipelineConfig {
     }
 
     pub fn with_generation_controls(mut self, controls: OpenVinoGenerationControls) -> Self {
-        self.generation_controls = controls;
+        match &mut self {
+            Self::Cpu {
+                generation_controls,
+                ..
+            }
+            | Self::Npu {
+                generation_controls,
+                ..
+            } => *generation_controls = controls,
+        }
         self
     }
 
     pub fn with_disable_thinking(mut self, disable_thinking: bool) -> Self {
-        self.disable_thinking = disable_thinking;
+        match &mut self {
+            Self::Cpu {
+                disable_thinking: thinking,
+                ..
+            }
+            | Self::Npu {
+                disable_thinking: thinking,
+                ..
+            } => *thinking = disable_thinking,
+        }
         self
+    }
+
+    fn target(&self) -> OpenVinoDeviceTarget {
+        match self {
+            Self::Cpu { .. } => OpenVinoDeviceTarget::Cpu,
+            Self::Npu { .. } => OpenVinoDeviceTarget::Npu,
+        }
     }
 }
 
 impl OpenVinoGenAiGenerator {
     pub fn runtime_available(bundle: &OpenVinoRuntimeBundle) -> Result<(), String> {
-        let _ = openvino_genai_api(bundle)?;
+        let _ = openvino_genai_api_for_target(bundle, OpenVinoDeviceTarget::Npu)?;
         Ok(())
     }
 
     pub fn new(
         bundle: &OpenVinoRuntimeBundle,
         model_dir: &Path,
-        config: &OpenVinoNpuPipelineConfig,
+        config: &OpenVinoPipelineConfig,
     ) -> Result<Self, String> {
-        let api = openvino_genai_api(bundle)?;
-        std::fs::create_dir_all(&config.cache_dir)
-            .map_err(|error| format!("Failed to create OpenVINO cache dir: {error}"))?;
+        let target = config.target();
+        let api = openvino_genai_api_for_target(bundle, target)?;
+        if let OpenVinoPipelineConfig::Npu { cache_dir, .. } = config {
+            std::fs::create_dir_all(cache_dir)
+                .map_err(|error| format!("Failed to create OpenVINO cache dir: {error}"))?;
+        }
 
         let model_dir = path_to_cstring(model_dir, "models_path")?;
-        let device = cstring("NPU", "device")?;
-        let cache_key = cstring("CACHE_DIR", "property key")?;
-        let cache_value = path_to_cstring(&config.cache_dir, "CACHE_DIR")?;
-        let max_prompt_len_key = cstring("MAX_PROMPT_LEN", "property key")?;
-        let max_prompt_len_value = cstring(&config.max_prompt_len.to_string(), "MAX_PROMPT_LEN")?;
-        let min_response_len_key = cstring("MIN_RESPONSE_LEN", "property key")?;
-        let min_response_len_value =
-            cstring(&config.min_response_len.to_string(), "MIN_RESPONSE_LEN")?;
+        let device = cstring(target.as_str(), "device")?;
 
         let mut pipeline_ptr: *mut OvGenAiLlmPipeline = ptr::null_mut();
-        let status = unsafe {
-            (api.create_pipeline)(
-                model_dir.as_ptr(),
-                device.as_ptr(),
-                6,
-                &mut pipeline_ptr,
-                cache_key.as_ptr(),
-                cache_value.as_ptr(),
-                max_prompt_len_key.as_ptr(),
-                max_prompt_len_value.as_ptr(),
-                min_response_len_key.as_ptr(),
-                min_response_len_value.as_ptr(),
-            )
+        let (status, max_new_tokens_cap, generation_controls, disable_thinking) = match config {
+            OpenVinoPipelineConfig::Cpu {
+                generation_controls,
+                disable_thinking,
+            } => (
+                unsafe { (api.create_pipeline)(model_dir.as_ptr(), device.as_ptr(), 0, &mut pipeline_ptr) },
+                usize::MAX,
+                generation_controls.clone(),
+                *disable_thinking,
+            ),
+            OpenVinoPipelineConfig::Npu {
+                cache_dir,
+                max_prompt_len,
+                min_response_len,
+                generation_controls,
+                disable_thinking,
+            } => {
+                let cache_key = cstring("CACHE_DIR", "property key")?;
+                let cache_value = path_to_cstring(cache_dir, "CACHE_DIR")?;
+                let max_prompt_len_key = cstring("MAX_PROMPT_LEN", "property key")?;
+                let max_prompt_len_value = cstring(&max_prompt_len.to_string(), "MAX_PROMPT_LEN")?;
+                let min_response_len_key = cstring("MIN_RESPONSE_LEN", "property key")?;
+                let min_response_len_value =
+                    cstring(&min_response_len.to_string(), "MIN_RESPONSE_LEN")?;
+                (
+                    unsafe {
+                        (api.create_pipeline)(
+                            model_dir.as_ptr(),
+                            device.as_ptr(),
+                            6,
+                            &mut pipeline_ptr,
+                            cache_key.as_ptr(),
+                            cache_value.as_ptr(),
+                            max_prompt_len_key.as_ptr(),
+                            max_prompt_len_value.as_ptr(),
+                            min_response_len_key.as_ptr(),
+                            min_response_len_value.as_ptr(),
+                        )
+                    },
+                    *min_response_len,
+                    generation_controls.clone(),
+                    *disable_thinking,
+                )
+            }
         };
         check_status(&api, status, "ov_genai_llm_pipeline_create")?;
 
@@ -449,9 +532,9 @@ impl OpenVinoGenAiGenerator {
             inner: Arc::new(Mutex::new(OpenVinoGenAiInner {
                 api: Arc::clone(&api),
                 pipeline: pipeline_ptr,
-                max_new_tokens_cap: config.min_response_len,
-                generation_controls: config.generation_controls.clone(),
-                disable_thinking: config.disable_thinking,
+                max_new_tokens_cap,
+                generation_controls,
+                disable_thinking,
             })),
         })
     }
@@ -640,10 +723,7 @@ fn create_generation_config(
                 inherited,
                 "ov_genai_llm_pipeline_get_generation_config",
             ) {
-                log::warn!(
-                    "{}; falling back to empty generation config initialization",
-                    error
-                );
+                log::warn!("{error}; falling back to empty generation config initialization");
             }
         } else {
             log::warn!(
@@ -1083,9 +1163,13 @@ struct OpenVinoGenAiApiState {
 static OPENVINO_GENAI_API: std::sync::OnceLock<Mutex<OpenVinoGenAiApiState>> =
     std::sync::OnceLock::new();
 
-fn openvino_genai_api(bundle: &OpenVinoRuntimeBundle) -> Result<Arc<OpenVinoGenAiApi>, String> {
+fn openvino_genai_api_for_target(
+    bundle: &OpenVinoRuntimeBundle,
+    target: OpenVinoDeviceTarget,
+) -> Result<Arc<OpenVinoGenAiApi>, String> {
     let state = OPENVINO_GENAI_API.get_or_init(|| Mutex::new(OpenVinoGenAiApiState::default()));
     let fingerprint = bundle.fingerprint.value.clone();
+    let cache_key = format!("{fingerprint}:{}", target.as_str().to_ascii_lowercase());
 
     {
         let guard = match state.lock() {
@@ -1096,7 +1180,7 @@ fn openvino_genai_api(bundle: &OpenVinoRuntimeBundle) -> Result<Arc<OpenVinoGenA
             }
         };
 
-        if let Some(cached) = guard.results.get(&fingerprint) {
+        if let Some(cached) = guard.results.get(&cache_key) {
             return match cached {
                 CachedOpenVinoGenAiApi::Success(api) => Ok(Arc::clone(api)),
                 CachedOpenVinoGenAiApi::Failure(error) => Err(error.clone()),
@@ -1106,8 +1190,7 @@ fn openvino_genai_api(bundle: &OpenVinoRuntimeBundle) -> Result<Arc<OpenVinoGenA
         if let Some(active) = guard.active_fingerprint.as_ref() {
             if active != &fingerprint {
                 let error = format!(
-                    "OpenVINO GenAI already initialized from bundle fingerprint '{active}'; restart the process to use '{}'",
-                    fingerprint
+                    "OpenVINO GenAI already initialized from bundle fingerprint '{active}'; restart the process to use '{fingerprint}'"
                 );
                 drop(guard);
                 let mut guard = match state.lock() {
@@ -1116,13 +1199,17 @@ fn openvino_genai_api(bundle: &OpenVinoRuntimeBundle) -> Result<Arc<OpenVinoGenA
                 };
                 guard
                     .results
-                    .insert(fingerprint, CachedOpenVinoGenAiApi::Failure(error.clone()));
+                    .insert(cache_key, CachedOpenVinoGenAiApi::Failure(error.clone()));
                 return Err(error);
             }
         }
     }
 
-    if let Some(failure) = bundle.npu_validation_failure {
+    let validation_failure = match target {
+        OpenVinoDeviceTarget::Cpu => bundle.cpu_validation_failure,
+        OpenVinoDeviceTarget::Npu => bundle.npu_validation_failure,
+    };
+    if let Some(failure) = validation_failure {
         let error = format!(
             "OpenVINO runtime bundle is not validated ({}) at {}",
             failure.code(),
@@ -1134,18 +1221,18 @@ fn openvino_genai_api(bundle: &OpenVinoRuntimeBundle) -> Result<Arc<OpenVinoGenA
         };
         guard
             .results
-            .insert(fingerprint, CachedOpenVinoGenAiApi::Failure(error.clone()));
+            .insert(cache_key, CachedOpenVinoGenAiApi::Failure(error.clone()));
         return Err(error);
     }
 
-    let api = OpenVinoGenAiApi::load(bundle)?;
+    let api = OpenVinoGenAiApi::load(bundle, target)?;
     let mut guard = match state.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     };
     guard.active_fingerprint = Some(fingerprint.clone());
     guard.results.insert(
-        fingerprint,
+        cache_key,
         CachedOpenVinoGenAiApi::Success(Arc::clone(&api)),
     );
     Ok(api)
@@ -1178,7 +1265,7 @@ mod tests {
 
         let temp = tempdir().expect("temp dir");
         let bundle = build_bundle(temp.path(), None);
-        let api = match super::openvino_genai_api(&bundle) {
+        let api = match super::openvino_genai_api_for_target(&bundle, super::OpenVinoDeviceTarget::Cpu) {
             Ok(api) => api,
             Err(_) => return,
         };
@@ -1292,6 +1379,7 @@ mod tests {
             icuuc_dll,
             required_files,
             version_metadata,
+            cpu_validation_failure: failure,
             npu_validation_failure: failure,
             fingerprint,
         }

@@ -902,8 +902,7 @@ fn genai_api(bundle: &OrtRuntimeBundle) -> Result<Arc<GenAiApi>, String> {
         if let Some(active) = guard.active_fingerprint.as_ref() {
             if active != &fingerprint {
                 let error = format!(
-                    "DirectML GenAI already initialized from bundle fingerprint '{active}'; restart the process to use '{}'",
-                    fingerprint
+                    "DirectML GenAI already initialized from bundle fingerprint '{active}'; restart the process to use '{fingerprint}'"
                 );
                 drop(guard);
                 let mut guard = match state.lock() {
@@ -1044,7 +1043,7 @@ mod tests {
             RequiredRuntimeFile::new("onnxruntime-genai.dll", genai_dll.clone()),
             RequiredRuntimeFile::new("DirectML.dll", directml_dll.clone()),
         ];
-        let version_metadata = vec![RuntimeVersionMetadata::new("ort-crate", "2.0.0-rc.11")];
+        let version_metadata = vec![RuntimeVersionMetadata::new("onnxruntime", "bundled")];
         let fingerprint = RuntimeBundleFingerprint::new(
             RuntimeFamily::Ort,
             Some(root.clone()),

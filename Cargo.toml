@@ -31,9 +31,6 @@ rand_distr = "0.4"
 url = "2.5"
 anyhow = "1.0"
 hardware-query = "0.2.1"
-ort = { version = "=2.0.0-rc.11", features = ["load-dynamic", "ndarray", "half", "directml"] }
-tokenizers = "0.20"
-ndarray = "0.17"
 half = "2.4"
 libloading = "0.8"
 windows-sys = { version = "0.59.0", features = ["Win32_Storage_FileSystem"] }

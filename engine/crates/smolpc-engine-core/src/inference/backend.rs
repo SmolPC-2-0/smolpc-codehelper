@@ -5,7 +5,6 @@ pub const BENCHMARK_SELECTION_BUDGET_MS: u64 = 2_000;
 pub const DIRECTML_MIN_DECODE_SPEEDUP_RATIO: f64 = 1.30;
 pub const DIRECTML_MAX_TTFT_REGRESSION_RATIO: f64 = 1.15;
 pub const DIRECTML_DEMOTION_THRESHOLD: u32 = 3;
-pub const ORT_CRATE_VERSION: &str = "2.0.0-rc.11";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]

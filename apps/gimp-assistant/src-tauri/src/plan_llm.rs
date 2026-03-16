@@ -1,5 +1,4 @@
-use crate::plan_schema::{ActionPlan, Op, Target};
-use serde_json::json;
+use crate::plan_schema::ActionPlan;
 
 fn planner_prompt(user_text: &str) -> String {
     // IMPORTANT: LLM must output ONLY JSON matching ActionPlan schema.
@@ -49,9 +48,8 @@ If the user is vague (e.g. "make it nicer"), return a plan with ZERO steps and a
 If the user requests any kind of line (regardless of color or phrasing), always use draw_line — never treat a line request as vague.
 
 User request:
-{user}
-"#,
-        user = user_text
+{user_text}
+"#
     )
 }
 

@@ -29,16 +29,11 @@ pub struct ActionStep {
     pub stop_on_error: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Target {
+    #[default]
     ActiveLayer,
-}
-
-impl Default for Target {
-    fn default() -> Self {
-        Target::ActiveLayer
-    }
 }
 
 /// Allowed operations (the LLM may only choose from this list).
