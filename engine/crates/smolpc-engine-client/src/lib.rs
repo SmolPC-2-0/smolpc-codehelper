@@ -34,6 +34,7 @@ pub enum RuntimeModePreference {
     Auto,
     Cpu,
     Dml,
+    Npu,
 }
 
 impl RuntimeModePreference {
@@ -42,6 +43,7 @@ impl RuntimeModePreference {
             Self::Auto => None,
             Self::Cpu => Some("cpu"),
             Self::Dml => Some("dml"),
+            Self::Npu => Some("openvino_npu"),
         }
     }
 }
@@ -65,9 +67,10 @@ fn parse_runtime_mode_override(value: &str) -> Option<RuntimeModePreference> {
     match value.trim().to_ascii_lowercase().as_str() {
         "cpu" => Some(RuntimeModePreference::Cpu),
         "dml" | "directml" => Some(RuntimeModePreference::Dml),
+        "npu" | "openvino" | "openvino_npu" => Some(RuntimeModePreference::Npu),
         _ => {
             log::warn!(
-                "Ignoring unsupported {FORCE_EP_ENV} value '{value}'; expected one of: cpu, dml, directml"
+                "Ignoring unsupported {FORCE_EP_ENV} value '{value}'; expected one of: cpu, dml, directml, npu, openvino"
             );
             None
         }

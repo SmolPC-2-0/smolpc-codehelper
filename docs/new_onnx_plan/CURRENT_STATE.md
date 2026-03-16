@@ -1,7 +1,10 @@
 # ONNX Migration - Current State
 
+> **Note:** This document is a historical snapshot from the DirectML integration phase.
+> For current project state, see `CLAUDE.md` at the repo root.
+
 Last updated: 2026-02-28
-Branch: `codex/directml-inferencing`
+Branch: `codex/directml-inferencing` (historical — this branch has been merged)
 Phase: 2A DirectML acceleration (GenAI C-FFI path) completed and validated
 
 ---
@@ -74,11 +77,15 @@ CPU keeps legacy fallback to `<model_id>/model.onnx`; DML does not.
 
 ## Validation Snapshot
 
-Latest local validation on this branch:
+Validation snapshot at the time of writing (2026-02-28, on `codex/directml-inferencing`):
 
 - `cargo check --all-targets`: pass (warning-clean)
 - `cargo test --lib -- --nocapture`: pass (`79 passed, 0 failed, 9 ignored`)
 - `npm run check`: pass (1 existing frontend accessibility warning, unrelated)
+
+> **2026-03-16 update:** These results are stale. The codebase has since moved to
+> shared engine architecture with OpenVINO NPU support. Run verification commands
+> from `CLAUDE.md` for current status.
 
 ---
 

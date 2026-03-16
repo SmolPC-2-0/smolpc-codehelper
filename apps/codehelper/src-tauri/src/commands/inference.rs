@@ -61,8 +61,9 @@ fn parse_runtime_mode(mode: &str) -> Result<RuntimeModePreference, String> {
         "auto" => Ok(RuntimeModePreference::Auto),
         "cpu" => Ok(RuntimeModePreference::Cpu),
         "dml" | "directml" => Ok(RuntimeModePreference::Dml),
+        "npu" | "openvino" | "openvino_npu" => Ok(RuntimeModePreference::Npu),
         _ => Err(format!(
-            "Unsupported runtime mode '{mode}'. Use one of: auto, cpu, dml"
+            "Unsupported runtime mode '{mode}'. Use one of: auto, cpu, dml, npu"
         )),
     }
 }
@@ -72,6 +73,7 @@ pub(super) fn runtime_mode_label(mode: RuntimeModePreference) -> &'static str {
         RuntimeModePreference::Auto => "auto",
         RuntimeModePreference::Cpu => "cpu",
         RuntimeModePreference::Dml => "dml",
+        RuntimeModePreference::Npu => "npu",
     }
 }
 

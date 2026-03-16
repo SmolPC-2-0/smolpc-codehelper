@@ -54,7 +54,7 @@ export interface AvailableModel {
 /**
  * Active inference backend state exposed by the shared engine host.
  */
-export type InferenceRuntimeMode = 'auto' | 'cpu' | 'dml';
+export type InferenceRuntimeMode = 'auto' | 'cpu' | 'dml' | 'npu';
 export type StartupModeDto = 'auto' | 'directml_required';
 export type EngineReadinessState =
 	| 'idle'
