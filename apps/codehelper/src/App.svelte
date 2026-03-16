@@ -45,6 +45,8 @@
 		'This mode is visible in the unified shell, but chat execution is not wired yet.';
 	const GIMP_COMPOSER_PLACEHOLDER =
 		'Describe the change you want to make to the image (Shift+Enter for new line)...';
+	const BLENDER_COMPOSER_PLACEHOLDER =
+		'Ask about your Blender scene or a Blender workflow (Shift+Enter for new line)...';
 
 	const activeMode = $derived(modeStore.activeMode);
 	const activeModeConfig = $derived(modeStore.activeConfig);
@@ -55,12 +57,20 @@
 	const hasNoChats = $derived(chatsStore.chats.length === 0);
 	const canUseCodePath = $derived(activeMode === 'code');
 	const canUseGimpPath = $derived(activeMode === 'gimp');
-	const isGimpRequestRunning = $derived(
-		currentUnifiedMode === 'gimp' &&
+	const canUseBlenderPath = $derived(activeMode === 'blender');
+	const isUnifiedRequestRunning = $derived(
+		currentUnifiedMode !== null &&
 			currentUnifiedChatId !== null &&
 			currentUnifiedMessageId !== null
 	);
-	const hasLiveComposer = $derived(canUseCodePath || canUseGimpPath);
+	const isGimpRequestRunning = $derived(currentUnifiedMode === 'gimp' && isUnifiedRequestRunning);
+	const isBlenderRequestRunning = $derived(
+		currentUnifiedMode === 'blender' && isUnifiedRequestRunning
+	);
+	const currentUnifiedModeLabel = $derived(
+		currentUnifiedMode ? (modeStore.getConfig(currentUnifiedMode)?.label ?? 'Another mode') : null
+	);
+	const hasLiveComposer = $derived(canUseCodePath || canUseGimpPath || canUseBlenderPath);
 	const modeLabel = $derived(activeModeConfig?.label ?? 'Mode');
 	const modeSubtitle = $derived(activeModeConfig?.subtitle ?? 'Unified assistant workspace');
 	const modeSuggestions = $derived(activeModeConfig?.suggestions ?? []);
@@ -73,23 +83,39 @@
 			return NON_CODE_DISABLED_REASON;
 		}
 
-		if (canUseCodePath && isGimpRequestRunning) {
-			return 'GIMP mode is still processing a request. Switch back to GIMP to wait or cancel it.';
+		if (canUseCodePath && isUnifiedRequestRunning) {
+			return `${currentUnifiedModeLabel ?? 'Another mode'} is still processing a request. Switch back to that mode to wait or cancel it.`;
 		}
 
-		if (canUseGimpPath && inferenceStore.isGenerating) {
-			return 'Code mode is still generating a response. Wait for it to finish before starting a GIMP request.';
+		if ((canUseGimpPath || canUseBlenderPath) && inferenceStore.isGenerating) {
+			return `Code mode is still generating a response. Wait for it to finish before starting a ${modeLabel} request.`;
+		}
+
+		if (canUseGimpPath && isBlenderRequestRunning) {
+			return 'Blender mode is still processing a request. Switch back to Blender to wait or cancel it.';
+		}
+
+		if (canUseBlenderPath && isGimpRequestRunning) {
+			return 'GIMP mode is still processing a request. Switch back to GIMP to wait or cancel it.';
 		}
 
 		return null;
 	});
 	const composerIsLoaded = $derived(canUseCodePath ? inferenceStore.isLoaded : hasLiveComposer);
 	const composerIsGenerating = $derived(
-		canUseCodePath ? inferenceStore.isGenerating : canUseGimpPath ? isGimpRequestRunning : false
+		canUseCodePath
+			? inferenceStore.isGenerating
+			: canUseGimpPath
+				? isGimpRequestRunning
+				: canUseBlenderPath
+					? isBlenderRequestRunning
+					: false
 	);
 	const composerPlaceholder = $derived(
 		canUseGimpPath
 			? GIMP_COMPOSER_PLACEHOLDER
+			: canUseBlenderPath
+				? BLENDER_COMPOSER_PLACEHOLDER
 			: 'Ask a coding question (Shift+Enter for new line)...'
 	);
 	const pageTitle = $derived(
@@ -98,6 +124,8 @@
 				? 'New Code Chat'
 				: activeMode === 'gimp'
 					? 'New GIMP Chat'
+					: activeMode === 'blender'
+						? 'New Blender Chat'
 					: 'New Chat')
 	);
 	const showBenchmarkPanel = $derived(uiStore.activeOverlay === 'benchmark');
@@ -332,7 +360,19 @@ Teaching rules:
 			return;
 		}
 
-		if (activeMode !== 'code' || !inferenceStore.isLoaded || inferenceStore.isGenerating) return;
+		if (activeMode === 'blender') {
+			await handleBlenderMessage(content);
+			return;
+		}
+
+		if (
+			activeMode !== 'code' ||
+			!inferenceStore.isLoaded ||
+			inferenceStore.isGenerating ||
+			isUnifiedRequestRunning
+		) {
+			return;
+		}
 
 		const activeChat =
 			currentChat ??
@@ -423,8 +463,13 @@ Teaching rules:
 		}
 	}
 
-	function finalizeGimpResponse(chatId: string, messageId: string, response: AssistantResponseDto) {
-		if (response.undoable) {
+	function finalizeUnifiedResponse(
+		mode: AppMode,
+		chatId: string,
+		messageId: string,
+		response: AssistantResponseDto
+	) {
+		if (mode === 'gimp' && response.undoable) {
 			chatsStore.clearUndoableAssistantMessages(chatId);
 		}
 
@@ -438,53 +483,67 @@ Teaching rules:
 		});
 	}
 
-	function updateGimpStreamingMessage(
+	function updateUnifiedStreamingMessage(
+		mode: AppMode,
 		chatId: string,
 		messageId: string,
 		updates: Partial<Message>
 	) {
 		chatsStore.updateMessage(chatId, messageId, updates);
-		if (activeMode === 'gimp' && chatsStore.getCurrentChatIdForMode('gimp') === chatId) {
+		if (activeMode === mode && chatsStore.getCurrentChatIdForMode(mode) === chatId) {
 			scrollToBottom();
 		}
+	}
+
+	interface UnifiedStreamAccumulator {
+		current: AssistantResponseDto | null;
+		hasSeenToken: boolean;
+		accumulatedText: string;
+		toolResults: Message['toolResults'];
 	}
 
 	function applyGimpEvent(
 		chatId: string,
 		messageId: string,
 		event: AssistantStreamEvent,
-		fallbackResponse: { current: AssistantResponseDto | null }
+		streamedResponse: UnifiedStreamAccumulator
 	) {
 		switch (event.kind) {
 			case 'status':
-				updateGimpStreamingMessage(chatId, messageId, {
+				updateUnifiedStreamingMessage('gimp', chatId, messageId, {
 					content: event.detail,
 					isStreaming: true
 				});
 				break;
 			case 'tool_call':
-				updateGimpStreamingMessage(chatId, messageId, {
+				updateUnifiedStreamingMessage('gimp', chatId, messageId, {
 					content: `Running ${event.name}...`,
 					isStreaming: true
 				});
 				break;
-			case 'tool_result':
-				updateGimpStreamingMessage(chatId, messageId, {
+			case 'tool_result': {
+				const toolResults = [...(streamedResponse.toolResults ?? []), event.result];
+				streamedResponse.toolResults = toolResults;
+				updateUnifiedStreamingMessage('gimp', chatId, messageId, {
 					content: event.result.ok ? event.result.summary : `Error: ${event.result.summary}`,
-					toolResults: [event.result],
+					toolResults,
 					isStreaming: true
 				});
 				break;
+			}
 			case 'complete':
-				fallbackResponse.current = event.response;
-				finalizeGimpResponse(chatId, messageId, event.response);
+				streamedResponse.current = event.response;
+				finalizeUnifiedResponse('gimp', chatId, messageId, {
+					...event.response,
+					toolResults: streamedResponse.toolResults ?? event.response.toolResults
+				});
 				break;
 			case 'error':
-				updateGimpStreamingMessage(chatId, messageId, {
+				updateUnifiedStreamingMessage('gimp', chatId, messageId, {
 					content: `Error: ${event.message}`,
 					explain: null,
 					undoable: false,
-					toolResults: undefined,
+					toolResults: streamedResponse.toolResults,
 					plan: undefined,
 					isStreaming: false
 				});
@@ -494,12 +553,84 @@ Teaching rules:
 		}
 	}
 
-	async function handleGimpMessage(content: string) {
+	function applyBlenderEvent(
+		chatId: string,
+		messageId: string,
+		event: AssistantStreamEvent,
+		streamedResponse: UnifiedStreamAccumulator
+	) {
+		switch (event.kind) {
+			case 'status':
+				if (!streamedResponse.hasSeenToken) {
+					updateUnifiedStreamingMessage('blender', chatId, messageId, {
+						content: event.detail,
+						toolResults: streamedResponse.toolResults,
+						isStreaming: true
+					});
+				}
+				break;
+			case 'tool_call':
+				if (!streamedResponse.hasSeenToken) {
+					updateUnifiedStreamingMessage('blender', chatId, messageId, {
+						content: `Running ${event.name}...`,
+						toolResults: streamedResponse.toolResults,
+						isStreaming: true
+					});
+				}
+				break;
+			case 'tool_result': {
+				const toolResults = [...(streamedResponse.toolResults ?? []), event.result];
+				streamedResponse.toolResults = toolResults;
+				updateUnifiedStreamingMessage('blender', chatId, messageId, {
+					content: streamedResponse.hasSeenToken
+						? streamedResponse.accumulatedText
+						: event.result.summary,
+					toolResults,
+					isStreaming: true
+				});
+				break;
+			}
+			case 'token':
+				streamedResponse.hasSeenToken = true;
+				streamedResponse.accumulatedText += event.token;
+				updateUnifiedStreamingMessage('blender', chatId, messageId, {
+					content: streamedResponse.accumulatedText,
+					toolResults: streamedResponse.toolResults,
+					isStreaming: true
+				});
+				break;
+			case 'complete': {
+				streamedResponse.current = event.response;
+				const reply =
+					streamedResponse.hasSeenToken && streamedResponse.accumulatedText.length > 0
+						? streamedResponse.accumulatedText
+						: event.response.reply;
+				finalizeUnifiedResponse('blender', chatId, messageId, {
+					...event.response,
+					reply,
+					toolResults: streamedResponse.toolResults ?? event.response.toolResults
+				});
+				break;
+			}
+			case 'error':
+				updateUnifiedStreamingMessage('blender', chatId, messageId, {
+					content: `Error: ${event.message}`,
+					explain: null,
+					undoable: false,
+					toolResults: streamedResponse.toolResults,
+					plan: undefined,
+					isStreaming: false
+				});
+				break;
+		}
+	}
+
+	async function handleUnifiedModeMessage(mode: 'gimp' | 'blender', content: string) {
 		if (
-			activeMode !== 'gimp' ||
-			!canUseGimpPath ||
-			isGimpRequestRunning ||
-			inferenceStore.isGenerating
+			activeMode !== mode ||
+			currentUnifiedMode !== null ||
+			inferenceStore.isGenerating ||
+			(mode === 'gimp' ? !canUseGimpPath : !canUseBlenderPath)
 		) {
 			return;
 		}
@@ -507,7 +638,7 @@ Teaching rules:
 		const activeChat =
 			currentChat ??
 			chatsStore.createChat(
-				'gimp',
+				mode,
 				inferenceStore.currentModel ?? settingsStore.selectedModel ?? 'onnx-model'
 			);
 		if (!activeChat) return;
@@ -528,7 +659,10 @@ Teaching rules:
 		const assistantMessage: Message = {
 			id: crypto.randomUUID(),
 			role: 'assistant',
-			content: 'Selecting the best GIMP action for this request.',
+			content:
+				mode === 'gimp'
+					? 'Selecting the best GIMP action for this request.'
+					: 'Starting the Blender tutoring request.',
 			timestamp: Date.now(),
 			isStreaming: true
 		};
@@ -537,35 +671,54 @@ Teaching rules:
 
 		currentUnifiedChatId = activeChat.id;
 		currentUnifiedMessageId = assistantMessage.id;
-		currentUnifiedMode = 'gimp';
+		currentUnifiedMode = mode;
 
 		const chatId = activeChat.id;
 		const messageId = assistantMessage.id;
-		const streamedResponse = { current: null as AssistantResponseDto | null };
+		const streamedResponse: UnifiedStreamAccumulator = {
+			current: null,
+			hasSeenToken: false,
+			accumulatedText: '',
+			toolResults: undefined
+		};
 
 		try {
-			await modeStore.refreshModeStatus('gimp');
+			await modeStore.refreshModeStatus(mode);
 			const request = {
-				mode: 'gimp' as const,
+				mode,
 				chatId,
 				messages: buildAssistantMessages(content, historyBeforeMessage),
 				userText: content
 			};
 
 			const response = await assistantSend(request, (event) => {
-				applyGimpEvent(chatId, messageId, event, streamedResponse);
+				if (mode === 'gimp') {
+					applyGimpEvent(chatId, messageId, event, streamedResponse);
+					return;
+				}
+
+				applyBlenderEvent(chatId, messageId, event, streamedResponse);
 			});
 
 			if (!streamedResponse.current) {
-				finalizeGimpResponse(chatId, messageId, response);
+				finalizeUnifiedResponse(mode, chatId, messageId, {
+					...response,
+					reply:
+						mode === 'blender' &&
+						streamedResponse.hasSeenToken &&
+						streamedResponse.accumulatedText.length > 0
+							? streamedResponse.accumulatedText
+							: response.reply,
+					toolResults: streamedResponse.toolResults ?? response.toolResults
+				});
 			}
 		} catch (error) {
-			console.error('GIMP request failed:', error);
+			console.error(`${mode.toUpperCase()} request failed:`, error);
 			chatsStore.updateMessage(chatId, messageId, {
 				content: `Error: ${error}`,
 				explain: null,
 				undoable: false,
-				toolResults: undefined,
+				toolResults: streamedResponse.toolResults,
 				plan: undefined,
 				isStreaming: false
 			});
@@ -573,8 +726,16 @@ Teaching rules:
 			currentUnifiedChatId = null;
 			currentUnifiedMessageId = null;
 			currentUnifiedMode = null;
-			await modeStore.refreshModeStatus('gimp');
+			await modeStore.refreshModeStatus(mode);
 		}
+	}
+
+	async function handleGimpMessage(content: string) {
+		await handleUnifiedModeMessage('gimp', content);
+	}
+
+	async function handleBlenderMessage(content: string) {
+		await handleUnifiedModeMessage('blender', content);
 	}
 
 	function findNearestUserPrompt(messageId: string): string | null {
@@ -593,14 +754,26 @@ Teaching rules:
 	}
 
 	function handleRegenerateMessage(messageId: string) {
-		if (activeMode !== 'code' || inferenceStore.isGenerating) return;
+		if (
+			(activeMode !== 'code' && activeMode !== 'blender') ||
+			inferenceStore.isGenerating ||
+			(activeMode === 'blender' && isBlenderRequestRunning)
+		) {
+			return;
+		}
 		const sourcePrompt = findNearestUserPrompt(messageId);
 		if (!sourcePrompt) return;
 		handleSendMessage(sourcePrompt);
 	}
 
 	function handleContinueMessage(messageId: string) {
-		if (activeMode !== 'code' || inferenceStore.isGenerating) return;
+		if (
+			(activeMode !== 'code' && activeMode !== 'blender') ||
+			inferenceStore.isGenerating ||
+			(activeMode === 'blender' && isBlenderRequestRunning)
+		) {
+			return;
+		}
 		const basePrompt = findNearestUserPrompt(messageId);
 		const continuationPrompt = basePrompt
 			? `Continue your previous response to: "${basePrompt}". Expand with more details and an example.`
@@ -609,7 +782,13 @@ Teaching rules:
 	}
 
 	function handleBranchFromMessage(messageId: string) {
-		if (activeMode !== 'code' || !currentChat) return;
+		if (
+			(activeMode !== 'code' && activeMode !== 'blender') ||
+			!currentChat ||
+			(activeMode === 'blender' && isBlenderRequestRunning)
+		) {
+			return;
+		}
 		const messageIndex = currentChat.messages.findIndex((message) => message.id === messageId);
 		if (messageIndex < 0) return;
 
@@ -657,12 +836,15 @@ Teaching rules:
 	}
 
 	function handleExampleSelect(prompt: string) {
-		if (activeMode !== 'code' && activeMode !== 'gimp') return;
+		if (activeMode !== 'code' && activeMode !== 'gimp' && activeMode !== 'blender') return;
 		handleSendMessage(prompt);
 	}
 
 	async function handleCancelGeneration() {
-		if (activeMode === 'gimp' && isGimpRequestRunning) {
+		if (
+			(activeMode === 'gimp' && isGimpRequestRunning) ||
+			(activeMode === 'blender' && isBlenderRequestRunning)
+		) {
 			try {
 				await assistantCancel();
 				if (currentUnifiedChatId && currentUnifiedMessageId) {
@@ -671,7 +853,7 @@ Teaching rules:
 					});
 				}
 			} catch (error) {
-				console.error('Failed to cancel GIMP request:', error);
+				console.error('Failed to cancel unified mode request:', error);
 			}
 			return;
 		}

@@ -56,14 +56,15 @@ pub fn mode_config(mode: AppMode) -> ModeConfigDto {
         AppMode::Blender => ModeConfigDto {
             id: AppMode::Blender,
             label: "Blender".to_string(),
-            subtitle: "3D scene assistance for Blender workflows".to_string(),
+            subtitle: "Live Blender tutoring with scene-aware guidance and Blender-doc grounding"
+                .to_string(),
             icon: "box".to_string(),
             provider_kind: ProviderKind::Hybrid,
             system_prompt_key: "mode.blender.default".to_string(),
             suggestions: vec![
-                "Explain this scene".to_string(),
-                "Create a simple material".to_string(),
-                "Fix this modifier".to_string(),
+                "What is in my scene right now?".to_string(),
+                "How do I add a bevel to the selected object?".to_string(),
+                "Explain what this modifier stack is doing".to_string(),
             ],
             capabilities: shared_tool_mode_capabilities(false),
         },

@@ -1,8 +1,12 @@
 use crate::assistant::state::AssistantState;
 use crate::assistant::{MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION, UNIFIED_ASSISTANT_NOT_IMPLEMENTED};
-use crate::commands::inference::{resolve_generation_client, InferenceState};
+use crate::commands::inference::{
+    cached_generation_client, resolve_generation_client, InferenceState,
+};
+use crate::modes::blender::execute_blender_request;
 use crate::modes::gimp::{execute_gimp_request, EngineTextGenerator};
 use crate::modes::registry::ModeProviderRegistry;
+use crate::modes::text_generation::EngineTextStreamer;
 use smolpc_assistant_types::{
     AppMode, AssistantResponseDto, AssistantSendRequestDto, AssistantStreamEventDto,
 };
@@ -19,24 +23,41 @@ pub async fn assistant_send(
 ) -> Result<AssistantResponseDto, String> {
     state.clear_cancelled();
 
-    if request.mode != AppMode::Gimp {
-        return Err(UNIFIED_ASSISTANT_NOT_IMPLEMENTED.to_string());
-    }
+    let result = match request.mode {
+        AppMode::Gimp => {
+            let provider = registry.provider_for_mode(AppMode::Gimp);
+            let engine_client = resolve_generation_client(&app_handle, &inference_state).await?;
+            let generator = EngineTextGenerator::new(engine_client);
 
-    let provider = registry.provider_for_mode(AppMode::Gimp);
-    let engine_client = resolve_generation_client(&app_handle, &inference_state).await?;
-    let generator = EngineTextGenerator::new(engine_client);
-
-    let result = execute_gimp_request(provider, &generator, &request, &state, |event| {
-        if let Err(error) = on_event.send(event) {
-            log::warn!("Failed to emit GIMP assistant event: {error}");
+            execute_gimp_request(provider, &generator, &request, &state, |event| {
+                if let Err(error) = on_event.send(event) {
+                    log::warn!("Failed to emit GIMP assistant event: {error}");
+                }
+            })
+            .await
         }
-    })
-    .await;
+        AppMode::Blender => {
+            let provider = registry.provider_for_mode(AppMode::Blender);
+            let engine_client = resolve_generation_client(&app_handle, &inference_state).await?;
+            let generator = EngineTextStreamer::new(engine_client);
+
+            execute_blender_request(provider, &generator, &request, &state, |event| {
+                if let Err(error) = on_event.send(event) {
+                    log::warn!("Failed to emit Blender assistant event: {error}");
+                }
+            })
+            .await
+        }
+        _ => Err(UNIFIED_ASSISTANT_NOT_IMPLEMENTED.to_string()),
+    };
 
     if let Err(message) = &result {
         let code = if message == "ASSISTANT_CANCELLED" {
             "ASSISTANT_CANCELLED"
+        } else if message == UNIFIED_ASSISTANT_NOT_IMPLEMENTED {
+            "UNIFIED_ASSISTANT_NOT_IMPLEMENTED"
+        } else if request.mode == AppMode::Blender {
+            "BLENDER_ASSISTANT_FAILED"
         } else {
             "GIMP_ASSISTANT_FAILED"
         };
@@ -44,7 +65,7 @@ pub async fn assistant_send(
             code: code.to_string(),
             message: message.clone(),
         }) {
-            log::warn!("Failed to emit GIMP assistant error event: {error}");
+            log::warn!("Failed to emit assistant error event: {error}");
         }
     }
 
@@ -52,8 +73,16 @@ pub async fn assistant_send(
 }
 
 #[tauri::command]
-pub fn assistant_cancel(state: tauri::State<'_, AssistantState>) -> Result<(), String> {
+pub async fn assistant_cancel(
+    state: tauri::State<'_, AssistantState>,
+    inference_state: tauri::State<'_, InferenceState>,
+) -> Result<(), String> {
     state.mark_cancelled();
+
+    if let Some(client) = cached_generation_client(&inference_state).await {
+        let _ = client.cancel().await;
+    }
+
     Ok(())
 }
 

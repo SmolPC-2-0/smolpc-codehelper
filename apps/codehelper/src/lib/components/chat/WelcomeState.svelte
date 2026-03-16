@@ -49,9 +49,9 @@
 		},
 		blender: {
 			chip: 'Blender Mode',
-			headline: 'Preview scene-assistant workflows from the shared desktop shell.',
+			headline: 'Ask live Blender questions with scene-aware guidance from the unified shell.',
 			description:
-				'The Blender bridge is not connected yet, but the shell already reserves its mode identity and prompt surface.'
+				'Blender mode is live in Phase 5. Ask about the current scene, modifiers, modeling workflows, or general Blender questions and the assistant will ground answers with scene context and local Blender reference docs when helpful.'
 		},
 		writer: {
 			chip: 'Writer Mode',

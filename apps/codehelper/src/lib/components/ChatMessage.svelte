@@ -112,7 +112,7 @@
 
 		{#if message.explain}
 			<div class="chat-message__explain">
-				<strong>Do this yourself in GIMP:</strong>
+				<strong>{mode === 'gimp' ? 'Do this yourself in GIMP:' : 'How to do this yourself:'}</strong>
 				<p>{message.explain}</p>
 			</div>
 		{/if}
@@ -134,16 +134,16 @@
 			</div>
 		{/if}
 
-		{#if mode === 'gimp' && message.plan}
+		{#if mode !== 'code' && message.plan}
 			<details class="chat-message__plan">
-				<summary>Show planning details</summary>
+				<summary>{mode === 'blender' ? 'Show request details' : 'Show planning details'}</summary>
 				<pre>{JSON.stringify(message.plan, null, 2)}</pre>
 			</details>
 		{/if}
 
 		{#if message.role === 'assistant' && !message.isStreaming}
 			<div class="chat-message__actions">
-				{#if mode === 'code' && canRegenerate}
+				{#if (mode === 'code' || mode === 'blender') && canRegenerate}
 					<button
 						type="button"
 						onclick={onRegenerate}
@@ -155,7 +155,7 @@
 					</button>
 				{/if}
 
-				{#if mode === 'code'}
+				{#if mode === 'code' || mode === 'blender'}
 					<button
 						type="button"
 						onclick={onContinue}

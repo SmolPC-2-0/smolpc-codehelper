@@ -73,11 +73,15 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 	{
 		id: 'blender',
 		label: 'Blender',
-		subtitle: '3D scene assistance for Blender workflows',
+		subtitle: 'Live Blender tutoring with scene-aware guidance and Blender-doc grounding',
 		icon: 'box',
 		providerKind: 'hybrid',
 		systemPromptKey: 'mode.blender.default',
-		suggestions: ['Explain this scene', 'Create a simple material', 'Fix this modifier'],
+		suggestions: [
+			'What is in my scene right now?',
+			'How do I add a bevel to the selected object?',
+			'Explain what this modifier stack is doing'
+		],
 		capabilities: {
 			supportsTools: true,
 			supportsUndo: false,

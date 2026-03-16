@@ -4,6 +4,7 @@ use super::gimp::GimpProvider;
 use super::libreoffice::LibreOfficeProvider;
 use super::provider::ToolProvider;
 use smolpc_assistant_types::AppMode;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,16 +24,20 @@ pub struct ModeProviderRegistry {
 
 impl Default for ModeProviderRegistry {
     fn default() -> Self {
-        Self {
-            code: Arc::new(CodeProvider),
-            gimp: Arc::new(GimpProvider::default()),
-            blender: Arc::new(BlenderProvider),
-            libreoffice: Arc::new(LibreOfficeProvider),
-        }
+        Self::new(None)
     }
 }
 
 impl ModeProviderRegistry {
+    pub fn new(resource_dir: Option<PathBuf>) -> Self {
+        Self {
+            code: Arc::new(CodeProvider),
+            gimp: Arc::new(GimpProvider::default()),
+            blender: Arc::new(BlenderProvider::new(resource_dir)),
+            libreoffice: Arc::new(LibreOfficeProvider),
+        }
+    }
+
     pub fn provider_family(mode: AppMode) -> ProviderFamily {
         match mode {
             AppMode::Code => ProviderFamily::Code,
