@@ -35,6 +35,6 @@ dist-ssr
 nul
 
 # Local/generated artifacts
-/cache_dir/
+cache_dir/
 /apps/codehelper/scripts/src-tauri/
 /tmp/
