@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-16
-**Status:** Phase 3 Code mode is merged; Phase 4 GIMP preflight is next
+**Status:** Phase 4 GIMP preflight is locked; implementation is next
 
 ## Phase 0: Documentation Baseline
 
@@ -157,11 +157,36 @@
 **Scope**
 
 - port GIMP behavior into a GIMP provider
+- make GIMP the first real external-provider mode
+- activate `assistant_send` for `gimp` only
 - support tool execution and undo
+
+**Phase 4 preflight decisions**
+
+- GIMP is the first real external-provider mode
+- Code mode stays on the existing Codehelper inference path
+- Blender / Writer / Calc / Slides remain placeholder-only
+- GIMP transport uses TCP MCP with default `127.0.0.1:10008`
+- the shared `smolpc-mcp-client` crate owns the TCP transport additions
+- GIMP Phase 4 targets parity with the current proven assistant surface rather
+  than expanding beyond it
+- GIMP uses deterministic fast paths first and constrained `call_api` fallback
+  second
+- GIMP undo stays clipboard-backed rather than depending on the native GIMP
+  undo stack
+- GIMP uses structured status / tool events and does not require token
+  streaming in this phase
+- GIMP and Code are the only live modes after Phase 4
 
 **Exit criteria**
 
 - GIMP mode can connect, execute a validated action, and undo it
+
+**Current branch status**
+
+- preflight docs are the current step
+- `codex/unified-gimp-mode` should branch only after these docs are merged into
+  both `docs/unified-assistant-spec` and `dev/unified-assistant`
 
 ## Phase 5: Blender Mode
 
