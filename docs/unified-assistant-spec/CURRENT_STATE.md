@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-16
-**Phase:** Phase 1 foundation scaffold implemented; stabilization in progress on `codex/unified-foundation`
+**Phase:** Phase 1 foundation merged into `dev/unified-assistant`; Phase 2 shell preflight docs are next
 
 ## Branch Roles
 
@@ -9,9 +9,9 @@
 |---|---|
 | `docs/unified-assistant-spec` | Canonical architecture/spec branch |
 | `dev/unified-assistant` | Implementation mainline after docs merge |
-| `codex/unified-spec-refresh` | Documentation refresh working branch |
-| `codex/unified-foundation` | Phase 1 foundation implementation branch |
-| `codex/unified-foundation-docs` | Docs-first stabilization branch for foundation follow-up contracts |
+| `codex/unified-foundation` | Merged Phase 1 implementation branch |
+| `codex/unified-foundation-status-docs` | Phase 1 closeout docs branch |
+| `codex/unified-shell-docs` | Next docs-first preflight branch for shell work |
 
 ## What Is Done
 
@@ -24,7 +24,9 @@ The documentation baseline for the unified frontend is now defined around:
 - adapters-first migration
 - strict merge-safe boundaries
 
-Phase 1 foundation scaffolding now exists on `codex/unified-foundation`:
+Phase 1 foundation is now merged into `dev/unified-assistant` via PR `#63`.
+
+Merged foundation capabilities now present in `dev/unified-assistant`:
 
 - shared Rust contract crate: `crates/smolpc-assistant-types`
 - shared MCP scaffolding crate: `crates/smolpc-mcp-client`
@@ -37,22 +39,22 @@ Phase 1 foundation scaffolding now exists on `codex/unified-foundation`:
   - `assistant_cancel`
   - `mode_undo`
 - frontend contract mirrors and typed invoke wrappers in `apps/codehelper/src/lib`
+- async MCP client contract in the shared transport crate
+- mode-aware shared-provider status/tool interfaces at the provider boundary
+- tracked `apps/codehelper/src-tauri/libs/openvino/README.md` placeholder for clean-checkout Tauri builds
+- clean frontend audit lockfile with `undici` resolved out of the vulnerable range
 
-Validation completed on the foundation branch:
+Validation completed for the merged foundation:
 
 - `cargo test -p smolpc-assistant-types`
 - `cargo test -p smolpc-mcp-client`
 - `cargo check -p smolpc-assistant-types`
 - `cargo check -p smolpc-mcp-client`
 - `cargo check -p smolpc-code-helper`
-- `npm run check`
-
-Current stabilization items before foundation can merge:
-
-- make the MCP transport client contract async before any real transport lands
-- make shared-provider status and tool discovery mode-aware at the provider boundary
-- commit a tracked OpenVINO placeholder directory so clean Tauri builds pass
-- refresh the root npm lockfile so the workspace audit is green
+- `cargo test -p smolpc-code-helper --lib`
+- `npm run check --workspace apps/codehelper`
+- `npm audit --workspace apps/codehelper --omit=dev --audit-level=high`
+- PR checks green, including `Frontend Quality` and `Tauri Build Check`
 
 The standalone apps remain source references during the future port:
 
@@ -62,29 +64,34 @@ The standalone apps remain source references during the future port:
 
 ## What Has Not Started
 
-These workstreams remain intentionally untouched by Phase 1:
-
 - unified shell refactor in `apps/codehelper`
 - real provider integrations for Code, GIMP, Blender, or LibreOffice
-- mode provider ports from standalone apps
-- launcher cleanup
-- packaging changes
+- mode provider ports
+- launcher cleanup beyond the foundation test fix
+- unified-app packaging hardening beyond the tracked OpenVINO placeholder
 - Windows end-to-end validation for the unified app
 
-## Next Workstreams After Foundation Stabilization
+## Next Workstreams
 
-These begin only after `codex/unified-foundation` is green and merged into
-`dev/unified-assistant`.
+The next official step is docs-first Phase 2 shell preflight:
 
-1. Unified shell
+1. `codex/unified-shell-docs`
+   - tighten shell state/store details
+   - lock storage versioning and per-mode history rules
+   - lock placeholder behavior for non-integrated modes
+2. merge `codex/unified-shell-docs` into `docs/unified-assistant-spec`
+3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
+4. create `codex/unified-shell`
+5. implement Unified Shell:
    - mode dropdown
    - per-mode histories
    - shared status model
-2. Code mode integration
-3. GIMP provider port
-4. Blender provider port
-5. LibreOffice provider port
-6. Hardening and Windows packaging validation
+6. continue serial merge order:
+   - Code mode integration
+   - GIMP provider port
+   - Blender provider port
+   - LibreOffice provider port
+   - Hardening and Windows packaging validation
 
 ## Known Risks
 
@@ -100,14 +107,13 @@ These begin only after `codex/unified-foundation` is green and merged into
 1. Do docs work first.
 2. Merge docs into `dev/unified-assistant`.
 3. Create implementation branches from `dev/unified-assistant` only.
-4. Port behavior into new unified adapters rather than merging standalone app
-   directories.
+4. Port behavior into new unified adapters rather than merging standalone app directories.
 5. Treat engine contract changes as separate work when possible.
 
-## Success Condition For This Phase
+## Current Success Condition
 
-This phase is complete only when:
+The current closeout step is complete only when:
 
-- the foundation follow-up docs are merged into `docs/unified-assistant-spec`
+- Phase 1 status docs are merged into `docs/unified-assistant-spec`
 - those docs are merged into `dev/unified-assistant`
-- the foundation branch is green and ready to merge
+- the team can branch `codex/unified-shell-docs` without reinterpreting Phase 1

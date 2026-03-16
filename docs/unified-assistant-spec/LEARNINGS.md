@@ -4,7 +4,7 @@
 >
 > **Audience:** Every AI session. Read relevant sections before working on that subsystem.
 >
-> **Last Updated:** 2026-03-13
+> **Last Updated:** 2026-03-16
 
 ---
 
@@ -65,6 +65,10 @@
 
 ## MCP
 
+- **Make the shared MCP client async before real transports land** (2026-03): stdio and TCP transports are inherently async. If the shared JSON-RPC client starts synchronous, every real implementation either blocks a thread or forces a breaking trait change later.
+
+- **Shared providers must be mode-aware at the provider boundary** (2026-03): LibreOffice serves Writer, Calc, and Slides from one runtime. Patching `ProviderStateDto.mode` later in the command layer is too fragile; the provider contract itself must accept the requested mode for status, tool discovery, undo, and execution.
+
 - **GIMP MCP uses TCP, not stdio** (2026-03): `maorcc/gimp-mcp` connects to GIMP's Script-Fu console via TCP. The MCP server itself listens on TCP port 10008. This is different from most MCP servers which use stdio.
 
 - **`call_api` is the escape hatch** (2026-03): The GIMP MCP server's `call_api` tool can execute arbitrary GIMP PDB procedures. This means the model isn't limited to predefined tools — it can generate any GIMP API call. This is powerful but requires careful prompt engineering.
@@ -91,6 +95,8 @@
 
 ## Packaging
 
+- **Track placeholder resource directories for Tauri CI** (2026-03): If `bundle.resources` references a directory such as `apps/codehelper/src-tauri/libs/openvino/`, that directory must exist in git on a clean checkout even when the real Windows DLLs are staged later by scripts. A tracked `README.md` placeholder is enough to satisfy Tauri's resource resolution.
+
 - **PyInstaller causes Windows Defender false positives** (2026-03): Bundling Python apps with PyInstaller frequently triggers antivirus alerts on school machines. Use `uv` + source Python instead.
 
 - **Can't reuse application-bundled Python** (2026-03): GIMP, Blender, and LibreOffice all bundle their own Python, but they install to Program Files (needs admin), have different versions, and modifying them risks breaking the host application.
@@ -102,6 +108,10 @@
 ---
 
 ## Workflow
+
+- **`npm audit fix --package-lock-only` is worth trying before package range changes** (2026-03): The foundation branch's `undici` advisory was resolved by refreshing the lockfile only. That kept the dependency ranges stable while still moving the vulnerable transitive resolution out of range.
+
+- **Launcher path tests need platform-specific absolute fixtures** (2026-03): A Windows-style absolute path string is not absolute on macOS/Linux. Tests that validate launcher manifest rules should use a fixture that is absolute on the current platform or they can fail for the wrong reason.
 
 - **Parallel specialist reviews catch cascading issues** (2026-02): Running Rust, Frontend, and Architecture reviews in parallel, then fixing and re-reviewing, is effective for thorough audits. Issues in one layer often reveal issues in others.
 
