@@ -31,9 +31,9 @@ _Updated at end of each session. Provides immediate context without reading exte
 **What's Working**:
 
 - Shared engine architecture: `smolpc-engine-host` (axum HTTP server) + `smolpc-engine-core` (inference) + `smolpc-engine-client` (Tauri adapter)
-- ORT CPU inference with KV Cache + Attention Sinks (Generator, KvCache, InferenceSession, Tokenizer)
 - DirectML inference via ONNX Runtime GenAI native FFI (`GenAiDirectMlGenerator`)
 - Native OpenVINO GenAI NPU inference fully implemented (`OpenVinoGenAiGenerator`) — loads `openvino_genai.dll` + `openvino_c.dll` at runtime, creates `LlmPipeline` targeting `NPU`, streams via `StreamerCallback`, reads native TTFT/throughput metrics
+- OpenVINO GenAI CPU fallback (used when DirectML and NPU are unavailable)
 - Backend selection policy: `openvino_npu → directml → cpu` with persisted decisions keyed by full selection fingerprint
 - Lane-based readiness model in `GET /engine/status` and `POST /engine/check-model`
 - OpenVINO startup probe (NPU detection, device name, driver version, driver floor check)
@@ -44,12 +44,12 @@ _Updated at end of each session. Provides immediate context without reading exte
 **What's Missing Before OpenVINO Runs**:
 
 1. `apps/codehelper/src-tauri/libs/openvino/` — OpenVINO 2026.0.0 DLL bundle (8 DLLs, ~200MB)
-2. `%LOCALAPPDATA%/SmolPC/models/<model_id>/openvino_npu/` — OpenVINO IR model artifact + `manifest.json`
+2. `%LOCALAPPDATA%/SmolPC/models/<model_id>/openvino/` — OpenVINO IR model artifact + `manifest.json`
 
 **Next Up**:
 
 1. **Stage DLL bundle**: download OpenVINO 2026.0.0 + GenAI package → extract 8 DLLs to `libs/openvino/`
-2. **Prepare model artifact**: download `OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov` (or coder variant) from HuggingFace → place in `models/*/openvino_npu/` + write `manifest.json`
+2. **Prepare model artifact**: download `OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov` (or coder variant) from HuggingFace → place in `models/*/openvino/` + write `manifest.json`
 3. **Validate on Windows**: startup probe, preflight (30s budget), first-token, streaming
 4. **Three-way benchmark**: extend `BackendBenchmarkComparison` for `openvino_npu` vs `directml` vs `cpu`
 5. **Catalog migration**: move default model off `qwen3-4b-instruct-2507` to the 1.5B Qwen family
@@ -213,9 +213,8 @@ SmolPC Code Helper is an **offline AI coding assistant** for secondary school st
 │  ┌─────────────────────────────────────────────────────┐     │
 │  │           smolpc-engine-core                         │     │
 │  │  InferenceRuntimeAdapter (dispatch enum)             │     │
-│  │  ├── Ort { Generator }          ← CPU via ort crate  │     │
 │  │  ├── GenAiDirectMl { ... }      ← DML native FFI     │     │
-│  │  └── OpenVinoGenAiNpu { ... }   ← OV GenAI native    │     │
+│  │  └── OpenVinoGenAi { ... }      ← OV GenAI (NPU/CPU) │     │
 │  └─────────────────────────────────────────────────────┘     │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -243,14 +242,11 @@ apps/codehelper/src-tauri/libs/
 
 ```
 %LOCALAPPDATA%/SmolPC/models/<model_id>/
-  cpu/
-    model.onnx
-    tokenizer.json
   dml/
     model.onnx
     genai_config.json
     tokenizer.json
-  openvino_npu/
+  openvino/
     manifest.json          ← lists required files
     model.xml              ← OpenVINO IR graph
     model.bin              ← model weights
@@ -259,7 +255,7 @@ apps/codehelper/src-tauri/libs/
     config.json
 ```
 
-OpenVINO GenAI handles tokenization itself — no Rust tokenizer needed for the NPU lane.
+OpenVINO GenAI handles tokenization itself — no Rust tokenizer needed for the OpenVINO lane.
 
 ### Detailed Documentation
 
@@ -310,7 +306,6 @@ npm run lint               # Lint
 - `engine/crates/smolpc-engine-core/src/inference/runtime_loading.rs` — `OrtRuntimeLoader`, `OpenVinoRuntimeLoader` (all DLL loading lives here)
 - `engine/crates/smolpc-engine-core/src/inference/genai/openvino.rs` — OpenVINO GenAI native FFI
 - `engine/crates/smolpc-engine-core/src/inference/genai/directml.rs` — DirectML GenAI native FFI
-- `engine/crates/smolpc-engine-core/src/inference/generator.rs` — ORT CPU autoregressive loop
 - `engine/crates/smolpc-engine-core/src/inference/backend.rs` — `InferenceBackend`, `BackendStatus`, benchmark types
 - `engine/crates/smolpc-engine-core/src/inference/backend_store.rs` — Persisted backend decision records
 - `engine/crates/smolpc-engine-core/src/models/loader.rs` — Model path resolution per lane
@@ -362,7 +357,7 @@ tbb12.dll → openvino.dll → openvino_c.dll → openvino_ir_frontend.dll
 
 ### OpenVINO Model Must Be OpenVINO IR, Not ONNX
 
-The OpenVINO lane uses `openvino_genai.dll` directly — it expects `.xml` + `.bin` IR artifacts. Do not point it at an ONNX file. The `openvino_npu/manifest.json` must enumerate the required files.
+The OpenVINO lane uses `openvino_genai.dll` directly — it expects `.xml` + `.bin` IR artifacts. Do not point it at an ONNX file. The `openvino/manifest.json` must enumerate the required files.
 
 ### Svelte 5 Runes (NOT Svelte 4 Stores)
 
@@ -424,7 +419,6 @@ Corrections and patterns discovered during development. Categorized for easy ref
 
 ### ONNX/ORT
 
-- **ORT crate version is pinned to `2.0.0-rc.11`** (hardcoded as `ORT_CRATE_VERSION` constant). Do not upgrade without updating the constant and re-validating the DML lane.
 - **Qwen2.5 has TWO stop tokens**: `<|endoftext|>` (151643) + `<|im_end|>` (151645). Both must be checked.
 - **ChatML is mandatory for chat behavior**: Without `<|im_start|>` formatting, Qwen regurgitates pretraining data.
 
@@ -435,7 +429,7 @@ Corrections and patterns discovered during development. Categorized for easy ref
 1. **Adding DLL loading outside `runtime_loading.rs`** — the source-invariant test will fail at CI
 2. **Mixing OpenVINO component versions** — `openvino`, `openvino_genai`, `openvino_tokenizers` must be the same release tuple
 3. **Pointing OpenVINO lane at an ONNX file** — it needs OpenVINO IR (`.xml` + `.bin`), not ONNX
-4. **Forgetting `manifest.json` in `openvino_npu/`** — the engine uses this as the artifact readiness gate
+4. **Forgetting `manifest.json` in `openvino/`** — the engine uses this as the artifact readiness gate
 5. **Using Svelte 4 patterns** — this project uses Svelte 5 runes only
 6. **Using `@apply`** — Tailwind 4 doesn't support it
 7. **Changing backend policy in Tauri/launcher** — engine host owns all selection logic

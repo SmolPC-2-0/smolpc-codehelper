@@ -5,7 +5,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use reqwest::Client;
 use smolpc_engine_core::inference::backend::{BackendStatus, CheckModelResponse};
 use smolpc_engine_core::models::registry::ModelDefinition;
-use smolpc_engine_core::{GenerationConfig, GenerationMetrics, GenerationResult};
+use smolpc_engine_core::{GenerationConfig, GenerationMetrics};
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -535,79 +535,6 @@ impl EngineClient {
         parse_models_response(&value)
     }
 
-    pub async fn generate_text(
-        &self,
-        prompt: &str,
-        config: Option<GenerationConfig>,
-    ) -> Result<GenerationResult, EngineClientError> {
-        let started = Instant::now();
-        let body = completion_body(&prompt_as_messages(prompt), false, config);
-        let response = self
-            .http
-            .post(self.url("/v1/chat/completions"))
-            .header(AUTHORIZATION, self.auth_header())
-            .header(CONTENT_TYPE, "application/json")
-            .body(body.to_string())
-            .send()
-            .await?;
-        let response = ensure_success(response, "/v1/chat/completions").await?;
-        let value = response.json::<serde_json::Value>().await?;
-
-        if let Some(error_message) = parse_error_message(&value) {
-            return Err(EngineClientError::Message(error_message));
-        }
-
-        let text = value
-            .get("choices")
-            .and_then(|c| c.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|first| first.get("message"))
-            .and_then(|m| m.get("content"))
-            .and_then(|c| c.as_str())
-            .unwrap_or_default()
-            .to_string();
-
-        let metrics = non_stream_metrics(&value, started, &text)?;
-
-        Ok(GenerationResult { text, metrics })
-    }
-
-    pub async fn generate_text_messages(
-        &self,
-        messages: &[EngineChatMessage],
-        config: Option<GenerationConfig>,
-    ) -> Result<GenerationResult, EngineClientError> {
-        let started = Instant::now();
-        let body = completion_body(messages, false, config);
-        let response = self
-            .http
-            .post(self.url("/v1/chat/completions"))
-            .header(AUTHORIZATION, self.auth_header())
-            .header(CONTENT_TYPE, "application/json")
-            .body(body.to_string())
-            .send()
-            .await?;
-        let response = ensure_success(response, "/v1/chat/completions").await?;
-        let value = response.json::<serde_json::Value>().await?;
-
-        if let Some(error_message) = parse_error_message(&value) {
-            return Err(EngineClientError::Message(error_message));
-        }
-
-        let text = value
-            .get("choices")
-            .and_then(|c| c.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|first| first.get("message"))
-            .and_then(|m| m.get("content"))
-            .and_then(|c| c.as_str())
-            .unwrap_or_default()
-            .to_string();
-
-        let metrics = non_stream_metrics(&value, started, &text)?;
-        Ok(GenerationResult { text, metrics })
-    }
-
     pub async fn generate_stream<F>(
         &self,
         prompt: &str,
@@ -1088,36 +1015,6 @@ fn parse_models_response(
     Ok(out)
 }
 
-fn non_stream_metrics(
-    value: &serde_json::Value,
-    started: Instant,
-    text: &str,
-) -> Result<GenerationMetrics, EngineClientError> {
-    if let Some(metrics_value) = value.get("smolpc_metrics") {
-        return Ok(serde_json::from_value(metrics_value.clone())?);
-    }
-
-    let total_tokens = value
-        .get("usage")
-        .and_then(|usage| usage.get("completion_tokens"))
-        .and_then(|token_count| token_count.as_u64())
-        .map(|token_count| token_count as usize)
-        .unwrap_or_else(|| text.split_whitespace().count());
-    let total_time_ms = started.elapsed().as_millis() as u64;
-    let tokens_per_second = if total_tokens > 0 && total_time_ms > 0 {
-        total_tokens as f64 / (total_time_ms as f64 / 1_000.0)
-    } else {
-        0.0
-    };
-
-    Ok(GenerationMetrics {
-        total_tokens,
-        time_to_first_token_ms: None,
-        tokens_per_second,
-        total_time_ms,
-    })
-}
-
 fn fallback_stream_metrics(
     started: Instant,
     emitted_chunks: usize,
@@ -1472,24 +1369,6 @@ mod tests {
             parse_error_message(&value),
             Some("stream failed".to_string())
         );
-    }
-
-    #[test]
-    fn non_stream_metrics_prefers_host_metrics_extension() {
-        let value = serde_json::json!({
-            "smolpc_metrics": {
-                "total_tokens": 24,
-                "time_to_first_token_ms": 321,
-                "tokens_per_second": 14.2,
-                "total_time_ms": 1690
-            }
-        });
-
-        let metrics = non_stream_metrics(&value, Instant::now(), "ignored")
-            .expect("host metrics extension should parse");
-        assert_eq!(metrics.total_tokens, 24);
-        assert_eq!(metrics.time_to_first_token_ms, Some(321));
-        assert_eq!(metrics.total_time_ms, 1690);
     }
 
     #[test]

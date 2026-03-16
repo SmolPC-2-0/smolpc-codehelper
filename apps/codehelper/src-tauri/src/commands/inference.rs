@@ -4,7 +4,7 @@ use smolpc_engine_client::{
 };
 use smolpc_engine_core::inference::backend::{BackendStatus, CheckModelResponse};
 use smolpc_engine_core::models::registry::ModelDefinition;
-use smolpc_engine_core::{GenerationConfig, GenerationMetrics, GenerationResult};
+use smolpc_engine_core::{GenerationConfig, GenerationMetrics};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
@@ -360,20 +360,6 @@ pub async fn unload_model(
         .map_err(|e| format!("Failed to unload model: {e}"))?;
     *state.desired_model.lock().await = None;
     Ok("Model unloaded successfully".to_string())
-}
-
-#[tauri::command]
-pub async fn generate_text(
-    prompt: String,
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
-) -> Result<GenerationResult, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
-    ensure_desired_model_loaded(&client, &state).await?;
-    client
-        .generate_text(&prompt, None)
-        .await
-        .map_err(|e| format!("Generation failed: {e}"))
 }
 
 #[tauri::command]

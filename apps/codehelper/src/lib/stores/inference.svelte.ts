@@ -11,7 +11,6 @@ import type {
 	EnsureStartedRequestDto,
 	GenerationConfig,
 	GenerationMetrics,
-	GenerationResult,
 	InferenceChatMessage,
 	InferenceBackend,
 	InferenceRuntimeMode,
@@ -34,7 +33,6 @@ let readiness = $state<EngineReadinessDto | null>(null);
 let isGenerating = $state(false);
 let error = $state<string | null>(null);
 let availableModels = $state<AvailableModel[]>([]);
-let lastResult = $state<GenerationResult | null>(null);
 let lastMetrics = $state<GenerationMetrics | null>(null);
 let backendStatus = $state<BackendStatus | null>(null);
 let runtimeMode = $state<InferenceRuntimeMode>('auto');
@@ -135,9 +133,6 @@ export const inferenceStore = {
 	},
 	get availableModels() {
 		return availableModels;
-	},
-	get lastResult() {
-		return lastResult;
 	},
 	get lastMetrics() {
 		return lastMetrics;
@@ -269,37 +264,6 @@ export const inferenceStore = {
 		} catch (e) {
 			error = String(e);
 			console.error('Failed to unload model:', e);
-		}
-	},
-
-	/**
-	 * Generate text from a prompt (blocking, returns full result).
-	 */
-	async generate(prompt: string): Promise<GenerationResult | null> {
-		if (!this.isReady) {
-			error = 'Engine is not ready';
-			return null;
-		}
-
-		if (isGenerating) {
-			error = 'Generation already in progress';
-			return null;
-		}
-
-		isGenerating = true;
-		error = null;
-
-		try {
-			const result = await invoke<GenerationResult>('generate_text', { prompt });
-			lastResult = result;
-			return result;
-		} catch (e) {
-			error = String(e);
-			console.error('Generation failed:', e);
-			return null;
-		} finally {
-			await this.syncStatus();
-			isGenerating = false;
 		}
 	},
 

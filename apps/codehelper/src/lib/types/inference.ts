@@ -21,17 +21,6 @@ export interface GenerationMetrics {
 }
 
 /**
- * Result of text generation
- */
-export interface GenerationResult {
-	/** Generated text */
-	text: string;
-
-	/** Performance metrics */
-	metrics: GenerationMetrics;
-}
-
-/**
  * Model metadata
  */
 export interface ModelInfo {

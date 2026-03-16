@@ -26,7 +26,7 @@ use smolpc_engine_core::inference::{
     OrtRuntimeLoader, RuntimeVersionMetadata,
 };
 use smolpc_engine_core::models::{ModelArtifactBackend, ModelLoader, ModelRegistry};
-use smolpc_engine_core::{GenerationConfig, GenerationMetrics, GenerationResult};
+use smolpc_engine_core::{GenerationConfig, GenerationMetrics};
 use std::cmp::Ordering as CmpOrdering;
 use std::collections::hash_map::DefaultHasher;
 use std::convert::Infallible;
@@ -2329,38 +2329,6 @@ impl EngineState {
         }
     }
 
-    async fn generate_text(
-        &self,
-        prompt: &str,
-        config: Option<GenerationConfig>,
-    ) -> Result<GenerationResult, String> {
-        let (_permit, cancelled) = self.begin_generation()?;
-        let mut text = String::new();
-        let result = {
-            let adapter_guard = self.runtime_adapter.lock().await;
-            let adapter = adapter_guard
-                .as_ref()
-                .ok_or_else(|| "No model loaded. Call /engine/load first.".to_string())?;
-            adapter
-                .generate_stream(prompt, config, cancelled.clone(), |token| {
-                    text.push_str(&token)
-                })
-                .await
-        };
-        let metrics = match result {
-            Ok(metrics) => metrics,
-            Err(error) => {
-                self.try_runtime_fallback_after_directml_failure(&error)
-                    .await;
-                return Err(error);
-            }
-        };
-        if cancelled.load(Ordering::SeqCst) {
-            return Err("INFERENCE_GENERATION_CANCELLED: Generation cancelled".to_string());
-        }
-        Ok(GenerationResult { text, metrics })
-    }
-
     async fn generate_stream<F>(
         &self,
         prompt: &str,
@@ -2392,38 +2360,6 @@ impl EngineState {
             return Err("INFERENCE_GENERATION_CANCELLED: Generation cancelled".to_string());
         }
         Ok(metrics)
-    }
-
-    async fn generate_text_messages(
-        &self,
-        messages: &[InferenceChatMessage],
-        config: Option<GenerationConfig>,
-    ) -> Result<GenerationResult, String> {
-        let (_permit, cancelled) = self.begin_generation()?;
-        let mut text = String::new();
-        let result = {
-            let adapter_guard = self.runtime_adapter.lock().await;
-            let adapter = adapter_guard
-                .as_ref()
-                .ok_or_else(|| "No model loaded. Call /engine/load first.".to_string())?;
-            adapter
-                .generate_stream_messages(messages, config, cancelled.clone(), |token| {
-                    text.push_str(&token)
-                })
-                .await
-        };
-        let metrics = match result {
-            Ok(metrics) => metrics,
-            Err(error) => {
-                self.try_runtime_fallback_after_directml_failure(&error)
-                    .await;
-                return Err(error);
-            }
-        };
-        if cancelled.load(Ordering::SeqCst) {
-            return Err("INFERENCE_GENERATION_CANCELLED: Generation cancelled".to_string());
-        }
-        Ok(GenerationResult { text, metrics })
     }
 
     async fn generate_stream_messages<F>(
@@ -2655,6 +2591,114 @@ fn constant_time_eq(lhs: &[u8], rhs: &[u8]) -> bool {
     diff == 0
 }
 
+/// Returns true for model families that default to "thinking" mode (e.g. Qwen3).
+fn model_has_thinking_mode(model_id: &str) -> bool {
+    model_id.starts_with("qwen3")
+}
+
+/// Streaming filter that strips `<think>…</think>` blocks from generated text.
+///
+/// Qwen3 models may emit chain-of-thought reasoning wrapped in these tags even when
+/// `/nothink` is present in the prompt.  This filter acts as a safety net so that
+/// thinking output never reaches the user.
+struct ThinkingFilter {
+    buf: String,
+    inside_think: bool,
+    /// After `</think>`, skip one leading newline (it may arrive in a later token).
+    skip_newline: bool,
+}
+
+impl ThinkingFilter {
+    fn new() -> Self {
+        Self {
+            buf: String::new(),
+            inside_think: false,
+            skip_newline: false,
+        }
+    }
+
+    /// Feed a new token into the filter.  Returns any text that should be emitted
+    /// to the user, or `None` if the token was suppressed / buffered.
+    fn push(&mut self, token: &str) -> Option<String> {
+        self.buf.push_str(token);
+
+        // Strip a deferred newline left over from a previous </think>.
+        if self.skip_newline && self.buf.starts_with('\n') {
+            self.buf = self.buf[1..].to_string();
+            self.skip_newline = false;
+        } else if self.skip_newline && !self.buf.is_empty() {
+            // Next char isn't '\n' — stop waiting.
+            self.skip_newline = false;
+        }
+
+        let mut output = String::new();
+
+        loop {
+            if self.inside_think {
+                if let Some(end) = self.buf.find("</think>") {
+                    let rest = end + "</think>".len();
+                    self.buf = self.buf[rest..].to_string();
+                    self.inside_think = false;
+                    // Consume trailing newline if present; otherwise defer to next push.
+                    if self.buf.starts_with('\n') {
+                        self.buf = self.buf[1..].to_string();
+                    } else {
+                        self.skip_newline = true;
+                    }
+                    continue;
+                }
+                // Buffer might end with a partial "</think>" match — keep it.
+                let keep = partial_tag_suffix_len(&self.buf, "</think>");
+                self.buf = self.buf[self.buf.len() - keep..].to_string();
+                break;
+            } else {
+                if let Some(start) = self.buf.find("<think>") {
+                    output.push_str(&self.buf[..start]);
+                    self.buf = self.buf[start + "<think>".len()..].to_string();
+                    self.inside_think = true;
+                    continue;
+                }
+                // Emit everything except a potential partial "<think>" at the tail.
+                let keep = partial_tag_suffix_len(&self.buf, "<think>");
+                let safe = self.buf.len() - keep;
+                if safe > 0 {
+                    output.push_str(&self.buf[..safe]);
+                    self.buf = self.buf[safe..].to_string();
+                }
+                break;
+            }
+        }
+
+        if output.is_empty() {
+            None
+        } else {
+            Some(output)
+        }
+    }
+
+    /// Flush any remaining buffered text at end-of-stream.
+    fn finish(&mut self) -> Option<String> {
+        if self.inside_think || self.buf.is_empty() {
+            self.buf.clear();
+            return None;
+        }
+        Some(std::mem::take(&mut self.buf))
+    }
+}
+
+/// Returns the length of the longest suffix of `haystack` that is a prefix of `needle`.
+fn partial_tag_suffix_len(haystack: &str, needle: &str) -> usize {
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    let max = n.len().min(h.len());
+    for suffix_len in (1..=max).rev() {
+        if h.ends_with(&n[..suffix_len]) {
+            return suffix_len;
+        }
+    }
+    0
+}
+
 fn looks_like_chatml_prompt(content: &str) -> bool {
     content.contains("<|im_start|>") && content.contains("<|im_end|>")
 }
@@ -2671,7 +2715,10 @@ fn is_preformatted_chatml_single_user_message(messages: &[ChatCompletionMessage]
     !content.trim().is_empty() && looks_like_chatml_prompt(&content)
 }
 
-fn request_to_prompt(messages: &[ChatCompletionMessage]) -> Result<String, String> {
+fn request_to_prompt(
+    messages: &[ChatCompletionMessage],
+    disable_thinking: bool,
+) -> Result<String, String> {
     if messages.is_empty() {
         return Err("messages cannot be empty".to_string());
     }
@@ -2689,6 +2736,7 @@ fn request_to_prompt(messages: &[ChatCompletionMessage]) -> Result<String, Strin
     }
 
     let mut prompt = String::new();
+    let mut system_seen = false;
     for m in messages {
         let content = m.content.clone().unwrap_or_default();
         if !content.is_empty() {
@@ -2702,8 +2750,21 @@ fn request_to_prompt(messages: &[ChatCompletionMessage]) -> Result<String, Strin
             prompt.push_str(role);
             prompt.push('\n');
             prompt.push_str(&content);
+            if disable_thinking && role == "system" && !system_seen {
+                prompt.push_str("\n/nothink");
+                system_seen = true;
+            }
             prompt.push_str("<|im_end|>\n");
         }
+    }
+
+    // If thinking should be disabled but no system message was present,
+    // prepend a minimal system message with the /nothink directive.
+    if disable_thinking && !system_seen {
+        let rest = prompt.clone();
+        prompt.clear();
+        prompt.push_str("<|im_start|>system\n/nothink<|im_end|>\n");
+        prompt.push_str(&rest);
     }
 
     if prompt.is_empty() {
@@ -3019,6 +3080,10 @@ async fn v1_chat_completions(
         .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
     let openvino_active =
         state.engine.active_backend().await == Some(InferenceBackend::OpenVinoNpu);
+    let current_model_id = state.engine.current_model.lock().await.clone();
+    let disable_thinking = current_model_id
+        .as_deref()
+        .is_some_and(model_has_thinking_mode);
     let use_legacy_prompt = is_preformatted_chatml_single_user_message(&req.messages);
     let completion_input = if openvino_active && !use_legacy_prompt {
         let messages = request_to_structured_messages(&req.messages)
@@ -3028,7 +3093,7 @@ async fn v1_chat_completions(
             CompletionInput::Messages(messages),
         )
     } else {
-        let prompt = request_to_prompt(&req.messages)
+        let prompt = request_to_prompt(&req.messages, disable_thinking)
             .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
         let mode = if use_legacy_prompt {
             OPENVINO_CHAT_MODE_LEGACY_PROMPT
@@ -3087,6 +3152,11 @@ async fn v1_chat_completions(
 
         let stream = async_stream::stream! {
             let _cancel_guard = CancelOnDrop { engine: state.engine.clone() };
+            let mut think_filter = if disable_thinking {
+                Some(ThinkingFilter::new())
+            } else {
+                None
+            };
             let start = serde_json::json!({
                 "id": request_id,
                 "object": "chat.completion.chunk",
@@ -3099,14 +3169,21 @@ async fn v1_chat_completions(
             while let Some(item) = rx.recv().await {
                 match item {
                     StreamMessage::Token(token) => {
-                        let chunk = serde_json::json!({
-                            "id": request_id,
-                            "object": "chat.completion.chunk",
-                            "created": created,
-                            "model": model_name,
-                            "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": serde_json::Value::Null}],
-                        });
-                        yield Ok(Event::default().data(chunk.to_string()));
+                        let filtered = if let Some(ref mut filter) = think_filter {
+                            filter.push(&token)
+                        } else {
+                            Some(token)
+                        };
+                        if let Some(text) = filtered {
+                            let chunk = serde_json::json!({
+                                "id": request_id,
+                                "object": "chat.completion.chunk",
+                                "created": created,
+                                "model": model_name,
+                                "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": serde_json::Value::Null}],
+                            });
+                            yield Ok(Event::default().data(chunk.to_string()));
+                        }
                     }
                     StreamMessage::Metrics(metrics) => {
                         let metrics_event = serde_json::json!({
@@ -3134,6 +3211,19 @@ async fn v1_chat_completions(
                         yield Ok(Event::default().data(error_event.to_string()));
                     }
                     StreamMessage::Done => {
+                        // Flush any remaining buffered text from the thinking filter.
+                        if let Some(ref mut filter) = think_filter {
+                            if let Some(tail) = filter.finish() {
+                                let chunk = serde_json::json!({
+                                    "id": request_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created,
+                                    "model": model_name,
+                                    "choices": [{"index": 0, "delta": {"content": tail}, "finish_reason": serde_json::Value::Null}],
+                                });
+                                yield Ok(Event::default().data(chunk.to_string()));
+                            }
+                        }
                         let done = serde_json::json!({
                             "id": request_id,
                             "object": "chat.completion.chunk",
@@ -3149,44 +3239,18 @@ async fn v1_chat_completions(
             }
         };
 
-        return Ok(Sse::new(stream)
+        Ok(Sse::new(stream)
             .keep_alive(KeepAlive::default())
-            .into_response());
+            .into_response())
+    } else {
+        Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Non-streaming completions are not supported. Set \"stream\": true."
+                    .to_string(),
+            }),
+        ))
     }
-
-    let result = match completion_input {
-        CompletionInput::Prompt(prompt) => state.engine.generate_text(&prompt, config).await,
-        CompletionInput::Messages(messages) => {
-            state.engine.generate_text_messages(&messages, config).await
-        }
-    }
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse { error: e }),
-        )
-    })?;
-    drop(gen_permit);
-
-    let response = serde_json::json!({
-        "id": request_id,
-        "object": "chat.completion",
-        "created": created,
-        "model": model_name,
-        "choices": [{
-            "index": 0,
-            "message": {"role": "assistant", "content": result.text},
-            "finish_reason": "stop"
-        }],
-        "usage": {
-            "prompt_tokens": 0,
-            "completion_tokens": result.metrics.total_tokens,
-            "total_tokens": result.metrics.total_tokens
-        },
-        "smolpc_metrics": result.metrics
-    });
-
-    Ok(Json(response).into_response())
 }
 
 #[tokio::main]
@@ -3288,7 +3352,7 @@ mod tests {
             },
         ];
 
-        let prompt = request_to_prompt(&messages).expect("chatml prompt");
+        let prompt = request_to_prompt(&messages, false).expect("chatml prompt");
         assert!(prompt.contains("<|im_start|>system\nYou are helpful.<|im_end|>\n"));
         assert!(prompt.contains("<|im_start|>user\nhello<|im_end|>\n"));
         assert!(prompt.ends_with("<|im_start|>assistant\n"));
@@ -3302,8 +3366,109 @@ mod tests {
             content: Some(preformatted.to_string()),
         }];
 
-        let prompt = request_to_prompt(&messages).expect("preformatted chatml");
+        let prompt = request_to_prompt(&messages, false).expect("preformatted chatml");
         assert_eq!(prompt, preformatted);
+    }
+
+    #[test]
+    fn request_to_prompt_injects_nothink_in_system_message() {
+        let messages = vec![
+            ChatCompletionMessage {
+                role: "system".to_string(),
+                content: Some("You are helpful.".to_string()),
+            },
+            ChatCompletionMessage {
+                role: "user".to_string(),
+                content: Some("hello".to_string()),
+            },
+        ];
+
+        let prompt = request_to_prompt(&messages, true).expect("chatml with nothink");
+        assert!(prompt.contains("<|im_start|>system\nYou are helpful.\n/nothink<|im_end|>\n"));
+        assert!(prompt.contains("<|im_start|>user\nhello<|im_end|>\n"));
+    }
+
+    #[test]
+    fn request_to_prompt_prepends_nothink_system_message_when_none_present() {
+        let messages = vec![ChatCompletionMessage {
+            role: "user".to_string(),
+            content: Some("hello".to_string()),
+        }];
+
+        let prompt = request_to_prompt(&messages, true).expect("nothink without system");
+        assert!(prompt.starts_with("<|im_start|>system\n/nothink<|im_end|>\n"));
+        assert!(prompt.contains("<|im_start|>user\nhello<|im_end|>\n"));
+    }
+
+    #[test]
+    fn request_to_prompt_nothink_false_does_not_inject() {
+        let messages = vec![
+            ChatCompletionMessage {
+                role: "system".to_string(),
+                content: Some("You are helpful.".to_string()),
+            },
+            ChatCompletionMessage {
+                role: "user".to_string(),
+                content: Some("hello".to_string()),
+            },
+        ];
+
+        let prompt = request_to_prompt(&messages, false).expect("chatml without nothink");
+        assert!(!prompt.contains("/nothink"));
+    }
+
+    #[test]
+    fn model_has_thinking_mode_matches_qwen3() {
+        assert!(model_has_thinking_mode("qwen3-4b-instruct"));
+        assert!(model_has_thinking_mode("qwen3-0.6b"));
+        assert!(!model_has_thinking_mode("qwen2.5-coder-1.5b"));
+        assert!(!model_has_thinking_mode("phi-4-mini-instruct"));
+    }
+
+    #[test]
+    fn thinking_filter_streaming_suppresses_think_block() {
+        let mut f = ThinkingFilter::new();
+        let mut out = String::new();
+        for token in ["<think>", "reasoning here", "</think>", "\n", "Hello!"] {
+            if let Some(t) = f.push(token) {
+                out.push_str(&t);
+            }
+        }
+        if let Some(t) = f.finish() {
+            out.push_str(&t);
+        }
+        assert_eq!(out, "Hello!");
+    }
+
+    #[test]
+    fn thinking_filter_streaming_split_tags() {
+        let mut f = ThinkingFilter::new();
+        let mut out = String::new();
+        // Tags split across token boundaries.
+        for token in ["<th", "ink>", "internal", "</thi", "nk>", "World"] {
+            if let Some(t) = f.push(token) {
+                out.push_str(&t);
+            }
+        }
+        if let Some(t) = f.finish() {
+            out.push_str(&t);
+        }
+        assert_eq!(out, "World");
+    }
+
+    #[test]
+    fn thinking_filter_passes_non_thinking_text() {
+        let mut f = ThinkingFilter::new();
+        let mut out = String::new();
+        for token in ["Hello, ", "world!"] {
+            if let Some(t) = f.push(token) {
+                out.push_str(&t);
+            }
+        }
+        if let Some(t) = f.finish() {
+            out.push_str(&t);
+        }
+        assert_eq!(out, "Hello, world!");
     }
 
     #[test]
