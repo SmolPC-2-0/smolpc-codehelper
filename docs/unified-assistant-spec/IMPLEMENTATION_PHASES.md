@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-16
-**Status:** Phase 2 shell preflight is documented; shell implementation is next
+**Status:** Phase 2 shell is merged; Phase 2 closeout docs are in progress; Phase 3 Code mode is next
 
 ## Phase 0: Documentation Baseline
 
@@ -49,14 +49,14 @@
   - tracked OpenVINO placeholder directory
   - clean frontend audit lockfile
 
-## Branch Order After Phase 1
+## Branch Order After Phase 2
 
-1. `codex/unified-shell-docs`
+1. `codex/unified-shell-status-docs`
 2. merge into `docs/unified-assistant-spec`
 3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-4. `codex/unified-shell`
-5. shell merge and closeout docs
-6. `codex/unified-code-mode-docs`
+4. `codex/unified-code-mode-docs`
+5. merge into `docs/unified-assistant-spec`
+6. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
 7. `codex/unified-code-mode`
 8. closeout docs
 9. `codex/unified-gimp-mode-docs`
@@ -70,7 +70,7 @@
 
 ## Phase 2: Unified Shell
 
-**Suggested branches:** `codex/unified-shell-docs`, then `codex/unified-shell`
+**Suggested branches:** `codex/unified-shell-docs`, `codex/unified-shell`, then `codex/unified-shell-status-docs`
 
 **Scope**
 
@@ -98,6 +98,23 @@
 - `apps/codehelper` can present all six modes in one shell
 - Code mode remains the default and closest to current behavior
 - non-Code modes are honest placeholders rather than fake chat integrations
+
+**Current branch status**
+
+- preflight docs merged into `docs/unified-assistant-spec`, then into `dev/unified-assistant`
+- implementation merged via PR `#64`
+- merged shell capabilities:
+  - `AppModeDropdown` in the header
+  - per-mode unified chat/history state
+  - fresh unified storage keys with no standalone-chat migration
+  - lazy mode-status loading and caching
+  - visible non-Code placeholder modes with disabled composer
+  - existing Codehelper send/generate path preserved only for Code
+  - Code-only export, benchmark, and context controls in Phase 2
+- CI unblock follow-ups landed with the shell:
+  - root `.prettierrc` Svelte override
+  - root `eslint.config.mjs`
+  - tracked `apps/codehelper/.gitignore`
 
 ## Phase 3: Code Mode
 

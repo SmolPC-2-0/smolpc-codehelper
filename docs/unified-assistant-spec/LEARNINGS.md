@@ -61,6 +61,8 @@
 
 - **Tailwind 4 has no `@apply`** (2026-02): `@apply` was removed in Tailwind 4. Use utility classes directly in templates. For reusable styles, extract into components or use CSS variables.
 
+- **Root Prettier needs a Svelte-only override** (2026-03): The repo-level `.prettierrc` cannot safely apply `prettier-plugin-tailwindcss` to `.svelte` files during root incremental checks. Keep Tailwind's plugin at the top level, but load `prettier-plugin-svelte` inside the `.svelte` override instead.
+
 ---
 
 ## MCP
@@ -112,6 +114,10 @@
 - **`npm audit fix --package-lock-only` is worth trying before package range changes** (2026-03): The foundation branch's `undici` advisory was resolved by refreshing the lockfile only. That kept the dependency ranges stable while still moving the vulnerable transitive resolution out of range.
 
 - **Launcher path tests need platform-specific absolute fixtures** (2026-03): A Windows-style absolute path string is not absolute on macOS/Linux. Tests that validate launcher manifest rules should use a fixture that is absolute on the current platform or they can fail for the wrong reason.
+
+- **Root incremental style gates need root frontend config entrypoints** (2026-03): CI runs `prettier` and `eslint` from the repo root against `apps/codehelper/...` paths. That requires a root `eslint.config.mjs` that re-exports the workspace config, plus a real `apps/codehelper/.gitignore` so `includeIgnoreFile()` does not crash.
+
+- **Keep shell diffs off legacy lint surfaces unless they are truly needed** (2026-03): Incremental style gates only lint changed files. Touching a legacy frontend file with an unrelated existing lint violation can turn that old issue into a new CI blocker for the current phase.
 
 - **Parallel specialist reviews catch cascading issues** (2026-02): Running Rust, Frontend, and Architecture reviews in parallel, then fixing and re-reviewing, is effective for thorough audits. Issues in one layer often reveal issues in others.
 
