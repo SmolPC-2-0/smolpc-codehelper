@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-16
-**Phase:** Phase 4 GIMP preflight is locked in docs; GIMP implementation is next
+**Phase:** Phase 4 GIMP mode is merged; Phase 5 Blender preflight is next
 
 ## Branch Roles
 
@@ -20,7 +20,8 @@
 | `codex/unified-code-mode` | Merged Phase 3 implementation branch |
 | `codex/unified-code-mode-status-docs` | Merged Phase 3 closeout docs branch |
 | `codex/unified-gimp-mode-docs` | Merged Phase 4 preflight docs branch |
-| `codex/unified-gimp-mode` | Next Phase 4 implementation branch |
+| `codex/unified-gimp-mode` | Merged Phase 4 implementation branch |
+| `codex/unified-gimp-mode-status-docs` | Phase 4 closeout docs branch |
 
 ## What Is Done
 
@@ -145,6 +146,56 @@ Validation completed for the merged Code-mode polish:
 - root incremental ESLint checks against the changed frontend files
 - PR checks green, including `Frontend Quality` and `Tauri Build Check`
 
+Phase 4 GIMP mode is now merged into `dev/unified-assistant` via PR `#67`.
+
+Merged GIMP behavior now present in `dev/unified-assistant`:
+
+- `assistant_send` is now operational for `mode === gimp`
+- `mode_status(gimp)` now reports real provider connection state and tool
+  discovery
+- `mode_refresh_tools(gimp)` now forces reconnect and tool rediscovery
+- `mode_undo(gimp)` now delegates to the real GIMP provider path
+- the placeholder `modes/gimp.rs` file has been replaced with a real unified
+  GIMP adapter module tree under `apps/codehelper/src-tauri/src/modes/gimp/`
+- the shared `smolpc-mcp-client` crate now includes TCP JSON-RPC transport and
+  MCP session helpers used by the unified GIMP provider
+- the unified shell now enables the GIMP composer, routes GIMP requests through
+  `assistantSend()`, renders tool activity and explain text, and exposes Undo
+  only on undoable GIMP responses
+- Code mode still uses the existing Codehelper inference path
+- Blender / Writer / Calc / Slides remain visible placeholders
+
+Merged GIMP v1 action surface:
+
+- GIMP info query
+- current image metadata query
+- describe current image
+- draw line
+- draw heart
+- draw circle
+- draw oval
+- draw triangle
+- draw filled rectangle / square
+- crop to square
+- resize width
+- increase / decrease brightness
+- increase / decrease contrast
+- blur entire image
+- brighten / darken top, bottom, left, or right half
+- increase / decrease contrast in top, bottom, left, or right half
+- blur top, bottom, left, or right half
+- rotate 90 / 180 / 270
+- flip horizontal / vertical
+- undo last change
+
+Validation completed for the merged GIMP mode:
+
+- `cargo test -p smolpc-mcp-client`
+- `cargo check -p smolpc-code-helper`
+- `cargo test -p smolpc-code-helper --lib modes::gimp`
+- `npm run check --workspace apps/codehelper`
+- PR `#67` merged into `dev/unified-assistant`
+
 The standalone apps remain source references during the future port:
 
 - `apps/gimp-assistant`
@@ -153,7 +204,7 @@ The standalone apps remain source references during the future port:
 
 ## What Has Not Started
 
-- real provider integrations for Code, GIMP, Blender, or LibreOffice
+- real provider integrations for Blender or LibreOffice
 - mode provider ports
 - launcher cleanup beyond the foundation test fix
 - unified-app packaging hardening beyond the tracked OpenVINO placeholder
@@ -161,26 +212,36 @@ The standalone apps remain source references during the future port:
 
 ## Next Workstreams
 
-The next official step after these docs merge is `codex/unified-gimp-mode`:
+The next official step after these docs merge is `codex/unified-blender-mode-docs`:
 
-1. merge `codex/unified-gimp-mode-docs` into `docs/unified-assistant-spec`
-2. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-3. create `codex/unified-gimp-mode`
-4. activate `assistant_send`, `mode_status`, `mode_refresh_tools`, and
-   `mode_undo` for `gimp` only
-5. close out Phase 4 in docs
-6. continue serial merge order:
-   - GIMP provider port
+1. create `codex/unified-blender-mode-docs`
+2. lock Phase 5 Blender behavior before code
+3. merge `codex/unified-blender-mode-docs` into `docs/unified-assistant-spec`
+4. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
+5. create `codex/unified-blender-mode`
+6. port the bridge-backed Blender provider path into the unified adapter
+7. close out Phase 5 in docs
+8. continue serial merge order:
    - Blender provider port
    - LibreOffice provider port
    - Hardening and Windows packaging validation
+
+The current merged GIMP implementation leaves these future phase boundaries
+intact:
+
+1. `assistant_send` remains scaffold-only for non-GIMP modes
+2. Code mode still does not use the unified provider/orchestration path
+3. packaging still assumes an external GIMP install plus external MCP
+   plugin/server runtime
+4. no standalone app directories were taken over by the unified branch
 
 ## Known Risks
 
 | Risk | Impact |
 |---|---|
 | Engine branch churn | unified app may need contract updates while the engine is still evolving |
-| Standalone app branch churn | GIMP, Blender, and LibreOffice behaviors may continue changing during the port |
+| Standalone app branch churn | Blender and LibreOffice behavior may continue changing during the remaining ports |
+| External GIMP runtime assumptions | Phase 4 depends on a separate GIMP install and MCP plugin/server already being available |
 | Packaging/runtime validation | third-party runtime paths may behave differently in packaged Windows builds |
 | LibreOffice port alignment | the LibreOffice branch must stay aligned with the unified provider design |
 
@@ -194,8 +255,10 @@ The next official step after these docs merge is `codex/unified-gimp-mode`:
 
 ## Current Success Condition
 
-The current preflight step is complete only when:
+The current closeout step is complete only when:
 
-- Phase 4 GIMP docs are merged into `docs/unified-assistant-spec`
-- those docs are merged into `dev/unified-assistant`
-- the team can branch `codex/unified-gimp-mode` without reopening Phase 4 scope
+1. Phase 4 GIMP implementation is merged into `dev/unified-assistant`
+2. the closeout docs are merged into `docs/unified-assistant-spec`
+3. those docs are merged back into `dev/unified-assistant`
+4. the next branch can start from a baseline that records GIMP as the first
+   real external-provider mode
