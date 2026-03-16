@@ -2,10 +2,52 @@
 	import { Gauge, Loader2 } from '@lucide/svelte';
 	import { inferenceStore } from '$lib/stores/inference.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
-	import type { InferenceRuntimeMode } from '$lib/types/inference';
+	import type { InferenceRuntimeMode, BackendLaneStatus } from '$lib/types/inference';
 
 	let isSwitching = $state(false);
-	const diagnosticsOnly = $derived(!inferenceStore.runtimeModeControlsEnabled);
+
+	interface ModeOption {
+		value: InferenceRuntimeMode;
+		label: string;
+		disabled: boolean;
+		title: string;
+	}
+
+	function isLaneFailed(lane: BackendLaneStatus | undefined): boolean {
+		if (!lane) return false;
+		return !!lane.last_failure_class;
+	}
+
+	function laneFailureReason(lane: BackendLaneStatus | undefined): string {
+		if (!lane?.last_failure_message) return 'unavailable';
+		return lane.last_failure_message;
+	}
+
+	const modeOptions = $derived.by<ModeOption[]>(() => {
+		const bs = inferenceStore.backendStatus;
+		const npuLane = bs?.lanes?.openvino_npu;
+		const dmlLane = bs?.lanes?.directml;
+
+		const npuFailed = isLaneFailed(npuLane);
+		const dmlFailed = isLaneFailed(dmlLane);
+
+		return [
+			{ value: 'auto' as const, label: 'Mode: Auto', disabled: false, title: 'Automatic backend selection' },
+			{
+				value: 'dml' as const,
+				label: `Mode: DirectML${dmlFailed ? ' (unavailable)' : ''}`,
+				disabled: dmlFailed,
+				title: dmlFailed ? `DirectML unavailable: ${laneFailureReason(dmlLane)}` : 'Force DirectML GPU acceleration'
+			},
+			{ value: 'cpu' as const, label: 'Mode: CPU', disabled: false, title: 'Force CPU inference' },
+			{
+				value: 'npu' as const,
+				label: `Mode: NPU${npuFailed ? ' (unavailable)' : ''}`,
+				disabled: npuFailed,
+				title: npuFailed ? `NPU unavailable: ${laneFailureReason(npuLane)}` : 'Force Intel NPU via OpenVINO'
+			}
+		];
+	});
 
 	async function handleModeChange(event: Event) {
 		const target = event.target as HTMLSelectElement;
@@ -34,18 +76,16 @@
 	<select
 		value={inferenceStore.runtimeMode}
 		onchange={handleModeChange}
-		disabled={diagnosticsOnly || isSwitching || inferenceStore.isGenerating}
+		disabled={isSwitching || inferenceStore.isGenerating}
 		class="mode-selector__control"
 		aria-label="Select inference runtime mode"
-		title={
-			diagnosticsOnly
-				? 'Runtime mode override is diagnostics-only'
-				: 'Switch runtime mode and restart shared engine host'
-		}
+		title="Switch runtime mode and restart the shared engine host"
 	>
-		<option value="auto">Mode: Auto</option>
-		<option value="dml">Mode: DirectML</option>
-		<option value="cpu">Mode: CPU</option>
+		{#each modeOptions as option}
+			<option value={option.value} disabled={option.disabled} title={option.title}>
+				{option.label}
+			</option>
+		{/each}
 	</select>
 </div>
 

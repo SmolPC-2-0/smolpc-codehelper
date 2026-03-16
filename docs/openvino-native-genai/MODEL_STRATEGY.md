@@ -17,7 +17,7 @@ Primary KPI: best practical performance on weak Intel laptops.
 Why:
 
 - Intel explicitly calls out `Qwen2.5-1.5B-Instruct` as supported on NPU in OpenVINO `2026.0.0`
-- size is more realistic for weak laptops than Phi-4-mini
+- size is more realistic for weak laptops than larger 4B+ models
 - the OpenVINO-hosted artifact aligns with the chosen native runtime lane
 
 Sources:
@@ -123,7 +123,7 @@ Manifest requirements:
 3. `ort_cpu` baseline
 4. optional small-model sanity check with `Qwen-2.5-coder-0.5B`
 
-Do not lead Phase 1 with Phi-4-mini for this KPI.
+Lead Phase 1 with the 1.5B Qwen model for this KPI; Qwen3-4B is the higher-capability tier.
 
 Current repo note:
 

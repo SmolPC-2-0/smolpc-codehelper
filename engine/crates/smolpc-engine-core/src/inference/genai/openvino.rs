@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 type OvGenAiLlmPipeline = c_void;
@@ -582,8 +582,33 @@ impl OpenVinoGenAiGenerator {
             generate_stream_blocking(inner, prompt_owned, gen_config, cancelled_worker, token_tx)
         });
 
-        while let Some(piece) = token_rx.recv().await {
-            on_token(piece);
+        // Per-token watchdog: NPU compilation can cause a long TTFT on first run,
+        // so use a generous 90s window to avoid false positives.
+        const TOKEN_WATCHDOG_SECS: u64 = 90;
+        let deadline = tokio::time::sleep(Duration::from_secs(TOKEN_WATCHDOG_SECS));
+        tokio::pin!(deadline);
+
+        loop {
+            tokio::select! {
+                piece = token_rx.recv() => {
+                    match piece {
+                        Some(t) => {
+                            on_token(t);
+                            deadline.as_mut().reset(
+                                tokio::time::Instant::now() + Duration::from_secs(TOKEN_WATCHDOG_SECS)
+                            );
+                        }
+                        None => break,
+                    }
+                }
+                _ = &mut deadline => {
+                    cancelled.store(true, Ordering::SeqCst);
+                    return Err(
+                        "OpenVINO generation timed out: no tokens received within 90 seconds. \
+                         This may indicate a model compatibility issue with OpenVINO.".to_string()
+                    );
+                }
+            }
         }
 
         worker
@@ -616,8 +641,31 @@ impl OpenVinoGenAiGenerator {
             )
         });
 
-        while let Some(piece) = token_rx.recv().await {
-            on_token(piece);
+        const TOKEN_WATCHDOG_SECS: u64 = 90;
+        let deadline = tokio::time::sleep(Duration::from_secs(TOKEN_WATCHDOG_SECS));
+        tokio::pin!(deadline);
+
+        loop {
+            tokio::select! {
+                piece = token_rx.recv() => {
+                    match piece {
+                        Some(t) => {
+                            on_token(t);
+                            deadline.as_mut().reset(
+                                tokio::time::Instant::now() + Duration::from_secs(TOKEN_WATCHDOG_SECS)
+                            );
+                        }
+                        None => break,
+                    }
+                }
+                _ = &mut deadline => {
+                    cancelled.store(true, Ordering::SeqCst);
+                    return Err(
+                        "OpenVINO generation timed out: no tokens received within 90 seconds. \
+                         This may indicate a model compatibility issue with OpenVINO.".to_string()
+                    );
+                }
+            }
         }
 
         worker

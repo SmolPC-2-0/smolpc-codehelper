@@ -29,9 +29,6 @@ const READINESS_STATES: ReadonlySet<string> = new Set([
 	'failed'
 ]);
 
-const DIAGNOSTICS_RUNTIME_MODE_CONTROLS =
-	import.meta.env.DEV && import.meta.env.VITE_ENABLE_RUNTIME_MODE_CONTROLS === '1';
-
 // State
 let readiness = $state<EngineReadinessDto | null>(null);
 let isGenerating = $state(false);
@@ -69,6 +66,9 @@ function normalizeRuntimeMode(raw: string | null | undefined): InferenceRuntimeM
 	}
 	if (normalized === 'cpu') {
 		return 'cpu';
+	}
+	if (normalized === 'openvinonpu' || normalized === 'openvino' || normalized === 'npu') {
+		return 'npu';
 	}
 	return 'auto';
 }
@@ -145,8 +145,8 @@ export const inferenceStore = {
 	get runtimeMode() {
 		return runtimeMode;
 	},
-	get runtimeModeControlsEnabled() {
-		return DIAGNOSTICS_RUNTIME_MODE_CONTROLS;
+	get backendStatus() {
+		return backendStatus;
 	},
 
 	// Get status object for display
@@ -197,6 +197,12 @@ export const inferenceStore = {
 	async ensureStarted(
 		request: EnsureStartedRequestDto = defaultStartupRequest()
 	): Promise<EngineReadinessDto | null> {
+		// If we're reconnecting after the engine became unhealthy (e.g. it crashed
+		// during generation and was auto-restarted), force-clear stale generation state.
+		if (isGenerating) {
+			console.warn('ensureStarted: clearing stale isGenerating flag from prior session');
+			isGenerating = false;
+		}
 		error = null;
 		try {
 			const payload = await invoke<EngineReadinessDto>('engine_ensure_started', { request });
@@ -422,6 +428,9 @@ export const inferenceStore = {
 
 	/**
 	 * Cancel the current generation.
+	 *
+	 * If the engine is hung in an FFI call that can't be interrupted,
+	 * force-reset the UI state after 8 seconds so the user isn't stuck.
 	 */
 	async cancel(): Promise<void> {
 		if (!isGenerating) {
@@ -433,6 +442,14 @@ export const inferenceStore = {
 		} catch (e) {
 			console.error('Failed to cancel generation:', e);
 		}
+
+		setTimeout(() => {
+			if (isGenerating) {
+				console.warn('Generation cancel timed out — force-resetting UI state');
+				isGenerating = false;
+				error = 'Generation was force-stopped. The engine may need to restart.';
+			}
+		}, 8000);
 	},
 
 	/**
@@ -483,19 +500,10 @@ export const inferenceStore = {
 		return this.ensureStarted(defaultStartupRequest(defaultModelId));
 	},
 
-	/**
-	 * Diagnostics-only runtime mode switch.
-	 */
 	async setRuntimeMode(
 		mode: InferenceRuntimeMode,
 		modelId: string | null = null
 	): Promise<boolean> {
-		if (!DIAGNOSTICS_RUNTIME_MODE_CONTROLS) {
-			error =
-				'Runtime mode override is diagnostics-only. Enable VITE_ENABLE_RUNTIME_MODE_CONTROLS=1 for local diagnostics.';
-			return false;
-		}
-
 		if (isGenerating) {
 			error = 'Cannot switch runtime mode while generation is in progress';
 			return false;

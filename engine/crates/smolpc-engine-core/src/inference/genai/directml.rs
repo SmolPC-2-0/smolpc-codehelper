@@ -7,7 +7,7 @@ use std::path::Path;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 type OgaResult = c_void;
@@ -442,8 +442,33 @@ impl GenAiDirectMlGenerator {
             generate_stream_blocking(inner, prompt_owned, gen_config, cancelled_worker, token_tx)
         });
 
-        while let Some(piece) = token_rx.recv().await {
-            on_token(piece);
+        // Per-token watchdog: if no token arrives within this window, treat as hung.
+        // TTFT for large models on DirectML can be 10-20s on budget hardware; 45s gives headroom.
+        const TOKEN_WATCHDOG_SECS: u64 = 45;
+        let deadline = tokio::time::sleep(Duration::from_secs(TOKEN_WATCHDOG_SECS));
+        tokio::pin!(deadline);
+
+        loop {
+            tokio::select! {
+                piece = token_rx.recv() => {
+                    match piece {
+                        Some(t) => {
+                            on_token(t);
+                            deadline.as_mut().reset(
+                                tokio::time::Instant::now() + Duration::from_secs(TOKEN_WATCHDOG_SECS)
+                            );
+                        }
+                        None => break,
+                    }
+                }
+                _ = &mut deadline => {
+                    cancelled.store(true, Ordering::SeqCst);
+                    return Err(
+                        "DirectML generation timed out: no tokens received within 45 seconds. \
+                         This may indicate a model compatibility issue with DirectML.".to_string()
+                    );
+                }
+            }
         }
 
         worker

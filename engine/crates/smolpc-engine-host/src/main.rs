@@ -3734,7 +3734,7 @@ mod tests {
         let resource_dir = temp.path().join("resources");
         let libs = resource_dir.join("libs");
         let models_dir = temp.path().join("models");
-        let model_dir = models_dir.join("phi-4-mini-instruct");
+        let model_dir = models_dir.join("qwen3-4b-instruct");
         let openvino_dir = model_dir.join("openvino");
 
         create_ort_files(
@@ -3800,7 +3800,7 @@ mod tests {
         };
 
         let response = build_check_model_response(
-            "phi-4-mini-instruct",
+            "qwen3-4b-instruct",
             &bundles,
             Some(&probe),
             Some(&openvino_probe),

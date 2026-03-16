@@ -119,11 +119,11 @@
 			</div>
 
 			<div class="model-info-panel__control-block">
-				<div class="model-info-panel__control-label">Inference Mode (Diagnostics)</div>
+				<div class="model-info-panel__control-label">Inference Mode</div>
 				<InferenceModeSelector />
-				{#if !inferenceStore.runtimeModeControlsEnabled}
-					<div class="model-info-panel__helper">Runtime mode override is diagnostics-only.</div>
-				{/if}
+				<div class="model-info-panel__helper">
+					Switch runtime mode and reload the current model into the selected backend.
+				</div>
 			</div>
 
 			<div class="model-info-panel__details">
@@ -151,6 +151,8 @@
 					<span>{formatReason(status.decisionPersistenceState)}</span>
 					<span>DirectML Lane</span>
 					<span>{formatReason(status.directmlPreflightState ?? status.directmlFailureClass)}</span>
+					<span>NPU Lane</span>
+					<span>{formatReason(inferenceStore.backendStatus?.lanes?.openvino_npu?.last_failure_class ?? inferenceStore.backendStatus?.lanes?.openvino_npu?.preflight_state ?? null)}</span>
 					<span>Model Path</span>
 					<span title={status.activeModelPath ?? ''}>{status.activeModelPath ?? 'n/a'}</span>
 				</div>

@@ -37,14 +37,14 @@ impl ModelRegistry {
                         .to_string(),
             },
             ModelDefinition {
-                id: "phi-4-mini-instruct".to_string(),
-                name: "Phi-4 Mini Instruct".to_string(),
-                size: "3.8B".to_string(),
-                disk_size_gb: 2.4,
+                id: "qwen3-4b-instruct".to_string(),
+                name: "Qwen3 4B Instruct".to_string(),
+                size: "4B".to_string(),
+                disk_size_gb: 2.5,
                 min_ram_gb: 16.0,
-                directory: "phi-4-mini-instruct".to_string(),
+                directory: "qwen3-4b-instruct".to_string(),
                 description:
-                    "Higher-capability tier with official OpenVINO and ONNX Runtime GenAI artifacts"
+                    "Higher-capability tier with OpenVINO CPU/NPU and DirectML artifacts"
                         .to_string(),
             },
         ]
@@ -62,13 +62,13 @@ mod tests {
     use super::ModelRegistry;
 
     #[test]
-    fn available_models_prioritize_qwen_then_phi() {
+    fn available_models_ordering() {
         let ids: Vec<String> = ModelRegistry::available_models()
             .into_iter()
             .map(|model| model.id)
             .collect();
 
-        assert_eq!(ids, vec!["qwen2.5-coder-1.5b", "phi-4-mini-instruct"]);
+        assert_eq!(ids, vec!["qwen2.5-coder-1.5b", "qwen3-4b-instruct"]);
     }
 
     #[test]
@@ -79,14 +79,14 @@ mod tests {
             .collect();
 
         assert!(ids.contains(&"qwen2.5-coder-1.5b".to_string()));
-        assert!(ids.contains(&"phi-4-mini-instruct".to_string()));
+        assert!(ids.contains(&"qwen3-4b-instruct".to_string()));
         assert_eq!(ids.len(), 2);
     }
 
     #[test]
     fn get_model_returns_supported_models_only() {
         assert!(ModelRegistry::get_model("qwen2.5-coder-1.5b").is_some());
-        assert!(ModelRegistry::get_model("phi-4-mini-instruct").is_some());
-        assert!(ModelRegistry::get_model("qwen3-4b-instruct-2507").is_none());
+        assert!(ModelRegistry::get_model("qwen3-4b-instruct").is_some());
+        assert!(ModelRegistry::get_model("phi-4-mini-instruct").is_none());
     }
 }
