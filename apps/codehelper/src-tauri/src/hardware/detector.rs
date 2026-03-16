@@ -127,7 +127,9 @@ fn build_npu_candidate(npu: &hardware_query::NPUInfo) -> (NpuInfo, u32) {
     let score = confidence_rank(&confidence) * 100
         + u32::from(driver_version.is_some()) * 20
         + u32::from(tops.is_some()) * 10
-        + tops.map(|value| value.max(0.0).min(99.0) as u32).unwrap_or(0);
+        + tops
+            .map(|value| value.max(0.0).min(99.0) as u32)
+            .unwrap_or(0);
 
     (
         NpuInfo {
@@ -328,7 +330,10 @@ fn convert_npu_info(hw_info: &hardware_query::HardwareInfo) -> Option<NpuInfo> {
         .map(|(info, _)| info);
 
     if hw_info.npus().len() > 1 {
-        log::debug!("Detected {} NPUs; selected best identifier", hw_info.npus().len());
+        log::debug!(
+            "Detected {} NPUs; selected best identifier",
+            hw_info.npus().len()
+        );
     }
 
     selected

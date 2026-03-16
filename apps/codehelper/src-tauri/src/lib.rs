@@ -37,7 +37,13 @@ pub fn run() {
             }
 
             log::info!("Hardware detection will occur on first request");
-            let resource_dir = app.path().resource_dir().ok();
+            let resource_dir = match app.path().resource_dir() {
+                Ok(path) => Some(path),
+                Err(error) => {
+                    log::warn!("Unable to resolve Tauri resource directory: {error}");
+                    None
+                }
+            };
             app.manage(ModeProviderRegistry::new(resource_dir));
             Ok(())
         })

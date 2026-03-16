@@ -132,11 +132,8 @@ where
 
     ensure_not_cancelled(state)?;
 
-    let (system_prompt, user_prompt) = build_question_prompts(
-        &request.user_text,
-        scene_context.as_ref(),
-        &rag_contexts,
-    );
+    let (system_prompt, user_prompt) =
+        build_question_prompts(&request.user_text, scene_context.as_ref(), &rag_contexts);
     let messages = vec![
         EngineChatMessage {
             role: "system".to_string(),
@@ -224,7 +221,10 @@ mod tests {
             name: &str,
             _arguments: serde_json::Value,
         ) -> Result<ToolExecutionResultDto, String> {
-            self.calls.lock().expect("calls lock").push(name.to_string());
+            self.calls
+                .lock()
+                .expect("calls lock")
+                .push(name.to_string());
             self.results
                 .lock()
                 .expect("results lock")
@@ -254,6 +254,26 @@ mod tests {
             on_token("Blender ".to_string());
             on_token("answer".to_string());
             Ok("Blender answer".to_string())
+        }
+    }
+
+    struct BlockingStreamer;
+
+    #[async_trait]
+    impl TextStreamer for BlockingStreamer {
+        async fn generate_stream(
+            &self,
+            _messages: &[EngineChatMessage],
+            state: &AssistantState,
+            _on_token: &mut (dyn FnMut(String) + Send),
+        ) -> Result<String, String> {
+            loop {
+                if state.is_cancelled() {
+                    return Err("ASSISTANT_CANCELLED".to_string());
+                }
+
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
         }
     }
 
@@ -364,5 +384,48 @@ mod tests {
             event,
             AssistantStreamEventDto::Token { token } if token == "Blender "
         )));
+    }
+
+    #[tokio::test]
+    async fn request_returns_cancelled_when_generation_is_stopped() {
+        let provider = Arc::new(MockProvider {
+            calls: Mutex::new(Vec::new()),
+            results: Mutex::new(VecDeque::from(vec![ToolExecutionResultDto {
+                name: "scene_current".to_string(),
+                ok: true,
+                summary: "No scene".to_string(),
+                payload: json!({
+                    "connected": false,
+                    "scene_data": null,
+                    "message": "No scene data",
+                    "last_update": null
+                }),
+            }])),
+        });
+        let state = Arc::new(AssistantState::default());
+
+        let task = tokio::spawn({
+            let provider = provider.clone();
+            let state = state.clone();
+            async move {
+                execute_blender_request(
+                    provider,
+                    &BlockingStreamer,
+                    &request("What is in my scene right now?"),
+                    state.as_ref(),
+                    |_| {},
+                )
+                .await
+            }
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        state.mark_cancelled();
+
+        let error = task
+            .await
+            .expect("join handle")
+            .expect_err("request cancelled");
+        assert_eq!(error, "ASSISTANT_CANCELLED");
     }
 }

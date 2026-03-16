@@ -123,7 +123,10 @@ fn format_rag_contexts(contexts: &[RagContext]) -> String {
         .map(|context| {
             let cleaned = normalize_context_text(&context.text);
             let clipped = truncate_with_ellipsis(&cleaned, MAX_CONTEXT_CHARS);
-            format!("### {}\n{}\nSource: {}", context.signature, clipped, context.url)
+            format!(
+                "### {}\n{}\nSource: {}",
+                context.signature, clipped, context.url
+            )
         })
         .collect::<Vec<_>>()
         .join("\n\n")

@@ -67,7 +67,11 @@ impl RagIndex {
         self.load_error.as_deref()
     }
 
-    pub fn retrieve_context(&self, query: &str, n_results: usize) -> Result<Vec<RagContext>, String> {
+    pub fn retrieve_context(
+        &self,
+        query: &str,
+        n_results: usize,
+    ) -> Result<Vec<RagContext>, String> {
         if !self.loaded {
             return Ok(Vec::new());
         }
@@ -99,7 +103,8 @@ impl RagIndex {
 
 fn load_metadata(json_path: &Path, pickle_path: &Path) -> Result<Vec<RagChunk>, String> {
     if json_path.exists() {
-        let file = File::open(json_path).map_err(|error| format!("{} ({error})", json_path.display()))?;
+        let file =
+            File::open(json_path).map_err(|error| format!("{} ({error})", json_path.display()))?;
         return serde_json::from_reader(file)
             .map_err(|error| format!("Failed parsing {}: {error}", json_path.display()));
     }
@@ -109,8 +114,8 @@ fn load_metadata(json_path: &Path, pickle_path: &Path) -> Result<Vec<RagChunk>, 
             "[BlenderRAG] metadata.json not found; falling back to metadata.pkl at {}",
             pickle_path.display()
         );
-        let file =
-            File::open(pickle_path).map_err(|error| format!("{} ({error})", pickle_path.display()))?;
+        let file = File::open(pickle_path)
+            .map_err(|error| format!("{} ({error})", pickle_path.display()))?;
         return serde_pickle::from_reader(file, serde_pickle::de::DeOptions::default())
             .map_err(|error| format!("Failed parsing {}: {error}", pickle_path.display()));
     }
@@ -177,8 +182,7 @@ fn contains_any(text: &str, terms: &HashSet<String>) -> bool {
 fn is_stopword(token: &str) -> bool {
     matches!(
         token,
-        "a"
-            | "an"
+        "a" | "an"
             | "and"
             | "are"
             | "as"
