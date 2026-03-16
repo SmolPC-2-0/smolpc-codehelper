@@ -43,9 +43,9 @@
 		},
 		gimp: {
 			chip: 'GIMP Mode',
-			headline: 'Stage image-edit workflows before the tool bridge is wired.',
+			headline: 'Edit the active image in GIMP from the unified assistant shell.',
 			description:
-				'The GIMP mode already reserves its shell layout, prompt surface, and provider status while execution is still disabled.'
+				'GIMP is the first live external-provider mode. Ask for image edits, metadata, and supported drawing or transform actions directly from this chat.'
 		},
 		blender: {
 			chip: 'Blender Mode',

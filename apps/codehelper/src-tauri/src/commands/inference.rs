@@ -1,6 +1,6 @@
 use smolpc_engine_client::{
     connect_or_spawn, read_runtime_env_overrides, EngineChatMessage, EngineClient,
-    EngineConnectOptions, RuntimeModePreference,
+    EngineConnectOptions, RuntimeModePreference, StartupMode, StartupPolicy,
 };
 use smolpc_engine_core::inference::backend::{BackendStatus, CheckModelResponse};
 use smolpc_engine_core::models::registry::ModelDefinition;
@@ -295,6 +295,19 @@ async fn ensure_desired_model_loaded(
         .map_err(|e| format!("Failed to restore model '{model_to_restore}': {e}"))
 }
 
+pub(crate) async fn resolve_generation_client(
+    app_handle: &tauri::AppHandle,
+    state: &InferenceState,
+) -> Result<EngineClient, String> {
+    let client = resolve_client(app_handle, state, false).await?;
+    client
+        .ensure_started(StartupMode::Auto, StartupPolicy::default())
+        .await
+        .map_err(|error| format!("Failed to ensure the shared engine is started: {error}"))?;
+    ensure_desired_model_loaded(&client, state).await?;
+    Ok(client)
+}
+
 fn log_host_binary_resolution(host_binary: Option<&PathBuf>) {
     let Some(path) = host_binary else {
         log::info!("Shared engine host binary will be resolved via runtime discovery");
@@ -371,8 +384,7 @@ pub async fn generate_text(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<GenerationResult, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
-    ensure_desired_model_loaded(&client, &state).await?;
+    let client = resolve_generation_client(&app_handle, &state).await?;
     client
         .generate_text(&prompt, None)
         .await
@@ -520,8 +532,7 @@ pub async fn inference_generate(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<GenerationMetrics, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
-    ensure_desired_model_loaded(&client, &state).await?;
+    let client = resolve_generation_client(&app_handle, &state).await?;
     client
         .generate_stream(&prompt, config, |token| {
             if let Err(e) = on_token.send(token) {
@@ -540,8 +551,7 @@ pub async fn inference_generate_messages(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<GenerationMetrics, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
-    ensure_desired_model_loaded(&client, &state).await?;
+    let client = resolve_generation_client(&app_handle, &state).await?;
     let messages = messages
         .into_iter()
         .map(|message| EngineChatMessage {

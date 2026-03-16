@@ -8,6 +8,7 @@
 		isGenerating: boolean;
 		bottomOffset: number;
 		disabledReason?: string | null;
+		placeholder?: string;
 		onSend: (content: string) => void;
 		onCancel: () => void;
 	}
@@ -17,6 +18,7 @@
 		isGenerating,
 		bottomOffset,
 		disabledReason = null,
+		placeholder = 'Ask a coding question (Shift+Enter for new line)...',
 		onSend,
 		onCancel
 	}: Props = $props();
@@ -28,7 +30,7 @@
 				? 'Chat execution is not available in this mode yet.'
 				: !isLoaded
 					? 'Loading model...'
-					: 'Ask a coding question (Shift+Enter for new line)...'
+					: placeholder
 	);
 </script>
 

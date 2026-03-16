@@ -28,6 +28,7 @@
 		onRegenerateMessage: (messageId: string) => void;
 		onContinueMessage: (messageId: string) => void;
 		onBranchFromMessage: (messageId: string) => void;
+		onUndoMessage: (messageId: string) => void;
 		onContainerReady: (element: HTMLDivElement) => void;
 	}
 
@@ -53,6 +54,7 @@
 		onRegenerateMessage,
 		onContinueMessage,
 		onBranchFromMessage,
+		onUndoMessage,
 		onContainerReady
 	}: Props = $props();
 
@@ -114,11 +116,13 @@
 			<div class="conversation-view__messages">
 				{#each messages as message (message.id)}
 					<ChatMessage
+						{mode}
 						{message}
 						canRegenerate={message.id === latestAssistantMessageId}
 						onRegenerate={() => onRegenerateMessage(message.id)}
 						onContinue={() => onContinueMessage(message.id)}
 						onBranchFromHere={() => onBranchFromMessage(message.id)}
+						onUndo={() => onUndoMessage(message.id)}
 					/>
 				{/each}
 			</div>

@@ -1,5 +1,6 @@
 import type { Chat, Message } from '$lib/types/chat';
 import { APP_MODES, type AppMode } from '$lib/types/mode';
+import type { ToolExecutionResultDto } from '$lib/types/provider';
 import { saveToStorage, loadFromStorage } from '$lib/utils/storage';
 
 const STORAGE_KEY = 'smolpc_unified_chats_v1';
@@ -37,13 +38,52 @@ function sanitizeMessage(candidate: unknown): Message | null {
 		return null;
 	}
 
+	const toolResults = sanitizeToolResults(value.toolResults);
+
 	return {
 		id: value.id,
 		role: value.role,
 		content: value.content,
 		timestamp: value.timestamp,
-		isStreaming: value.isStreaming === true
+		isStreaming: value.isStreaming === true,
+		explain:
+			typeof value.explain === 'string' || value.explain === null ? value.explain : undefined,
+		undoable: value.undoable === true,
+		toolResults,
+		plan: value.plan
 	};
+}
+
+function sanitizeToolResults(candidate: unknown): ToolExecutionResultDto[] | undefined {
+	if (!Array.isArray(candidate)) {
+		return undefined;
+	}
+
+	const toolResults = candidate
+		.map((item) => {
+			if (!item || typeof item !== 'object') {
+				return null;
+			}
+
+			const value = item as Partial<ToolExecutionResultDto>;
+			if (
+				typeof value.name !== 'string' ||
+				typeof value.ok !== 'boolean' ||
+				typeof value.summary !== 'string'
+			) {
+				return null;
+			}
+
+			return {
+				name: value.name,
+				ok: value.ok,
+				summary: value.summary,
+				payload: value.payload
+			};
+		})
+		.filter((item): item is ToolExecutionResultDto => item !== null);
+
+	return toolResults.length > 0 ? toolResults : undefined;
 }
 
 function sanitizeChat(candidate: unknown): Chat | null {
@@ -221,6 +261,33 @@ export const chatsStore = {
 		}
 
 		Object.assign(message, updates);
+		chat.updatedAt = Date.now();
+		this.persist();
+	},
+
+	clearUndoableAssistantMessages(chatId: string) {
+		const chat = chats.find((candidate) => candidate.id === chatId);
+		if (!chat) {
+			return;
+		}
+
+		let updated = false;
+		chat.messages = chat.messages.map((message) => {
+			if (message.role !== 'assistant' || !message.undoable) {
+				return message;
+			}
+
+			updated = true;
+			return {
+				...message,
+				undoable: false
+			};
+		});
+
+		if (!updated) {
+			return;
+		}
+
 		chat.updatedAt = Date.now();
 		this.persist();
 	},

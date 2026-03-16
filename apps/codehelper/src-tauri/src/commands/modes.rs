@@ -42,12 +42,20 @@ async fn collect_mode_status(
         Err(error) => (false, Some(error)),
     };
 
+    let merged_last_error = last_error.or_else(|| {
+        if matches!(provider_state.state.as_str(), "disconnected" | "error") {
+            provider_state.detail.clone()
+        } else {
+            None
+        }
+    });
+
     Ok(build_mode_status_dto(
         mode,
         engine_ready,
         provider_state,
         available_tools,
-        last_error,
+        merged_last_error,
     ))
 }
 
@@ -73,8 +81,10 @@ pub async fn mode_refresh_tools(
     inference_state: tauri::State<'_, InferenceState>,
     registry: tauri::State<'_, ModeProviderRegistry>,
 ) -> Result<ModeStatusDto, String> {
-    // Phase 1 foundation keeps refresh as a no-op until providers implement
-    // real reconnect and tool discovery flows.
+    // Phase 4: GIMP uses refresh to force a reconnect and live tool discovery.
+    let provider = registry.provider_for_mode(mode);
+    let _ = provider.disconnect_if_needed(mode).await;
+    let _ = provider.connect_if_needed(mode).await;
     collect_mode_status(mode, app_handle, inference_state, registry).await
 }
 

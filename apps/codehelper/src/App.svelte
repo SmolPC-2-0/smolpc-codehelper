@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
+	import { assistantCancel, assistantSend, undoModeAction } from '$lib/api/unified';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import BenchmarkPanel from '$lib/components/BenchmarkPanel.svelte';
 	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
@@ -19,6 +20,11 @@
 	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
 	import type {
+		AssistantMessageDto,
+		AssistantResponseDto,
+		AssistantStreamEvent
+	} from '$lib/types/assistant';
+	import type {
 		GenerationConfig,
 		InferenceBackend,
 		InferenceChatMessage,
@@ -30,10 +36,15 @@
 	let cancelRequested = $state(false);
 	let currentStreamingChatId = $state<string | null>(null);
 	let currentStreamingMessageId = $state<string | null>(null);
+	let currentUnifiedChatId = $state<string | null>(null);
+	let currentUnifiedMessageId = $state<string | null>(null);
+	let currentUnifiedMode = $state<AppMode | null>(null);
 	let bottomOffset = $state(0);
 	let showShortcutsOverlay = $state(false);
 	const NON_CODE_DISABLED_REASON =
 		'This mode is visible in the unified shell, but chat execution is not wired yet.';
+	const GIMP_COMPOSER_PLACEHOLDER =
+		'Describe the change you want to make to the image (Shift+Enter for new line)...';
 
 	const activeMode = $derived(modeStore.activeMode);
 	const activeModeConfig = $derived(modeStore.activeConfig);
@@ -43,6 +54,13 @@
 	const messages = $derived(currentChat?.messages ?? []);
 	const hasNoChats = $derived(chatsStore.chats.length === 0);
 	const canUseCodePath = $derived(activeMode === 'code');
+	const canUseGimpPath = $derived(activeMode === 'gimp');
+	const isGimpRequestRunning = $derived(
+		currentUnifiedMode === 'gimp' &&
+			currentUnifiedChatId !== null &&
+			currentUnifiedMessageId !== null
+	);
+	const hasLiveComposer = $derived(canUseCodePath || canUseGimpPath);
 	const modeLabel = $derived(activeModeConfig?.label ?? 'Mode');
 	const modeSubtitle = $derived(activeModeConfig?.subtitle ?? 'Unified assistant workspace');
 	const modeSuggestions = $derived(activeModeConfig?.suggestions ?? []);
@@ -50,9 +68,37 @@
 	const canExport = $derived(
 		Boolean(activeModeConfig?.capabilities.showExport) && messages.length > 0
 	);
-	const composerDisabledReason = $derived(canUseCodePath ? null : NON_CODE_DISABLED_REASON);
+	const composerDisabledReason = $derived.by(() => {
+		if (!hasLiveComposer) {
+			return NON_CODE_DISABLED_REASON;
+		}
+
+		if (canUseCodePath && isGimpRequestRunning) {
+			return 'GIMP mode is still processing a request. Switch back to GIMP to wait or cancel it.';
+		}
+
+		if (canUseGimpPath && inferenceStore.isGenerating) {
+			return 'Code mode is still generating a response. Wait for it to finish before starting a GIMP request.';
+		}
+
+		return null;
+	});
+	const composerIsLoaded = $derived(canUseCodePath ? inferenceStore.isLoaded : hasLiveComposer);
+	const composerIsGenerating = $derived(
+		canUseCodePath ? inferenceStore.isGenerating : canUseGimpPath ? isGimpRequestRunning : false
+	);
+	const composerPlaceholder = $derived(
+		canUseGimpPath
+			? GIMP_COMPOSER_PLACEHOLDER
+			: 'Ask a coding question (Shift+Enter for new line)...'
+	);
 	const pageTitle = $derived(
-		currentChat?.title ?? (activeMode === 'code' ? 'New Code Chat' : 'New Chat')
+		currentChat?.title ??
+			(activeMode === 'code'
+				? 'New Code Chat'
+				: activeMode === 'gimp'
+					? 'New GIMP Chat'
+					: 'New Chat')
 	);
 	const showBenchmarkPanel = $derived(uiStore.activeOverlay === 'benchmark');
 	const showHardwarePanel = $derived(uiStore.activeOverlay === 'hardware');
@@ -239,6 +285,27 @@ Teaching rules:
 		return payload;
 	}
 
+	function buildAssistantMessages(
+		userMessage: string,
+		historyMessages: Message[]
+	): AssistantMessageDto[] {
+		const payload: AssistantMessageDto[] = [];
+
+		for (const message of historyMessages) {
+			payload.push({
+				role: message.role,
+				content: message.content
+			});
+		}
+
+		payload.push({
+			role: 'user',
+			content: userMessage
+		});
+
+		return payload;
+	}
+
 	function handleScrollToLatest() {
 		uiStore.resetScrollState();
 		if (!messagesContainer) return;
@@ -260,6 +327,11 @@ Teaching rules:
 	}
 
 	async function handleSendMessage(content: string) {
+		if (activeMode === 'gimp') {
+			await handleGimpMessage(content);
+			return;
+		}
+
 		if (activeMode !== 'code' || !inferenceStore.isLoaded || inferenceStore.isGenerating) return;
 
 		const activeChat =
@@ -351,6 +423,160 @@ Teaching rules:
 		}
 	}
 
+	function finalizeGimpResponse(chatId: string, messageId: string, response: AssistantResponseDto) {
+		if (response.undoable) {
+			chatsStore.clearUndoableAssistantMessages(chatId);
+		}
+
+		chatsStore.updateMessage(chatId, messageId, {
+			content: response.reply,
+			explain: response.explain ?? null,
+			undoable: response.undoable,
+			toolResults: response.toolResults.length > 0 ? response.toolResults : undefined,
+			plan: response.plan,
+			isStreaming: false
+		});
+	}
+
+	function updateGimpStreamingMessage(
+		chatId: string,
+		messageId: string,
+		updates: Partial<Message>
+	) {
+		chatsStore.updateMessage(chatId, messageId, updates);
+		if (activeMode === 'gimp' && chatsStore.getCurrentChatIdForMode('gimp') === chatId) {
+			scrollToBottom();
+		}
+	}
+
+	function applyGimpEvent(
+		chatId: string,
+		messageId: string,
+		event: AssistantStreamEvent,
+		fallbackResponse: { current: AssistantResponseDto | null }
+	) {
+		switch (event.kind) {
+			case 'status':
+				updateGimpStreamingMessage(chatId, messageId, {
+					content: event.detail,
+					isStreaming: true
+				});
+				break;
+			case 'tool_call':
+				updateGimpStreamingMessage(chatId, messageId, {
+					content: `Running ${event.name}...`,
+					isStreaming: true
+				});
+				break;
+			case 'tool_result':
+				updateGimpStreamingMessage(chatId, messageId, {
+					content: event.result.ok ? event.result.summary : `Error: ${event.result.summary}`,
+					toolResults: [event.result],
+					isStreaming: true
+				});
+				break;
+			case 'complete':
+				fallbackResponse.current = event.response;
+				finalizeGimpResponse(chatId, messageId, event.response);
+				break;
+			case 'error':
+				updateGimpStreamingMessage(chatId, messageId, {
+					content: `Error: ${event.message}`,
+					explain: null,
+					undoable: false,
+					toolResults: undefined,
+					plan: undefined,
+					isStreaming: false
+				});
+				break;
+			case 'token':
+				break;
+		}
+	}
+
+	async function handleGimpMessage(content: string) {
+		if (
+			activeMode !== 'gimp' ||
+			!canUseGimpPath ||
+			isGimpRequestRunning ||
+			inferenceStore.isGenerating
+		) {
+			return;
+		}
+
+		const activeChat =
+			currentChat ??
+			chatsStore.createChat(
+				'gimp',
+				inferenceStore.currentModel ?? settingsStore.selectedModel ?? 'onnx-model'
+			);
+		if (!activeChat) return;
+		const historyBeforeMessage = [...activeChat.messages];
+
+		uiStore.setShowQuickExamples(false);
+		uiStore.resetScrollState();
+
+		const userMessage: Message = {
+			id: crypto.randomUUID(),
+			role: 'user',
+			content,
+			timestamp: Date.now()
+		};
+		chatsStore.addMessage(activeChat.id, userMessage);
+		scrollToBottom();
+
+		const assistantMessage: Message = {
+			id: crypto.randomUUID(),
+			role: 'assistant',
+			content: 'Selecting the best GIMP action for this request.',
+			timestamp: Date.now(),
+			isStreaming: true
+		};
+		chatsStore.addMessage(activeChat.id, assistantMessage);
+		scrollToBottom();
+
+		currentUnifiedChatId = activeChat.id;
+		currentUnifiedMessageId = assistantMessage.id;
+		currentUnifiedMode = 'gimp';
+
+		const chatId = activeChat.id;
+		const messageId = assistantMessage.id;
+		const streamedResponse = { current: null as AssistantResponseDto | null };
+
+		try {
+			await modeStore.refreshModeStatus('gimp');
+			const request = {
+				mode: 'gimp' as const,
+				chatId,
+				messages: buildAssistantMessages(content, historyBeforeMessage),
+				userText: content
+			};
+
+			const response = await assistantSend(request, (event) => {
+				applyGimpEvent(chatId, messageId, event, streamedResponse);
+			});
+
+			if (!streamedResponse.current) {
+				finalizeGimpResponse(chatId, messageId, response);
+			}
+		} catch (error) {
+			console.error('GIMP request failed:', error);
+			chatsStore.updateMessage(chatId, messageId, {
+				content: `Error: ${error}`,
+				explain: null,
+				undoable: false,
+				toolResults: undefined,
+				plan: undefined,
+				isStreaming: false
+			});
+		} finally {
+			currentUnifiedChatId = null;
+			currentUnifiedMessageId = null;
+			currentUnifiedMode = null;
+			await modeStore.refreshModeStatus('gimp');
+		}
+	}
+
 	function findNearestUserPrompt(messageId: string): string | null {
 		if (!currentChat) return null;
 		const messageIndex = currentChat.messages.findIndex((message) => message.id === messageId);
@@ -431,11 +657,25 @@ Teaching rules:
 	}
 
 	function handleExampleSelect(prompt: string) {
-		if (activeMode !== 'code') return;
+		if (activeMode !== 'code' && activeMode !== 'gimp') return;
 		handleSendMessage(prompt);
 	}
 
 	async function handleCancelGeneration() {
+		if (activeMode === 'gimp' && isGimpRequestRunning) {
+			try {
+				await assistantCancel();
+				if (currentUnifiedChatId && currentUnifiedMessageId) {
+					chatsStore.updateMessage(currentUnifiedChatId, currentUnifiedMessageId, {
+						content: 'Cancelling request...'
+					});
+				}
+			} catch (error) {
+				console.error('Failed to cancel GIMP request:', error);
+			}
+			return;
+		}
+
 		cancelRequested = true;
 
 		try {
@@ -452,6 +692,44 @@ Teaching rules:
 
 		currentStreamingChatId = null;
 		currentStreamingMessageId = null;
+	}
+
+	async function handleUndoMessage(messageId: string) {
+		if (activeMode !== 'gimp' || !currentChat || isGimpRequestRunning) {
+			return;
+		}
+
+		const targetMessage = currentChat.messages.find((message) => message.id === messageId);
+		if (!targetMessage?.undoable) {
+			return;
+		}
+
+		try {
+			await undoModeAction('gimp');
+			chatsStore.clearUndoableAssistantMessages(currentChat.id);
+			chatsStore.updateMessage(currentChat.id, messageId, {
+				undoable: false
+			});
+			chatsStore.addMessage(currentChat.id, {
+				id: crypto.randomUUID(),
+				role: 'assistant',
+				content: '↩ Last change undone.',
+				timestamp: Date.now(),
+				explain:
+					'To do this yourself in GIMP: press Ctrl+Z (or Cmd+Z on macOS), or choose Edit → Undo.',
+				undoable: false
+			});
+			await modeStore.refreshModeStatus('gimp');
+		} catch (error) {
+			console.error('Failed to undo GIMP action:', error);
+			chatsStore.addMessage(currentChat.id, {
+				id: crypto.randomUUID(),
+				role: 'assistant',
+				content: `Error: ${error}`,
+				timestamp: Date.now(),
+				undoable: false
+			});
+		}
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
@@ -641,7 +919,7 @@ Teaching rules:
 			{messages}
 			{latestAssistantMessageId}
 			showQuickExamples={uiStore.showQuickExamples}
-			disabledExamples={!canUseCodePath}
+			disabledExamples={!hasLiveComposer || !!composerDisabledReason}
 			disabledReason={composerDisabledReason}
 			onSelectExample={handleExampleSelect}
 			onToggleExamples={(show) => uiStore.setShowQuickExamples(show)}
@@ -652,13 +930,15 @@ Teaching rules:
 			onRegenerateMessage={handleRegenerateMessage}
 			onContinueMessage={handleContinueMessage}
 			onBranchFromMessage={handleBranchFromMessage}
+			onUndoMessage={handleUndoMessage}
 			onContainerReady={setMessagesContainer}
 		/>
 
 		<ComposerBar
-			isLoaded={inferenceStore.isLoaded}
-			isGenerating={inferenceStore.isGenerating}
+			isLoaded={composerIsLoaded}
+			isGenerating={composerIsGenerating}
 			disabledReason={composerDisabledReason}
+			placeholder={composerPlaceholder}
 			{bottomOffset}
 			onSend={handleSendMessage}
 			onCancel={handleCancelGeneration}
