@@ -24,3 +24,114 @@ export interface ModeConfigDto {
 	suggestions: string[];
 	capabilities: ModeCapabilitiesDto;
 }
+
+export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
+	{
+		id: 'code',
+		label: 'Code',
+		subtitle: 'Coding help inside the shared SmolPC app',
+		icon: 'code',
+		providerKind: 'local',
+		systemPromptKey: 'mode.code.default',
+		suggestions: ['Explain this error', 'Write a function', 'Review this snippet'],
+		capabilities: {
+			supportsTools: false,
+			supportsUndo: false,
+			showModelInfo: true,
+			showHardwarePanel: true,
+			showBenchmarkPanel: true,
+			showExport: true,
+			showContextControls: true
+		}
+	},
+	{
+		id: 'gimp',
+		label: 'GIMP',
+		subtitle: 'Image editing assistance for GIMP workflows',
+		icon: 'image',
+		providerKind: 'mcp',
+		systemPromptKey: 'mode.gimp.default',
+		suggestions: ['Resize an image', 'Remove the background', 'Undo the last change'],
+		capabilities: {
+			supportsTools: true,
+			supportsUndo: true,
+			showModelInfo: true,
+			showHardwarePanel: true,
+			showBenchmarkPanel: false,
+			showExport: false,
+			showContextControls: false
+		}
+	},
+	{
+		id: 'blender',
+		label: 'Blender',
+		subtitle: '3D scene assistance for Blender workflows',
+		icon: 'box',
+		providerKind: 'hybrid',
+		systemPromptKey: 'mode.blender.default',
+		suggestions: ['Explain this scene', 'Create a simple material', 'Fix this modifier'],
+		capabilities: {
+			supportsTools: true,
+			supportsUndo: false,
+			showModelInfo: true,
+			showHardwarePanel: true,
+			showBenchmarkPanel: false,
+			showExport: false,
+			showContextControls: false
+		}
+	},
+	{
+		id: 'writer',
+		label: 'Writer',
+		subtitle: 'Writing help for LibreOffice Writer',
+		icon: 'file-text',
+		providerKind: 'mcp',
+		systemPromptKey: 'mode.writer.default',
+		suggestions: ['Draft a paragraph', 'Rewrite this passage', 'Summarize this text'],
+		capabilities: {
+			supportsTools: true,
+			supportsUndo: false,
+			showModelInfo: true,
+			showHardwarePanel: true,
+			showBenchmarkPanel: false,
+			showExport: false,
+			showContextControls: false
+		}
+	},
+	{
+		id: 'calc',
+		label: 'Calc',
+		subtitle: 'Spreadsheet help for LibreOffice Calc',
+		icon: 'table',
+		providerKind: 'mcp',
+		systemPromptKey: 'mode.calc.default',
+		suggestions: ['Explain this formula', 'Build a grade table', 'Clean this data'],
+		capabilities: {
+			supportsTools: true,
+			supportsUndo: false,
+			showModelInfo: true,
+			showHardwarePanel: true,
+			showBenchmarkPanel: false,
+			showExport: false,
+			showContextControls: false
+		}
+	},
+	{
+		id: 'impress',
+		label: 'Slides',
+		subtitle: 'Presentation help for LibreOffice Slides',
+		icon: 'presentation',
+		providerKind: 'mcp',
+		systemPromptKey: 'mode.impress.default',
+		suggestions: ['Draft slide bullets', 'Turn notes into slides', 'Improve this outline'],
+		capabilities: {
+			supportsTools: true,
+			supportsUndo: false,
+			showModelInfo: true,
+			showHardwarePanel: true,
+			showBenchmarkPanel: false,
+			showExport: false,
+			showContextControls: false
+		}
+	}
+];
