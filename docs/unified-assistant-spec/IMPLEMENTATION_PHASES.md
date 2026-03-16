@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-16
-**Status:** Phase 2 shell and shell follow-up are merged; Phase 3 Code-mode preflight is locked and implementation is next
+**Status:** Phase 3 Code mode is merged; Phase 4 GIMP preflight is next
 
 ## Phase 0: Documentation Baseline
 
@@ -49,21 +49,19 @@
   - tracked OpenVINO placeholder directory
   - clean frontend audit lockfile
 
-## Branch Order After Phase 2
+## Branch Order After Phase 3
 
-1. `codex/unified-code-mode-docs`
+1. `codex/unified-gimp-mode-docs`
 2. merge into `docs/unified-assistant-spec`
 3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-4. `codex/unified-code-mode`
+4. `codex/unified-gimp-mode`
 5. closeout docs
-6. `codex/unified-gimp-mode-docs`
-7. `codex/unified-gimp-mode`
-8. `codex/unified-blender-mode-docs`
-9. `codex/unified-blender-mode`
-10. `codex/unified-libreoffice-mode-docs`
-11. `codex/unified-libreoffice-mode`
-12. `codex/unified-hardening-docs`
-13. `codex/unified-hardening`
+6. `codex/unified-blender-mode-docs`
+7. `codex/unified-blender-mode`
+8. `codex/unified-libreoffice-mode-docs`
+9. `codex/unified-libreoffice-mode`
+10. `codex/unified-hardening-docs`
+11. `codex/unified-hardening`
 
 ## Phase 2: Unified Shell
 
@@ -142,6 +140,19 @@
 **Exit criteria**
 
 - Code mode is feature-equivalent enough to serve as the baseline mode in the unified app
+
+**Current branch status**
+
+- preflight docs merged into `docs/unified-assistant-spec`, then into
+  `dev/unified-assistant`
+- implementation merged via PR `#66`
+- merged Code-mode polish now present in `dev/unified-assistant`:
+  - active Code-mode shell status prefers live `inferenceStore.status`
+  - Code-mode header, welcome state, and fallback metadata now use
+    Codehelper-specific wording
+  - backend mode config defaults and frontend fallback mode configs are aligned
+  - mode switching during Code generation remains allowed
+  - `assistant_send` remains scaffold-only and unused by active Code mode
 
 ## Phase 4: GIMP Mode
 

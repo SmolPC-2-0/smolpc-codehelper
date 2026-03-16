@@ -102,7 +102,24 @@ from the current `inferenceStore.status` state:
 This is a presentation rule only. It does not change the unified Tauri command
 contracts.
 
-## 8. Mode Switching During Generation
+## 8. Phase 3 Merged Outcome
+
+Phase 3 is now merged in `dev/unified-assistant` via PR `#66`.
+
+Merged Code-mode polish includes:
+
+- Code-mode shell status now prefers live engine/backend/model state from
+  `inferenceStore.status`
+- Code-mode welcome copy and prompt starters now feel Codehelper-specific
+  rather than generic shell placeholder text
+- Code-mode header and shell labels now reflect Codehelper identity more
+  clearly
+- backend mode-config defaults and frontend fallback mode configs are aligned on
+  the same Code-mode subtitle and prompt starters
+- mode switching during in-flight Code generation remains allowed and generation
+  continues in the originating Code chat
+
+## 9. Mode Switching During Generation
 
 Switching away from Code mode during an in-flight generation must not:
 
@@ -114,7 +131,7 @@ Switching away from Code mode during an in-flight generation must not:
 The generation continues in the originating Code chat and remains visible when
 the user switches back.
 
-## 9. Deferred From This Plan
+## 10. Deferred From This Plan
 
 The following are intentionally deferred:
 
@@ -125,7 +142,7 @@ The following are intentionally deferred:
 - activation of `assistant_send` for Code mode
 - local-provider execution work beyond the future architectural boundary
 
-## 10. Local Provider Expectations
+## 11. Local Provider Expectations
 
 Code mode uses a `local` provider, which means:
 
@@ -137,7 +154,7 @@ Code mode uses a `local` provider, which means:
 This remains the long-term architecture boundary. Phase 3 does not require the
 live Code-mode execution path to route through that boundary yet.
 
-## 11. Regression Rule
+## 12. Regression Rule
 
 Unified shell work must not reduce Code mode to a minimal placeholder while
 other modes gain functionality.
