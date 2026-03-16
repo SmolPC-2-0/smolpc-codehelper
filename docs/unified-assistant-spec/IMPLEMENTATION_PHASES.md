@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-16
-**Status:** Post-docs execution roadmap
+**Status:** Phase 1 complete on `dev/unified-assistant`; Phase 2 shell preflight is next
 
 ## Phase 0: Documentation Baseline
 
@@ -19,7 +19,7 @@
 
 ## Phase 1: Foundation
 
-**Suggested branch:** `codex/unified-foundation`
+**Suggested branches:** `codex/unified-foundation-docs` as needed, then `codex/unified-foundation`
 
 **Scope**
 
@@ -34,12 +34,42 @@
 - backend contracts exist for all six modes
 - no standalone app behavior has been ported yet
 
+**Current branch status**
+
+- implemented and merged via PR `#63`
+- remote implementation baseline now lives on `dev/unified-assistant`
+- contract follow-ups landed:
+  - async MCP client interface
+  - mode-aware shared-provider contract
+  - tracked OpenVINO placeholder directory
+  - clean frontend audit lockfile
+
+## Branch Order After Phase 1
+
+1. `codex/unified-shell-docs`
+2. merge into `docs/unified-assistant-spec`
+3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
+4. `codex/unified-shell`
+5. shell merge and closeout docs
+6. `codex/unified-code-mode-docs`
+7. `codex/unified-code-mode`
+8. closeout docs
+9. `codex/unified-gimp-mode-docs`
+10. `codex/unified-gimp-mode`
+11. `codex/unified-blender-mode-docs`
+12. `codex/unified-blender-mode`
+13. `codex/unified-libreoffice-mode-docs`
+14. `codex/unified-libreoffice-mode`
+15. `codex/unified-hardening-docs`
+16. `codex/unified-hardening`
+
 ## Phase 2: Unified Shell
 
-**Suggested branch:** `codex/unified-shell`
+**Suggested branches:** `codex/unified-shell-docs`, then `codex/unified-shell`
 
 **Scope**
 
+- docs-first preflight for shell store shape, storage versioning, and placeholder mode behavior
 - mode dropdown
 - per-mode histories
 - shared shell capability flags
@@ -52,7 +82,7 @@
 
 ## Phase 3: Code Mode
 
-**Suggested branch:** `codex/unified-code-mode`
+**Suggested branches:** `codex/unified-code-mode-docs`, then `codex/unified-code-mode`
 
 **Scope**
 
@@ -66,7 +96,7 @@
 
 ## Phase 4: GIMP Mode
 
-**Suggested branch:** `codex/unified-gimp-mode`
+**Suggested branches:** `codex/unified-gimp-mode-docs`, then `codex/unified-gimp-mode`
 
 **Scope**
 
@@ -79,7 +109,7 @@
 
 ## Phase 5: Blender Mode
 
-**Suggested branch:** `codex/unified-blender-mode`
+**Suggested branches:** `codex/unified-blender-mode-docs`, then `codex/unified-blender-mode`
 
 **Scope**
 
@@ -92,7 +122,7 @@
 
 ## Phase 6: LibreOffice Modes
 
-**Suggested branch:** `codex/unified-libreoffice-mode`
+**Suggested branches:** `codex/unified-libreoffice-mode-docs`, then `codex/unified-libreoffice-mode`
 
 **Scope**
 
@@ -106,7 +136,7 @@
 
 ## Phase 7: Hardening And Packaging
 
-**Suggested branch:** `codex/unified-hardening`
+**Suggested branches:** `codex/unified-hardening-docs`, then `codex/unified-hardening`
 
 **Scope**
 
