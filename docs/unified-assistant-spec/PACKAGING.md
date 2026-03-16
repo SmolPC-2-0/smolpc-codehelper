@@ -89,6 +89,22 @@ Phase 4 assumes:
 Phase 4 packaging validation covers connection to an external GIMP setup, not
 auto-install or first-run provisioning of GIMP.
 
+### 5.2.2 Phase 5 Blender runtime rule
+
+Phase 5 does not bundle Blender itself and does not bundle the Blender addon as
+part of the unified app.
+
+Phase 5 assumes:
+
+- Blender is installed separately
+- the Blender addon is installed separately
+- the unified app hosts the local bridge server used by the addon
+- the unified app bundles only Blender-provider-owned assets such as retrieval
+  metadata and bridge helper support files
+
+Phase 5 packaging validation covers connection to an external Blender setup and
+addon, not Blender installation or addon auto-provisioning.
+
 ### 5.3 No launcher-owned runtime paths
 
 Do not require packaged resources to live under a launcher-specific directory.
@@ -115,6 +131,8 @@ The packaging plan is valid only after Windows verification covers:
   Tauri build-time path checks
 - external apps are launched separately for provider testing
 - engine host may resolve from workspace `target/`
+- Blender provider testing assumes the unified app hosts the bridge and the
+  separately installed addon connects to it
 
 ### Packaged
 
@@ -139,6 +157,7 @@ Before calling the packaging plan complete, verify:
 - runtime assets resolve correctly
 - GIMP mode fails gracefully if GIMP is not installed or not running
 - Blender mode fails gracefully if Blender bridge is unavailable
+- Blender mode fails gracefully if port `5179` is already occupied
 - Writer/Calc/Slides can each connect through the shared LibreOffice provider
 
 ## 10. Deferred Packaging Questions

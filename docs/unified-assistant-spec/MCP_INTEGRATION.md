@@ -174,7 +174,7 @@ Blender uses a hybrid provider.
 
 Primary path:
 
-- existing Blender bridge behavior
+- existing Blender bridge behavior hosted by the unified app
 
 Secondary path:
 
@@ -184,6 +184,95 @@ Rules:
 
 - bridge-backed workflows remain the primary behavior for parity
 - MCP expansion must not block the initial unified port
+- Phase 5 keeps Blender bridge-first and does not require `smolpc-mcp-client`
+  or `blender-mcp`
+- the unified app reuses the existing addon contract without modifying the
+  addon itself
+
+### 5.3.1 Blender Phase 5 bridge contract
+
+Phase 5 keeps the existing bridge compatibility surface:
+
+- bridge bind address: `127.0.0.1:5179`
+- auth token path:
+  `%LOCALAPPDATA%/SmolPC/engine-runtime/bridge-token.txt`
+- the unified app hosts the bridge server
+- the external Blender addon connects to that bridge
+
+Phase 5 startup rule:
+
+- bridge startup is lazy and non-fatal
+- a bridge bind failure degrades Blender mode only
+- a bind conflict must not stop the unified app from launching
+
+### 5.3.2 Blender Phase 5 tutoring surface
+
+Phase 5 Blender scope is scene-aware tutoring chat, not full standalone-app
+parity.
+
+Included in Phase 5:
+
+- live scene-aware question answering
+- local Blender-doc retrieval grounding
+- shared-engine generation
+- token streaming with cancellation
+- bridge-backed scene status in the unified shell
+- existing tutoring-style chat actions that fit the unified shell
+
+Deferred from Phase 5:
+
+- backend toggle UI
+- Ollama fallback UI
+- separate scene-analysis UI
+- standalone scene panel recreation
+- Blender undo
+- Blender export emphasis
+- Blender benchmark surfaces
+
+### 5.3.3 Blender Phase 5 pseudo-tools
+
+Phase 5 Blender does not add a general MCP tool surface.
+
+The provider exposes exactly two internal pseudo-tools:
+
+- `scene_current`
+- `retrieve_rag_context`
+
+The final tutoring answer is produced by the shared engine, not by a provider
+tool.
+
+### 5.3.4 Blender Phase 5 retrieval model
+
+Phase 5 ports the standalone Blender assistant's local retrieval approach:
+
+- bundled Blender documentation metadata
+- local keyword retrieval only
+- no vector database expansion
+- no remote retrieval service
+
+Retrieval rules:
+
+- skip retrieval for obvious scene-state questions
+- use retrieval for broader Blender workflow questions
+- retrieval load failure must degrade gracefully to scene-aware chat only
+
+### 5.3.5 Blender Phase 5 status semantics
+
+`mode_status(blender)` uses these states:
+
+- `disconnected`: bridge runtime is unavailable or could not be started
+- `connecting`: transient during explicit start or refresh work
+- `connected`: bridge runtime is healthy, even if no live scene snapshot is
+  currently available
+- `error`: startup or bridge interaction failed after the provider was tried
+
+Detail rules:
+
+- no scene snapshot yet must be surfaced clearly
+- stale scene snapshot must be surfaced clearly
+- missing live scene data does not disable generic Blender tutoring chat
+- `supports_tools = true`
+- `supports_undo = false`
 
 ### 5.4 LibreOffice provider
 
@@ -272,7 +361,7 @@ pub struct ModeStatusDto {
 |---|---|---|
 | Code | Not applicable | No-op |
 | GIMP | No, depends on external app availability | Disconnect cleanly; do not claim ownership of the external app |
-| Blender | Connect to bridge first; start helper process only if part of bridge contract | Clean disconnect from bridge |
+| Blender | Lazy-start local bridge server on first Blender use | Cleanly stop bridge runtime on app exit; do not claim ownership of Blender itself |
 | LibreOffice | Yes, provider may own its MCP runtime | Keep shared runtime alive across Writer/Calc/Slides switches |
 
 ## 8. Undo Support
@@ -281,7 +370,7 @@ pub struct ModeStatusDto {
 |---|---|
 | Code | Optional; not guaranteed in v1 |
 | GIMP | Yes, first-class where provider supports it |
-| Blender | Optional; depends on bridge/provider parity |
+| Blender | No in Phase 5 |
 | Writer | Optional; provider-backed if available |
 | Calc | Optional; provider-backed if available |
 | Slides | Optional; provider-backed if available |
@@ -326,6 +415,23 @@ Phase 4 activates the provider-backed command surface only for GIMP:
   `impress`
 - Code mode keeps the existing Codehelper inference path rather than routing
   through `assistant_send`
+
+## 9.3 Phase 5 Blender activation rule
+
+Phase 5 activates the provider-backed command surface for Blender while keeping
+Code and GIMP behavior stable:
+
+- `assistant_send` is operational for `mode == blender`
+- `assistant_send` remains shared-engine-backed for Blender rather than using
+  MCP transport
+- `mode_status(blender)` reports live bridge runtime state and internal
+  pseudo-tool availability
+- `mode_refresh_tools(blender)` performs a real bridge/runtime refresh and
+  retrieval reload attempt
+- `mode_undo(blender)` remains unsupported
+- Code mode keeps the existing Codehelper inference path
+- GIMP mode keeps the current Phase 4 MCP-backed execution path
+- `assistant_send` remains scaffold-only for `writer`, `calc`, and `impress`
 
 ## 10. Planner Boundary
 

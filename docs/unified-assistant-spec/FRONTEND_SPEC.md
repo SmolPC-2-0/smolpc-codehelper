@@ -108,7 +108,7 @@ export type AssistantStreamEvent =
 |---|---|---|---|
 | `code` | Code | local | Preserves current Codehelper experience |
 | `gimp` | GIMP | mcp | Adds tool status and undo affordances |
-| `blender` | Blender | hybrid | Uses bridge-backed scene workflows |
+| `blender` | Blender | hybrid | Uses bridge-backed scene tutoring with local retrieval grounding |
 | `writer` | Writer | mcp | LibreOffice submode |
 | `calc` | Calc | mcp | LibreOffice submode |
 | `impress` | Slides | mcp | LibreOffice submode with Slides label |
@@ -279,6 +279,22 @@ During Phase 4 GIMP work:
 - GIMP mode uses structured status / tool events and does not require token
   streaming in this phase.
 
+### Phase 5 Blender rule
+
+During Phase 5 Blender work:
+
+- Blender mode becomes a live shell mode with an enabled composer.
+- Blender mode uses `assistant_send()` rather than the existing Codehelper
+  inference path.
+- Blender mode uses the shared engine for final tutoring generation.
+- Blender mode uses token streaming with cancellation.
+- Blender mode uses bridge-backed scene status and local Blender-doc retrieval.
+- Code mode keeps the existing Codehelper inference path unchanged.
+- GIMP mode keeps the current Phase 4 structured-result path unchanged.
+- Writer, Calc, and Slides remain placeholder-only.
+- active Blender-mode status in the header should come from real provider state
+  rather than placeholder copy.
+
 ## 10. Suggestion Chips
 
 Suggestion chips are mode-specific empty-state actions.
@@ -287,7 +303,7 @@ Examples:
 
 - Code: "Explain this error", "Write a function", "Review this snippet"
 - GIMP: "Blur the top half of the image", "Crop this image to a square", "Rotate the image 90 degrees clockwise"
-- Blender: "Explain this scene", "Create a simple material", "Fix this modifier"
+- Blender: "What is in my scene right now?", "How do I add a bevel to the selected object?", "Explain what this modifier stack is doing"
 - Writer: "Draft a paragraph", "Rewrite this passage", "Summarize this text"
 - Calc: "Explain this formula", "Build a grade table", "Clean this data"
 - Slides: "Draft slide bullets", "Turn notes into slides", "Improve this outline"
@@ -320,6 +336,8 @@ mode work begins.
 - Phase 4 note: becomes operational for `gimp` only; it remains scaffold-only
   for the remaining non-Code modes and is still not used by active Code mode
   yet
+- Phase 5 note: becomes operational for `blender` as well, using token
+  streaming plus structured provider events
 
 ### `assistant_cancel()`
 
@@ -394,6 +412,23 @@ Before provider integrations land:
 - switching away from GIMP during execution is allowed and must not corrupt the
   originating GIMP chat.
 
+### Phase 5 Blender activation
+
+- Blender becomes the second live non-Code execution mode after GIMP.
+- Blender mode uses `assistantSend()` with token streaming.
+- Blender assistant messages may include:
+  - `reply`
+  - `toolResults`
+  - `plan`
+- Blender assistant messages keep tutoring-style chat actions where they fit
+  the unified shell:
+  - `Regenerate`
+  - `Continue`
+  - `Branch Chat`
+- Blender assistant messages do not render Undo in Phase 5.
+- switching away from Blender during execution is allowed and must not corrupt
+  the originating Blender chat.
+
 ## 14. Migration Path
 
 1. Preserve the current Codehelper shell as the shared shell.
@@ -403,7 +438,8 @@ Before provider integrations land:
    `assistant_send`.
 5. Port GIMP behavior into a new GIMP provider and activate `assistant_send`
    for `gimp` only.
-6. Port Blender behavior into a new Blender provider.
+6. Port Blender behavior into a new Blender provider and activate
+   `assistant_send` for `blender`.
 7. Port LibreOffice behavior into one provider with Writer/Calc/Slides
    frontend configs.
 

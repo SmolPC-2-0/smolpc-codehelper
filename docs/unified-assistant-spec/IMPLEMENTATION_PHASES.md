@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-16
-**Status:** Phase 4 GIMP mode is merged; Phase 5 Blender preflight is next
+**Status:** Phase 5 Blender preflight is locked; Blender implementation is next after docs merge into `dev/unified-assistant`
 
 ## Phase 0: Documentation Baseline
 
@@ -204,7 +204,30 @@
 **Scope**
 
 - port Blender bridge behavior into a Blender provider
-- preserve bridge-first workflows
+- keep Blender bridge-first and shared-engine-only
+- include scene-aware tutoring chat plus local Blender-doc retrieval grounding
+- preserve token streaming with cancellation
+- keep standalone Blender app code as a reference source rather than merging it
+
+**Phase 5 preflight decisions**
+
+- Blender becomes the second live non-Code mode after GIMP
+- `assistant_send` becomes operational for `blender`
+- Blender stays bridge-first and does not require `blender-mcp`
+- Blender keeps the existing addon bridge contract:
+  - `127.0.0.1:5179`
+  - `%LOCALAPPDATA%/SmolPC/engine-runtime/bridge-token.txt`
+- bridge startup is lazy and non-fatal to unified app startup
+- Blender uses shared engine only; no Ollama fallback UI or backend toggle in
+  the unified shell
+- Blender includes the standalone app's lightweight local retrieval path
+- Blender uses token streaming plus structured provider events
+- Blender keeps tutoring-style chat actions that fit the unified shell:
+  - `Regenerate`
+  - `Continue`
+  - `Branch Chat`
+- Blender undo remains unsupported in Phase 5
+- Writer / Calc / Slides remain placeholders
 
 **Exit criteria**
 
@@ -212,9 +235,15 @@
 
 **Current branch status**
 
-- Blender preflight docs are the next official step
-- `codex/unified-blender-mode` should not branch until its docs are merged into
-  both `docs/unified-assistant-spec` and `dev/unified-assistant`
+- Blender preflight docs are now locked on `docs/unified-assistant-spec`
+- `codex/unified-blender-mode` should not branch until these docs are merged
+  into both `docs/unified-assistant-spec` and `dev/unified-assistant`
+- the implementation branch should deliver:
+  - lazy bridge runtime startup
+  - live `mode_status(blender)` and `mode_refresh_tools(blender)`
+  - `assistant_send(mode=blender)` with token streaming
+  - scene snapshot plus retrieval-grounded tutoring prompts
+  - no edits to `apps/blender-assistant/`
 
 ## Phase 6: LibreOffice Modes
 

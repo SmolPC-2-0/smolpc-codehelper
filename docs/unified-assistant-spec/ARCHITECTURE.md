@@ -60,7 +60,8 @@ merge plan for the unified frontend.
 |        v                  v                  v                   |
 |   Local Code        External GIMP      Blender hybrid           |
 |   provider          MCP provider       provider                 |
-|                                         (bridge first)          |
+|                                         (local bridge server    |
+|                                          + external addon)      |
 |                                                                  |
 |                    LibreOffice MCP provider                      |
 |                    shared by Writer/Calc/Slides                  |
@@ -93,7 +94,7 @@ The engine is never duplicated per mode.
 ### 4.3 External provider runtimes
 
 - GIMP MCP server
-- Blender bridge and optional supplementary MCP tooling
+- Blender bridge server hosted by the unified app plus the external addon
 - LibreOffice MCP runtime
 
 These are provider-owned integrations. They are not inference runtimes.
@@ -163,7 +164,9 @@ only in the command layer.
 
 - `CodeProvider` wraps in-app behavior and current Codehelper capabilities.
 - `GimpProvider` ports behavior from the GIMP assistant into new unified files.
-- `BlenderProvider` ports bridge-based Blender behavior into new unified files.
+- `BlenderProvider` ports bridge-based Blender behavior into new unified files
+  and owns the bridge runtime, scene cache, and retrieval index for the
+  unified app.
 - `LibreOfficeProvider` ports behavior from the LibreOffice branch into new
   unified files and serves three frontend submodes.
 
@@ -213,10 +216,22 @@ Mode switching does **not**:
 7. Backend streams:
    - status events
    - tool call/result events
-   - token events
+   - token events when the mode uses streaming generation
    - completion or error
 8. Frontend stores final response metadata
 ```
+
+### Phase 5 Blender request path
+
+After Phase 5:
+
+1. `assistant_send` is operational for `gimp` and `blender`.
+2. Blender requests use the hybrid provider path:
+   - ensure the local bridge runtime is available
+   - fetch current scene snapshot through the provider
+   - optionally retrieve Blender-doc contexts
+   - generate the tutoring answer through the shared engine
+3. Blender remains bridge-first. Supplemental MCP work stays deferred.
 
 ## 9. Repository Boundaries
 
@@ -226,6 +241,7 @@ All unified implementation lands under:
 
 - `apps/codehelper/`
 - new shared crates for assistant DTOs / MCP transport if needed
+- provider-owned bundled assets for modes such as Blender retrieval metadata
 
 ### 9.2 Reference-only app zones during the port
 
