@@ -24,21 +24,26 @@ every mode uses MCP, so this document defines a **provider model** that covers:
 
 ```rust
 pub trait ToolProvider {
-    async fn connect_if_needed(&self) -> Result<ProviderStateDto, String>;
-    async fn status(&self) -> Result<ProviderStateDto, String>;
-    async fn list_tools(&self) -> Result<Vec<ToolDefinitionDto>, String>;
+    async fn connect_if_needed(&self, mode: AppMode) -> Result<ProviderStateDto, String>;
+    async fn status(&self, mode: AppMode) -> Result<ProviderStateDto, String>;
+    async fn list_tools(&self, mode: AppMode) -> Result<Vec<ToolDefinitionDto>, String>;
     async fn execute_tool(
         &self,
+        mode: AppMode,
         name: &str,
         arguments: serde_json::Value,
     ) -> Result<ToolExecutionResultDto, String>;
-    async fn undo_last_action(&self) -> Result<(), String>;
-    async fn disconnect_if_needed(&self) -> Result<(), String>;
+    async fn undo_last_action(&self, mode: AppMode) -> Result<(), String>;
+    async fn disconnect_if_needed(&self, mode: AppMode) -> Result<(), String>;
 }
 ```
 
 The assistant orchestrator calls the provider interface. It does not know or
 care whether the implementation is local, MCP-backed, or hybrid.
+
+The `mode` argument is required even for shared providers so Writer, Calc, and
+Slides can report honest per-submode state and evolve independently without
+breaking the provider boundary later.
 
 ## 4. Registry
 
@@ -131,12 +136,33 @@ Rules:
 2. Frontend mode config changes prompt, suggestions, and UI labeling.
 3. Mode switching between Writer/Calc/Slides should not spawn separate
    provider processes.
+4. Shared providers still surface the requested submode back through
+   `ProviderStateDto.mode` and any mode-sensitive tool list decisions.
+
+## 5.5 `smolpc-mcp-client` scaffolding contract
+
+The Phase 1 transport crate is intentionally small, but one contract is locked
+early:
+
+```rust
+#[async_trait]
+pub trait JsonRpcClient {
+    async fn call(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Result<JsonRpcResponse, McpClientError>;
+}
+```
+
+The transport call is async from the start because stdio and TCP MCP flows are
+inherently asynchronous. The foundation branch must not ship a synchronous call
+signature that later mode branches would need to break.
 
 ## 6. DTO Contracts
 
 ```rust
 pub struct ProviderStateDto {
-    pub mode: String,
+    pub mode: AppMode,
     pub state: String,
     pub detail: Option<String>,
     pub supports_tools: bool,
@@ -154,6 +180,14 @@ pub struct ToolExecutionResultDto {
     pub ok: bool,
     pub summary: String,
     pub payload: serde_json::Value,
+}
+
+pub struct ModeStatusDto {
+    pub mode: AppMode,
+    pub engine_ready: bool,
+    pub provider_state: ProviderStateDto,
+    pub available_tools: Vec<ToolDefinitionDto>,
+    pub last_error: Option<String>,
 }
 ```
 
@@ -205,6 +239,17 @@ The frontend should only render undo affordances when:
 | disconnect during run | provider died mid-request | surface a reconnect / retry action |
 
 Messages must stay student-friendly and actionable.
+
+## 9.1 Phase 1 placeholder behavior
+
+The foundation branch intentionally keeps provider behavior narrow:
+
+- Code provider reports scaffold status and no tools
+- GIMP / Blender / LibreOffice providers report placeholder disconnected status
+- `mode_refresh_tools` is an intentional no-op in Phase 1 and becomes real in
+  later phases
+- `assistant_send` accepts the final request shape but still returns
+  `UNIFIED_ASSISTANT_NOT_IMPLEMENTED`
 
 ## 10. Planner Boundary
 

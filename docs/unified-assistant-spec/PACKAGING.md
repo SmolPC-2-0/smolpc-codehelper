@@ -59,6 +59,12 @@ scope of the unified frontend.
 The unified app must bundle or resolve the resources needed by
 `smolpc-engine-host` in both dev and packaged builds.
 
+For clean-checkout development and CI, resource directories referenced by
+Tauri must exist in git even when the real Windows runtime payload is not
+checked in. In particular, `apps/codehelper/src-tauri/libs/openvino/` should
+contain a tracked placeholder file such as `README.md`, while the actual
+OpenVINO runtime DLLs continue to be staged by setup scripts.
+
 ### 5.2 Provider runtime separation
 
 Provider assets must stay provider-owned:
@@ -91,6 +97,8 @@ The packaging plan is valid only after Windows verification covers:
 ### Development
 
 - resources may resolve from the repository checkout
+- tracked placeholder resource directories may exist only to satisfy clean
+  Tauri build-time path checks
 - external apps are launched separately for provider testing
 - engine host may resolve from workspace `target/`
 

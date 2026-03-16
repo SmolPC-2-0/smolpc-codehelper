@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-16
-**Phase:** Documentation baseline refreshed; implementation not started
+**Phase:** Foundation stabilization in progress before shell work begins
 
 ## Branch Roles
 
@@ -10,6 +10,8 @@
 | `docs/unified-assistant-spec` | Canonical architecture/spec branch |
 | `dev/unified-assistant` | Implementation mainline after docs merge |
 | `codex/unified-spec-refresh` | Documentation refresh working branch |
+| `codex/unified-foundation` | Phase 1 foundation implementation branch |
+| `codex/unified-foundation-docs` | Docs-first stabilization branch for foundation follow-up contracts |
 
 ## What Is Done
 
@@ -22,6 +24,13 @@ The documentation baseline for the unified frontend is now defined around:
 - adapters-first migration
 - strict merge-safe boundaries
 
+Current stabilization items before foundation can merge:
+
+- make the MCP transport client contract async before any real transport lands
+- make shared-provider status and tool discovery mode-aware at the provider boundary
+- commit a tracked OpenVINO placeholder directory so clean Tauri builds pass
+- refresh the root npm lockfile so the workspace audit is green
+
 The standalone apps remain source references during the future port:
 
 - `apps/gimp-assistant`
@@ -30,35 +39,27 @@ The standalone apps remain source references during the future port:
 
 ## What Has Not Started
 
-Implementation has **not** started yet.
-
-Specifically not started:
-
 - unified shell refactor in `apps/codehelper`
-- shared provider interfaces
+- real provider integrations for Code, GIMP, Blender, or LibreOffice
 - mode provider ports
 - launcher cleanup
 - packaging changes
 - Windows end-to-end validation for the unified app
 
-## Next Workstreams After Docs Merge
+## Next Workstreams After Foundation Stabilization
 
-These begin only after the documentation baseline is merged into
+These begin only after `codex/unified-foundation` is green and merged into
 `dev/unified-assistant`.
 
-1. Foundation
-   - shared DTOs
-   - provider interface
-   - mode registry
-2. Unified shell
+1. Unified shell
    - mode dropdown
    - per-mode histories
    - shared status model
-3. Code mode integration
-4. GIMP provider port
-5. Blender provider port
-6. LibreOffice provider port
-7. Hardening and Windows packaging validation
+2. Code mode integration
+3. GIMP provider port
+4. Blender provider port
+5. LibreOffice provider port
+6. Hardening and Windows packaging validation
 
 ## Known Risks
 
@@ -82,6 +83,6 @@ These begin only after the documentation baseline is merged into
 
 This phase is complete only when:
 
-- the refreshed docs are merged into `docs/unified-assistant-spec`
+- the foundation follow-up docs are merged into `docs/unified-assistant-spec`
 - those docs are merged into `dev/unified-assistant`
-- contributors can begin implementation without re-deciding the product shape
+- the foundation branch is green and ready to merge
