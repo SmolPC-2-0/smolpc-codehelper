@@ -9,8 +9,8 @@ use smolpc_assistant_types::{
     AppMode, ProviderStateDto, ToolDefinitionDto, ToolExecutionResultDto,
 };
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use tokio::sync::Mutex as AsyncMutex;
+use std::sync::Arc;
+use tokio::sync::{Mutex as AsyncMutex, RwLock};
 
 #[derive(Debug)]
 struct RuntimeState {
@@ -37,7 +37,7 @@ impl Default for RuntimeState {
 pub struct BlenderProvider {
     config: BridgeConfig,
     resource_dir: Option<PathBuf>,
-    scene_cache: Arc<Mutex<SceneCache>>,
+    scene_cache: Arc<RwLock<SceneCache>>,
     state: AsyncMutex<RuntimeState>,
 }
 
@@ -75,9 +75,8 @@ impl BlenderProvider {
             },
             ToolDefinitionDto {
                 name: "retrieve_rag_context".to_string(),
-                description:
-                    "Retrieve local Blender reference context for a workflow question."
-                        .to_string(),
+                description: "Retrieve local Blender reference context for a workflow question."
+                    .to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -105,15 +104,12 @@ impl BlenderProvider {
         provider_state(mode, status, state.last_error.as_deref(), true, false)
     }
 
-    fn current_snapshot(&self) -> SceneSnapshot {
-        match self.scene_cache.lock() {
-            Ok(cache) => cache.snapshot(),
-            Err(poisoned) => poisoned.into_inner().snapshot(),
-        }
+    async fn current_snapshot(&self) -> SceneSnapshot {
+        self.scene_cache.read().await.snapshot()
     }
 
-    fn detail_for_connected_state(&self, rag_index: &RagIndex) -> Option<String> {
-        let snapshot = self.current_snapshot();
+    async fn detail_for_connected_state(&self, rag_index: &RagIndex) -> Option<String> {
+        let snapshot = self.current_snapshot().await;
         let mut details = Vec::new();
 
         if let Some(message) = snapshot.message {
@@ -148,7 +144,12 @@ impl BlenderProvider {
         let mut candidates = Vec::new();
 
         if let Some(resource_dir) = self.resource_dir.as_ref() {
-            candidates.push(resource_dir.join("resources").join("blender").join("rag_system"));
+            candidates.push(
+                resource_dir
+                    .join("resources")
+                    .join("blender")
+                    .join("rag_system"),
+            );
             candidates.push(resource_dir.join("blender").join("rag_system"));
         }
 
@@ -198,7 +199,7 @@ impl BlenderProvider {
 
         Ok(Self::bridge_connected_state(
             mode,
-            self.detail_for_connected_state(&state.rag_index),
+            self.detail_for_connected_state(&state.rag_index).await,
         ))
     }
 
@@ -284,7 +285,7 @@ impl ToolProvider for BlenderProvider {
         let mut state = self.state.lock().await;
         match name {
             "scene_current" => {
-                let result = Self::scene_tool_result(self.current_snapshot());
+                let result = Self::scene_tool_result(self.current_snapshot().await);
                 state.last_error = None;
                 Ok(result)
             }
@@ -328,6 +329,7 @@ impl ToolProvider for BlenderProvider {
 mod tests {
     use super::BlenderProvider;
     use crate::modes::blender::bridge::BridgeConfig;
+    use crate::modes::blender::state::SceneData;
     use crate::modes::provider::ToolProvider;
     use serde_json::json;
     use smolpc_assistant_types::AppMode;
@@ -350,6 +352,10 @@ mod tests {
         let tools = provider.list_tools(AppMode::Blender).await.expect("tools");
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0].name, "scene_current");
+        assert!(state
+            .detail
+            .expect("detail")
+            .contains("No live Blender scene data"));
     }
 
     #[tokio::test]
@@ -394,7 +400,12 @@ mod tests {
     #[tokio::test]
     async fn retrieve_rag_context_returns_results_when_metadata_is_loaded() {
         let temp_dir = tempdir().expect("temp dir");
-        let rag_dir = temp_dir.path().join("resources").join("blender").join("rag_system").join("simple_db");
+        let rag_dir = temp_dir
+            .path()
+            .join("resources")
+            .join("blender")
+            .join("rag_system")
+            .join("simple_db");
         std::fs::create_dir_all(&rag_dir).expect("rag dir");
         std::fs::write(
             rag_dir.join("metadata.json"),
@@ -450,6 +461,84 @@ mod tests {
 
         let state = provider.status(AppMode::Blender).await.expect("status");
         assert_eq!(state.state, "connected");
-        assert!(state.detail.expect("detail").contains("retrieval is unavailable"));
+        assert!(state
+            .detail
+            .expect("detail")
+            .contains("retrieval is unavailable"));
+    }
+
+    #[tokio::test]
+    async fn status_reports_live_scene_detail_when_scene_cache_has_data() {
+        let provider = BlenderProvider::with_config(
+            BridgeConfig {
+                host: "127.0.0.1".to_string(),
+                port: 0,
+            },
+            None,
+        );
+
+        provider
+            .status(AppMode::Blender)
+            .await
+            .expect("initial status");
+        {
+            let mut cache = provider.scene_cache.write().await;
+            cache.update(SceneData {
+                object_count: 2,
+                active_object: Some("Cube".to_string()),
+                mode: "OBJECT".to_string(),
+                render_engine: Some("BLENDER_EEVEE".to_string()),
+                objects: Vec::new(),
+            });
+        }
+
+        let state = provider.status(AppMode::Blender).await.expect("status");
+        let detail = state.detail.expect("detail");
+        assert!(detail.contains("Live scene available"));
+        assert!(detail.contains("active object: Cube"));
+    }
+
+    #[tokio::test]
+    async fn reconnect_restores_tool_definitions_after_disconnect() {
+        let provider = BlenderProvider::with_config(
+            BridgeConfig {
+                host: "127.0.0.1".to_string(),
+                port: 0,
+            },
+            None,
+        );
+
+        provider.status(AppMode::Blender).await.expect("status");
+        assert_eq!(
+            provider
+                .list_tools(AppMode::Blender)
+                .await
+                .expect("tools")
+                .len(),
+            2
+        );
+
+        provider
+            .disconnect_if_needed(AppMode::Blender)
+            .await
+            .expect("disconnect");
+        assert!(provider
+            .list_tools(AppMode::Blender)
+            .await
+            .expect("tools after disconnect")
+            .is_empty());
+
+        provider
+            .connect_if_needed(AppMode::Blender)
+            .await
+            .expect("reconnect");
+        assert_eq!(
+            provider
+                .list_tools(AppMode::Blender)
+                .await
+                .expect("tools after reconnect")
+                .len(),
+            2
+        );
     }
 }

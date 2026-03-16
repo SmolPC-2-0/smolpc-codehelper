@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 
 const SCENE_STALE_THRESHOLD_SECS: u64 = 30;
 
@@ -86,8 +87,8 @@ impl SceneCache {
     }
 }
 
-pub fn shared_scene_cache() -> Arc<Mutex<SceneCache>> {
-    Arc::new(Mutex::new(SceneCache::default()))
+pub fn shared_scene_cache() -> Arc<RwLock<SceneCache>> {
+    Arc::new(RwLock::new(SceneCache::default()))
 }
 
 pub fn now_unix_seconds() -> u64 {
@@ -108,7 +109,10 @@ mod tests {
 
         assert!(!snapshot.connected);
         assert!(snapshot.scene_data.is_none());
-        assert!(snapshot.message.expect("message").contains("No live Blender scene data"));
+        assert!(snapshot
+            .message
+            .expect("message")
+            .contains("No live Blender scene data"));
     }
 
     #[test]

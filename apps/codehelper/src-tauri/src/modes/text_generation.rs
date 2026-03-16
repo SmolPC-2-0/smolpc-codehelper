@@ -54,14 +54,14 @@ impl TextStreamer for EngineTextStreamer {
         let cancel_client = self.client.clone();
         let reply = Arc::new(Mutex::new(String::new()));
         let reply_for_stream = Arc::clone(&reply);
-        let generation = self
-            .client
-            .generate_stream_messages(messages, Some(Self::config()), |token| {
-                if let Ok(mut value) = reply_for_stream.lock() {
-                    value.push_str(&token);
-                }
-                on_token(token);
-            });
+        let generation =
+            self.client
+                .generate_stream_messages(messages, Some(Self::config()), |token| {
+                    if let Ok(mut value) = reply_for_stream.lock() {
+                        value.push_str(&token);
+                    }
+                    on_token(token);
+                });
         tokio::pin!(generation);
 
         let cancel_future = async {
