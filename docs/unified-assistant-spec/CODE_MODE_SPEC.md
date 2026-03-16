@@ -76,7 +76,45 @@ During Phase 2 shell implementation:
 6. Code chats live in fresh unified storage and are not migrated from the old
    standalone storage keys.
 
-## 6. Deferred From This Plan
+## 6. Phase 3 Code-Mode Rules
+
+Phase 3 is a parity-polish phase, not a backend-unification phase.
+
+1. Code mode keeps using the current Codehelper inference path.
+2. `assistant_send` remains scaffold-only and is not activated for Code mode.
+3. No new backend command contracts or DTO changes are introduced.
+4. Send, regenerate, continue, branch, and export remain Code-only behaviors.
+5. Benchmark surfaces remain Code-only.
+6. Code-mode shell status should reflect real engine/backend/model state rather
+   than the scaffold `mode_status` provider copy.
+7. Mode switching during Code generation remains allowed.
+
+## 7. Code-Mode Status Source
+
+During Phase 3, the visible shell status for active Code mode should be derived
+from the current `inferenceStore.status` state:
+
+- engine readiness
+- active backend
+- current model
+- startup failure state when present
+
+This is a presentation rule only. It does not change the unified Tauri command
+contracts.
+
+## 8. Mode Switching During Generation
+
+Switching away from Code mode during an in-flight generation must not:
+
+- cancel generation implicitly
+- move the response into another mode
+- reset the current Code chat
+- lose the streamed or final result when the user returns to Code mode
+
+The generation continues in the originating Code chat and remains visible when
+the user switches back.
+
+## 9. Deferred From This Plan
 
 The following are intentionally deferred:
 
@@ -84,8 +122,10 @@ The following are intentionally deferred:
 - editor-native inline completions
 - deep IDE workspace integration beyond what current Codehelper already offers
 - any requirement that Code mode leave the unified Tauri app
+- activation of `assistant_send` for Code mode
+- local-provider execution work beyond the future architectural boundary
 
-## 7. Local Provider Expectations
+## 10. Local Provider Expectations
 
 Code mode uses a `local` provider, which means:
 
@@ -94,10 +134,10 @@ Code mode uses a `local` provider, which means:
 - the assistant orchestrator still treats Code mode through the same provider
   boundary used by other modes
 
-This keeps the unified backend consistent while allowing Code mode to preserve
-its existing behavior.
+This remains the long-term architecture boundary. Phase 3 does not require the
+live Code-mode execution path to route through that boundary yet.
 
-## 8. Regression Rule
+## 11. Regression Rule
 
 Unified shell work must not reduce Code mode to a minimal placeholder while
 other modes gain functionality.

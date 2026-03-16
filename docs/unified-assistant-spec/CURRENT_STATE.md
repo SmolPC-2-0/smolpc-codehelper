@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-16
-**Phase:** Phase 2 shell and shell follow-up are merged into `dev/unified-assistant`; Phase 3 Code-mode docs preflight is next
+**Phase:** Phase 3 Code-mode preflight is locked in docs; Code-mode implementation is next
 
 ## Branch Roles
 
@@ -15,8 +15,9 @@
 | `codex/unified-shell` | Merged Phase 2 shell implementation branch |
 | `codex/unified-shell-status-docs` | Merged Phase 2 closeout docs branch |
 | `codex/unified-shell-followups` | Merged post-Phase-2 shell hardening branch |
-| `codex/unified-shell-followups-status-docs` | Active shell follow-up docs sync branch |
-| `codex/unified-code-mode-docs` | Next Phase 3 preflight docs branch |
+| `codex/unified-shell-followups-status-docs` | Merged shell follow-up docs sync branch |
+| `codex/unified-code-mode-docs` | Merged Phase 3 preflight docs branch |
+| `codex/unified-code-mode` | Next Phase 3 implementation branch |
 
 ## What Is Done
 
@@ -133,17 +134,14 @@ The standalone apps remain source references during the future port:
 
 ## Next Workstreams
 
-The next official step after these docs merge is `codex/unified-code-mode-docs`:
+The next official step after these docs merge is `codex/unified-code-mode`:
 
-1. merge `codex/unified-shell-followups-status-docs` into `docs/unified-assistant-spec`
+1. merge `codex/unified-code-mode-docs` into `docs/unified-assistant-spec`
 2. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-3. create `codex/unified-code-mode-docs`
-4. lock the Code-mode parity-polish details for Phase 3
-5. merge those docs into `docs/unified-assistant-spec`
-6. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-7. create `codex/unified-code-mode`
-8. continue serial merge order:
-   - Code mode integration
+3. create `codex/unified-code-mode`
+4. implement Code-mode parity polish without activating `assistant_send`
+5. close out Phase 3 in docs
+6. continue serial merge order:
    - GIMP provider port
    - Blender provider port
    - LibreOffice provider port
@@ -168,8 +166,8 @@ The next official step after these docs merge is `codex/unified-code-mode-docs`:
 
 ## Current Success Condition
 
-The current closeout step is complete only when:
+The current preflight step is complete only when:
 
-- shell follow-up docs are merged into `docs/unified-assistant-spec`
+- Phase 3 Code-mode docs are merged into `docs/unified-assistant-spec`
 - those docs are merged into `dev/unified-assistant`
-- the team can branch `codex/unified-code-mode-docs` without reopening shell decisions
+- the team can branch `codex/unified-code-mode` without reopening Code-mode scope
