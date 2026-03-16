@@ -292,6 +292,18 @@ During Phase 5 Blender work:
   competing live-mode request while Blender still owns the shared engine is
   blocked until the active request finishes or is cancelled.
 
+### Phase 6A LibreOffice scaffolding rule
+
+During Phase 6A LibreOffice work:
+
+- Writer, Calc, and Slides remain visible but disabled.
+- LibreOffice modes do not use `assistant_send()` yet.
+- LibreOffice mode copy should say the integration is scaffolded rather than
+  pretending document actions are live.
+- the disabled composer reason for LibreOffice modes is:
+  `LibreOffice integration is scaffolded in the unified app, but live document actions are not wired yet.`
+- Code, GIMP, and Blender execution paths remain unchanged.
+
 ## 10. Suggestion Chips
 
 Suggestion chips are mode-specific empty-state actions.
@@ -429,6 +441,14 @@ Before provider integrations land:
   is still streaming through the shared engine until the active request finishes
   or is cancelled.
 
+### Phase 6A LibreOffice scaffolding
+
+- Writer, Calc, and Slides keep mode-aware subtitles, welcome copy, and staged
+  suggestion chips.
+- Writer, Calc, and Slides keep the composer visible but disabled.
+- the shell must not show a fake send path, fake tool list, or fake document
+  execution state for LibreOffice modes.
+
 ## 14. Migration Path
 
 1. Preserve the current Codehelper shell as the shared shell.
@@ -440,8 +460,10 @@ Before provider integrations land:
    for `gimp` only.
 6. Port Blender behavior into a new Blender provider and activate
    `assistant_send` for `blender`.
-7. Port LibreOffice behavior into one provider with Writer/Calc/Slides
-   frontend configs.
+7. Land LibreOffice scaffolding into one shared provider with Writer/Calc/Slides
+   frontend configs while keeping those modes disabled.
+8. Activate live LibreOffice behavior in a later dedicated branch once the
+   separate source work is stable enough to port.
 
 The frontend should not import or embed standalone app code directly. It should
 consume new unified stores, mode configs, and Tauri command contracts.

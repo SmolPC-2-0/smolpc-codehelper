@@ -297,6 +297,8 @@ Rules:
    provider processes.
 4. Shared providers still surface the requested submode back through
    `ProviderStateDto.mode` and any mode-sensitive tool list decisions.
+5. Phase 6A only lands the shared provider scaffold; live LibreOffice runtime
+   activation is deferred to a later follow-up branch.
 
 ## 5.5 `smolpc-mcp-client` scaffolding contract
 
@@ -316,6 +318,10 @@ pub trait JsonRpcClient {
 The transport call is async from the start because stdio and TCP MCP flows are
 inherently asynchronous. The foundation branch must not ship a synchronous call
 signature that later mode branches would need to break.
+
+Phase 6A extends this crate with shared stdio transport support so the unified
+LibreOffice provider can later use the same client layer as the other provider
+families instead of importing a standalone-app-specific MCP client.
 
 ## 6. DTO Contracts
 
@@ -364,12 +370,12 @@ pub struct ModeStatusDto {
 
 ### Per-provider rules
 
-| Provider    | Auto-start                                          | Disconnect behavior                                                               |
-| ----------- | --------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Code        | Not applicable                                      | No-op                                                                             |
-| GIMP        | No, depends on external app availability            | Disconnect cleanly; do not claim ownership of the external app                    |
-| Blender     | Lazy-start local bridge server on first Blender use | Cleanly stop bridge runtime on app exit; do not claim ownership of Blender itself |
-| LibreOffice | Yes, provider may own its MCP runtime               | Keep shared runtime alive across Writer/Calc/Slides switches                      |
+| Provider    | Auto-start                                          | Disconnect behavior                                                                |
+| ----------- | --------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Code        | Not applicable                                      | No-op                                                                              |
+| GIMP        | No, depends on external app availability            | Disconnect cleanly; do not claim ownership of the external app                     |
+| Blender     | Lazy-start local bridge server on first Blender use | Cleanly stop bridge runtime on app exit; do not claim ownership of Blender itself  |
+| LibreOffice | Phase 6A: no; activation deferred                   | Keep shared runtime alive across Writer/Calc/Slides switches once activation lands |
 
 ## 8. Undo Support
 
@@ -440,6 +446,20 @@ Code and GIMP behavior stable:
 - Code mode keeps the existing Codehelper inference path
 - GIMP mode keeps the current Phase 4 MCP-backed execution path
 - `assistant_send` remains scaffold-only for `writer`, `calc`, and `impress`
+
+## 9.4 Phase 6A LibreOffice scaffolding rule
+
+Phase 6A keeps LibreOffice execution non-live while landing the merge-safe
+provider scaffold:
+
+- `assistant_send` remains scaffold-only for `writer`, `calc`, and `impress`
+- `mode_status(writer|calc|impress)` returns scaffold-aware provider detail
+  rather than the original generic foundation placeholder wording
+- `mode_refresh_tools(writer|calc|impress)` validates the staged scaffold only
+  and does not launch a LibreOffice runtime
+- `available_tools` remains empty for LibreOffice modes in this phase
+- Calc is explicitly not required to be live in this phase because the current
+  source branch does not yet provide parity-level spreadsheet tooling
 
 ## 10. Planner Boundary
 
