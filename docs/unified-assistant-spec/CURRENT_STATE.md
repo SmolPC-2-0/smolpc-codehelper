@@ -5,26 +5,26 @@
 
 ## Branch Roles
 
-| Branch | Role |
-|---|---|
-| `docs/unified-assistant-spec` | Canonical architecture/spec branch |
-| `dev/unified-assistant` | Implementation mainline after docs merge |
-| `codex/unified-foundation` | Merged Phase 1 implementation branch |
-| `codex/unified-foundation-status-docs` | Phase 1 closeout docs branch |
-| `codex/unified-shell-docs` | Merged Phase 2 preflight docs branch |
-| `codex/unified-shell` | Merged Phase 2 shell implementation branch |
-| `codex/unified-shell-status-docs` | Merged Phase 2 closeout docs branch |
-| `codex/unified-shell-followups` | Merged post-Phase-2 shell hardening branch |
-| `codex/unified-shell-followups-status-docs` | Merged shell follow-up docs sync branch |
-| `codex/unified-code-mode-docs` | Merged Phase 3 preflight docs branch |
-| `codex/unified-code-mode` | Merged Phase 3 implementation branch |
-| `codex/unified-code-mode-status-docs` | Merged Phase 3 closeout docs branch |
-| `codex/unified-gimp-mode-docs` | Merged Phase 4 preflight docs branch |
-| `codex/unified-gimp-mode` | Merged Phase 4 implementation branch |
-| `codex/unified-gimp-mode-status-docs` | Phase 4 closeout docs branch |
-| `codex/unified-blender-mode-docs` | Merged Phase 5 preflight docs branch |
-| `codex/unified-blender-mode` | Merged Phase 5 implementation branch |
-| `codex/unified-blender-mode-status-docs` | Phase 5 closeout docs branch |
+| Branch                                      | Role                                       |
+| ------------------------------------------- | ------------------------------------------ |
+| `docs/unified-assistant-spec`               | Canonical architecture/spec branch         |
+| `dev/unified-assistant`                     | Implementation mainline after docs merge   |
+| `codex/unified-foundation`                  | Merged Phase 1 implementation branch       |
+| `codex/unified-foundation-status-docs`      | Phase 1 closeout docs branch               |
+| `codex/unified-shell-docs`                  | Merged Phase 2 preflight docs branch       |
+| `codex/unified-shell`                       | Merged Phase 2 shell implementation branch |
+| `codex/unified-shell-status-docs`           | Merged Phase 2 closeout docs branch        |
+| `codex/unified-shell-followups`             | Merged post-Phase-2 shell hardening branch |
+| `codex/unified-shell-followups-status-docs` | Merged shell follow-up docs sync branch    |
+| `codex/unified-code-mode-docs`              | Merged Phase 3 preflight docs branch       |
+| `codex/unified-code-mode`                   | Merged Phase 3 implementation branch       |
+| `codex/unified-code-mode-status-docs`       | Merged Phase 3 closeout docs branch        |
+| `codex/unified-gimp-mode-docs`              | Merged Phase 4 preflight docs branch       |
+| `codex/unified-gimp-mode`                   | Merged Phase 4 implementation branch       |
+| `codex/unified-gimp-mode-status-docs`       | Phase 4 closeout docs branch               |
+| `codex/unified-blender-mode-docs`           | Merged Phase 5 preflight docs branch       |
+| `codex/unified-blender-mode`                | Merged Phase 5 implementation branch       |
+| `codex/unified-blender-mode-status-docs`    | Phase 5 closeout docs branch               |
 
 ## What Is Done
 
@@ -277,13 +277,13 @@ boundaries intact:
 
 ## Known Risks
 
-| Risk | Impact |
-|---|---|
-| Engine branch churn | unified app may need contract updates while the engine is still evolving |
-| Standalone app branch churn | Blender and LibreOffice behavior may continue changing during the remaining ports |
+| Risk                              | Impact                                                                                   |
+| --------------------------------- | ---------------------------------------------------------------------------------------- |
+| Engine branch churn               | unified app may need contract updates while the engine is still evolving                 |
+| Standalone app branch churn       | Blender and LibreOffice behavior may continue changing during the remaining ports        |
 | External GIMP runtime assumptions | Phase 4 depends on a separate GIMP install and MCP plugin/server already being available |
-| Packaging/runtime validation | third-party runtime paths may behave differently in packaged Windows builds |
-| LibreOffice port alignment | the LibreOffice branch must stay aligned with the unified provider design |
+| Packaging/runtime validation      | third-party runtime paths may behave differently in packaged Windows builds              |
+| LibreOffice port alignment        | the LibreOffice branch must stay aligned with the unified provider design                |
 
 ## Merge-Safe Rules
 

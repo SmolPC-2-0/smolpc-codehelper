@@ -219,6 +219,9 @@
 - Blender keeps the existing addon bridge contract:
   - `127.0.0.1:5179`
   - `%LOCALAPPDATA%/SmolPC/engine-runtime/bridge-token.txt`
+- the Windows packaging path above is canonical; non-Windows dev/test
+  environments may use the platform-appropriate local app-data equivalent while
+  preserving the same addon-facing token-file contract
 - bridge startup is lazy and non-fatal to unified app startup
 - Blender uses shared engine only; no Ollama fallback UI or backend toggle in
   the unified shell
@@ -288,12 +291,12 @@ These apply to every implementation phase:
 
 ## Windows Validation Milestones
 
-| Milestone | Required proof |
-|---|---|
-| Foundation ready | commands and DTOs compile cleanly |
-| Shell ready | six modes visible in one shell |
-| Code ready | existing Codehelper experience preserved |
-| GIMP ready | tool call and undo work |
-| Blender ready | bridge-backed workflow works |
+| Milestone         | Required proof                               |
+| ----------------- | -------------------------------------------- |
+| Foundation ready  | commands and DTOs compile cleanly            |
+| Shell ready       | six modes visible in one shell               |
+| Code ready        | existing Codehelper experience preserved     |
+| GIMP ready        | tool call and undo work                      |
+| Blender ready     | bridge-backed workflow works                 |
 | LibreOffice ready | Writer/Calc/Slides all work via one provider |
-| Packaging ready | packaged app runs without launcher ownership |
+| Packaging ready   | packaged app runs without launcher ownership |

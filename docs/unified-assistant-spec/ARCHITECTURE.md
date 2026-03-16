@@ -17,14 +17,14 @@ merge plan for the unified frontend.
 
 ## 2. Modes
 
-| Mode | Internal Id | Provider Kind | Source Reference |
-|---|---|---|---|
-| Code | `code` | Local provider | `apps/codehelper/` |
-| GIMP | `gimp` | MCP provider | `apps/gimp-assistant/` |
-| Blender | `blender` | Hybrid provider | `apps/blender-assistant/` |
-| Writer | `writer` | MCP provider | `apps/libreoffice-assistant/` |
-| Calc | `calc` | MCP provider | `apps/libreoffice-assistant/` |
-| Slides | `impress` | MCP provider | `apps/libreoffice-assistant/` |
+| Mode    | Internal Id | Provider Kind   | Source Reference              |
+| ------- | ----------- | --------------- | ----------------------------- |
+| Code    | `code`      | Local provider  | `apps/codehelper/`            |
+| GIMP    | `gimp`      | MCP provider    | `apps/gimp-assistant/`        |
+| Blender | `blender`   | Hybrid provider | `apps/blender-assistant/`     |
+| Writer  | `writer`    | MCP provider    | `apps/libreoffice-assistant/` |
+| Calc    | `calc`      | MCP provider    | `apps/libreoffice-assistant/` |
+| Slides  | `impress`   | MCP provider    | `apps/libreoffice-assistant/` |
 
 ## 3. High-Level System
 
@@ -268,13 +268,13 @@ and then be pulled into the unified branches.
 
 ## 10. Merge-Safe Boundaries
 
-| Area | Rule |
-|---|---|
-| Unified shell | Implement in `apps/codehelper` only |
-| Standalone apps | Port behavior into adapters; do not merge directories |
-| Engine | Prefer contract reuse over direct internal edits |
-| Packaging | Document and validate after provider integration, not before |
-| Launcher | Out of scope for runtime ownership |
+| Area            | Rule                                                         |
+| --------------- | ------------------------------------------------------------ |
+| Unified shell   | Implement in `apps/codehelper` only                          |
+| Standalone apps | Port behavior into adapters; do not merge directories        |
+| Engine          | Prefer contract reuse over direct internal edits             |
+| Packaging       | Document and validate after provider integration, not before |
+| Launcher        | Out of scope for runtime ownership                           |
 
 ## 11. Critical Invariants
 
