@@ -64,7 +64,19 @@ Code mode v1 retains:
 4. export and diagnostics surfaces
 5. shared engine contract
 
-## 5. Deferred From This Plan
+## 5. Phase 2 Shell Behavior
+
+During Phase 2 shell implementation:
+
+1. Code mode remains the default active mode.
+2. Code mode alone uses the current Codehelper send/generate path.
+3. Code mode alone keeps export enabled.
+4. Code mode alone keeps benchmark surfaces enabled.
+5. Code mode keeps context controls visible while non-Code modes hide them.
+6. Code chats live in fresh unified storage and are not migrated from the old
+   standalone storage keys.
+
+## 6. Deferred From This Plan
 
 The following are intentionally deferred:
 
@@ -73,7 +85,7 @@ The following are intentionally deferred:
 - deep IDE workspace integration beyond what current Codehelper already offers
 - any requirement that Code mode leave the unified Tauri app
 
-## 6. Local Provider Expectations
+## 7. Local Provider Expectations
 
 Code mode uses a `local` provider, which means:
 
@@ -85,7 +97,7 @@ Code mode uses a `local` provider, which means:
 This keeps the unified backend consistent while allowing Code mode to preserve
 its existing behavior.
 
-## 7. Regression Rule
+## 8. Regression Rule
 
 Unified shell work must not reduce Code mode to a minimal placeholder while
 other modes gain functionality.

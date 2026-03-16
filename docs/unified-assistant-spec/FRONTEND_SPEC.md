@@ -118,7 +118,7 @@ export type AssistantStreamEvent =
 The app has one persistent shell:
 
 - app identity / mode title
-- mode dropdown
+- app-mode dropdown in the header
 - history sidebar
 - conversation view
 - composer
@@ -134,7 +134,7 @@ capabilities.
 App
   Header
     AppIdentity
-    ModeDropdown
+    AppModeDropdown
     StatusBar
   Body
     Sidebar
@@ -168,6 +168,12 @@ App
 - global app shell
 - stored chats for other modes
 
+### Phase 2 shell rule
+
+Phase 2 does not activate real non-Code execution. Mode switching only changes
+the shell state, provider status visibility, suggestions, and capability-driven
+UI.
+
 ## 7. Per-Mode Histories
 
 Chat history is stored in one shared store but filtered by `Chat.mode`.
@@ -177,8 +183,23 @@ Rules:
 1. Every chat is tagged with exactly one mode.
 2. The sidebar shows only chats matching the active mode.
 3. Switching modes does not delete or migrate chats.
-4. Storage keys must be versioned for the unified product so current standalone
-   Codehelper storage is not silently reused.
+4. Unified storage must use fresh versioned keys and must not reuse
+   `smolpc_chats` or `smolpc_current_chat`.
+5. The unified app does not migrate existing standalone Codehelper chats.
+6. Current chat state is tracked per mode, not as one global current chat id.
+
+### Phase 2 unified storage keys
+
+- chats: `smolpc_unified_chats_v1`
+- current chat by mode: `smolpc_unified_current_chat_by_mode_v1`
+- active mode: `smolpc_unified_active_mode_v1`
+
+### Auto-chat creation rule
+
+- On first empty boot, the shell auto-creates one Code chat only.
+- Non-Code modes do not auto-create blank chats.
+- In non-Code modes, chats are created only when the user explicitly clicks
+  `New Chat`.
 
 ## 8. Capability Flags
 
@@ -189,7 +210,7 @@ mode.
 
 - sidebar / chat history
 - conversation view
-- composer
+- composer shell
 - status bar
 - model info panel
 - hardware panel
@@ -197,6 +218,7 @@ mode.
 ### Code-only in v1
 
 - benchmark panel
+- export action
 - code-oriented workspace controls
 - code-specific quick actions
 
@@ -204,6 +226,14 @@ mode.
 
 - undo button only where the mode supports it
 - tool summary surfaces only where the provider supports tools
+- disabled composer copy in modes that are visible but not yet wired
+
+### Phase 2 capability handling
+
+- benchmark and export stay Code-only
+- model info and hardware panels stay shared
+- context controls hide outside Code
+- non-Code modes show suggestions and provider status, but do not submit prompts
 
 ## 9. Code Mode Preservation
 
@@ -218,6 +248,11 @@ What remains in Code mode:
 - model and hardware diagnostics
 - keyboard shortcuts
 - code-specific panels and controls listed in [CODE_MODE_SPEC.md](CODE_MODE_SPEC.md)
+
+### Phase 2 execution rule
+
+During Phase 2 shell work, the existing Codehelper send/generate flow remains
+active only when `activeMode === 'code'`.
 
 ## 10. Suggestion Chips
 
@@ -277,7 +312,39 @@ mode work begins.
 - Arguments: `{ mode: AppMode }`
 - Returns: `ModeStatus`
 
-## 12. Migration Path
+## 12. Phase 2 Shell Bootstrap
+
+Phase 2 startup behavior is:
+
+1. Initialize the mode store.
+2. Fetch `list_modes()` once.
+3. Restore `activeMode` from `smolpc_unified_active_mode_v1`, defaulting to
+   `code`.
+4. Fetch `mode_status(activeMode)` for the active mode.
+5. Start the existing engine bootstrap flow unchanged.
+6. Auto-create one Code chat only if the unified chat storage is empty.
+
+### Mode status loading
+
+- `list_modes()` is fetched once at startup.
+- `mode_status(mode)` is fetched lazily for the active mode at startup and on
+  every mode switch.
+- statuses may be cached by mode in the frontend store.
+- Phase 2 does not require any backend contract changes for this.
+
+## 13. Phase 2 Placeholder Behavior
+
+Before provider integrations land:
+
+- Code mode uses the current Codehelper behavior.
+- GIMP, Blender, Writer, Calc, and Slides are visible in the shell.
+- non-Code modes show mode-specific identity, suggestions, and provider status.
+- non-Code modes keep the composer visible but disabled.
+- the disabled composer reason is:
+  `This mode is visible in the unified shell, but chat execution is not wired yet.`
+- the shell must not fake Code-mode execution in other modes.
+
+## 14. Migration Path
 
 1. Preserve the current Codehelper shell as the shared shell.
 2. Add mode state and per-mode histories.

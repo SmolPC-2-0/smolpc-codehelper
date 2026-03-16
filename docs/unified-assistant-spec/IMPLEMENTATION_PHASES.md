@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-16
-**Status:** Phase 1 complete on `dev/unified-assistant`; Phase 2 shell preflight is next
+**Status:** Phase 2 shell preflight is documented; shell implementation is next
 
 ## Phase 0: Documentation Baseline
 
@@ -80,10 +80,24 @@
 - shared shell capability flags
 - mode-aware status model
 
+**Preflight decisions**
+
+- fresh unified storage keys:
+  - `smolpc_unified_chats_v1`
+  - `smolpc_unified_current_chat_by_mode_v1`
+  - `smolpc_unified_active_mode_v1`
+- no migration from old standalone chat keys
+- per-mode current chat tracking
+- `code` default active mode
+- non-Code modes visible with disabled composer
+- Code-only send/generate/export/benchmark behavior
+- no backend contract changes in Phase 2
+
 **Exit criteria**
 
 - `apps/codehelper` can present all six modes in one shell
 - Code mode remains the default and closest to current behavior
+- non-Code modes are honest placeholders rather than fake chat integrations
 
 ## Phase 3: Code Mode
 
