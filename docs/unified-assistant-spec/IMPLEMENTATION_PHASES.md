@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-16
-**Status:** Phase 5 Blender preflight is locked; Blender implementation is next after docs merge into `dev/unified-assistant`
+**Status:** Phase 5 Blender mode is merged; Phase 6 LibreOffice preflight is next
 
 ## Phase 0: Documentation Baseline
 
@@ -44,17 +44,15 @@
   - tracked OpenVINO placeholder directory
   - clean frontend audit lockfile
 
-## Branch Order After Phase 4
+## Branch Order After Phase 5
 
-1. `codex/unified-blender-mode-docs`
+1. `codex/unified-libreoffice-mode-docs`
 2. merge into `docs/unified-assistant-spec`
 3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-4. `codex/unified-blender-mode`
+4. `codex/unified-libreoffice-mode`
 5. closeout docs
-6. `codex/unified-libreoffice-mode-docs`
-7. `codex/unified-libreoffice-mode`
-8. `codex/unified-hardening-docs`
-9. `codex/unified-hardening`
+6. `codex/unified-hardening-docs`
+7. `codex/unified-hardening`
 
 ## Phase 2: Unified Shell
 
@@ -235,14 +233,17 @@
 
 **Current branch status**
 
-- Blender preflight docs are now locked on `docs/unified-assistant-spec`
-- `codex/unified-blender-mode` should not branch until these docs are merged
-  into both `docs/unified-assistant-spec` and `dev/unified-assistant`
-- the implementation branch should deliver:
-  - lazy bridge runtime startup
+- preflight docs merged into `docs/unified-assistant-spec`, then into
+  `dev/unified-assistant`
+- implementation merged via PR `#69`
+- merged Blender behavior now present in `dev/unified-assistant`:
+  - lazy bridge runtime startup hosted by the unified app
   - live `mode_status(blender)` and `mode_refresh_tools(blender)`
   - `assistant_send(mode=blender)` with token streaming
   - scene snapshot plus retrieval-grounded tutoring prompts
+  - Blender shell copy and prompt starters now reflect a live mode
+  - Blender assistant messages keep `Regenerate`, `Continue`, and
+    `Branch Chat`
   - no edits to `apps/blender-assistant/`
 
 ## Phase 6: LibreOffice Modes
