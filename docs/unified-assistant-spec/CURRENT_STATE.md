@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-16
-**Phase:** Phase 2 shell preflight is locked on `codex/unified-shell-docs`; shell implementation is next
+**Phase:** Phase 2 shell is merged into `dev/unified-assistant`; Phase 3 Code-mode docs preflight is next
 
 ## Branch Roles
 
@@ -11,8 +11,10 @@
 | `dev/unified-assistant` | Implementation mainline after docs merge |
 | `codex/unified-foundation` | Merged Phase 1 implementation branch |
 | `codex/unified-foundation-status-docs` | Phase 1 closeout docs branch |
-| `codex/unified-shell-docs` | Active Phase 2 preflight docs branch |
-| `codex/unified-shell` | Next implementation branch after docs merge |
+| `codex/unified-shell-docs` | Merged Phase 2 preflight docs branch |
+| `codex/unified-shell` | Merged Phase 2 shell implementation branch |
+| `codex/unified-shell-status-docs` | Active Phase 2 closeout docs branch |
+| `codex/unified-code-mode-docs` | Next Phase 3 preflight docs branch |
 
 ## What Is Done
 
@@ -67,6 +69,33 @@ Phase 2 shell decisions are now locked:
 - Code-only send/generate/export/benchmark behavior during the shell phase
 - no backend contract changes for Phase 2
 
+Phase 2 shell is now merged into `dev/unified-assistant` via PR `#64`.
+
+Merged shell capabilities now present in `dev/unified-assistant`:
+
+- header-level `AppModeDropdown`
+- six visible modes in one `apps/codehelper` shell
+- fresh unified storage keys:
+  - `smolpc_unified_chats_v1`
+  - `smolpc_unified_current_chat_by_mode_v1`
+  - `smolpc_unified_active_mode_v1`
+- per-mode current chat tracking and history filtering
+- one auto-created Code chat only on first empty boot
+- lazy mode-status loading through the Phase 1 Tauri commands
+- non-Code placeholder modes with disabled composer and visible prompt starters
+- existing Codehelper send/generate path preserved only in Code mode
+- Code-only export, benchmark, and context controls during the shell phase
+- root frontend style-gate support for workspace `.svelte` and `.ts` files
+
+Validation completed for the merged shell:
+
+- `npm run check --workspace apps/codehelper`
+- `cargo check -p smolpc-code-helper`
+- `cargo test -p smolpc-code-helper --lib`
+- root incremental Prettier checks against the net PR diff
+- root incremental ESLint checks against the net PR diff
+- PR checks green, including `Incremental Style Gates` and `Tauri Build Check`
+
 The standalone apps remain source references during the future port:
 
 - `apps/gimp-assistant`
@@ -75,7 +104,6 @@ The standalone apps remain source references during the future port:
 
 ## What Has Not Started
 
-- unified shell refactor in `apps/codehelper`
 - real provider integrations for Code, GIMP, Blender, or LibreOffice
 - mode provider ports
 - launcher cleanup beyond the foundation test fix
@@ -84,17 +112,16 @@ The standalone apps remain source references during the future port:
 
 ## Next Workstreams
 
-The next official step after these docs merge is `codex/unified-shell`:
+The next official step after these docs merge is `codex/unified-code-mode-docs`:
 
-1. merge `codex/unified-shell-docs` into `docs/unified-assistant-spec`
+1. merge `codex/unified-shell-status-docs` into `docs/unified-assistant-spec`
 2. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-3. create `codex/unified-shell`
-4. implement Unified Shell:
-   - mode dropdown
-   - per-mode histories
-   - shared status model
-5. close out Phase 2 with `codex/unified-shell-status-docs`
-6. continue serial merge order:
+3. create `codex/unified-code-mode-docs`
+4. lock the Code-mode preservation details for Phase 3
+5. merge those docs into `docs/unified-assistant-spec`
+6. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
+7. create `codex/unified-code-mode`
+8. continue serial merge order:
    - Code mode integration
    - GIMP provider port
    - Blender provider port
@@ -121,8 +148,8 @@ The next official step after these docs merge is `codex/unified-shell`:
 
 ## Current Success Condition
 
-The current preflight step is complete only when:
+The current closeout step is complete only when:
 
-- Phase 2 shell preflight docs are merged into `docs/unified-assistant-spec`
+- Phase 2 closeout docs are merged into `docs/unified-assistant-spec`
 - those docs are merged into `dev/unified-assistant`
-- the team can branch `codex/unified-shell` without reinterpreting shell behavior
+- the team can branch `codex/unified-code-mode-docs` without reopening shell decisions
