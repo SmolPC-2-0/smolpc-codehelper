@@ -1,9 +1,13 @@
+mod assistant;
 mod benchmark;
 mod commands;
 mod hardware;
 mod launcher;
+mod modes;
 mod security;
 
+use assistant::state::AssistantState;
+use commands::assistant::{assistant_cancel, assistant_send, mode_undo};
 use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_benchmark};
 use commands::default::{read, save_code, write};
 use commands::engine_client_adapter::{engine_ensure_started, engine_status};
@@ -15,7 +19,9 @@ use commands::inference::{
     set_inference_runtime_mode, unload_model, InferenceState,
 };
 use commands::launcher::{launcher_launch_or_focus, launcher_list_apps};
+use commands::modes::{list_modes, mode_refresh_tools, mode_status};
 use launcher::orchestrator::LauncherState;
+use modes::registry::ModeProviderRegistry;
 #[allow(clippy::missing_panics_doc)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -32,9 +38,11 @@ pub fn run() {
             log::info!("Hardware detection will occur on first request");
             Ok(())
         })
+        .manage(AssistantState::default())
         .manage(HardwareCache::default())
         .manage(InferenceState::default())
         .manage(LauncherState::default())
+        .manage(ModeProviderRegistry::default())
         .invoke_handler(tauri::generate_handler![
             read,
             write,
@@ -59,6 +67,12 @@ pub fn run() {
             set_inference_runtime_mode,
             engine_ensure_started,
             engine_status,
+            list_modes,
+            mode_status,
+            mode_refresh_tools,
+            assistant_send,
+            assistant_cancel,
+            mode_undo,
             launcher_list_apps,
             launcher_launch_or_focus
         ])

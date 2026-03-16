@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-16
-**Phase:** Foundation stabilization in progress before shell work begins
+**Phase:** Phase 1 foundation scaffold implemented; stabilization in progress on `codex/unified-foundation`
 
 ## Branch Roles
 
@@ -24,6 +24,29 @@ The documentation baseline for the unified frontend is now defined around:
 - adapters-first migration
 - strict merge-safe boundaries
 
+Phase 1 foundation scaffolding now exists on `codex/unified-foundation`:
+
+- shared Rust contract crate: `crates/smolpc-assistant-types`
+- shared MCP scaffolding crate: `crates/smolpc-mcp-client`
+- backend mode/provider skeleton in `apps/codehelper/src-tauri`
+- unified Tauri command scaffolding:
+  - `list_modes`
+  - `mode_status`
+  - `mode_refresh_tools`
+  - `assistant_send`
+  - `assistant_cancel`
+  - `mode_undo`
+- frontend contract mirrors and typed invoke wrappers in `apps/codehelper/src/lib`
+
+Validation completed on the foundation branch:
+
+- `cargo test -p smolpc-assistant-types`
+- `cargo test -p smolpc-mcp-client`
+- `cargo check -p smolpc-assistant-types`
+- `cargo check -p smolpc-mcp-client`
+- `cargo check -p smolpc-code-helper`
+- `npm run check`
+
 Current stabilization items before foundation can merge:
 
 - make the MCP transport client contract async before any real transport lands
@@ -39,9 +62,11 @@ The standalone apps remain source references during the future port:
 
 ## What Has Not Started
 
+These workstreams remain intentionally untouched by Phase 1:
+
 - unified shell refactor in `apps/codehelper`
 - real provider integrations for Code, GIMP, Blender, or LibreOffice
-- mode provider ports
+- mode provider ports from standalone apps
 - launcher cleanup
 - packaging changes
 - Windows end-to-end validation for the unified app

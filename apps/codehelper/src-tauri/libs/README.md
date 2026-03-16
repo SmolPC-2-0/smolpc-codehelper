@@ -32,4 +32,8 @@ OpenVINO staging on Windows uses the official 2026 GenAI archive:
 
 The setup script validates the GenAI C ABI on `openvino_genai_c.dll` before copying the bundle into this directory.
 
-These files are not checked into git. The setup scripts populate ignored local paths for development and bundle packaging.
+The actual Windows OpenVINO runtime files are not checked into git. This
+repository does keep `libs/openvino/README.md` checked in so clean checkouts
+and CI have a real directory for Tauri resource resolution. Development and
+packaged Windows builds still require the setup script to stage the runtime DLLs
+into that directory before launch.
