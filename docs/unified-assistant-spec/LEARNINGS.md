@@ -73,6 +73,8 @@
 
 - **Optional message metadata is the safest way to mix mode-specific UIs** (2026-03): Phase 4 needed GIMP assistant messages to carry `explain`, `undoable`, `toolResults`, and `plan` without breaking existing Code chats. Extending the shared `Message` shape with optional fields preserved backward compatibility while still allowing mode-specific rendering and actions.
 
+- **Live non-Code modes still need a single shared-generation gate** (2026-03): Phase 5 made Blender a second live non-Code mode, but it still shares the same engine runtime as Code. The shell can allow mode switching during Blender generation, yet it must block starting a competing Code or GIMP request until the active non-Code run finishes or is cancelled.
+
 ---
 
 ## MCP
@@ -94,6 +96,8 @@
 - **Mode-by-mode activation can reuse one command surface** (2026-03): Phase 4 made `assistant_send`, `mode_status`, `mode_refresh_tools`, and `mode_undo` real for GIMP without changing command names or DTOs. The stable command surface from Phase 1 was sufficient; only the mode-specific implementation behind it changed.
 
 - **GIMP status must attempt a real connection to be useful** (2026-03): A cached placeholder state is not enough once GIMP becomes a live mode. The unified GIMP provider needs `status()` to attempt live MCP initialization and tool discovery so the header and welcome state can show an honest connected/disconnected result immediately on mode switch.
+
+- **Scene-query heuristics must stay narrower than workflow questions** (2026-03): Blender retrieval should be skipped for pure scene-state questions like "What is in my scene right now?", but not for workflow questions that happen to mention scene nouns such as "selected object". Broad substring heuristics accidentally suppress retrieval on legitimate tutoring questions.
 
 ---
 
@@ -140,6 +144,8 @@
 - **Context compaction is the biggest risk** (2026-03): Long AI sessions lose synthesized research when context compacts. Always persist findings to documentation files before they're lost. This entire docs/unified-assistant-spec directory was created specifically to prevent research loss.
 
 - **Dirty clones need selective staging, not cleanup churn** (2026-03): The shared clone used for unified work can contain unrelated local diffs from other workstreams. For implementation branches, stage only the files that belong to the phase and leave unrelated dirt alone instead of widening the branch scope with cleanup commits.
+
+- **Bridge handles need explicit drop cleanup or Rust tests can hang** (2026-03): Lazy-start provider runtimes that spawn local servers must stop those tasks when the handle is dropped. Without explicit cleanup, the lib test binary can finish its assertions but never exit because detached bridge tasks are still alive.
 
 ---
 
