@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-16
-**Phase:** Phase 1 foundation merged into `dev/unified-assistant`; Phase 2 shell preflight docs are next
+**Phase:** Phase 2 shell preflight is locked on `codex/unified-shell-docs`; shell implementation is next
 
 ## Branch Roles
 
@@ -11,7 +11,8 @@
 | `dev/unified-assistant` | Implementation mainline after docs merge |
 | `codex/unified-foundation` | Merged Phase 1 implementation branch |
 | `codex/unified-foundation-status-docs` | Phase 1 closeout docs branch |
-| `codex/unified-shell-docs` | Next docs-first preflight branch for shell work |
+| `codex/unified-shell-docs` | Active Phase 2 preflight docs branch |
+| `codex/unified-shell` | Next implementation branch after docs merge |
 
 ## What Is Done
 
@@ -56,6 +57,16 @@ Validation completed for the merged foundation:
 - `npm audit --workspace apps/codehelper --omit=dev --audit-level=high`
 - PR checks green, including `Frontend Quality` and `Tauri Build Check`
 
+Phase 2 shell decisions are now locked:
+
+- fresh unified chat storage with no migration from `smolpc_chats`
+- per-mode current chat tracking
+- `code` as the default active mode
+- header-level `AppModeDropdown`
+- non-Code modes visible but composer-disabled
+- Code-only send/generate/export/benchmark behavior during the shell phase
+- no backend contract changes for Phase 2
+
 The standalone apps remain source references during the future port:
 
 - `apps/gimp-assistant`
@@ -73,19 +84,16 @@ The standalone apps remain source references during the future port:
 
 ## Next Workstreams
 
-The next official step is docs-first Phase 2 shell preflight:
+The next official step after these docs merge is `codex/unified-shell`:
 
-1. `codex/unified-shell-docs`
-   - tighten shell state/store details
-   - lock storage versioning and per-mode history rules
-   - lock placeholder behavior for non-integrated modes
-2. merge `codex/unified-shell-docs` into `docs/unified-assistant-spec`
-3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-4. create `codex/unified-shell`
-5. implement Unified Shell:
+1. merge `codex/unified-shell-docs` into `docs/unified-assistant-spec`
+2. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
+3. create `codex/unified-shell`
+4. implement Unified Shell:
    - mode dropdown
    - per-mode histories
    - shared status model
+5. close out Phase 2 with `codex/unified-shell-status-docs`
 6. continue serial merge order:
    - Code mode integration
    - GIMP provider port
@@ -113,8 +121,8 @@ The next official step is docs-first Phase 2 shell preflight:
 
 ## Current Success Condition
 
-The current closeout step is complete only when:
+The current preflight step is complete only when:
 
-- Phase 1 status docs are merged into `docs/unified-assistant-spec`
+- Phase 2 shell preflight docs are merged into `docs/unified-assistant-spec`
 - those docs are merged into `dev/unified-assistant`
-- the team can branch `codex/unified-shell-docs` without reinterpreting Phase 1
+- the team can branch `codex/unified-shell` without reinterpreting shell behavior
