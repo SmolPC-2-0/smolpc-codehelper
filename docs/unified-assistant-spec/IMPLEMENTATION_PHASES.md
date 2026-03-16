@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-16
-**Status:** Phase 4 GIMP preflight is locked; implementation is next
+**Status:** Phase 4 GIMP mode is merged; Phase 5 Blender preflight is next
 
 ## Phase 0: Documentation Baseline
 
@@ -44,19 +44,17 @@
   - tracked OpenVINO placeholder directory
   - clean frontend audit lockfile
 
-## Branch Order After Phase 3
+## Branch Order After Phase 4
 
-1. `codex/unified-gimp-mode-docs`
+1. `codex/unified-blender-mode-docs`
 2. merge into `docs/unified-assistant-spec`
 3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-4. `codex/unified-gimp-mode`
+4. `codex/unified-blender-mode`
 5. closeout docs
-6. `codex/unified-blender-mode-docs`
-7. `codex/unified-blender-mode`
-8. `codex/unified-libreoffice-mode-docs`
-9. `codex/unified-libreoffice-mode`
-10. `codex/unified-hardening-docs`
-11. `codex/unified-hardening`
+6. `codex/unified-libreoffice-mode-docs`
+7. `codex/unified-libreoffice-mode`
+8. `codex/unified-hardening-docs`
+9. `codex/unified-hardening`
 
 ## Phase 2: Unified Shell
 
@@ -184,9 +182,20 @@
 
 **Current branch status**
 
-- preflight docs are the current step
-- `codex/unified-gimp-mode` should branch only after these docs are merged into
-  both `docs/unified-assistant-spec` and `dev/unified-assistant`
+- preflight docs merged into `docs/unified-assistant-spec`, then into
+  `dev/unified-assistant`
+- implementation merged via PR `#67`
+- merged GIMP behavior now present in `dev/unified-assistant`:
+  - `assistant_send` is operational for `gimp` only
+  - `mode_status(gimp)` reports live provider connection state and tool
+    discovery
+  - `mode_refresh_tools(gimp)` forces reconnect and tool rediscovery
+  - `mode_undo(gimp)` delegates to the real provider path
+  - the unified shell enables the GIMP composer and uses `assistantSend()` for
+    GIMP chats
+  - GIMP responses can render explain text, tool activity, and Undo
+  - Code mode still uses the existing Codehelper inference path
+  - non-Code, non-GIMP modes remain placeholders
 
 ## Phase 5: Blender Mode
 
@@ -200,6 +209,12 @@
 **Exit criteria**
 
 - Blender mode can complete a bridge-backed scene workflow in the unified app
+
+**Current branch status**
+
+- Blender preflight docs are the next official step
+- `codex/unified-blender-mode` should not branch until its docs are merged into
+  both `docs/unified-assistant-spec` and `dev/unified-assistant`
 
 ## Phase 6: LibreOffice Modes
 

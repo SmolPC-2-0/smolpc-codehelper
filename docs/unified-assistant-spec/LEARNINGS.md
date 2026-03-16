@@ -71,6 +71,8 @@
 
 - **Keep non-active modes phase-neutral in shared shell copy** (2026-03): Phase-specific wording in multi-mode UI goes stale quickly once the next phase lands. Keep copy specific for the mode under active implementation, but keep untouched modes neutral unless the phase is explicitly about them.
 
+- **Optional message metadata is the safest way to mix mode-specific UIs** (2026-03): Phase 4 needed GIMP assistant messages to carry `explain`, `undoable`, `toolResults`, and `plan` without breaking existing Code chats. Extending the shared `Message` shape with optional fields preserved backward compatibility while still allowing mode-specific rendering and actions.
+
 ---
 
 ## MCP
@@ -88,6 +90,10 @@
 - **LibreOffice `mcp-libre` has two modes** (2026-03): Standalone mode has 14 tools. Extension mode (with LibreOffice extension installed) has 73 tools. Extension mode is recommended for full capability.
 
 - **All MCP servers are Python** (2026-03): gimp-mcp, blender-mcp, and mcp-libre are all Python. They're lightweight and don't run inference (inference goes to the engine). Python is managed by bundled `uv`.
+
+- **Mode-by-mode activation can reuse one command surface** (2026-03): Phase 4 made `assistant_send`, `mode_status`, `mode_refresh_tools`, and `mode_undo` real for GIMP without changing command names or DTOs. The stable command surface from Phase 1 was sufficient; only the mode-specific implementation behind it changed.
+
+- **GIMP status must attempt a real connection to be useful** (2026-03): A cached placeholder state is not enough once GIMP becomes a live mode. The unified GIMP provider needs `status()` to attempt live MCP initialization and tool discovery so the header and welcome state can show an honest connected/disconnected result immediately on mode switch.
 
 ---
 
@@ -132,6 +138,8 @@
 - **No git worktrees** (2026-03): User preference — use separate clones instead. Worktrees have caused issues in this project.
 
 - **Context compaction is the biggest risk** (2026-03): Long AI sessions lose synthesized research when context compacts. Always persist findings to documentation files before they're lost. This entire docs/unified-assistant-spec directory was created specifically to prevent research loss.
+
+- **Dirty clones need selective staging, not cleanup churn** (2026-03): The shared clone used for unified work can contain unrelated local diffs from other workstreams. For implementation branches, stage only the files that belong to the phase and leave unrelated dirt alone instead of widening the branch scope with cleanup commits.
 
 ---
 
