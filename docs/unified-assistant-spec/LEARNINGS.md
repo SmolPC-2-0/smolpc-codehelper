@@ -67,6 +67,10 @@
 
 - **Top-level async app init should always be caught** (2026-03): The unified shell startup sequence chains several async steps (`modeStore.initialize()`, inference startup, cached hardware load). Calling that sequence without a top-level `.catch()` risks unhandled startup failures that are hard to diagnose. Catch once at the shell entrypoint and surface the warning in the UI.
 
+- **Live modes should surface live runtime state, not scaffold status copy** (2026-03): Once a mode already has a real execution path, the shell should present that mode's actual runtime state rather than reusing placeholder provider messaging for consistency. In Phase 3, Code mode needed `inferenceStore.status` as the visible shell status source to avoid making a working path look fake.
+
+- **Keep non-active modes phase-neutral in shared shell copy** (2026-03): Phase-specific wording in multi-mode UI goes stale quickly once the next phase lands. Keep copy specific for the mode under active implementation, but keep untouched modes neutral unless the phase is explicitly about them.
+
 ---
 
 ## MCP
