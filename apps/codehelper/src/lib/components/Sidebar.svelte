@@ -3,6 +3,7 @@
 	import { chatsStore } from '$lib/stores/chats.svelte';
 	import type { DeletedChatSnapshot } from '$lib/stores/chats.svelte';
 	import type { Chat } from '$lib/types/chat';
+	import type { AppMode } from '$lib/types/mode';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { formatTimestamp, groupChatsByTime } from '$lib/utils/date';
 	import {
@@ -23,10 +24,13 @@
 	import { Button } from '$lib/components/ui/button';
 
 	interface Props {
+		activeMode: AppMode;
+		activeModeLabel: string;
+		activeModeSubtitle: string;
 		onClose?: () => void;
 	}
 
-	let { onClose }: Props = $props();
+	let { activeMode, activeModeLabel, activeModeSubtitle, onClose }: Props = $props();
 
 	let searchQuery = $state('');
 	let showArchived = $state(false);
@@ -40,6 +44,8 @@
 	let undoTimeoutId = $state<number | null>(null);
 
 	const normalizedQuery = $derived(searchQuery.trim().toLowerCase());
+	const currentChatId = $derived(chatsStore.getCurrentChatIdForMode(activeMode));
+	const modeChats = $derived(chatsStore.getChatsForMode(activeMode));
 
 	function chatMatchesQuery(chat: Chat, query: string): boolean {
 		if (!query) return true;
@@ -51,11 +57,11 @@
 	}
 
 	const activeChats = $derived(
-		chatsStore.sortedChats.filter((chat) => !chat.archived && chatMatchesQuery(chat, normalizedQuery))
+		modeChats.filter((chat) => !chat.archived && chatMatchesQuery(chat, normalizedQuery))
 	);
 
 	const archivedChats = $derived(
-		chatsStore.sortedChats.filter((chat) => chat.archived && chatMatchesQuery(chat, normalizedQuery))
+		modeChats.filter((chat) => chat.archived && chatMatchesQuery(chat, normalizedQuery))
 	);
 
 	const pinnedChats = $derived(activeChats.filter((chat) => chat.pinned));
@@ -66,13 +72,13 @@
 	function handleNewChat() {
 		actionsMenuChatId = null;
 		editingChatId = null;
-		chatsStore.createChat(settingsStore.selectedModel);
+		chatsStore.createChat(activeMode, settingsStore.selectedModel);
 	}
 
 	function handleSelectChat(chatId: string) {
 		if (editingChatId) return;
 		actionsMenuChatId = null;
-		chatsStore.setCurrentChat(chatId);
+		chatsStore.setCurrentChat(activeMode, chatId);
 		if (window.innerWidth < 768 && onClose) {
 			onClose();
 		}
@@ -183,8 +189,8 @@
 	<div class="sidebar__header">
 		<div class="sidebar__header-row">
 			<div>
-				<h1>SmolPC Helper</h1>
-				<p>Offline coding assistant workspace</p>
+				<h1>SmolPC Unified Assistant</h1>
+				<p>{activeModeLabel} · {activeModeSubtitle}</p>
 			</div>
 			{#if onClose}
 				<Button
@@ -202,9 +208,7 @@
 	</div>
 
 	<div class="sidebar__action">
-		<Button onclick={handleNewChat} class="sidebar__new-chat">
-			New Chat
-		</Button>
+		<Button onclick={handleNewChat} class="sidebar__new-chat">New Chat</Button>
 
 		<div class="sidebar__search-wrap">
 			<span class="sidebar__search-icon" aria-hidden="true">
@@ -214,7 +218,7 @@
 				type="search"
 				bind:value={searchQuery}
 				class="sidebar__search-input"
-				placeholder="Search chats, model, content"
+				placeholder={`Search ${activeModeLabel.toLowerCase()} chats`}
 				aria-label="Search chats"
 			/>
 		</div>
@@ -226,7 +230,7 @@
 				<h3 class="sidebar__group-title">Pinned</h3>
 				{#each pinnedChats as chat (chat.id)}
 					<div
-						class={`sidebar__chat-row ${chatsStore.currentChatId === chat.id ? 'sidebar__chat-row--active' : ''}`}
+						class={`sidebar__chat-row ${currentChatId === chat.id ? 'sidebar__chat-row--active' : ''}`}
 					>
 						{#if editingChatId === chat.id}
 							<input
@@ -244,7 +248,11 @@
 								}}
 							/>
 						{:else}
-							<button type="button" onclick={() => handleSelectChat(chat.id)} class="sidebar__chat-button">
+							<button
+								type="button"
+								onclick={() => handleSelectChat(chat.id)}
+								class="sidebar__chat-button"
+							>
 								<span class="sidebar__chat-title">{chat.title}</span>
 								<span class="sidebar__chat-meta">{formatTimestamp(chat.updatedAt)}</span>
 							</button>
@@ -271,10 +279,20 @@
 							</button>
 							{#if actionsMenuChatId === chat.id}
 								<div class="sidebar__menu">
-									<button type="button" onclick={() => startRename(chat)}><Pencil class="h-3.5 w-3.5" /> Rename</button>
-									<button type="button" onclick={() => duplicateChat(chat.id)}><Copy class="h-3.5 w-3.5" /> Duplicate</button>
-									<button type="button" onclick={() => toggleArchived(chat.id)}><Archive class="h-3.5 w-3.5" /> Archive</button>
-									<button type="button" class="sidebar__menu-danger" onclick={() => requestDelete(chat.id)}>
+									<button type="button" onclick={() => startRename(chat)}
+										><Pencil class="h-3.5 w-3.5" /> Rename</button
+									>
+									<button type="button" onclick={() => duplicateChat(chat.id)}
+										><Copy class="h-3.5 w-3.5" /> Duplicate</button
+									>
+									<button type="button" onclick={() => toggleArchived(chat.id)}
+										><Archive class="h-3.5 w-3.5" /> Archive</button
+									>
+									<button
+										type="button"
+										class="sidebar__menu-danger"
+										onclick={() => requestDelete(chat.id)}
+									>
 										<Trash2 class="h-3.5 w-3.5" /> Delete
 									</button>
 								</div>
@@ -290,7 +308,7 @@
 				<h3 class="sidebar__group-title">{group.label}</h3>
 				{#each group.chats as chat (chat.id)}
 					<div
-						class={`sidebar__chat-row ${chatsStore.currentChatId === chat.id ? 'sidebar__chat-row--active' : ''}`}
+						class={`sidebar__chat-row ${currentChatId === chat.id ? 'sidebar__chat-row--active' : ''}`}
 					>
 						{#if editingChatId === chat.id}
 							<input
@@ -308,7 +326,11 @@
 								}}
 							/>
 						{:else}
-							<button type="button" onclick={() => handleSelectChat(chat.id)} class="sidebar__chat-button">
+							<button
+								type="button"
+								onclick={() => handleSelectChat(chat.id)}
+								class="sidebar__chat-button"
+							>
 								<span class="sidebar__chat-title">{chat.title}</span>
 								<span class="sidebar__chat-meta">{formatTimestamp(chat.updatedAt)}</span>
 							</button>
@@ -335,10 +357,20 @@
 							</button>
 							{#if actionsMenuChatId === chat.id}
 								<div class="sidebar__menu">
-									<button type="button" onclick={() => startRename(chat)}><Pencil class="h-3.5 w-3.5" /> Rename</button>
-									<button type="button" onclick={() => duplicateChat(chat.id)}><Copy class="h-3.5 w-3.5" /> Duplicate</button>
-									<button type="button" onclick={() => toggleArchived(chat.id)}><Archive class="h-3.5 w-3.5" /> Archive</button>
-									<button type="button" class="sidebar__menu-danger" onclick={() => requestDelete(chat.id)}>
+									<button type="button" onclick={() => startRename(chat)}
+										><Pencil class="h-3.5 w-3.5" /> Rename</button
+									>
+									<button type="button" onclick={() => duplicateChat(chat.id)}
+										><Copy class="h-3.5 w-3.5" /> Duplicate</button
+									>
+									<button type="button" onclick={() => toggleArchived(chat.id)}
+										><Archive class="h-3.5 w-3.5" /> Archive</button
+									>
+									<button
+										type="button"
+										class="sidebar__menu-danger"
+										onclick={() => requestDelete(chat.id)}
+									>
 										<Trash2 class="h-3.5 w-3.5" /> Delete
 									</button>
 								</div>
@@ -472,12 +504,11 @@
 		position: absolute;
 		inset: 0;
 		pointer-events: none;
-		background:
-			radial-gradient(
-				38rem 20rem at -20% -10%,
-				color-mix(in srgb, var(--color-primary) 8%, transparent),
-				transparent 72%
-			);
+		background: radial-gradient(
+			38rem 20rem at -20% -10%,
+			color-mix(in srgb, var(--color-primary) 8%, transparent),
+			transparent 72%
+		);
 	}
 
 	.sidebar__header {

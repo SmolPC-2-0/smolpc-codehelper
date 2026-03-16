@@ -1,12 +1,20 @@
 <script lang="ts">
 	import ContextToggle from '$lib/components/ContextToggle.svelte';
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
+
+	interface Props {
+		showContextControls?: boolean;
+	}
+
+	let { showContextControls = true }: Props = $props();
 </script>
 
 <section class="workspace-controls" aria-label="Session controls">
-	<div class="workspace-controls__row">
-		<ContextToggle />
-	</div>
+	{#if showContextControls}
+		<div class="workspace-controls__row">
+			<ContextToggle />
+		</div>
+	{/if}
 	<div class="workspace-controls__row workspace-controls__row--compact">
 		<ThemeSelector />
 	</div>

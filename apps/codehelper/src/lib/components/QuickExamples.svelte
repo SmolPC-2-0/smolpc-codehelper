@@ -1,17 +1,35 @@
 <script lang="ts">
-	import { QUICK_EXAMPLES } from '$lib/types/examples';
-	import { X } from '@lucide/svelte';
-
-	interface Props {
-		onSelectExample: (prompt: string) => void;
-		onClose?: () => void;
+	export interface QuickExampleCard {
+		id: string;
+		title: string;
+		prompt: string;
 	}
 
-	let { onSelectExample, onClose }: Props = $props();
+	interface Props {
+		examples: QuickExampleCard[];
+		onSelectExample: (prompt: string) => void;
+		onClose?: () => void;
+		disabled?: boolean;
+		disabledReason?: string | null;
+	}
+
+	let {
+		examples,
+		onSelectExample,
+		onClose,
+		disabled = false,
+		disabledReason = null
+	}: Props = $props();
 
 	function handleSelect(prompt: string) {
+		if (disabled) {
+			return;
+		}
+
 		onSelectExample(prompt);
-		if (onClose) onClose();
+		if (onClose) {
+			onClose();
+		}
 	}
 </script>
 
@@ -20,31 +38,35 @@
 		<div class="quick-examples__title">
 			<div>
 				<h3>Prompt Starters</h3>
-				<p>Pick one and adapt it to your assignment.</p>
+				<p>
+					{#if disabled && disabledReason}
+						{disabledReason}
+					{:else}
+						Pick one and adapt it to your task.
+					{/if}
+				</p>
 			</div>
 		</div>
 		{#if onClose}
-			<button
-				onclick={onClose}
-				class="quick-examples__close"
-				aria-label="Close examples"
-			>
-				<X class="h-4 w-4" />
+			<button onclick={onClose} class="quick-examples__close" aria-label="Close examples">
+				<span aria-hidden="true">×</span>
 			</button>
 		{/if}
 	</div>
 
 	<div class="quick-examples__grid">
-		{#each QUICK_EXAMPLES as example (example.id)}
-				<button
-					onclick={() => handleSelect(example.prompt)}
-					class="quick-examples__item"
-				>
-					<div class="quick-examples__item-head">
-						<span>{example.title}</span>
-					</div>
-					<p>{example.prompt}</p>
-				</button>
+		{#each examples as example (example.id)}
+			<button
+				onclick={() => handleSelect(example.prompt)}
+				class="quick-examples__item"
+				{disabled}
+				title={disabled && disabledReason ? disabledReason : example.prompt}
+			>
+				<div class="quick-examples__item-head">
+					<span>{example.title}</span>
+				</div>
+				<p>{example.prompt}</p>
+			</button>
 		{/each}
 	</div>
 </div>
@@ -122,13 +144,19 @@
 		transition:
 			transform var(--motion-fast),
 			border-color var(--motion-fast),
-			background var(--motion-fast);
+			background var(--motion-fast),
+			opacity var(--motion-fast);
 	}
 
-	.quick-examples__item:hover {
+	.quick-examples__item:hover:not(:disabled) {
 		transform: translateY(-0.5px);
 		border-color: var(--outline-strong);
 		background: var(--surface-active);
+	}
+
+	.quick-examples__item:disabled {
+		cursor: not-allowed;
+		opacity: 0.62;
 	}
 
 	.quick-examples__item-head {

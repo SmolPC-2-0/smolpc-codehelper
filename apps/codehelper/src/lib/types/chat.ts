@@ -1,3 +1,5 @@
+import type { AppMode } from '$lib/types/mode';
+
 export interface Message {
 	id: string;
 	role: 'user' | 'assistant';
@@ -8,6 +10,7 @@ export interface Message {
 
 export interface Chat {
 	id: string;
+	mode: AppMode;
 	title: string;
 	messages: Message[];
 	createdAt: number;

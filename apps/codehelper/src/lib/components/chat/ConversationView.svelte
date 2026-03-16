@@ -3,11 +3,20 @@
 	import WelcomeState from '$lib/components/chat/WelcomeState.svelte';
 	import { ArrowDown } from '@lucide/svelte';
 	import type { Message } from '$lib/types/chat';
+	import type { AppMode } from '$lib/types/mode';
+	import type { ProviderStateDto } from '$lib/types/provider';
 
 	interface Props {
+		mode: AppMode;
+		modeLabel: string;
+		modeSubtitle: string;
+		suggestions: string[];
+		providerState?: ProviderStateDto | null;
 		messages: Message[];
 		latestAssistantMessageId: string | null;
 		showQuickExamples: boolean;
+		disabledExamples?: boolean;
+		disabledReason?: string | null;
 		onSelectExample: (prompt: string) => void;
 		onToggleExamples: (show: boolean) => void;
 		onUserScrollUp: () => void;
@@ -21,9 +30,16 @@
 	}
 
 	let {
+		mode,
+		modeLabel,
+		modeSubtitle,
+		suggestions,
+		providerState = null,
 		messages,
 		latestAssistantMessageId,
 		showQuickExamples,
+		disabledExamples = false,
+		disabledReason = null,
 		onSelectExample,
 		onToggleExamples,
 		onUserScrollUp,
@@ -77,7 +93,14 @@
 	<div class="conversation-view__inner">
 		{#if messages.length === 0}
 			<WelcomeState
+				{mode}
+				{modeLabel}
+				{modeSubtitle}
+				{suggestions}
+				{providerState}
 				{showQuickExamples}
+				{disabledExamples}
+				{disabledReason}
 				{onSelectExample}
 				{onToggleExamples}
 			/>
@@ -111,14 +134,13 @@
 		padding: 1rem 1rem 0.9rem;
 		scroll-padding-bottom: 2rem;
 		position: relative;
-		background:
-			linear-gradient(
-				90deg,
-				rgb(255 255 255 / 1.2%) 0,
-				transparent 24%,
-				transparent 76%,
-				rgb(255 255 255 / 1.2%) 100%
-			);
+		background: linear-gradient(
+			90deg,
+			rgb(255 255 255 / 1.2%) 0,
+			transparent 24%,
+			transparent 76%,
+			rgb(255 255 255 / 1.2%) 100%
+		);
 	}
 
 	.conversation-view__inner {
