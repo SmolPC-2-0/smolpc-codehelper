@@ -1800,7 +1800,17 @@ impl EngineState {
         let should_attempt_openvino = match force_override {
             Some(InferenceBackend::OpenVinoNpu) => true,
             Some(_) => false,
-            None => persisted_backend.is_none() || stored_openvino,
+            None => {
+                // Skip the expensive NPU preflight (compilation + warmup) in auto mode
+                // when DirectML is available — it can block startup for 3-4 minutes on
+                // machines where the OpenVINO NPU compilation cache is cold or broken.
+                // Use -ForceEp npu to explicitly evaluate the OpenVINO NPU lane.
+                if has_dml_candidate {
+                    false
+                } else {
+                    persisted_backend.is_none() || stored_openvino
+                }
+            }
         };
         let mut persisted_record_decision = stored
             .as_ref()
