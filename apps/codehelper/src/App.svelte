@@ -509,7 +509,11 @@ Teaching rules:
 
 	<BenchmarkPanel visible={showBenchmarkPanel} onClose={() => uiStore.closeOverlay()} />
 	<HardwarePanel visible={showHardwarePanel} onClose={() => uiStore.closeOverlay()} />
-	<ModelInfoPanel visible={showModelInfoPanel} onClose={() => uiStore.closeOverlay()} />
+	<ModelInfoPanel
+		visible={showModelInfoPanel}
+		busy={isInferenceBusy}
+		onClose={() => uiStore.closeOverlay()}
+	/>
 	<KeyboardShortcutsOverlay
 		open={showShortcutsOverlay}
 		onClose={() => (showShortcutsOverlay = false)}

@@ -3,6 +3,11 @@
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { BrainCircuit, Loader2 } from '@lucide/svelte';
 
+	interface Props {
+		busy?: boolean;
+	}
+
+	let { busy = false }: Props = $props();
 	let isLoading = $state(false);
 
 	async function handleModelChange(event: Event) {
@@ -36,7 +41,7 @@
 	<select
 		value={inferenceStore.currentModel ?? ''}
 		onchange={handleModelChange}
-		disabled={isLoading || inferenceStore.isGenerating}
+		disabled={isLoading || busy}
 		class="model-selector__control"
 		aria-label="Select inference model"
 	>

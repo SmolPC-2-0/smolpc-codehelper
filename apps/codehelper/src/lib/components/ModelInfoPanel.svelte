@@ -6,15 +6,25 @@
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import ModelSelector from '$lib/components/ModelSelector.svelte';
 	import InferenceModeSelector from '$lib/components/InferenceModeSelector.svelte';
+	import type {
+		BackendSelectionState,
+		EngineReadinessState,
+		InferenceBackend
+	} from '$lib/types/inference';
 
 	interface Props {
 		visible: boolean;
+		busy?: boolean;
 		onClose?: () => void;
 	}
 
-	let { visible, onClose }: Props = $props();
+	let { visible, busy = false, onClose }: Props = $props();
 	let refreshing = $state(false);
 	const status = $derived(inferenceStore.status);
+	const reloadModelId = $derived(
+		inferenceStore.currentModel ?? settingsStore.selectedModel ?? null
+	);
+	const controlsBusy = $derived(busy || refreshing);
 
 	onMount(() => {
 		function handleKeydown(event: KeyboardEvent) {
@@ -39,11 +49,13 @@
 		onClose?.();
 	}
 
-	async function refreshPanel() {
+	async function reloadCurrentModel() {
 		refreshing = true;
 		try {
+			if (reloadModelId) {
+				await inferenceStore.loadModel(reloadModelId);
+			}
 			await inferenceStore.listModels();
-			await inferenceStore.syncStatus();
 		} finally {
 			refreshing = false;
 		}
@@ -59,26 +71,49 @@
 		}
 	}
 
-	function formatBackendLabel(backend: string | null): string {
-		if (!backend) {
-			return 'Unknown';
-		}
-		if (backend === 'openvino_npu') {
-			return 'OpenVINO NPU';
-		}
+	function friendlyReadinessLabel(state: string): string {
+		if (state === 'ready') return 'Ready';
+		if (state === 'failed') return 'Failed';
+		if (state === 'loading_model') return 'Loading model...';
+		if (state === 'probing') return 'Detecting hardware...';
+		if (state === 'resolving_assets') return 'Resolving model files...';
+		if (state === 'starting') return 'Starting...';
+		return 'Idle';
+	}
+
+	function friendlyBackendLabel(
+		backend: InferenceBackend | null,
+		selectionState: BackendSelectionState | null = null
+	): string {
+		let label = 'Unknown';
+
 		if (backend === 'directml') {
-			return 'DirectML';
+			label = 'DirectML GPU';
+		} else if (backend === 'cpu') {
+			label = 'CPU';
+		} else if (backend === 'openvino_npu') {
+			label = 'OpenVINO NPU';
 		}
-		if (backend === 'cpu') {
-			return 'CPU';
+
+		if (selectionState === 'fallback' && label !== 'Unknown') {
+			return `${label} (fallback)`;
 		}
-		return backend.toUpperCase();
+
+		return label;
+	}
+
+	function formatModeLabel(mode: string): string {
+		return mode.toUpperCase();
 	}
 
 	function formatReason(value: string | null): string {
 		if (!value) {
 			return 'n/a';
 		}
+		return value.replaceAll('_', ' ');
+	}
+
+	function formatReadinessState(value: EngineReadinessState | 'unknown'): string {
 		return value.replaceAll('_', ' ');
 	}
 </script>
@@ -94,10 +129,10 @@
 				<Button
 					variant="ghost"
 					size="icon"
-					onclick={refreshPanel}
-					disabled={refreshing}
-					aria-label="Refresh model info"
-					title="Refresh model info"
+					onclick={reloadCurrentModel}
+					disabled={controlsBusy || !reloadModelId}
+					aria-label="Reload model"
+					title="Reload model"
 				>
 					<RefreshCw class={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
 				</Button>
@@ -115,22 +150,40 @@
 		<div class="model-info-panel__content">
 			<div class="model-info-panel__control-block">
 				<div class="model-info-panel__control-label">Model</div>
-				<ModelSelector />
+				<ModelSelector busy={controlsBusy} />
 			</div>
 
 			<div class="model-info-panel__control-block">
 				<div class="model-info-panel__control-label">Inference Mode</div>
-				<InferenceModeSelector />
+				<InferenceModeSelector busy={controlsBusy} />
 				<div class="model-info-panel__helper">
 					Switch runtime mode and reload the current model into the selected backend.
 				</div>
 			</div>
 
-			<div class="model-info-panel__details">
-				<div class="model-info-panel__details-title">Active Runtime</div>
+			<section class="model-info-panel__summary">
+				<div class="model-info-panel__details-title">Runtime</div>
+				<div class="model-info-panel__details-grid">
+					<span>Status</span>
+					<span>{friendlyReadinessLabel(status.readinessState)}</span>
+					<span>Model</span>
+					<span>{status.currentModel ?? 'None loaded'}</span>
+					<span>Backend</span>
+					<span>{friendlyBackendLabel(status.activeBackend, status.selectionState)}</span>
+					{#if status.selectedDeviceName}
+						<span>Device</span>
+						<span>{status.selectedDeviceName}</span>
+					{/if}
+					<span>Mode</span>
+					<span>{formatModeLabel(status.runtimeMode)}</span>
+				</div>
+			</section>
+
+			<details class="model-info-panel__details">
+				<summary class="model-info-panel__details-summary">Engine details</summary>
 				<div class="model-info-panel__details-grid">
 					<span>Readiness State</span>
-					<span>{status.readinessState}</span>
+					<span>{formatReadinessState(status.readinessState)}</span>
 					<span>Attempt ID</span>
 					<span title={status.readiness?.attempt_id ?? ''}
 						>{status.readiness?.attempt_id ?? 'n/a'}</span
@@ -142,11 +195,11 @@
 					<span>Loaded Model</span>
 					<span>{status.currentModel ?? 'none'}</span>
 					<span>Backend</span>
-					<span>{formatBackendLabel(status.activeBackend)}</span>
+					<span>{friendlyBackendLabel(status.activeBackend, status.selectionState)}</span>
 					<span>Runtime Engine</span>
 					<span>{status.runtimeEngine ?? 'n/a'}</span>
 					<span>Mode</span>
-					<span>{status.runtimeMode.toUpperCase()}</span>
+					<span>{formatModeLabel(status.runtimeMode)}</span>
 					<span>Device</span>
 					<span>{status.selectedDeviceName ?? 'n/a'}</span>
 					<span>Selection Reason</span>
@@ -166,10 +219,10 @@
 					<span>Model Path</span>
 					<span title={status.activeModelPath ?? ''}>{status.activeModelPath ?? 'n/a'}</span>
 				</div>
-			</div>
+			</details>
 
 			{#if status.readinessState === 'failed' && status.startupRetryable}
-				<Button variant="outline" onclick={retryStartup} disabled={refreshing}>
+				<Button variant="outline" onclick={retryStartup} disabled={controlsBusy}>
 					Retry startup
 				</Button>
 			{/if}
@@ -252,11 +305,23 @@
 		color: var(--color-muted-foreground);
 	}
 
+	.model-info-panel__summary,
 	.model-info-panel__details {
 		border: 1px solid var(--outline-soft);
 		border-radius: var(--radius-lg);
 		padding: 0.72rem;
 		background: color-mix(in srgb, var(--surface-widget) 96%, black);
+	}
+
+	.model-info-panel__details-summary {
+		cursor: pointer;
+		font-size: 0.75rem;
+		font-weight: 650;
+		list-style: none;
+	}
+
+	.model-info-panel__details-summary::-webkit-details-marker {
+		display: none;
 	}
 
 	.model-info-panel__details-title {
@@ -265,6 +330,10 @@
 		gap: 0.4rem;
 		font-size: 0.75rem;
 		font-weight: 650;
+		margin-bottom: 0.5rem;
+	}
+
+	.model-info-panel__details[open] .model-info-panel__details-summary {
 		margin-bottom: 0.5rem;
 	}
 
@@ -302,6 +371,10 @@
 	:global(.model-info-panel .mode-selector) {
 		width: 100%;
 		min-width: 0;
+	}
+
+	:global(.model-info-panel .mode-selector__status) {
+		margin-top: 0.4rem;
 	}
 
 	:global(.model-info-panel .model-selector__control),
