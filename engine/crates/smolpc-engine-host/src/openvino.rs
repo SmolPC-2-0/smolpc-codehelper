@@ -543,19 +543,20 @@ fn parse_positive_env_usize(name: &str, default: usize) -> Result<usize, String>
 
 #[cfg(target_os = "windows")]
 pub(crate) fn openvino_generation_controls_for_model(_model_id: &str) -> OpenVinoGenerationControls {
-    let qwen3_eos_only = false;
+    // All catalog models (qwen2.5-coder-1.5b, qwen3-4b-instruct) use ChatML with identical
+    // special token IDs: <|im_end|>=151645, <|endoftext|>=151643.
+    // Explicit controls are required because the OpenVINO C config is built manually and does
+    // not inherit generation_config.json defaults.
     OpenVinoGenerationControls {
-        // Qwen chat template EOS token (<|im_end|>) is 151645.
-        // Set explicit EOS because OpenVINO C config is built manually and does not
-        // implicitly inherit generation_config.json defaults.
-        eos_token_id: qwen3_eos_only.then_some(151645),
+        eos_token_id: Some(151645),
         min_new_tokens: Some(1),
-        // Both token IDs for belt-and-suspenders: <|im_end|>=151645, <|endoftext|>=151643
-        stop_token_ids: qwen3_eos_only.then_some(vec![151643, 151645]),
+        stop_token_ids: Some(vec![151643, 151645]),
         // stop_strings operates on accumulated decoded text (incl. special tokens) — catches
         // <|im_end|> even when the NPU StaticLLMPipeline doesn't honour stop_token_ids reliably.
-        stop_strings: qwen3_eos_only
-            .then_some(vec!["<|im_end|>".to_string(), "<|endoftext|>".to_string()]),
+        stop_strings: Some(vec![
+            "<|im_end|>".to_string(),
+            "<|endoftext|>".to_string(),
+        ]),
         ignore_eos: Some(false),
     }
 }
