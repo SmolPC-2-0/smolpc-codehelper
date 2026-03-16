@@ -8,23 +8,39 @@
 		setupCodeCopyHandlers
 	} from '$lib/utils/markdown';
 	import { invoke } from '@tauri-apps/api/core';
-	import { Bot, Check, Copy, Download, GitBranchPlus, RefreshCw, User, Waypoints } from '@lucide/svelte';
+	import {
+		Bot,
+		Check,
+		Copy,
+		Download,
+		GitBranchPlus,
+		RefreshCw,
+		Undo2,
+		User,
+		Waypoints,
+		Wrench
+	} from '@lucide/svelte';
+	import type { AppMode } from '$lib/types/mode';
 
 	// src/lib/components/ChatMessage.svelte 9-30
 	interface Props {
+		mode: AppMode;
 		message: Message;
 		canRegenerate?: boolean;
 		onRegenerate?: () => void;
 		onContinue?: () => void;
 		onBranchFromHere?: () => void;
+		onUndo?: () => void;
 	}
 
 	let {
+		mode,
 		message,
 		canRegenerate = false,
 		onRegenerate = () => {},
 		onContinue = () => {},
-		onBranchFromHere = () => {}
+		onBranchFromHere = () => {},
+		onUndo = () => {}
 	}: Props = $props();
 
 	let copied = $state(false);
@@ -61,7 +77,9 @@
 	});
 </script>
 
-<article class={`chat-message ${message.role === 'user' ? 'chat-message--user' : 'chat-message--assistant'}`}>
+<article
+	class={`chat-message ${message.role === 'user' ? 'chat-message--user' : 'chat-message--assistant'}`}
+>
 	<div class="chat-message__avatar">
 		{#if message.role === 'user'}
 			<User class="h-4 w-4" />
@@ -73,10 +91,12 @@
 	<div class="chat-message__body" bind:this={contentContainer}>
 		<header class="chat-message__meta">
 			<span class="chat-message__role">{message.role === 'user' ? 'You' : 'Assistant'}</span>
-			<span class="chat-message__time">{new Date(message.timestamp).toLocaleTimeString([], {
-				hour: '2-digit',
-				minute: '2-digit'
-			})}</span>
+			<span class="chat-message__time"
+				>{new Date(message.timestamp).toLocaleTimeString([], {
+					hour: '2-digit',
+					minute: '2-digit'
+				})}</span
+			>
 		</header>
 
 		<div class="chat-message__content prose prose-sm max-w-none break-words">
@@ -90,9 +110,40 @@
 			</div>
 		{/if}
 
+		{#if message.explain}
+			<div class="chat-message__explain">
+				<strong>Do this yourself in GIMP:</strong>
+				<p>{message.explain}</p>
+			</div>
+		{/if}
+
+		{#if message.toolResults?.length}
+			<div class="chat-message__tool-results">
+				<div class="chat-message__tool-results-heading">
+					<Wrench class="h-3.5 w-3.5" />
+					<span>Tool activity</span>
+				</div>
+				<ul>
+					{#each message.toolResults as toolResult (toolResult.name + toolResult.summary)}
+						<li class:chat-message__tool-results-item--error={!toolResult.ok}>
+							<span>{toolResult.name}</span>
+							<span>{toolResult.summary}</span>
+						</li>
+					{/each}
+				</ul>
+			</div>
+		{/if}
+
+		{#if mode === 'gimp' && message.plan}
+			<details class="chat-message__plan">
+				<summary>Show planning details</summary>
+				<pre>{JSON.stringify(message.plan, null, 2)}</pre>
+			</details>
+		{/if}
+
 		{#if message.role === 'assistant' && !message.isStreaming}
 			<div class="chat-message__actions">
-				{#if canRegenerate}
+				{#if mode === 'code' && canRegenerate}
 					<button
 						type="button"
 						onclick={onRegenerate}
@@ -104,50 +155,64 @@
 					</button>
 				{/if}
 
-				<button
-					type="button"
-					onclick={onContinue}
-					class="chat-message__action"
-					title="Continue this response"
-				>
-					<Waypoints class="h-3 w-3" />
-					<span>Continue</span>
-				</button>
+				{#if mode === 'code'}
+					<button
+						type="button"
+						onclick={onContinue}
+						class="chat-message__action"
+						title="Continue this response"
+					>
+						<Waypoints class="h-3 w-3" />
+						<span>Continue</span>
+					</button>
 
-				<button
-					type="button"
-					onclick={onBranchFromHere}
-					class="chat-message__action"
-					title="Branch this conversation from here"
-				>
-					<GitBranchPlus class="h-3 w-3" />
-					<span>Branch Chat</span>
-				</button>
+					<button
+						type="button"
+						onclick={onBranchFromHere}
+						class="chat-message__action"
+						title="Branch this conversation from here"
+					>
+						<GitBranchPlus class="h-3 w-3" />
+						<span>Branch Chat</span>
+					</button>
+				{/if}
 
-				{#if codeBlocks.length > 0}
-				<button
-					type="button"
-					onclick={handleCopyAllCode}
-					class="chat-message__action"
-					title="Copy all code from this message"
-				>
-					{#if copied}
-						<Check class="h-3 w-3 chat-message__action-icon--success" />
-						<span class="chat-message__action-text--success">Copied!</span>
-					{:else}
-						<Copy class="h-3 w-3" />
-						<span>Copy All Code</span>
-					{/if}
-				</button>
-				<button
-					type="button"
-					onclick={handleSaveAllCode}
-					class="chat-message__action"
-					title="Save all code from this message to file"
-				>
-					<Download class="h-3 w-3" />
-					<span>Save All Code</span>
-				</button>
+				{#if mode === 'gimp' && message.undoable}
+					<button
+						type="button"
+						onclick={onUndo}
+						class="chat-message__action"
+						title="Undo the last GIMP change"
+					>
+						<Undo2 class="h-3 w-3" />
+						<span>Undo</span>
+					</button>
+				{/if}
+
+				{#if mode === 'code' && codeBlocks.length > 0}
+					<button
+						type="button"
+						onclick={handleCopyAllCode}
+						class="chat-message__action"
+						title="Copy all code from this message"
+					>
+						{#if copied}
+							<Check class="h-3 w-3 chat-message__action-icon--success" />
+							<span class="chat-message__action-text--success">Copied!</span>
+						{:else}
+							<Copy class="h-3 w-3" />
+							<span>Copy All Code</span>
+						{/if}
+					</button>
+					<button
+						type="button"
+						onclick={handleSaveAllCode}
+						class="chat-message__action"
+						title="Save all code from this message to file"
+					>
+						<Download class="h-3 w-3" />
+						<span>Save All Code</span>
+					</button>
 				{/if}
 			</div>
 		{/if}
@@ -255,6 +320,89 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.38rem;
+	}
+
+	.chat-message__explain {
+		margin-top: 0.75rem;
+		padding: 0.7rem 0.8rem;
+		border-radius: var(--radius-lg);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-widget) 94%, black);
+	}
+
+	.chat-message__explain strong {
+		display: block;
+		font-size: 0.72rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--color-muted-foreground);
+		margin-bottom: 0.35rem;
+	}
+
+	.chat-message__explain p {
+		margin: 0;
+		font-size: 0.82rem;
+		color: var(--color-muted-foreground);
+	}
+
+	.chat-message__tool-results {
+		margin-top: 0.75rem;
+		padding: 0.7rem 0.8rem;
+		border-radius: var(--radius-lg);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-widget) 95%, black);
+	}
+
+	.chat-message__tool-results-heading {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: 0.72rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--color-muted-foreground);
+		margin-bottom: 0.45rem;
+	}
+
+	.chat-message__tool-results ul {
+		display: grid;
+		gap: 0.3rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.chat-message__tool-results li {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		justify-content: space-between;
+		font-size: 0.8rem;
+	}
+
+	.chat-message__tool-results-item--error {
+		color: var(--color-destructive);
+	}
+
+	.chat-message__plan {
+		margin-top: 0.7rem;
+		font-size: 0.76rem;
+		color: var(--color-muted-foreground);
+	}
+
+	.chat-message__plan summary {
+		cursor: pointer;
+	}
+
+	.chat-message__plan pre {
+		margin-top: 0.5rem;
+		padding: 0.7rem;
+		border-radius: var(--radius-lg);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-widget) 95%, black);
+		overflow-x: auto;
+		font-size: 0.73rem;
 	}
 
 	.chat-message__action {

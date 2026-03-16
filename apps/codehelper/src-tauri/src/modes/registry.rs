@@ -25,7 +25,7 @@ impl Default for ModeProviderRegistry {
     fn default() -> Self {
         Self {
             code: Arc::new(CodeProvider),
-            gimp: Arc::new(GimpProvider),
+            gimp: Arc::new(GimpProvider::default()),
             blender: Arc::new(BlenderProvider),
             libreoffice: Arc::new(LibreOfficeProvider),
         }

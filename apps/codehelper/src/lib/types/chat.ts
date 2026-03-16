@@ -1,11 +1,17 @@
 import type { AppMode } from '$lib/types/mode';
 
+import type { ToolExecutionResultDto } from '$lib/types/provider';
+
 export interface Message {
 	id: string;
 	role: 'user' | 'assistant';
 	content: string;
 	timestamp: number;
 	isStreaming?: boolean;
+	explain?: string | null;
+	undoable?: boolean;
+	toolResults?: ToolExecutionResultDto[];
+	plan?: unknown;
 }
 
 export interface Chat {

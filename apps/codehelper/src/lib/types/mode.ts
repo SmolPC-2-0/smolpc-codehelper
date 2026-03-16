@@ -51,11 +51,15 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 	{
 		id: 'gimp',
 		label: 'GIMP',
-		subtitle: 'Image editing assistance for GIMP workflows',
+		subtitle: 'Live image editing help for GIMP through the unified assistant shell',
 		icon: 'image',
 		providerKind: 'mcp',
 		systemPromptKey: 'mode.gimp.default',
-		suggestions: ['Resize an image', 'Remove the background', 'Undo the last change'],
+		suggestions: [
+			'Blur the top half of the image',
+			'Crop this image to a square',
+			'Rotate the image 90 degrees clockwise'
+		],
 		capabilities: {
 			supportsTools: true,
 			supportsUndo: true,

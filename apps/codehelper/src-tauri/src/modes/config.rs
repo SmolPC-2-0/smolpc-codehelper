@@ -41,14 +41,15 @@ pub fn mode_config(mode: AppMode) -> ModeConfigDto {
         AppMode::Gimp => ModeConfigDto {
             id: AppMode::Gimp,
             label: "GIMP".to_string(),
-            subtitle: "Image editing assistance for GIMP workflows".to_string(),
+            subtitle: "Live image editing help for GIMP through the unified assistant shell"
+                .to_string(),
             icon: "image".to_string(),
             provider_kind: ProviderKind::Mcp,
             system_prompt_key: "mode.gimp.default".to_string(),
             suggestions: vec![
-                "Resize an image".to_string(),
-                "Remove the background".to_string(),
-                "Undo the last change".to_string(),
+                "Blur the top half of the image".to_string(),
+                "Crop this image to a square".to_string(),
+                "Rotate the image 90 degrees clockwise".to_string(),
             ],
             capabilities: shared_tool_mode_capabilities(true),
         },
