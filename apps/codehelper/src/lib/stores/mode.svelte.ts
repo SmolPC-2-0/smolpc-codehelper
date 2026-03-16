@@ -1,19 +1,24 @@
 import { getModeStatus, listModes } from '$lib/api/unified';
 import { loadFromStorage, saveToStorage } from '$lib/utils/storage';
-import type { AppMode, ModeConfigDto } from '$lib/types/mode';
+import { FALLBACK_MODE_CONFIGS, type AppMode, type ModeConfigDto } from '$lib/types/mode';
 import type { ModeStatusDto } from '$lib/types/provider';
 
 const ACTIVE_MODE_KEY = 'smolpc_unified_active_mode_v1';
 
 let activeMode = $state<AppMode>('code');
-let modeConfigs = $state<ModeConfigDto[]>([]);
+let modeConfigs = $state<ModeConfigDto[]>(FALLBACK_MODE_CONFIGS);
 let statusByMode = $state<Partial<Record<AppMode, ModeStatusDto>>>({});
 let loading = $state(false);
-let error = $state<string | null>(null);
+let configError = $state<string | null>(null);
+let statusError = $state<string | null>(null);
 let initialized = $state(false);
 
 function getModeConfig(mode: AppMode): ModeConfigDto | null {
 	return modeConfigs.find((config) => config.id === mode) ?? null;
+}
+
+function toErrorMessage(cause: unknown): string {
+	return cause instanceof Error ? cause.message : String(cause);
 }
 
 async function loadModeStatus(mode: AppMode): Promise<void> {
@@ -38,7 +43,10 @@ export const modeStore = {
 		return loading;
 	},
 	get error() {
-		return error;
+		return (
+			[configError, statusError].filter((value): value is string => Boolean(value)).join(' · ') ||
+			null
+		);
 	},
 	get initialized() {
 		return initialized;
@@ -64,21 +72,31 @@ export const modeStore = {
 		}
 
 		loading = true;
-		error = null;
+		configError = null;
+		statusError = null;
+		const storedMode = loadFromStorage<AppMode>(ACTIVE_MODE_KEY, 'code');
 
 		try {
-			modeConfigs = await listModes();
-			const storedMode = loadFromStorage<AppMode>(ACTIVE_MODE_KEY, 'code');
-			const resolvedMode = getModeConfig(storedMode) ? storedMode : 'code';
-
-			activeMode = resolvedMode;
-			saveToStorage(ACTIVE_MODE_KEY, activeMode);
-
-			await loadModeStatus(activeMode);
-			initialized = true;
+			const remoteModes = await listModes();
+			if (remoteModes.length === 0) {
+				throw new Error('list_modes returned no modes');
+			}
+			modeConfigs = remoteModes;
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : String(cause);
+			configError = `Mode list unavailable; using local fallback config. ${toErrorMessage(cause)}`;
+			modeConfigs = FALLBACK_MODE_CONFIGS;
+		}
+
+		const resolvedMode = getModeConfig(storedMode) ? storedMode : 'code';
+		activeMode = resolvedMode;
+		saveToStorage(ACTIVE_MODE_KEY, activeMode);
+
+		try {
+			await loadModeStatus(activeMode);
+		} catch (cause) {
+			statusError = toErrorMessage(cause);
 		} finally {
+			initialized = true;
 			loading = false;
 		}
 	},
@@ -96,12 +114,12 @@ export const modeStore = {
 
 	async refreshModeStatus(mode: AppMode = activeMode): Promise<void> {
 		loading = true;
-		error = null;
+		statusError = null;
 
 		try {
 			await loadModeStatus(mode);
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : String(cause);
+			statusError = toErrorMessage(cause);
 		} finally {
 			loading = false;
 		}

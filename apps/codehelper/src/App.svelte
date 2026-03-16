@@ -56,11 +56,20 @@
 	const modeStatusLabel = $derived(
 		activeModeStatus?.providerState
 			? activeModeStatus.providerState.state.replace(/_/g, ' ')
-			: modeStore.loading
-				? 'loading'
-				: 'status pending'
+			: modeStore.error
+				? 'fallback active'
+				: modeStore.loading
+					? 'loading'
+					: 'status pending'
 	);
-	const modeStatusDetail = $derived(activeModeStatus?.providerState.detail ?? null);
+	const modeStatusDetail = $derived.by(() => {
+		const details = [
+			modeStore.error ? `Shell warning: ${modeStore.error}` : null,
+			activeModeStatus?.providerState.detail ?? null
+		].filter((detail): detail is string => Boolean(detail));
+
+		return details.length > 0 ? details.join(' · ') : null;
+	});
 
 	function setMessagesContainer(element: HTMLDivElement) {
 		messagesContainer = element;
@@ -160,11 +169,6 @@ Teaching rules:
 		await modeStore.setActiveMode(mode);
 		uiStore.resetScrollState();
 		uiStore.setShowQuickExamples(true);
-
-		const supportsBenchmark = modeStore.getConfig(mode)?.capabilities.showBenchmarkPanel ?? false;
-		if (!supportsBenchmark && uiStore.activeOverlay === 'benchmark') {
-			uiStore.closeOverlay();
-		}
 	}
 
 	async function handleSendMessage(content: string) {
@@ -453,7 +457,9 @@ Teaching rules:
 			}
 		}
 
-		initApp();
+		initApp().catch((error) => {
+			console.error('[initApp]', error);
+		});
 
 		window.addEventListener('keydown', handleKeyDown);
 
@@ -480,6 +486,8 @@ Teaching rules:
 
 	$effect(() => {
 		const canShowBenchmark = activeModeConfig?.capabilities.showBenchmarkPanel ?? false;
+		// Centralize benchmark overlay cleanup here so mode changes and config refreshes
+		// follow the same capability gate.
 		if (!canShowBenchmark && uiStore.activeOverlay === 'benchmark') {
 			uiStore.closeOverlay();
 		}

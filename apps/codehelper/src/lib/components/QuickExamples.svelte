@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { X } from '@lucide/svelte';
+
 	export interface QuickExampleCard {
 		id: string;
 		title: string;
@@ -49,7 +51,7 @@
 		</div>
 		{#if onClose}
 			<button onclick={onClose} class="quick-examples__close" aria-label="Close examples">
-				<span aria-hidden="true">×</span>
+				<X class="quick-examples__close-icon" aria-hidden="true" />
 			</button>
 		{/if}
 	</div>
@@ -123,6 +125,11 @@
 		color: var(--color-foreground);
 		border-color: var(--outline-soft);
 		background: var(--surface-hover);
+	}
+
+	:global(.quick-examples__close-icon) {
+		width: 1rem;
+		height: 1rem;
 	}
 
 	.quick-examples__grid {
