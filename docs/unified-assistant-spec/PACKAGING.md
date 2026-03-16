@@ -101,6 +101,10 @@ Phase 5 assumes:
 - the unified app hosts the local bridge server used by the addon
 - the unified app bundles only Blender-provider-owned assets such as retrieval
   metadata and bridge helper support files
+- the current Phase 5 retrieval bundle is
+  `apps/codehelper/src-tauri/resources/blender/rag_system/simple_db/metadata.json`
+  because the unified Blender provider uses lightweight keyword retrieval and
+  does not need vector-database assets in v1
 
 Phase 5 packaging validation covers connection to an external Blender setup and
 addon, not Blender installation or addon auto-provisioning.

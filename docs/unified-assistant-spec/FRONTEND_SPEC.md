@@ -294,6 +294,9 @@ During Phase 5 Blender work:
 - Writer, Calc, and Slides remain placeholder-only.
 - active Blender-mode status in the header should come from real provider state
   rather than placeholder copy.
+- switching away from Blender during generation is allowed, but starting a
+  competing live-mode request while Blender still owns the shared engine is
+  blocked until the active request finishes or is cancelled.
 
 ## 10. Suggestion Chips
 
@@ -428,6 +431,8 @@ Before provider integrations land:
 - Blender assistant messages do not render Undo in Phase 5.
 - switching away from Blender during execution is allowed and must not corrupt
   the originating Blender chat.
+- the shell must not allow a competing live-mode request to start while Blender
+  is still streaming through the shared engine.
 
 ## 14. Migration Path
 

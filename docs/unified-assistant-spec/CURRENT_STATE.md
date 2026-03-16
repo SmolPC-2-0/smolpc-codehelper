@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-16
-**Phase:** Phase 5 Blender preflight is locked; implementation is next after docs merge into `dev/unified-assistant`
+**Phase:** Phase 5 Blender mode is merged; Phase 6 LibreOffice preflight is next
 
 ## Branch Roles
 
@@ -22,7 +22,9 @@
 | `codex/unified-gimp-mode-docs` | Merged Phase 4 preflight docs branch |
 | `codex/unified-gimp-mode` | Merged Phase 4 implementation branch |
 | `codex/unified-gimp-mode-status-docs` | Phase 4 closeout docs branch |
-| `codex/unified-blender-mode-docs` | Phase 5 preflight docs branch |
+| `codex/unified-blender-mode-docs` | Merged Phase 5 preflight docs branch |
+| `codex/unified-blender-mode` | Merged Phase 5 implementation branch |
+| `codex/unified-blender-mode-status-docs` | Phase 5 closeout docs branch |
 
 ## What Is Done
 
@@ -197,21 +199,42 @@ Validation completed for the merged GIMP mode:
 - `npm run check --workspace apps/codehelper`
 - PR `#67` merged into `dev/unified-assistant`
 
-Phase 5 Blender preflight decisions are now locked on
-`docs/unified-assistant-spec`.
+Phase 5 Blender mode is now merged into `dev/unified-assistant` via PR `#69`.
 
-Locked Blender Phase 5 behavior:
+Merged Blender behavior now present in `dev/unified-assistant`:
 
-- Blender becomes the second live non-Code mode after GIMP
-- `assistant_send` becomes operational for `mode === blender`
+- `assistant_send` is now operational for `mode === blender`
+- `mode_status(blender)` now reports live provider state from the lazy-start
+  bridge-backed Blender provider
+- `mode_refresh_tools(blender)` now refreshes bridge/runtime health and
+  pseudo-tool availability
 - Blender stays bridge-first and shared-engine-only
-- Blender uses the existing addon protocol unchanged
-- bridge startup is lazy and non-fatal to unified app startup
-- Blender includes local Blender-doc retrieval grounding
-- Blender uses token streaming with cancellation
-- Blender keeps tutoring-style conversation actions that already fit the
-  unified shell
-- Writer / Calc / Slides remain placeholders
+- the unified app now hosts the local Blender bridge server on
+  `127.0.0.1:5179`
+- bridge startup is lazy and non-fatal to unified app startup; port conflicts
+  degrade Blender mode only
+- the unified app now bundles provider-owned Blender retrieval metadata under
+  `apps/codehelper/src-tauri/resources/blender/rag_system/simple_db/metadata.json`
+- Blender questions now use scene snapshot plus local Blender-doc retrieval
+  grounding when appropriate
+- Blender uses token streaming with cancellation through the shared
+  `assistant_send` surface
+- Blender assistant messages keep tutoring-style conversation actions that fit
+  the unified shell:
+  - `Regenerate`
+  - `Continue`
+  - `Branch Chat`
+- Blender undo remains unsupported
+- Code mode still uses the existing Codehelper inference path
+- GIMP keeps the Phase 4 MCP-backed path unchanged
+- Writer / Calc / Slides remain visible placeholders
+
+Validation completed for the merged Blender mode:
+
+- `cargo check -p smolpc-code-helper`
+- `cargo test -p smolpc-code-helper --lib`
+- `npm run check --workspace apps/codehelper`
+- PR `#69` merged into `dev/unified-assistant`
 
 The standalone apps remain source references during the future port:
 
@@ -221,7 +244,7 @@ The standalone apps remain source references during the future port:
 
 ## What Has Not Started
 
-- real provider integrations for Blender or LibreOffice
+- real provider integrations for LibreOffice
 - mode provider ports
 - launcher cleanup beyond the foundation test fix
 - unified-app packaging hardening beyond the tracked OpenVINO placeholder
@@ -229,22 +252,21 @@ The standalone apps remain source references during the future port:
 
 ## Next Workstreams
 
-The next official step after this Blender preflight docs merge is the Phase 5
-implementation branch:
+The next official step after this Blender closeout docs merge is the Phase 6
+LibreOffice docs preflight branch:
 
-1. merge `codex/unified-blender-mode-docs` into `docs/unified-assistant-spec`
-2. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-3. create `codex/unified-blender-mode`
-4. port the bridge-backed Blender provider path into the unified adapter
-5. close out Phase 5 in docs
-6. continue serial merge order:
-   - Blender provider port
+1. create `codex/unified-libreoffice-mode-docs`
+2. lock the shared LibreOffice provider design in docs
+3. merge docs into `docs/unified-assistant-spec`
+4. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
+5. create `codex/unified-libreoffice-mode`
+6. close out Phase 6 in docs
+7. continue serial merge order:
    - LibreOffice provider port
    - Hardening and Windows packaging validation
 
-The current merged GIMP implementation plus Blender preflight leaves these
-future phase boundaries
-intact:
+The current merged GIMP and Blender implementations leave these future phase
+boundaries intact:
 
 1. `assistant_send` remains scaffold-only for Writer / Calc / Slides
 2. Code mode still does not use the unified provider/orchestration path
