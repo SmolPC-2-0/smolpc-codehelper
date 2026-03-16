@@ -114,7 +114,7 @@
 	}
 
 	function formatReadinessState(value: EngineReadinessState | 'unknown'): string {
-		return value.replaceAll('_', ' ');
+		return formatReason(value);
 	}
 </script>
 

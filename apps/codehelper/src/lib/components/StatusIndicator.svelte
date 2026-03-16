@@ -17,6 +17,7 @@
 					? 'status-indicator--failed'
 					: 'status-indicator--starting'
 	);
+	const backendLabelText = $derived(backendLabel());
 
 	function readinessLabel(): string {
 		if (status.isGenerating) {
@@ -77,7 +78,7 @@
 			<span class="status-indicator__runtime">{status.startupErrorCode}</span>
 		{:else}
 			<span class="status-indicator__runtime">
-				{backendLabel() ? `${backendLabel()} · Click for settings` : 'Click for settings'}
+				{backendLabelText ? `${backendLabelText} · Click for settings` : 'Click for settings'}
 			</span>
 		{/if}
 	</div>

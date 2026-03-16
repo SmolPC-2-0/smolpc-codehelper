@@ -19,6 +19,7 @@
 	let isSwitching = $state(false);
 	let isCheckingReadiness = $state(false);
 	let laneReadiness = $state<CheckModelResponse | null>(null);
+	// Not reactive; used only to discard stale async readiness responses.
 	let readinessRequestNonce = 0;
 
 	const effectiveModelId = $derived(
@@ -141,6 +142,13 @@
 					return;
 				}
 				laneReadiness = readiness;
+			})
+			.catch((error) => {
+				if (requestNonce !== readinessRequestNonce) {
+					return;
+				}
+				console.error('Failed to check model readiness:', error);
+				laneReadiness = null;
 			})
 			.finally(() => {
 				if (requestNonce === readinessRequestNonce) {

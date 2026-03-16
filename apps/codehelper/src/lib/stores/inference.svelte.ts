@@ -440,7 +440,8 @@ export const inferenceStore = {
 	 * Cancel the current generation.
 	 *
 	 * If the engine is hung in an FFI call that can't be interrupted,
-	 * force-reset the UI state after 15 seconds so the user isn't stuck.
+	 * force-reset the UI state after 15 seconds so the user is not stuck behind
+	 * the informational syncStatus() calls that still run during normal teardown.
 	 */
 	async cancel(): Promise<void> {
 		if (!isGenerating && cancelState !== 'pending') {
@@ -458,8 +459,25 @@ export const inferenceStore = {
 		}
 
 		cancelTimeoutSessionId = sessionId;
-		cancelTimeoutId = setTimeout(() => {
-			if (isActiveGenerationSession(sessionId) && (isGenerating || cancelState === 'pending')) {
+		cancelTimeoutId = setTimeout(async () => {
+			if (!isActiveGenerationSession(sessionId) || (!isGenerating && cancelState !== 'pending')) {
+				clearCancelTimeout(sessionId);
+				return;
+			}
+
+			// Reconcile with engine host before force-clearing
+			try {
+				const hostGenerating = await invoke<boolean>('is_generating');
+				if (hostGenerating) {
+					// Host is still generating — leave state alone, it will resolve eventually
+					clearCancelTimeout(sessionId);
+					return;
+				}
+			} catch {
+				// Can't reach host — fall through to force-clear so UI isn't stuck
+			}
+
+			if (isActiveGenerationSession(sessionId)) {
 				console.warn('Generation cancel timed out — force-resetting UI state');
 				cancelState = 'timed_out';
 				isGenerating = false;
