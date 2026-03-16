@@ -225,7 +225,11 @@
 				transparent 1px,
 				transparent 8px
 			);
-		background-size: auto, auto, auto, 100% 8px;
+		background-size:
+			auto,
+			auto,
+			auto,
+			100% 8px;
 		background-blend-mode: normal, screen, normal, soft-light;
 	}
 

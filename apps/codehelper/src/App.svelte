@@ -383,7 +383,7 @@ Teaching rules:
 			const availableModelIds = new Set(inferenceStore.availableModels.map((model) => model.id));
 			const selectedModelId = availableModelIds.has(settingsStore.selectedModel)
 				? settingsStore.selectedModel
-				: inferenceStore.availableModels[0]?.id ?? null;
+				: (inferenceStore.availableModels[0]?.id ?? null);
 
 			await inferenceStore.ensureStarted({
 				mode: 'auto',

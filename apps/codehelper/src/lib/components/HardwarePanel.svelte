@@ -57,7 +57,7 @@
 {#if visible}
 	<div class="hardware-panel">
 		<div class="mb-4 flex items-center justify-between">
-			<h3 class="text-lg font-semibold flex items-center gap-2">
+			<h3 class="flex items-center gap-2 text-lg font-semibold">
 				<Cpu class="h-5 w-5" />
 				Hardware Information
 			</h3>
@@ -83,12 +83,12 @@
 
 		{#if hardwareStore.loading}
 			<div class="flex items-center justify-center py-8">
-				<div class="animate-spin text-primary">
+				<div class="text-primary animate-spin">
 					<RefreshCw class="h-8 w-8" />
 				</div>
 			</div>
 		{:else if hardwareStore.error}
-			<div class="rounded-md border border-red-500 bg-red-50 dark:bg-red-950 p-4">
+			<div class="rounded-md border border-red-500 bg-red-50 p-4 dark:bg-red-950">
 				<p class="text-sm text-red-600 dark:text-red-400">
 					Error detecting hardware: {hardwareStore.error}
 				</p>
@@ -96,9 +96,9 @@
 		{:else if hardwareStore.info}
 			<div class="space-y-4">
 				<!-- CPU Information -->
-				<div class="rounded-lg border border-border p-4">
+				<div class="border-border rounded-lg border p-4">
 					<div class="mb-3 flex items-center gap-2">
-						<Cpu class="h-4 w-4 text-primary" />
+						<Cpu class="text-primary h-4 w-4" />
 						<h4 class="font-semibold">CPU</h4>
 					</div>
 					<div class="space-y-2 text-sm">
@@ -117,27 +117,28 @@
 						<div class="grid grid-cols-3 gap-2">
 							<span class="text-muted-foreground">Cores:</span>
 							<span class="col-span-2"
-								>{hardwareStore.info.cpu.cores_physical} physical / {hardwareStore.info
-									.cpu.cores_logical} logical</span
+								>{hardwareStore.info.cpu.cores_physical} physical / {hardwareStore.info.cpu
+									.cores_logical} logical</span
 							>
 						</div>
 						<div class="grid grid-cols-3 gap-2">
 							<span class="text-muted-foreground">Frequency:</span>
-							<span class="col-span-2"
-								>{formatFrequency(hardwareStore.info.cpu.frequency_mhz)}</span
+							<span class="col-span-2">{formatFrequency(hardwareStore.info.cpu.frequency_mhz)}</span
 							>
 						</div>
 						<div class="grid grid-cols-3 gap-2">
 							<span class="text-muted-foreground">Cache:</span>
 							<span class="col-span-2">
-								L1: {formatCache(hardwareStore.info.cpu.cache_l1_kb)},
-								L2: {formatCache(hardwareStore.info.cpu.cache_l2_kb)},
-								L3: {formatCache(hardwareStore.info.cpu.cache_l3_kb)}
+								L1: {formatCache(hardwareStore.info.cpu.cache_l1_kb)}, L2: {formatCache(
+									hardwareStore.info.cpu.cache_l2_kb
+								)}, L3: {formatCache(hardwareStore.info.cpu.cache_l3_kb)}
 							</span>
 						</div>
-						<div class="mt-3 pt-3 border-t border-border">
-							<div class="mb-1 text-muted-foreground text-xs">
-								{hardwareStore.info.cpu.architecture.includes('aarch64') ? 'SIMD Extensions:' : 'Instruction Sets:'}
+						<div class="border-border mt-3 border-t pt-3">
+							<div class="text-muted-foreground mb-1 text-xs">
+								{hardwareStore.info.cpu.architecture.includes('aarch64')
+									? 'SIMD Extensions:'
+									: 'Instruction Sets:'}
 							</div>
 							<div class="flex flex-wrap gap-1.5">
 								{#each hardwareStore.info.cpu.features.filter((feature) => {
@@ -153,7 +154,7 @@
 									}
 								}) as feature}
 									<span
-										class="bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-900 px-2 py-0.5 text-xs rounded-md"
+										class="rounded-md border border-green-200 bg-green-100 px-2 py-0.5 text-xs text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-400"
 									>
 										{feature}
 									</span>
@@ -164,15 +165,17 @@
 				</div>
 
 				<!-- Memory Information -->
-				<div class="rounded-lg border border-border p-4">
+				<div class="border-border rounded-lg border p-4">
 					<div class="mb-3 flex items-center gap-2">
-						<MemoryStick class="h-4 w-4 text-primary" />
+						<MemoryStick class="text-primary h-4 w-4" />
 						<h4 class="font-semibold">Memory</h4>
 					</div>
 					<div class="space-y-2 text-sm">
 						<div class="grid grid-cols-3 gap-2">
 							<span class="text-muted-foreground">Total:</span>
-							<span class="col-span-2 font-medium">{hardwareStore.info.memory.total_gb.toFixed(1)} GB</span>
+							<span class="col-span-2 font-medium"
+								>{hardwareStore.info.memory.total_gb.toFixed(1)} GB</span
+							>
 						</div>
 						<div class="grid grid-cols-3 gap-2">
 							<span class="text-muted-foreground">Available:</span>
@@ -182,9 +185,9 @@
 				</div>
 
 				<!-- Storage Information -->
-				<div class="rounded-lg border border-border p-4">
+				<div class="border-border rounded-lg border p-4">
 					<div class="mb-3 flex items-center gap-2">
-						<HardDrive class="h-4 w-4 text-primary" />
+						<HardDrive class="text-primary h-4 w-4" />
 						<h4 class="font-semibold">Primary Storage</h4>
 					</div>
 					<div class="space-y-2 text-sm">
@@ -202,28 +205,29 @@
 						</div>
 						<div class="grid grid-cols-3 gap-2">
 							<span class="text-muted-foreground">Available:</span>
-							<span class="col-span-2">{hardwareStore.info.storage.available_gb.toFixed(0)} GB</span>
+							<span class="col-span-2">{hardwareStore.info.storage.available_gb.toFixed(0)} GB</span
+							>
 						</div>
 					</div>
 				</div>
 
 				<!-- GPU Information -->
-				<div class="rounded-lg border border-border p-4">
+				<div class="border-border rounded-lg border p-4">
 					<div class="mb-3 flex items-center gap-2">
-						<Gpu class="h-4 w-4 text-primary" />
+						<Gpu class="text-primary h-4 w-4" />
 						<h4 class="font-semibold">
 							GPU{hardwareStore.info.gpus.length > 1 ? 's' : ''}
-							<span class="ml-1 text-xs text-muted-foreground">
+							<span class="text-muted-foreground ml-1 text-xs">
 								({hardwareStore.info.gpus.length})
 							</span>
 						</h4>
 					</div>
 					{#if hardwareStore.info.gpus.length === 0}
-						<p class="text-sm text-muted-foreground">No GPUs detected</p>
+						<p class="text-muted-foreground text-sm">No GPUs detected</p>
 					{:else}
 						<div class="space-y-3">
 							{#each hardwareStore.info.gpus as gpu, i}
-								<div class={`space-y-2 text-sm ${i > 0 ? 'pt-3 border-t border-border' : ''}`}>
+								<div class={`space-y-2 text-sm ${i > 0 ? 'border-border border-t pt-3' : ''}`}>
 									<div class="grid grid-cols-3 gap-2">
 										<span class="text-muted-foreground">Name:</span>
 										<span class="col-span-2 font-medium">{gpu.name}</span>
@@ -260,16 +264,16 @@
 
 				<!-- NPU Information -->
 				{#if hardwareStore.info.npu}
-					<div class="rounded-lg border border-border p-4">
+					<div class="border-border rounded-lg border p-4">
 						<div class="mb-3 flex items-center gap-2">
-							<Zap class="h-4 w-4 text-primary" />
+							<Zap class="text-primary h-4 w-4" />
 							<h4 class="font-semibold">NPU</h4>
 							{#if hardwareStore.info.npu.confidence !== 'High'}
 								<span
-									class={`ml-auto px-2 py-0.5 text-xs rounded-md ${
+									class={`ml-auto rounded-md px-2 py-0.5 text-xs ${
 										hardwareStore.info.npu.confidence === 'Medium'
-											? 'bg-yellow-100 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-400'
-											: 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+											? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-400'
+											: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
 									}`}
 								>
 									{hardwareStore.info.npu.confidence} Confidence
@@ -285,7 +289,8 @@
 							</div>
 							<div class="grid grid-cols-3 gap-2">
 								<span class="text-muted-foreground">Identifier:</span>
-								<span class="col-span-2 font-mono text-xs">{hardwareStore.info.npu.identifier}</span>
+								<span class="col-span-2 font-mono text-xs">{hardwareStore.info.npu.identifier}</span
+								>
 							</div>
 							{#if hardwareStore.info.npu.driver_version}
 								<div class="grid grid-cols-3 gap-2">
@@ -304,8 +309,8 @@
 						</div>
 					</div>
 				{:else}
-					<div class="rounded-lg border border-dashed border-border p-4">
-						<div class="flex items-center gap-2 text-muted-foreground">
+					<div class="border-border rounded-lg border border-dashed p-4">
+						<div class="text-muted-foreground flex items-center gap-2">
 							<Zap class="h-4 w-4" />
 							<span class="text-sm">No NPU detected</span>
 						</div>
@@ -313,14 +318,14 @@
 				{/if}
 
 				<!-- Detection Info -->
-				<div class="pt-2 border-t border-border text-xs text-muted-foreground text-center">
+				<div class="border-border text-muted-foreground border-t pt-2 text-center text-xs">
 					Detected at {new Date(hardwareStore.info.detected_at).toLocaleString()}
 				</div>
 			</div>
 		{:else}
 			<div class="flex flex-col items-center justify-center py-8 text-center">
-				<Cpu class="h-12 w-12 text-muted-foreground mb-3" />
-				<p class="text-sm text-muted-foreground mb-3">No hardware information available</p>
+				<Cpu class="text-muted-foreground mb-3 h-12 w-12" />
+				<p class="text-muted-foreground mb-3 text-sm">No hardware information available</p>
 				<Button onclick={refreshHardware}>Detect Hardware</Button>
 			</div>
 		{/if}

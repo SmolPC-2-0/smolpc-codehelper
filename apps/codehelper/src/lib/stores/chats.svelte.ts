@@ -13,13 +13,9 @@ let chats = $state<Chat[]>(initialChats);
 let currentChatId = $state<string | null>(initialCurrentId);
 
 // Derived state
-const currentChat = $derived<Chat | null>(
-	chats.find((chat) => chat.id === currentChatId) ?? null
-);
+const currentChat = $derived<Chat | null>(chats.find((chat) => chat.id === currentChatId) ?? null);
 
-const sortedChats = $derived<Chat[]>(
-	[...chats].sort((a, b) => b.updatedAt - a.updatedAt)
-);
+const sortedChats = $derived<Chat[]>([...chats].sort((a, b) => b.updatedAt - a.updatedAt));
 
 export interface DeletedChatSnapshot {
 	chat: Chat;
@@ -165,7 +161,8 @@ export const chatsStore = {
 		chat.updatedAt = Date.now();
 
 		if (chat.archived && currentChatId === id) {
-			const nextChat = chats.find((candidate) => candidate.id !== id && !candidate.archived) ?? null;
+			const nextChat =
+				chats.find((candidate) => candidate.id !== id && !candidate.archived) ?? null;
 			currentChatId = nextChat?.id ?? null;
 			saveToStorage(CURRENT_CHAT_KEY, currentChatId);
 		}

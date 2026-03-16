@@ -157,7 +157,9 @@ export const inferenceStore = {
 			startupErrorCode: readiness?.error_code ?? null,
 			startupErrorMessage: readiness?.error_message ?? null,
 			startupRetryable: readiness?.retryable ?? false,
-			activeBackend: normalizeBackendName(readiness?.active_backend) ?? normalizeBackendName(backendStatus?.active_backend),
+			activeBackend:
+				normalizeBackendName(readiness?.active_backend) ??
+				normalizeBackendName(backendStatus?.active_backend),
 			activeArtifactBackend: normalizeBackendName(backendStatus?.active_artifact_backend),
 			runtimeEngine: backendStatus?.runtime_engine ?? null,
 			activeModelPath: backendStatus?.active_model_path ?? null,

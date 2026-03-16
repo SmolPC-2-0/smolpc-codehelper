@@ -153,10 +153,7 @@ export function renderMarkdown(text: string): string {
 	html = escapeHtml(html);
 
 	// Step 3: Process inline code (backticks survived HTML escaping, content is already escaped)
-	html = html.replace(
-		/`([^`]+)`/g,
-		'<code class="inline-code">$1</code>'
-	);
+	html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
 
 	// Headers
 	html = html.replace(/^### (.*$)/gim, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');

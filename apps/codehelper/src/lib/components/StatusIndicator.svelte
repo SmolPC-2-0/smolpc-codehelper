@@ -46,9 +46,7 @@
 		{#if status.readinessState === 'failed' && status.startupErrorCode}
 			<span class="status-indicator__runtime">{status.startupErrorCode}</span>
 		{:else if status.isLoaded}
-			<span class="status-indicator__runtime">
-				Open model and runtime settings
-			</span>
+			<span class="status-indicator__runtime"> Open model and runtime settings </span>
 		{/if}
 	</div>
 </button>

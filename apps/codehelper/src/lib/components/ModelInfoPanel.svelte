@@ -132,9 +132,13 @@
 					<span>Readiness State</span>
 					<span>{status.readinessState}</span>
 					<span>Attempt ID</span>
-					<span title={status.readiness?.attempt_id ?? ''}>{status.readiness?.attempt_id ?? 'n/a'}</span>
+					<span title={status.readiness?.attempt_id ?? ''}
+						>{status.readiness?.attempt_id ?? 'n/a'}</span
+					>
 					<span>State Since</span>
-					<span title={status.readiness?.state_since ?? ''}>{status.readiness?.state_since ?? 'n/a'}</span>
+					<span title={status.readiness?.state_since ?? ''}
+						>{status.readiness?.state_since ?? 'n/a'}</span
+					>
 					<span>Loaded Model</span>
 					<span>{status.currentModel ?? 'none'}</span>
 					<span>Backend</span>
@@ -152,7 +156,13 @@
 					<span>DirectML Lane</span>
 					<span>{formatReason(status.directmlPreflightState ?? status.directmlFailureClass)}</span>
 					<span>NPU Lane</span>
-					<span>{formatReason(inferenceStore.backendStatus?.lanes?.openvino_npu?.last_failure_class ?? inferenceStore.backendStatus?.lanes?.openvino_npu?.preflight_state ?? null)}</span>
+					<span
+						>{formatReason(
+							inferenceStore.backendStatus?.lanes?.openvino_npu?.last_failure_class ??
+								inferenceStore.backendStatus?.lanes?.openvino_npu?.preflight_state ??
+								null
+						)}</span
+					>
 					<span>Model Path</span>
 					<span title={status.activeModelPath ?? ''}>{status.activeModelPath ?? 'n/a'}</span>
 				</div>

@@ -33,11 +33,7 @@
 			</div>
 		{/if}
 
-		<ChatInput
-			{onSend}
-			disabled={!isLoaded || isGenerating}
-			placeholder={inputPlaceholder}
-		/>
+		<ChatInput {onSend} disabled={!isLoaded || isGenerating} placeholder={inputPlaceholder} />
 	</div>
 </section>
 

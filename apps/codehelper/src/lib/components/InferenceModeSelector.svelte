@@ -32,19 +32,28 @@
 		const dmlFailed = isLaneFailed(dmlLane);
 
 		return [
-			{ value: 'auto' as const, label: 'Mode: Auto', disabled: false, title: 'Automatic backend selection' },
+			{
+				value: 'auto' as const,
+				label: 'Mode: Auto',
+				disabled: false,
+				title: 'Automatic backend selection'
+			},
 			{
 				value: 'dml' as const,
 				label: `Mode: DirectML${dmlFailed ? ' (unavailable)' : ''}`,
 				disabled: dmlFailed,
-				title: dmlFailed ? `DirectML unavailable: ${laneFailureReason(dmlLane)}` : 'Force DirectML GPU acceleration'
+				title: dmlFailed
+					? `DirectML unavailable: ${laneFailureReason(dmlLane)}`
+					: 'Force DirectML GPU acceleration'
 			},
 			{ value: 'cpu' as const, label: 'Mode: CPU', disabled: false, title: 'Force CPU inference' },
 			{
 				value: 'npu' as const,
 				label: `Mode: NPU${npuFailed ? ' (unavailable)' : ''}`,
 				disabled: npuFailed,
-				title: npuFailed ? `NPU unavailable: ${laneFailureReason(npuLane)}` : 'Force Intel NPU via OpenVINO'
+				title: npuFailed
+					? `NPU unavailable: ${laneFailureReason(npuLane)}`
+					: 'Force Intel NPU via OpenVINO'
 			}
 		];
 	});

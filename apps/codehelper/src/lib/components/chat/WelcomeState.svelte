@@ -25,11 +25,9 @@
 
 	<div class="welcome-state__examples">
 		{#if showQuickExamples}
-			<QuickExamples onSelectExample={onSelectExample} onClose={() => onToggleExamples(false)} />
+			<QuickExamples {onSelectExample} onClose={() => onToggleExamples(false)} />
 		{:else}
-			<Button variant="outline" onclick={() => onToggleExamples(true)}>
-				Open Prompt Starters
-			</Button>
+			<Button variant="outline" onclick={() => onToggleExamples(true)}>Open Prompt Starters</Button>
 		{/if}
 	</div>
 </div>
