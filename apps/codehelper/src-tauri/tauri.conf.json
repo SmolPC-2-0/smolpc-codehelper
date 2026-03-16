@@ -38,6 +38,7 @@
       "libs/*",
       "libs/openvino",
       "binaries/*",
+      "resources/blender",
       "resources/launcher/*"
     ]
   }

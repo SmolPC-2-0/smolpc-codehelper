@@ -270,34 +270,32 @@ mod tests {
             line.clear();
             reader.read_line(&mut line).await.expect("read initialized");
 
-            for _ in 0..2 {
-                line.clear();
-                reader.read_line(&mut line).await.expect("read tools/list");
-                let request: serde_json::Value =
-                    serde_json::from_str(line.trim_end()).expect("tools list request");
-                writer
-                    .write_all(
-                        format!(
-                            "{}\n",
-                            json!({
-                                "jsonrpc": "2.0",
-                                "id": request["id"],
-                                "result": {
-                                    "tools": [
-                                        {
-                                            "name": "get_image_metadata",
-                                            "description": "Current image metadata",
-                                            "inputSchema": { "type": "object" }
-                                        }
-                                    ]
-                                }
-                            })
-                        )
-                        .as_bytes(),
+            line.clear();
+            reader.read_line(&mut line).await.expect("read tools/list");
+            let request: serde_json::Value =
+                serde_json::from_str(line.trim_end()).expect("tools list request");
+            writer
+                .write_all(
+                    format!(
+                        "{}\n",
+                        json!({
+                            "jsonrpc": "2.0",
+                            "id": request["id"],
+                            "result": {
+                                "tools": [
+                                    {
+                                        "name": "get_image_metadata",
+                                        "description": "Current image metadata",
+                                        "inputSchema": { "type": "object" }
+                                    }
+                                ]
+                            }
+                        })
                     )
-                    .await
-                    .expect("write tools/list response");
-            }
+                    .as_bytes(),
+                )
+                .await
+                .expect("write tools/list response");
         });
 
         let provider = GimpProvider::with_config(TcpTransportConfig {

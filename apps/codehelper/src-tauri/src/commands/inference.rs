@@ -308,6 +308,10 @@ pub(crate) async fn resolve_generation_client(
     Ok(client)
 }
 
+pub(crate) async fn cached_generation_client(state: &InferenceState) -> Option<EngineClient> {
+    state.client.lock().await.clone()
+}
+
 fn log_host_binary_resolution(host_binary: Option<&PathBuf>) {
     let Some(path) = host_binary else {
         log::info!("Shared engine host binary will be resolved via runtime discovery");

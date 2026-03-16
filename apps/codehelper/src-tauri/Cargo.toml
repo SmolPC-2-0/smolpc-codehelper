@@ -27,8 +27,11 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["full"] }
 async-trait = { workspace = true }
+axum = { workspace = true }
+rand = { workspace = true }
 rfd = "0.15.4"
 dirs = "6"
+serde-pickle = "1.2"
 smolpc-assistant-types = { path = "../../../crates/smolpc-assistant-types" }
 smolpc-mcp-client = { path = "../../../crates/smolpc-mcp-client" }
 smolpc-engine-core = { path = "../../../engine/crates/smolpc-engine-core" }

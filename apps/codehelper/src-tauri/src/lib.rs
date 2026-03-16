@@ -22,6 +22,7 @@ use commands::launcher::{launcher_launch_or_focus, launcher_list_apps};
 use commands::modes::{list_modes, mode_refresh_tools, mode_status};
 use launcher::orchestrator::LauncherState;
 use modes::registry::ModeProviderRegistry;
+use tauri::Manager;
 #[allow(clippy::missing_panics_doc)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -36,13 +37,14 @@ pub fn run() {
             }
 
             log::info!("Hardware detection will occur on first request");
+            let resource_dir = app.path().resource_dir().ok();
+            app.manage(ModeProviderRegistry::new(resource_dir));
             Ok(())
         })
         .manage(AssistantState::default())
         .manage(HardwareCache::default())
         .manage(InferenceState::default())
         .manage(LauncherState::default())
-        .manage(ModeProviderRegistry::default())
         .invoke_handler(tauri::generate_handler![
             read,
             write,
