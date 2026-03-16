@@ -1,165 +1,137 @@
 # SmolPC Unified Assistant -- Specification Index
 
-> **Read this document first.** It orients every AI session and human contributor
-> working on the SmolPC Unified Assistant.
+> Read this document first. It defines the product shape, branch flow, and
+> reading order for every session working on the unified assistant.
 
----
+**Last Updated:** 2026-03-16
+**Status:** Documentation baseline for the unified frontend
 
 ## Project Summary
 
-SmolPC Code Helper is an **offline AI coding and creative assistant** for
-secondary school students (ages 11--18) running budget Windows laptops.
+SmolPC Unified Assistant is a **single Tauri 2 desktop app** for students on
+budget Windows laptops. It provides six selectable modes inside one window:
 
-**What it does:** A single Tauri 2 desktop app provides six assistant modes --
-Code, GIMP, Blender, Writer, Calc, and Impress -- all powered by a shared local
-inference server (`smolpc-engine-host` on port 19432). Code mode is delivered as
-a VS Code extension that connects to the same engine.
+- Code
+- GIMP
+- Blender
+- Writer
+- Calc
+- Slides
 
-**Who it is for:** Students and teachers in schools where cloud access, admin
-rights, and high-end hardware cannot be assumed.
+`Slides` is the user-facing label for the internal mode id `impress`.
 
-**Key constraints:**
+All modes share one local inference server: `smolpc-engine-host` on port
+`19432`. The unified app owns the chat shell and mode switching. The launcher
+is **not** part of the product architecture for this workstream.
 
-| Constraint | Detail |
+## Locked Decisions
+
+| Area | Decision |
 |---|---|
-| Offline-first | No cloud calls, no telemetry. All inference runs locally. |
-| Privacy-first | GDPR and FERPA compliant by design. |
-| Budget hardware | Must run on 8 GB RAM; 16 GB is the comfort tier. |
-| NPU support | Intel NPU acceleration via OpenVINO. |
-| OS target | Windows primary (10/11). |
-| No admin install | NSIS currentUser installer -- no elevated privileges. |
+| Product shell | One unified Tauri app |
+| Code mode | Included in the unified app |
+| Mode list | Code, GIMP, Blender, Writer, Calc, Slides |
+| Engine ownership | Shared `smolpc-engine-host` only |
+| Launcher | Not part of architecture or implementation path |
+| Target OS | Windows primary |
+| Implementation mainline | `dev/unified-assistant` |
+| Spec mainline | `docs/unified-assistant-spec` |
+| Migration strategy | Adapters first |
+| Merge strategy | Strict isolation |
 
----
+## Authoritative Branches
+
+| Branch | Role |
+|---|---|
+| `docs/unified-assistant-spec` | Canonical architecture and product spec |
+| `dev/unified-assistant` | Implementation integration mainline |
+| `codex/*` | Narrow work branches created from one of the two branches above |
+
+## Required Workflow
+
+1. Update or correct the design on `docs/unified-assistant-spec`.
+2. Merge the refreshed docs into `docs/unified-assistant-spec`.
+3. Merge `docs/unified-assistant-spec` into `dev/unified-assistant`.
+4. Create implementation branches from `dev/unified-assistant`.
+
+No implementation branch should be created until the documentation baseline has
+been merged into `dev/unified-assistant`.
 
 ## Reading Order
 
-Pick the path that matches your task. Every path starts with this README.
+### New session
 
-### New session (no prior context)
-
-1. **This README**
-2. [ARCHITECTURE.md](ARCHITECTURE.md) -- system-level understanding
-3. [CURRENT_STATE.md](CURRENT_STATE.md) -- what is done, in progress, and blocked
+1. This README
+2. [ARCHITECTURE.md](ARCHITECTURE.md)
+3. [CURRENT_STATE.md](CURRENT_STATE.md)
+4. [GIT_WORKFLOW.md](GIT_WORKFLOW.md)
 
 ### Frontend work
 
 1. [ARCHITECTURE.md](ARCHITECTURE.md)
 2. [FRONTEND_SPEC.md](FRONTEND_SPEC.md)
-3. [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)
+3. [CODE_MODE_SPEC.md](CODE_MODE_SPEC.md)
+4. [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)
 
-### VS Code extension work
-
-1. [ARCHITECTURE.md](ARCHITECTURE.md)
-2. [VSCODE_EXTENSION_SPEC.md](VSCODE_EXTENSION_SPEC.md)
-3. [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)
-
-### Engine / inference work
-
-1. [ARCHITECTURE.md](ARCHITECTURE.md)
-2. [MODEL_STRATEGY.md](MODEL_STRATEGY.md)
-3. [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)
-
-### MCP integration work
+### Backend orchestration work
 
 1. [ARCHITECTURE.md](ARCHITECTURE.md)
 2. [MCP_INTEGRATION.md](MCP_INTEGRATION.md)
-3. [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)
+3. [PACKAGING.md](PACKAGING.md)
+4. [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)
 
-### Packaging / release work
+### Branching and rollout work
 
-1. [ARCHITECTURE.md](ARCHITECTURE.md)
-2. [PACKAGING.md](PACKAGING.md)
-3. [MODEL_STRATEGY.md](MODEL_STRATEGY.md)
-
-### Starting a new workstream
-
-1. **This README**
+1. [CURRENT_STATE.md](CURRENT_STATE.md)
 2. [GIT_WORKFLOW.md](GIT_WORKFLOW.md)
-3. [ARCHITECTURE.md](ARCHITECTURE.md)
-4. The relevant spec document for the workstream
-
----
+3. [IMPLEMENTATION_PHASES.md](IMPLEMENTATION_PHASES.md)
 
 ## Document Index
 
-| # | Document | Description |
-|---|---|---|
-| 1 | [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture: process model, inference pipeline, mode switching, MCP integration, and how the VS Code extension fits in. Start here for any technical work. |
-| 2 | [FRONTEND_SPEC.md](FRONTEND_SPEC.md) | Unified Tauri app frontend built with Svelte 5 runes and Tailwind 4. Covers the mode dropdown, chat UI, streaming via Tauri Channels, and the status bar. |
-| 3 | [VSCODE_EXTENSION_SPEC.md](VSCODE_EXTENSION_SPEC.md) | VS Code extension for Code mode. Defines the InlineCompletionProvider, webview chat panel, LSP diagnostic integration, and education-oriented features. |
-| 4 | [MCP_INTEGRATION.md](MCP_INTEGRATION.md) | MCP server integration for creative apps. Covers gimp-mcp (GIMP), the hybrid HTTP + MCP bridge for Blender, mcp-libre (LibreOffice), and the generalized MCP client. |
-| 5 | [MODEL_STRATEGY.md](MODEL_STRATEGY.md) | Model selection and tiering. Defines Tier 1 (8 GB, 0.5--3B params) and Tier 2 (16 GB+, 4--8B params), INT4 quantization, the ONNX/OpenVINO export pipeline, and runtime consolidation. |
-| 6 | [PACKAGING.md](PACKAGING.md) | Installer and distribution. Covers NSIS currentUser packaging, DLL bundling, Python/MCP deployment via bundled `uv.exe`, Azure Trusted Signing, directory structure, and update mechanism. |
-| 7 | [GIT_WORKFLOW.md](GIT_WORKFLOW.md) | Branch naming conventions, rules for parallel AI sessions, PR workflow, commit discipline, and merge conflict prevention strategies. |
-| 8 | [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md) | Coding standards for the project. Rust patterns, Svelte 5 runes usage, type synchronization between Rust and TypeScript, error handling, logging, and testing. |
-| 9 | [LEARNINGS.md](LEARNINGS.md) | Session-tracked corrections and discoveries, categorized by subsystem. A living record of mistakes made and lessons learned during development. |
-| 10 | [CURRENT_STATE.md](CURRENT_STATE.md) | Living status document. Tracks what is done, in progress, and blocked for each workstream. Read after ARCHITECTURE.md to understand where the project stands. |
-| 11 | [RESOURCES.md](RESOURCES.md) | External links: documentation, API references, GitHub repositories, HuggingFace model cards, and benchmark results. |
+| Document | Purpose |
+|---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Final system architecture for the unified app, engine, and mode providers |
+| [FRONTEND_SPEC.md](FRONTEND_SPEC.md) | UI shell, state model, and frontend contracts for all six modes |
+| [CODE_MODE_SPEC.md](CODE_MODE_SPEC.md) | Exact definition of what current Codehelper behavior is preserved in Code mode |
+| [MCP_INTEGRATION.md](MCP_INTEGRATION.md) | Tool-provider model and external integration behavior |
+| [PACKAGING.md](PACKAGING.md) | Windows packaging and bundled resource requirements |
+| [CURRENT_STATE.md](CURRENT_STATE.md) | Current baseline, next workstreams, and known risks |
+| [GIT_WORKFLOW.md](GIT_WORKFLOW.md) | Docs-first branching and merge-safe implementation rules |
+| [IMPLEMENTATION_PHASES.md](IMPLEMENTATION_PHASES.md) | Ordered implementation phases after the docs baseline is merged |
+| [MODEL_STRATEGY.md](MODEL_STRATEGY.md) | Model and runtime strategy; still shared across all modes |
+| [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md) | Coding standards for Rust and Svelte |
+| [VSCODE_EXTENSION_SPEC.md](VSCODE_EXTENSION_SPEC.md) | Historical/future-work note; not active for this plan |
+| [LEARNINGS.md](LEARNINGS.md) | Session corrections and discoveries |
+| [RESOURCES.md](RESOURCES.md) | External references and source repositories |
 
----
+## Repository Direction
 
-## Quick Reference -- Key Decisions
+The implementation location for the unified product remains
+`apps/codehelper/`. The current standalone apps are reference sources during
+the port:
 
-| Decision | Choice | Rationale |
-|---|---|---|
-| App architecture | Unified Tauri 2 app (mode dropdown) + VS Code extension | Single binary for creative modes; extension for Code mode where VS Code is the natural host |
-| Modes | Code, GIMP, Blender, Writer, Calc, Impress | Covers the core curriculum tools students use |
-| Inference server | Shared `smolpc-engine-host` on `:19432` | One process manages models and memory; all modes connect to it |
-| Inference runtimes | Migrating to 2: `onnxruntime-genai` (CPU/GPU) + `openvino_genai` (NPU) | Best coverage of Intel hardware without runtime bloat |
-| Model tiering | Tier 1 (8 GB, 0.5--3B) / Tier 2 (16 GB+, 4--8B) | Tier 1 must work on the worst-case hardware |
-| Frontend stack | Svelte 5 runes, Tailwind 4, Tauri Channels | Runes for fine-grained reactivity; Channels for streaming tokens |
-| GIMP integration | `maorcc/gimp-mcp` | Community MCP server for GIMP, actively maintained |
-| Blender integration | Hybrid: HTTP bridge + `blender-mcp` | Blender's Python API needs both REST and MCP access |
-| LibreOffice integration | `patrup/mcp-libre` | MCP server supporting Writer, Calc, Impress |
-| Python packaging | Bundle `uv.exe` as Tauri sidecar | Fast, no-admin Python env management |
-| Installer | Tauri NSIS `currentUser` | No admin rights required -- critical for school deployments |
-| Code signing | Azure Trusted Signing ($9.99/mo) | Affordable code signing to avoid SmartScreen warnings |
-| Code mode | VS Code extension (webview chat + InlineCompletionProvider) | Students already use VS Code; inline completions feel native |
+- `apps/gimp-assistant/`
+- `apps/blender-assistant/`
+- `apps/libreoffice-assistant/`
 
----
+They continue to evolve independently while their capabilities are ported into
+new adapter layers inside the unified app.
 
 ## Pending Decisions
 
-These items are tracked but not yet resolved. Each will be finalized through
-hands-on testing and documented in the relevant spec file.
+These remain open after the documentation baseline:
 
-| # | Decision | Blocker | Tracked in |
-|---|---|---|---|
-| 1 | **Final model selection** | Requires benchmarking on 8 GB target hardware | [MODEL_STRATEGY.md](MODEL_STRATEGY.md) |
-| 2 | **CPU runtime consolidation** | Need to determine if `onnxruntime-genai` alone can cover CPU, or if native OpenVINO CPU path is needed | [MODEL_STRATEGY.md](MODEL_STRATEGY.md) |
-| 3 | **Model distribution method** | Bundle models in installer vs download-on-first-run. Tradeoffs: installer size vs first-run UX on offline networks | [PACKAGING.md](PACKAGING.md) |
+- final model selection for target hardware
+- final Blender secondary MCP layering scope
+- exact Windows packaging details for third-party runtimes
+- final acceptance criteria for the LibreOffice provider on school hardware
 
----
+## Rule Of Thumb
 
-## How to Use This Specification
+If a contributor needs to decide between:
 
-**For AI sessions (Claude, Codex, etc.):**
-Read this README first, then follow the reading order for your task. Reference
-`CURRENT_STATE.md` before starting work to avoid duplicating effort or
-contradicting in-progress decisions. When you make a significant decision or
-discover a correction, record it in `LEARNINGS.md`.
+- modifying a standalone app directly, or
+- porting the behavior into a new adapter inside the unified app
 
-**For human contributors:**
-Same reading order applies. The spec documents are the source of truth for
-design decisions. If you change a decision, update the relevant spec document
-and this README's quick-reference table.
-
-**Living documents:** `CURRENT_STATE.md` and `LEARNINGS.md` are updated
-frequently. The other documents are updated when decisions change. All documents
-live in this directory (`/docs/unified-assistant-spec/`).
-
----
-
-## Repository Cleanup Note
-
-**The original `/docs/` directory has been DELETED on this branch.** It contained
-outdated and potentially conflicting documentation from prior development phases
-(Phase 1.5, ONNX plan, engine audits, etc.). Since this is a branch from `main`,
-nothing is lost — all prior docs are preserved on `main` and can be referenced
-if needed.
-
-All authoritative documentation for the unified assistant lives exclusively in
-`/docs/unified-assistant-spec/`. Future sessions should NOT recreate `/docs/` or reference
-documents from the `main` branch's `/docs/` unless explicitly checking historical
-context. The spec docs in `/docs/unified-assistant-spec/` supersede all prior documentation and
-are based on the current codebase state + completed research + web research findings.
+choose the adapter approach unless the standalone app itself has a bug that must
+be fixed at the source first.

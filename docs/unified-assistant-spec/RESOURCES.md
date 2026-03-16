@@ -22,7 +22,7 @@ Canonical reference for all external links, documentation sources, GitHub repos,
 - [MCP (Model Context Protocol)](#mcp-model-context-protocol)
   - [MCP Specification](#mcp-specification)
   - [MCP Servers](#mcp-servers)
-- [VS Code Extension Development](#vs-code-extension-development)
+- [Historical VS Code Extension Research](#historical-vs-code-extension-research)
   - [Core APIs](#core-apis)
   - [Reference Implementations](#reference-implementations)
 - [Frontend Framework](#frontend-framework)
@@ -209,7 +209,10 @@ Servers the unified assistant will connect to for application control.
 
 ---
 
-## VS Code Extension Development
+## Historical VS Code Extension Research
+
+These resources are retained for historical context and possible future work.
+They are not part of the active unified frontend implementation path.
 
 ### Core APIs
 
@@ -319,7 +322,7 @@ Study these for patterns, architecture decisions, and pitfalls.
 | Resource | URL | Purpose |
 |---|---|---|
 | GitHub organization | https://github.com/SmolPC-2-0/ | All SmolPC repositories. |
-| Main monorepo | https://github.com/SmolPC-2-0/smolpc-codehelper | Primary development repository containing engine, apps, and launcher. |
+| Main monorepo | https://github.com/SmolPC-2-0/smolpc-codehelper | Primary development repository containing engine, apps, utilities, and the unified app work. |
 
 ### Monorepo Zone Map
 
@@ -335,7 +338,7 @@ These are the key internal paths within the monorepo. Reference `docs/ARCHITECTU
 | Blender assistant | `apps/blender-assistant/` | Reference app for Blender integration via MCP. |
 | Code Helper | `apps/codehelper/` | Primary Tauri desktop app. Svelte 5 frontend + Tauri backend with engine client integration. |
 | LibreOffice assistant | `apps/libreoffice-assistant/` | LibreOffice integration app. |
-| Launcher | `launcher/` | Cross-app launcher. App discovery, launch-or-focus orchestration. |
+| Launcher | `launcher/` | Historical / optional utility zone. Not part of the active unified frontend architecture. |
 
 **Verified:** 2026-03-13
 

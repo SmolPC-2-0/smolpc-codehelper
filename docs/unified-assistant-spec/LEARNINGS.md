@@ -111,10 +111,10 @@
 
 ---
 
-## VS Code Extension
+## Historical VS Code Extension Research
 
-- **Chat Participant API requires Copilot** (2026-03): The VS Code Chat Participant API (for contributing to the Copilot chat panel) only works when GitHub Copilot is installed. Don't use it — use webview panels instead for the chat UI.
+- **Chat Participant API requires Copilot** (2026-03): Historical finding from the old extension-first direction. The VS Code Chat Participant API (for contributing to the Copilot chat panel) only works when GitHub Copilot is installed. Don't use it for the current unified app.
 
-- **InlineCompletionItemProvider is the autocomplete API** (2026-03): Same API that GitHub Copilot uses for ghost text. It's stable, well-documented, and works without Copilot installed.
+- **InlineCompletionItemProvider is the autocomplete API** (2026-03): Historical extension research. Same API that GitHub Copilot uses for ghost text. It is not part of the active unified-app plan.
 
 - **1.5B model viable for completions, not agents** (2026-03): A 1.5-3B model can handle short code completions and explain-code tasks. It is NOT capable of agentic multi-file edits (too slow, context too limited, instruction following too weak).
