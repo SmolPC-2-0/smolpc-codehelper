@@ -83,11 +83,7 @@
 		</div>
 
 		<div class="workspace-header__selectors">
-			<AppModeDropdown
-				{modes}
-				{activeMode}
-				onChange={onChangeMode}
-			/>
+			<AppModeDropdown {modes} {activeMode} onChange={onChangeMode} />
 		</div>
 	</div>
 	<div class="workspace-header__actions">
@@ -113,7 +109,7 @@
 			<Keyboard class="h-4 w-4" />
 		</Button>
 		<HardwareIndicator onclick={onToggleHardware} active={hardwareActive} />
-		<StatusIndicator status={status} active={modelInfoActive} onToggle={onToggleModelInfo} />
+		<StatusIndicator {status} active={modelInfoActive} onToggle={onToggleModelInfo} />
 	</div>
 </header>
 

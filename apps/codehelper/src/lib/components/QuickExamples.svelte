@@ -59,7 +59,7 @@
 			<button
 				onclick={() => handleSelect(example.prompt)}
 				class="quick-examples__item"
-				disabled={disabled}
+				{disabled}
 				title={disabled && disabledReason ? disabledReason : example.prompt}
 			>
 				<div class="quick-examples__item-head">

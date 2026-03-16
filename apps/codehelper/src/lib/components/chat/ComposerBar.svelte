@@ -26,9 +26,9 @@
 			? 'Generating response...'
 			: disabledReason
 				? 'Chat execution is not available in this mode yet.'
-			: !isLoaded
-				? 'Loading model...'
-				: 'Ask a coding question (Shift+Enter for new line)...'
+				: !isLoaded
+					? 'Loading model...'
+					: 'Ask a coding question (Shift+Enter for new line)...'
 	);
 </script>
 

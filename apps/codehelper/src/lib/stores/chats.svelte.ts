@@ -305,7 +305,9 @@ export const chatsStore = {
 
 		if (chat.archived && resolveCurrentChatId(chat.mode) === id) {
 			const nextChat =
-				getChatsForModeInternal(chat.mode).find((candidate) => candidate.id !== id && !candidate.archived) ??
+				getChatsForModeInternal(chat.mode).find(
+					(candidate) => candidate.id !== id && !candidate.archived
+				) ??
 				getChatsForModeInternal(chat.mode).find((candidate) => candidate.id !== id) ??
 				null;
 			currentChatIdByMode = {

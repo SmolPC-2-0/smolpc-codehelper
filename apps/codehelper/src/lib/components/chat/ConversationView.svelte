@@ -112,7 +112,7 @@
 					<ChatMessage
 						{message}
 						canRegenerate={showAssistantActions && message.id === latestAssistantMessageId}
-						showAssistantActions={showAssistantActions}
+						{showAssistantActions}
 						onRegenerate={() => onRegenerateMessage(message.id)}
 						onContinue={() => onContinueMessage(message.id)}
 						onBranchFromHere={() => onBranchFromMessage(message.id)}
@@ -137,14 +137,13 @@
 		padding: 1rem 1rem 0.9rem;
 		scroll-padding-bottom: 2rem;
 		position: relative;
-		background:
-			linear-gradient(
-				90deg,
-				rgb(255 255 255 / 1.2%) 0,
-				transparent 24%,
-				transparent 76%,
-				rgb(255 255 255 / 1.2%) 100%
-			);
+		background: linear-gradient(
+			90deg,
+			rgb(255 255 255 / 1.2%) 0,
+			transparent 24%,
+			transparent 76%,
+			rgb(255 255 255 / 1.2%) 100%
+		);
 	}
 
 	.conversation-view__inner {

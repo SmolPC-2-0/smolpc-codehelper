@@ -41,7 +41,9 @@
 	const modeSubtitle = $derived(activeModeConfig?.subtitle ?? 'Unified assistant workspace');
 	const modeSuggestions = $derived(activeModeConfig?.suggestions ?? []);
 	const showContextControls = $derived(activeModeConfig?.capabilities.showContextControls ?? false);
-	const canExport = $derived(Boolean(activeModeConfig?.capabilities.showExport) && messages.length > 0);
+	const canExport = $derived(
+		Boolean(activeModeConfig?.capabilities.showExport) && messages.length > 0
+	);
 	const composerDisabledReason = $derived(canUseCodePath ? null : NON_CODE_DISABLED_REASON);
 	const pageTitle = $derived(currentChat?.title ?? 'New Chat');
 	const showBenchmarkPanel = $derived(uiStore.activeOverlay === 'benchmark');
@@ -170,7 +172,10 @@ Teaching rules:
 
 		const activeChat =
 			currentChat ??
-			chatsStore.createChat('code', inferenceStore.currentModel ?? settingsStore.selectedModel ?? 'onnx-model');
+			chatsStore.createChat(
+				'code',
+				inferenceStore.currentModel ?? settingsStore.selectedModel ?? 'onnx-model'
+			);
 		if (!activeChat) return;
 		const historyBeforeMessage = [...activeChat.messages];
 
@@ -421,7 +426,7 @@ Teaching rules:
 			const availableModelIds = new Set(inferenceStore.availableModels.map((model) => model.id));
 			const selectedModelId = availableModelIds.has(settingsStore.selectedModel)
 				? settingsStore.selectedModel
-				: inferenceStore.availableModels[0]?.id ?? null;
+				: (inferenceStore.availableModels[0]?.id ?? null);
 
 			await inferenceStore.ensureStarted({
 				mode: 'auto',
@@ -497,7 +502,7 @@ Teaching rules:
 		class={`sidebar-stage ${uiStore.isSidebarOpen ? 'sidebar-stage--open' : 'sidebar-stage--closed'}`}
 	>
 		<Sidebar
-			activeMode={activeMode}
+			{activeMode}
 			activeModeLabel={modeLabel}
 			activeModeSubtitle={modeSubtitle}
 			onClose={() => uiStore.setSidebarOpen(false)}
@@ -508,9 +513,9 @@ Teaching rules:
 		<WorkspaceHeader
 			title={pageTitle}
 			{modeLabel}
-			modeSubtitle={modeSubtitle}
-			modeStatusLabel={modeStatusLabel}
-			modeStatusDetail={modeStatusDetail}
+			{modeSubtitle}
+			{modeStatusLabel}
+			{modeStatusDetail}
 			modes={modeStore.modeConfigs}
 			{activeMode}
 			showSidebarToggle={!uiStore.isSidebarOpen}
@@ -527,12 +532,12 @@ Teaching rules:
 			onExportChat={handleExportChat}
 		/>
 
-		<WorkspaceControls showContextControls={showContextControls} />
+		<WorkspaceControls {showContextControls} />
 
 		<ConversationView
 			mode={activeMode}
-			modeLabel={modeLabel}
-			modeSubtitle={modeSubtitle}
+			{modeLabel}
+			{modeSubtitle}
 			suggestions={modeSuggestions}
 			providerState={activeModeStatus?.providerState ?? null}
 			{messages}

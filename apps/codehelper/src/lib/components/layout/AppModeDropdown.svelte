@@ -22,7 +22,7 @@
 	<select
 		value={activeMode}
 		onchange={handleChange}
-		disabled={disabled}
+		{disabled}
 		class="app-mode-dropdown__control"
 		aria-label="Select assistant mode"
 		title="Switch unified assistant mode"

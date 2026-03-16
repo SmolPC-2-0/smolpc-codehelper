@@ -121,9 +121,7 @@
 				{disabledReason}
 			/>
 		{:else}
-			<Button variant="outline" onclick={() => onToggleExamples(true)}>
-				Open Prompt Starters
-			</Button>
+			<Button variant="outline" onclick={() => onToggleExamples(true)}>Open Prompt Starters</Button>
 		{/if}
 	</div>
 </div>
