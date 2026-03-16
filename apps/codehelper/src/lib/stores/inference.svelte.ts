@@ -11,6 +11,7 @@ import type {
 	EnsureStartedRequestDto,
 	GenerationConfig,
 	GenerationMetrics,
+	InferenceCancelState,
 	InferenceChatMessage,
 	InferenceBackend,
 	InferenceRuntimeMode,
@@ -31,11 +32,44 @@ const READINESS_STATES: ReadonlySet<string> = new Set([
 // State
 let readiness = $state<EngineReadinessDto | null>(null);
 let isGenerating = $state(false);
+let cancelState = $state<InferenceCancelState>('idle');
 let error = $state<string | null>(null);
 let availableModels = $state<AvailableModel[]>([]);
 let lastMetrics = $state<GenerationMetrics | null>(null);
 let backendStatus = $state<BackendStatus | null>(null);
 let runtimeMode = $state<InferenceRuntimeMode>('auto');
+let cancelTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let cancelTimeoutSessionId: number | null = null;
+let generationSessionCounter = 0;
+let activeGenerationSessionId = 0;
+
+function clearCancelTimeout(sessionId?: number): void {
+	if (sessionId !== undefined && cancelTimeoutSessionId !== sessionId) {
+		return;
+	}
+
+	if (cancelTimeoutId) {
+		clearTimeout(cancelTimeoutId);
+	}
+
+	cancelTimeoutId = null;
+	cancelTimeoutSessionId = null;
+}
+
+function beginGenerationSession(): number {
+	clearCancelTimeout();
+	const sessionId = ++generationSessionCounter;
+	activeGenerationSessionId = sessionId;
+	isGenerating = true;
+	cancelState = 'idle';
+	error = null;
+	lastMetrics = null;
+	return sessionId;
+}
+
+function isActiveGenerationSession(sessionId: number): boolean {
+	return activeGenerationSessionId === sessionId;
+}
 
 function normalizeBackendName(raw: string | null | undefined): InferenceBackend | null {
 	if (!raw) {
@@ -128,6 +162,9 @@ export const inferenceStore = {
 	get isGenerating() {
 		return isGenerating;
 	},
+	get cancelState() {
+		return cancelState;
+	},
 	get error() {
 		return error;
 	},
@@ -196,9 +233,12 @@ export const inferenceStore = {
 	): Promise<EngineReadinessDto | null> {
 		// If we're reconnecting after the engine became unhealthy (e.g. it crashed
 		// during generation and was auto-restarted), force-clear stale generation state.
-		if (isGenerating) {
-			console.warn('ensureStarted: clearing stale isGenerating flag from prior session');
+		if (isGenerating || cancelState !== 'idle') {
+			console.warn('ensureStarted: clearing stale generation state from prior session');
+			clearCancelTimeout();
 			isGenerating = false;
+			cancelState = 'idle';
+			activeGenerationSessionId = 0;
 		}
 		error = null;
 		try {
@@ -287,9 +327,7 @@ export const inferenceStore = {
 			return null;
 		}
 
-		isGenerating = true;
-		error = null;
-		lastMetrics = null;
+		const sessionId = beginGenerationSession();
 
 		try {
 			const onTokenChannel = new Channel<string>();
@@ -327,8 +365,12 @@ export const inferenceStore = {
 			console.error('Streaming generation failed:', e);
 			return null;
 		} finally {
-			await this.syncStatus();
-			isGenerating = false;
+			clearCancelTimeout(sessionId);
+			if (isActiveGenerationSession(sessionId)) {
+				isGenerating = false;
+				cancelState = 'idle';
+				void this.syncStatus();
+			}
 		}
 	},
 
@@ -347,9 +389,7 @@ export const inferenceStore = {
 			return null;
 		}
 
-		isGenerating = true;
-		error = null;
-		lastMetrics = null;
+		const sessionId = beginGenerationSession();
 
 		try {
 			const onTokenChannel = new Channel<string>();
@@ -387,8 +427,12 @@ export const inferenceStore = {
 			console.error('Streaming generation failed:', e);
 			return null;
 		} finally {
-			await this.syncStatus();
-			isGenerating = false;
+			clearCancelTimeout(sessionId);
+			if (isActiveGenerationSession(sessionId)) {
+				isGenerating = false;
+				cancelState = 'idle';
+				void this.syncStatus();
+			}
 		}
 	},
 
@@ -396,12 +440,16 @@ export const inferenceStore = {
 	 * Cancel the current generation.
 	 *
 	 * If the engine is hung in an FFI call that can't be interrupted,
-	 * force-reset the UI state after 8 seconds so the user isn't stuck.
+	 * force-reset the UI state after 15 seconds so the user isn't stuck.
 	 */
 	async cancel(): Promise<void> {
-		if (!isGenerating) {
+		if (!isGenerating && cancelState !== 'pending') {
 			return;
 		}
+
+		const sessionId = activeGenerationSessionId;
+		cancelState = 'pending';
+		clearCancelTimeout();
 
 		try {
 			await invoke('inference_cancel');
@@ -409,13 +457,16 @@ export const inferenceStore = {
 			console.error('Failed to cancel generation:', e);
 		}
 
-		setTimeout(() => {
-			if (isGenerating) {
+		cancelTimeoutSessionId = sessionId;
+		cancelTimeoutId = setTimeout(() => {
+			if (isActiveGenerationSession(sessionId) && (isGenerating || cancelState === 'pending')) {
 				console.warn('Generation cancel timed out — force-resetting UI state');
+				cancelState = 'timed_out';
 				isGenerating = false;
-				error = 'Generation was force-stopped. The engine may need to restart.';
+				error = 'Generation did not respond to cancel. Try reloading the model.';
 			}
-		}, 8000);
+			clearCancelTimeout(sessionId);
+		}, 15000);
 	},
 
 	/**
