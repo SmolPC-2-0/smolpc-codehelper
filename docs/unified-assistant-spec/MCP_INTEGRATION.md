@@ -14,11 +14,11 @@ every mode uses MCP, so this document defines a **provider model** that covers:
 
 ## 2. Provider Taxonomy
 
-| Provider kind | Used by | Notes |
-|---|---|---|
-| `local` | Code | No external MCP process required |
-| `mcp` | GIMP, Writer, Calc, Slides | JSON-RPC tool execution via MCP transport |
-| `hybrid` | Blender | Bridge-backed primary path, MCP-compatible extension path later |
+| Provider kind | Used by                    | Notes                                                           |
+| ------------- | -------------------------- | --------------------------------------------------------------- |
+| `local`       | Code                       | No external MCP process required                                |
+| `mcp`         | GIMP, Writer, Calc, Slides | JSON-RPC tool execution via MCP transport                       |
+| `hybrid`      | Blender                    | Bridge-backed primary path, MCP-compatible extension path later |
 
 ## 3. `ToolProvider` Abstraction
 
@@ -196,6 +196,9 @@ Phase 5 keeps the existing bridge compatibility surface:
 - bridge bind address: `127.0.0.1:5179`
 - auth token path:
   `%LOCALAPPDATA%/SmolPC/engine-runtime/bridge-token.txt`
+- on Windows packaging this is the canonical token path; non-Windows dev and
+  test environments may use the platform-appropriate local app-data equivalent
+  while preserving the same addon-facing token-file contract
 - the unified app hosts the bridge server
 - the external Blender addon connects to that bridge
 
@@ -255,6 +258,8 @@ Retrieval rules:
 - skip retrieval for obvious scene-state questions
 - use retrieval for broader Blender workflow questions
 - retrieval load failure must degrade gracefully to scene-aware chat only
+- retrieval load failure must be surfaced in provider detail so the shell can
+  report that Blender-doc grounding is temporarily unavailable
 
 ### 5.3.5 Blender Phase 5 status semantics
 
@@ -271,7 +276,9 @@ Detail rules:
 - no scene snapshot yet must be surfaced clearly
 - stale scene snapshot must be surfaced clearly
 - missing live scene data does not disable generic Blender tutoring chat
-- `supports_tools = true`
+- `supports_tools = true` because Blender exposes the internal pseudo-tools
+  `scene_current` and `retrieve_rag_context`, not because Phase 5 adds a
+  general external tool surface
 - `supports_undo = false`
 
 ### 5.4 LibreOffice provider
@@ -357,23 +364,23 @@ pub struct ModeStatusDto {
 
 ### Per-provider rules
 
-| Provider | Auto-start | Disconnect behavior |
-|---|---|---|
-| Code | Not applicable | No-op |
-| GIMP | No, depends on external app availability | Disconnect cleanly; do not claim ownership of the external app |
-| Blender | Lazy-start local bridge server on first Blender use | Cleanly stop bridge runtime on app exit; do not claim ownership of Blender itself |
-| LibreOffice | Yes, provider may own its MCP runtime | Keep shared runtime alive across Writer/Calc/Slides switches |
+| Provider    | Auto-start                                          | Disconnect behavior                                                               |
+| ----------- | --------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Code        | Not applicable                                      | No-op                                                                             |
+| GIMP        | No, depends on external app availability            | Disconnect cleanly; do not claim ownership of the external app                    |
+| Blender     | Lazy-start local bridge server on first Blender use | Cleanly stop bridge runtime on app exit; do not claim ownership of Blender itself |
+| LibreOffice | Yes, provider may own its MCP runtime               | Keep shared runtime alive across Writer/Calc/Slides switches                      |
 
 ## 8. Undo Support
 
-| Mode | Undo support |
-|---|---|
-| Code | Optional; not guaranteed in v1 |
-| GIMP | Yes, first-class where provider supports it |
-| Blender | No in Phase 5 |
-| Writer | Optional; provider-backed if available |
-| Calc | Optional; provider-backed if available |
-| Slides | Optional; provider-backed if available |
+| Mode    | Undo support                                |
+| ------- | ------------------------------------------- |
+| Code    | Optional; not guaranteed in v1              |
+| GIMP    | Yes, first-class where provider supports it |
+| Blender | No in Phase 5                               |
+| Writer  | Optional; provider-backed if available      |
+| Calc    | Optional; provider-backed if available      |
+| Slides  | Optional; provider-backed if available      |
 
 The frontend should only render undo affordances when:
 
@@ -382,13 +389,13 @@ The frontend should only render undo affordances when:
 
 ## 9. Failure Behavior
 
-| Failure | Meaning | User-facing message style |
-|---|---|---|
-| provider unavailable | external tool stack is not ready | tell the user what to start or reconnect |
-| tools missing | provider connected but did not expose required tools | explain that the mode is connected but incomplete |
-| validation failure | model proposed a bad tool or arguments | tell the user the action could not be safely executed |
-| execution failure | provider tool failed | explain what failed and suggest retry or a simpler action |
-| disconnect during run | provider died mid-request | surface a reconnect / retry action |
+| Failure               | Meaning                                              | User-facing message style                                 |
+| --------------------- | ---------------------------------------------------- | --------------------------------------------------------- |
+| provider unavailable  | external tool stack is not ready                     | tell the user what to start or reconnect                  |
+| tools missing         | provider connected but did not expose required tools | explain that the mode is connected but incomplete         |
+| validation failure    | model proposed a bad tool or arguments               | tell the user the action could not be safely executed     |
+| execution failure     | provider tool failed                                 | explain what failed and suggest retry or a simpler action |
+| disconnect during run | provider died mid-request                            | surface a reconnect / retry action                        |
 
 Messages must stay student-friendly and actionable.
 
@@ -427,7 +434,8 @@ Code and GIMP behavior stable:
 - `mode_status(blender)` reports live bridge runtime state and internal
   pseudo-tool availability
 - `mode_refresh_tools(blender)` performs a real bridge/runtime refresh and
-  retrieval reload attempt
+  one explicit retrieval reload attempt without a background retry loop or
+  backoff contract in Phase 5
 - `mode_undo(blender)` remains unsupported
 - Code mode keeps the existing Codehelper inference path
 - GIMP mode keeps the current Phase 4 MCP-backed execution path

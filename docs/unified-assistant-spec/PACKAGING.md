@@ -44,13 +44,13 @@ scope of the unified frontend.
 
 ## 4. Bundled Resource Categories
 
-| Resource group | Needed for | Notes |
-|---|---|---|
-| Engine runtime bundle | all modes | shared engine startup and backend runtime selection |
-| Models | all modes | shared model discovery |
-| GIMP provider assets | GIMP | provider-owned configuration or helper assets only; not the GIMP app itself |
-| Blender bridge assets | Blender | bridge helpers and any bundled support files |
-| LibreOffice MCP runtime | Writer/Calc/Slides | bundled provider runtime and support assets |
+| Resource group          | Needed for         | Notes                                                                       |
+| ----------------------- | ------------------ | --------------------------------------------------------------------------- |
+| Engine runtime bundle   | all modes          | shared engine startup and backend runtime selection                         |
+| Models                  | all modes          | shared model discovery                                                      |
+| GIMP provider assets    | GIMP               | provider-owned configuration or helper assets only; not the GIMP app itself |
+| Blender bridge assets   | Blender            | bridge helpers and any bundled support files                                |
+| LibreOffice MCP runtime | Writer/Calc/Slides | bundled provider runtime and support assets                                 |
 
 ## 5. Resource Rules
 

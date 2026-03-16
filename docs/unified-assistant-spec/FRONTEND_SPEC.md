@@ -31,87 +31,81 @@ for six modes:
 ## 3. Frontend Types
 
 ```ts
-export type AppMode =
-  | 'code'
-  | 'gimp'
-  | 'blender'
-  | 'writer'
-  | 'calc'
-  | 'impress';
+export type AppMode = 'code' | 'gimp' | 'blender' | 'writer' | 'calc' | 'impress';
 
 export interface ModeCapabilities {
-  supportsTools: boolean;
-  supportsUndo: boolean;
-  showModelInfo: boolean;
-  showHardwarePanel: boolean;
-  showBenchmarkPanel: boolean;
-  showExport: boolean;
-  showContextControls: boolean;
+	supportsTools: boolean;
+	supportsUndo: boolean;
+	showModelInfo: boolean;
+	showHardwarePanel: boolean;
+	showBenchmarkPanel: boolean;
+	showExport: boolean;
+	showContextControls: boolean;
 }
 
 export interface ModeConfig {
-  id: AppMode;
-  label: string;
-  subtitle: string;
-  icon: string;
-  providerKind: 'local' | 'mcp' | 'hybrid';
-  systemPromptKey: string;
-  suggestions: string[];
-  capabilities: ModeCapabilities;
+	id: AppMode;
+	label: string;
+	subtitle: string;
+	icon: string;
+	providerKind: 'local' | 'mcp' | 'hybrid';
+	systemPromptKey: string;
+	suggestions: string[];
+	capabilities: ModeCapabilities;
 }
 
 export interface Chat {
-  id: string;
-  mode: AppMode;
-  title: string;
-  messages: Message[];
-  createdAt: number;
-  updatedAt: number;
-  model: string;
-  pinned?: boolean;
-  archived?: boolean;
+	id: string;
+	mode: AppMode;
+	title: string;
+	messages: Message[];
+	createdAt: number;
+	updatedAt: number;
+	model: string;
+	pinned?: boolean;
+	archived?: boolean;
 }
 
 export interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-  isStreaming?: boolean;
-  explain?: string | null;
-  undoable?: boolean;
-  toolResults?: ToolExecutionResultDto[];
-  plan?: unknown;
-  status?: 'pending' | 'complete' | 'error';
+	id: string;
+	role: 'user' | 'assistant';
+	content: string;
+	timestamp: number;
+	isStreaming?: boolean;
+	explain?: string | null;
+	undoable?: boolean;
+	toolResults?: ToolExecutionResultDto[];
+	plan?: unknown;
+	status?: 'pending' | 'complete' | 'error';
 }
 
 export interface ModeStatus {
-  mode: AppMode;
-  engineReady: boolean;
-  providerState: ProviderStateDto;
-  availableTools: ToolDefinitionDto[];
-  lastError: string | null;
+	mode: AppMode;
+	engineReady: boolean;
+	providerState: ProviderStateDto;
+	availableTools: ToolDefinitionDto[];
+	lastError: string | null;
 }
 
 export type AssistantStreamEvent =
-  | { kind: 'status'; phase: string; detail: string }
-  | { kind: 'tool_call'; name: string; arguments: unknown }
-  | { kind: 'tool_result'; name: string; result: ToolExecutionResultDto }
-  | { kind: 'token'; token: string }
-  | { kind: 'complete'; response: AssistantResponseDto }
-  | { kind: 'error'; code: string; message: string };
+	| { kind: 'status'; phase: string; detail: string }
+	| { kind: 'tool_call'; name: string; arguments: unknown }
+	| { kind: 'tool_result'; name: string; result: ToolExecutionResultDto }
+	| { kind: 'token'; token: string }
+	| { kind: 'complete'; response: AssistantResponseDto }
+	| { kind: 'error'; code: string; message: string };
 ```
 
 ## 4. Mode Configuration
 
-| Mode | Label | Provider | Shared shell notes |
-|---|---|---|---|
-| `code` | Code | local | Preserves current Codehelper experience |
-| `gimp` | GIMP | mcp | Adds tool status and undo affordances |
-| `blender` | Blender | hybrid | Uses bridge-backed scene tutoring with local retrieval grounding |
-| `writer` | Writer | mcp | LibreOffice submode |
-| `calc` | Calc | mcp | LibreOffice submode |
-| `impress` | Slides | mcp | LibreOffice submode with Slides label |
+| Mode      | Label   | Provider | Shared shell notes                                               |
+| --------- | ------- | -------- | ---------------------------------------------------------------- |
+| `code`    | Code    | local    | Preserves current Codehelper experience                          |
+| `gimp`    | GIMP    | mcp      | Adds tool status and undo affordances                            |
+| `blender` | Blender | hybrid   | Uses bridge-backed scene tutoring with local retrieval grounding |
+| `writer`  | Writer  | mcp      | LibreOffice submode                                              |
+| `calc`    | Calc    | mcp      | LibreOffice submode                                              |
+| `impress` | Slides  | mcp      | LibreOffice submode with Slides label                            |
 
 ## 5. Shared Shell
 
@@ -432,7 +426,8 @@ Before provider integrations land:
 - switching away from Blender during execution is allowed and must not corrupt
   the originating Blender chat.
 - the shell must not allow a competing live-mode request to start while Blender
-  is still streaming through the shared engine.
+  is still streaming through the shared engine until the active request finishes
+  or is cancelled.
 
 ## 14. Migration Path
 

@@ -73,7 +73,7 @@
 
 - **Optional message metadata is the safest way to mix mode-specific UIs** (2026-03): Phase 4 needed GIMP assistant messages to carry `explain`, `undoable`, `toolResults`, and `plan` without breaking existing Code chats. Extending the shared `Message` shape with optional fields preserved backward compatibility while still allowing mode-specific rendering and actions.
 
-- **Live non-Code modes still need a single shared-generation gate** (2026-03): Phase 5 made Blender a second live non-Code mode, but it still shares the same engine runtime as Code. The shell can allow mode switching during Blender generation, yet it must block starting a competing Code or GIMP request until the active non-Code run finishes or is cancelled.
+- **Live non-Code modes still need a single shared-generation gate** (2026-03): Phase 5 made Blender a second live non-Code mode, but it still shares the same engine runtime as Code. The shell can allow mode switching during Blender generation, yet it must block starting any competing live-mode request until the active non-Code run finishes or is cancelled.
 
 ---
 
