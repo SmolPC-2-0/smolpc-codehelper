@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-16
-**Status:** Post-docs execution roadmap
+**Status:** Phase 1 active; foundation scaffold implemented locally on `codex/unified-foundation`
 
 ## Phase 0: Documentation Baseline
 
@@ -24,15 +24,26 @@
 **Scope**
 
 - shared DTOs
+- shared crates:
+  - `smolpc-assistant-types`
+  - `smolpc-mcp-client`
 - provider interfaces
 - mode registry
 - stream event contracts
 - minimal command scaffolding
+- frontend contract mirrors and typed invoke wrappers
 
 **Exit criteria**
 
 - backend contracts exist for all six modes
+- frontend mirrors exist for the new unified commands
 - no standalone app behavior has been ported yet
+
+**Current branch status**
+
+- implemented on `codex/unified-foundation`
+- validated with isolated crate tests/checks plus app/frontend compile checks
+- pending review and merge into `dev/unified-assistant`
 
 ## Phase 2: Unified Shell
 

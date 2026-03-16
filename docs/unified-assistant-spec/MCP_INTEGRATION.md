@@ -191,6 +191,21 @@ pub struct ModeStatusDto {
 }
 ```
 
+## 6.1 Phase 1 Foundation Placeholder Behavior
+
+The initial foundation branch wires the provider contract without real mode
+integration yet.
+
+Current placeholder behavior:
+
+- Code provider returns `idle` scaffold status and no tools
+- GIMP provider returns `disconnected` with `Provider not integrated yet`
+- Blender provider returns `disconnected` with `Provider not integrated yet`
+- LibreOffice provider returns `disconnected` with `Provider not integrated yet`
+- all providers return empty tool lists in Phase 1
+- `assistant_send` accepts the final request/event shape but returns
+  `UNIFIED_ASSISTANT_NOT_IMPLEMENTED`
+
 ## 7. Connection Lifecycle
 
 ### Shared lifecycle
