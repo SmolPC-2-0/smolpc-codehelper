@@ -44,13 +44,13 @@ scope of the unified frontend.
 
 ## 4. Bundled Resource Categories
 
-| Resource group          | Needed for         | Notes                                                                       |
-| ----------------------- | ------------------ | --------------------------------------------------------------------------- |
-| Engine runtime bundle   | all modes          | shared engine startup and backend runtime selection                         |
-| Models                  | all modes          | shared model discovery                                                      |
-| GIMP provider assets    | GIMP               | provider-owned configuration or helper assets only; not the GIMP app itself |
-| Blender bridge assets   | Blender            | bridge helpers and any bundled support files                                |
-| LibreOffice MCP runtime | Writer/Calc/Slides | bundled provider runtime and support assets                                 |
+| Resource group          | Needed for         | Notes                                                                          |
+| ----------------------- | ------------------ | ------------------------------------------------------------------------------ |
+| Engine runtime bundle   | all modes          | shared engine startup and backend runtime selection                            |
+| Models                  | all modes          | shared model discovery                                                         |
+| GIMP provider assets    | GIMP               | provider-owned configuration or helper assets only; not the GIMP app itself    |
+| Blender bridge assets   | Blender            | bridge helpers and any bundled support files                                   |
+| LibreOffice MCP runtime | Writer/Calc/Slides | staged placeholder in Phase 6A, bundled provider runtime only after activation |
 
 ## 5. Resource Rules
 
@@ -109,6 +109,22 @@ Phase 5 assumes:
 Phase 5 packaging validation covers connection to an external Blender setup and
 addon, not Blender installation or addon auto-provisioning.
 
+### 5.2.3 Phase 6A LibreOffice runtime rule
+
+Phase 6A does not bundle the full LibreOffice Python MCP runtime yet.
+
+Phase 6A assumes:
+
+- the unified app tracks a staged placeholder directory at
+  `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/README.md`
+- the separate LibreOffice functionality branch continues evolving its runtime
+  assets independently
+- the unified app only prepares the resource boundary and future stdio transport
+  path in this phase
+
+Phase 6A packaging validation covers staged resource-path correctness only, not
+live LibreOffice runtime execution.
+
 ### 5.3 No launcher-owned runtime paths
 
 Do not require packaged resources to live under a launcher-specific directory.
@@ -162,7 +178,7 @@ Before calling the packaging plan complete, verify:
 - GIMP mode fails gracefully if GIMP is not installed or not running
 - Blender mode fails gracefully if Blender bridge is unavailable
 - Blender mode fails gracefully if port `5179` is already occupied
-- Writer/Calc/Slides can each connect through the shared LibreOffice provider
+- staged LibreOffice resource paths resolve correctly in the unified app
 
 ## 10. Deferred Packaging Questions
 
@@ -172,3 +188,4 @@ These remain for later implementation phases:
 - final model distribution approach
 - whether some provider assets ship always or are staged optionally
 - exact bundle layout for Blender supplementary tooling
+- exact bundle timing for the full LibreOffice MCP runtime import

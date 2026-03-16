@@ -242,27 +242,34 @@ The standalone apps remain source references during the future port:
 - `apps/blender-assistant`
 - `apps/libreoffice-assistant`
 
+LibreOffice source-branch progress currently lives on
+`origin/codex/libreoffice-port-track-a`:
+
+- standalone shared-engine baseline complete
+- standalone MCP runtime port complete
+- standalone Phase 3 workflow preview complete with CPU-lane validation
+- Writer / Slides tool coverage is ahead of Calc-specific coverage
+
 ## What Has Not Started
 
-- real provider integrations for LibreOffice
-- mode provider ports
+- live LibreOffice activation inside the unified app
 - launcher cleanup beyond the foundation test fix
 - unified-app packaging hardening beyond the tracked OpenVINO placeholder
 - Windows end-to-end validation for the unified app
 
 ## Next Workstreams
 
-The next official step after this Blender closeout docs merge is the Phase 6
-LibreOffice docs preflight branch:
+The next official step after this Blender closeout docs merge is the Phase 6A
+LibreOffice scaffolding docs branch:
 
 1. create `codex/unified-libreoffice-mode-docs`
-2. lock the shared LibreOffice provider design in docs
+2. lock the LibreOffice scaffolding scope in docs
 3. merge docs into `docs/unified-assistant-spec`
 4. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
 5. create `codex/unified-libreoffice-mode`
-6. close out Phase 6 in docs
+6. close out LibreOffice scaffolding in docs
 7. continue serial merge order:
-   - LibreOffice provider port
+   - LibreOffice activation
    - Hardening and Windows packaging validation
 
 The current merged GIMP and Blender implementations leave these future phase
@@ -274,6 +281,8 @@ boundaries intact:
    plugin/server runtime
 4. Blender stays bridge-first and does not require `blender-mcp` in Phase 5
 5. no standalone app directories were taken over by the unified branch
+6. `origin/codex/libreoffice-port-track-a` remains the separate LibreOffice
+   functionality branch and is not a merge base for unified work
 
 ## Known Risks
 
@@ -283,7 +292,7 @@ boundaries intact:
 | Standalone app branch churn       | Blender and LibreOffice behavior may continue changing during the remaining ports        |
 | External GIMP runtime assumptions | Phase 4 depends on a separate GIMP install and MCP plugin/server already being available |
 | Packaging/runtime validation      | third-party runtime paths may behave differently in packaged Windows builds              |
-| LibreOffice port alignment        | the LibreOffice branch must stay aligned with the unified provider design                |
+| LibreOffice port alignment        | the LibreOffice source branch must stay aligned with the unified provider scaffold plan  |
 
 ## Merge-Safe Rules
 
@@ -295,10 +304,10 @@ boundaries intact:
 
 ## Current Success Condition
 
-The current closeout step is complete only when:
+The current next-step baseline is correct only when:
 
-1. Phase 4 GIMP implementation is merged into `dev/unified-assistant`
-2. the closeout docs are merged into `docs/unified-assistant-spec`
+1. Phase 5 Blender implementation is merged into `dev/unified-assistant`
+2. the Phase 5 closeout docs are merged into `docs/unified-assistant-spec`
 3. those docs are merged back into `dev/unified-assistant`
-4. the next branch can start from a baseline that records GIMP as the first
-   real external-provider mode
+4. the next branch starts from a baseline that records LibreOffice as a
+   scaffolding-first integration step rather than a live-mode activation

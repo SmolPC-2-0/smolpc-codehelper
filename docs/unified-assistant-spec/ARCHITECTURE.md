@@ -169,6 +169,8 @@ only in the command layer.
   unified app.
 - `LibreOfficeProvider` ports behavior from the LibreOffice branch into new
   unified files and serves three frontend submodes.
+- Phase 6A lands only the LibreOffice provider scaffold and shared stdio MCP
+  prep; live LibreOffice execution is deferred to a later activation branch.
 
 ## 7. Frontend Shell
 
@@ -232,6 +234,18 @@ After Phase 5:
    - optionally retrieve Blender-doc contexts
    - generate the tutoring answer through the shared engine
 3. Blender remains bridge-first. Supplemental MCP work stays deferred.
+
+### Phase 6A LibreOffice scaffold path
+
+After Phase 6A:
+
+1. `LibreOfficeProvider` is still shared by Writer / Calc / Slides.
+2. Writer / Calc / Slides remain disabled placeholder modes in the shell.
+3. `assistant_send` remains scaffold-only for LibreOffice modes.
+4. Shared stdio MCP transport support exists in `smolpc-mcp-client`, but the
+   LibreOffice provider does not activate the runtime yet.
+5. The tracked staged resource root for future LibreOffice MCP assets is:
+   `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/`
 
 ## 9. Repository Boundaries
 

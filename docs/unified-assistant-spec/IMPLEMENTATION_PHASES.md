@@ -55,9 +55,12 @@
 2. merge into `docs/unified-assistant-spec`
 3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
 4. `codex/unified-libreoffice-mode`
-5. closeout docs
-6. `codex/unified-hardening-docs`
-7. `codex/unified-hardening`
+5. `codex/unified-libreoffice-mode-status-docs`
+6. `codex/unified-libreoffice-activation-docs`
+7. `codex/unified-libreoffice-activation`
+8. `codex/unified-libreoffice-activation-status-docs`
+9. `codex/unified-hardening-docs`
+10. `codex/unified-hardening`
 
 ## Phase 2: Unified Shell
 
@@ -253,18 +256,52 @@
     `Branch Chat`
   - no edits to `apps/blender-assistant/`
 
-## Phase 6: LibreOffice Modes
+## Phase 6A: LibreOffice Scaffolding
 
 **Suggested branches:** `codex/unified-libreoffice-mode-docs`, then `codex/unified-libreoffice-mode`
 
 **Scope**
 
-- port from the LibreOffice source branch into one shared provider
-- expose Writer, Calc, and Slides as separate frontend modes
+- add merge-safe LibreOffice scaffolding into the unified app
+- keep Writer, Calc, and Slides visible but disabled
+- add shared stdio MCP transport support for future provider activation
+- replace the single-file LibreOffice placeholder with a real shared-provider module tree
+- stage a tracked LibreOffice resource placeholder for the future MCP runtime sync
+
+**Locked decisions**
+
+- this phase does not activate `assistant_send` for `writer`, `calc`, or `impress`
+- this phase does not import the full LibreOffice Python MCP runtime yet
+- `origin/codex/libreoffice-port-track-a` remains a read-only reference source
+- Calc is not required to be live in this phase
+- current source-branch baseline is:
+  - Phase 1 shared-engine baseline complete
+  - Phase 2 MCP runtime port complete
+  - Phase 3 workflow preview complete with CPU-lane validation
+  - Writer / Slides coverage ahead of Calc-specific coverage
 
 **Exit criteria**
 
-- Writer, Calc, and Slides share one provider runtime and feel like distinct frontend modes
+- `smolpc-mcp-client` supports stdio MCP transport
+- unified LibreOffice provider scaffolding exists under `apps/codehelper/src-tauri/src/modes/libreoffice/`
+- Writer, Calc, and Slides still share one provider family, feel like distinct frontend modes, and remain honest placeholders
+- roadmap and docs explicitly defer live LibreOffice activation to a later branch
+
+## Phase 6B: LibreOffice Activation
+
+**Suggested branches:** `codex/unified-libreoffice-activation-docs`, then `codex/unified-libreoffice-activation`
+
+**Scope**
+
+- import the selected LibreOffice MCP runtime assets from the separate source branch
+- activate the shared LibreOffice provider for live mode execution
+- decide the first live Writer / Calc / Slides surface from the then-current source branch state
+
+**Exit criteria**
+
+- at least the agreed first LibreOffice submodes are live through the shared provider
+- `assistant_send` is operational for the agreed LibreOffice submodes
+- hardening can begin from a real LibreOffice integration baseline
 
 ## Phase 7: Hardening And Packaging
 
