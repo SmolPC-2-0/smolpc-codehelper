@@ -12,6 +12,8 @@
 		modeSubtitle: string;
 		suggestions: string[];
 		providerState?: ProviderStateDto | null;
+		statusLabel?: string | null;
+		statusDetail?: string | null;
 		messages: Message[];
 		latestAssistantMessageId: string | null;
 		showQuickExamples: boolean;
@@ -35,6 +37,8 @@
 		modeSubtitle,
 		suggestions,
 		providerState = null,
+		statusLabel = null,
+		statusDetail = null,
 		messages,
 		latestAssistantMessageId,
 		showQuickExamples,
@@ -98,6 +102,8 @@
 				{modeSubtitle}
 				{suggestions}
 				{providerState}
+				{statusLabel}
+				{statusDetail}
 				{showQuickExamples}
 				{disabledExamples}
 				{disabledReason}

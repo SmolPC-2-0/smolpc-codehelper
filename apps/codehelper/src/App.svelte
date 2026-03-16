@@ -18,7 +18,12 @@
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
-	import type { GenerationConfig, InferenceChatMessage } from '$lib/types/inference';
+	import type {
+		GenerationConfig,
+		InferenceBackend,
+		InferenceChatMessage,
+		InferenceStatus
+	} from '$lib/types/inference';
 	import type { AppMode } from '$lib/types/mode';
 
 	let messagesContainer: HTMLDivElement | undefined = $state();
@@ -33,6 +38,7 @@
 	const activeMode = $derived(modeStore.activeMode);
 	const activeModeConfig = $derived(modeStore.activeConfig);
 	const activeModeStatus = $derived(modeStore.activeStatus);
+	const inferenceStatus = $derived(inferenceStore.status);
 	const currentChat = $derived(chatsStore.getCurrentChatForMode(activeMode));
 	const messages = $derived(currentChat?.messages ?? []);
 	const hasNoChats = $derived(chatsStore.chats.length === 0);
@@ -45,7 +51,9 @@
 		Boolean(activeModeConfig?.capabilities.showExport) && messages.length > 0
 	);
 	const composerDisabledReason = $derived(canUseCodePath ? null : NON_CODE_DISABLED_REASON);
-	const pageTitle = $derived(currentChat?.title ?? 'New Chat');
+	const pageTitle = $derived(
+		currentChat?.title ?? (activeMode === 'code' ? 'New Code Chat' : 'New Chat')
+	);
 	const showBenchmarkPanel = $derived(uiStore.activeOverlay === 'benchmark');
 	const showHardwarePanel = $derived(uiStore.activeOverlay === 'hardware');
 	const showModelInfoPanel = $derived(uiStore.activeOverlay === 'modelInfo');
@@ -53,16 +61,96 @@
 	const latestAssistantMessageId = $derived(
 		[...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null
 	);
+	function formatBackendLabel(backend: InferenceBackend | null): string | null {
+		if (!backend) {
+			return null;
+		}
+
+		switch (backend) {
+			case 'openvino_npu':
+				return 'OpenVINO NPU';
+			case 'directml':
+				return 'DirectML';
+			case 'cpu':
+				return 'CPU';
+			default:
+				return backend;
+		}
+	}
+
+	function buildCodeModeStatusLabel(status: InferenceStatus): string {
+		if (status.isGenerating) {
+			return 'generating';
+		}
+
+		switch (status.readinessState) {
+			case 'ready':
+				return formatBackendLabel(status.activeBackend)?.toLowerCase() ?? 'ready';
+			case 'failed':
+				return 'startup failed';
+			case 'idle':
+				return 'engine idle';
+			case 'starting':
+			case 'probing':
+			case 'resolving_assets':
+			case 'loading_model':
+				return 'starting engine';
+			default:
+				return 'status pending';
+		}
+	}
+
+	function buildCodeModeStatusDetail(
+		status: InferenceStatus,
+		shellWarning: string | null
+	): string | null {
+		const details: string[] = [];
+
+		if (shellWarning) {
+			details.push(`Shell warning: ${shellWarning}`);
+		}
+
+		if (status.readinessState === 'failed') {
+			if (status.startupErrorMessage) {
+				details.push(status.startupErrorMessage);
+			} else if (status.startupErrorCode) {
+				details.push(`Startup error: ${status.startupErrorCode}`);
+			}
+			return details.length > 0 ? details.join(' · ') : null;
+		}
+
+		if (status.currentModel) {
+			details.push(`Model: ${status.currentModel}`);
+		}
+
+		const backendLabel = formatBackendLabel(status.activeBackend);
+		if (backendLabel) {
+			details.push(`Backend: ${backendLabel}`);
+		}
+
+		if (status.isGenerating) {
+			details.push('Streaming response');
+		}
+
+		return details.length > 0 ? details.join(' · ') : null;
+	}
+
 	const modeStatusLabel = $derived(
-		activeModeStatus?.providerState
-			? activeModeStatus.providerState.state.replace(/_/g, ' ')
-			: modeStore.error
-				? 'fallback active'
-				: modeStore.loading
-					? 'loading'
-					: 'status pending'
+		canUseCodePath
+			? buildCodeModeStatusLabel(inferenceStatus)
+			: activeModeStatus?.providerState
+				? activeModeStatus.providerState.state.replace(/_/g, ' ')
+				: modeStore.error
+					? 'fallback active'
+					: modeStore.loading
+						? 'loading'
+						: 'status pending'
 	);
 	const modeStatusDetail = $derived.by(() => {
+		if (canUseCodePath) {
+			return buildCodeModeStatusDetail(inferenceStatus, modeStore.error);
+		}
+
 		const details = [
 			modeStore.error ? `Shell warning: ${modeStore.error}` : null,
 			activeModeStatus?.providerState.detail ?? null
@@ -527,7 +615,7 @@ Teaching rules:
 			modes={modeStore.modeConfigs}
 			{activeMode}
 			showSidebarToggle={!uiStore.isSidebarOpen}
-			status={inferenceStore.status}
+			status={inferenceStatus}
 			modelInfoActive={showModelInfoPanel}
 			hardwareActive={showHardwarePanel}
 			shortcutsOpen={showShortcutsOverlay}
@@ -548,6 +636,8 @@ Teaching rules:
 			{modeSubtitle}
 			suggestions={modeSuggestions}
 			providerState={activeModeStatus?.providerState ?? null}
+			statusLabel={modeStatusLabel}
+			statusDetail={modeStatusDetail}
 			{messages}
 			{latestAssistantMessageId}
 			showQuickExamples={uiStore.showQuickExamples}
