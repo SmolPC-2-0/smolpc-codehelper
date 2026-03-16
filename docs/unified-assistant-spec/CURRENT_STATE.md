@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-16
-**Phase:** Phase 2 shell is merged into `dev/unified-assistant`; Phase 3 Code-mode docs preflight is next
+**Phase:** Phase 2 shell and shell follow-up are merged into `dev/unified-assistant`; Phase 3 Code-mode docs preflight is next
 
 ## Branch Roles
 
@@ -13,7 +13,9 @@
 | `codex/unified-foundation-status-docs` | Phase 1 closeout docs branch |
 | `codex/unified-shell-docs` | Merged Phase 2 preflight docs branch |
 | `codex/unified-shell` | Merged Phase 2 shell implementation branch |
-| `codex/unified-shell-status-docs` | Active Phase 2 closeout docs branch |
+| `codex/unified-shell-status-docs` | Merged Phase 2 closeout docs branch |
+| `codex/unified-shell-followups` | Merged post-Phase-2 shell hardening branch |
+| `codex/unified-shell-followups-status-docs` | Active shell follow-up docs sync branch |
 | `codex/unified-code-mode-docs` | Next Phase 3 preflight docs branch |
 
 ## What Is Done
@@ -96,6 +98,25 @@ Validation completed for the merged shell:
 - root incremental ESLint checks against the net PR diff
 - PR checks green, including `Incremental Style Gates` and `Tauri Build Check`
 
+Post-Phase-2 shell hardening is now merged into `dev/unified-assistant` via PR `#65`.
+
+Merged shell follow-up behavior now present in `dev/unified-assistant`:
+
+- top-level shell init is explicitly caught rather than left fire-and-forget
+- local fallback mode configs keep the mode selector usable if `list_modes` fails or returns no modes
+- shell warning/error state is surfaced in the header instead of being silently hidden
+- benchmark-overlay cleanup is centralized in one reactive capability gate
+- the prompt-starters close button uses a stable icon again
+
+Validation completed for the merged shell follow-up:
+
+- `npm run check --workspace apps/codehelper`
+- `cargo check -p smolpc-code-helper`
+- `cargo test -p smolpc-code-helper --lib`
+- root incremental Prettier checks against the changed frontend files
+- root incremental ESLint checks against the changed frontend files
+- PR checks green
+
 The standalone apps remain source references during the future port:
 
 - `apps/gimp-assistant`
@@ -114,10 +135,10 @@ The standalone apps remain source references during the future port:
 
 The next official step after these docs merge is `codex/unified-code-mode-docs`:
 
-1. merge `codex/unified-shell-status-docs` into `docs/unified-assistant-spec`
+1. merge `codex/unified-shell-followups-status-docs` into `docs/unified-assistant-spec`
 2. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
 3. create `codex/unified-code-mode-docs`
-4. lock the Code-mode preservation details for Phase 3
+4. lock the Code-mode parity-polish details for Phase 3
 5. merge those docs into `docs/unified-assistant-spec`
 6. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
 7. create `codex/unified-code-mode`
@@ -150,6 +171,6 @@ The next official step after these docs merge is `codex/unified-code-mode-docs`:
 
 The current closeout step is complete only when:
 
-- Phase 2 closeout docs are merged into `docs/unified-assistant-spec`
+- shell follow-up docs are merged into `docs/unified-assistant-spec`
 - those docs are merged into `dev/unified-assistant`
 - the team can branch `codex/unified-code-mode-docs` without reopening shell decisions
