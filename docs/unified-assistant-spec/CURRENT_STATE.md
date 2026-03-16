@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-16
-**Phase:** Phase 3 Code mode is merged; Phase 4 GIMP preflight is next
+**Phase:** Phase 4 GIMP preflight is locked in docs; GIMP implementation is next
 
 ## Branch Roles
 
@@ -19,7 +19,8 @@
 | `codex/unified-code-mode-docs` | Merged Phase 3 preflight docs branch |
 | `codex/unified-code-mode` | Merged Phase 3 implementation branch |
 | `codex/unified-code-mode-status-docs` | Merged Phase 3 closeout docs branch |
-| `codex/unified-gimp-mode-docs` | Next Phase 4 preflight docs branch |
+| `codex/unified-gimp-mode-docs` | Merged Phase 4 preflight docs branch |
+| `codex/unified-gimp-mode` | Next Phase 4 implementation branch |
 
 ## What Is Done
 
@@ -160,14 +161,14 @@ The standalone apps remain source references during the future port:
 
 ## Next Workstreams
 
-The next official step after these docs merge is `codex/unified-gimp-mode-docs`:
+The next official step after these docs merge is `codex/unified-gimp-mode`:
 
-1. create `codex/unified-gimp-mode-docs`
+1. merge `codex/unified-gimp-mode-docs` into `docs/unified-assistant-spec`
 2. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-3. lock GIMP as the first real external-provider mode
-4. lock `assistant_send` activation, undo behavior, and streamed execution
-   status in docs first
-5. create `codex/unified-gimp-mode`
+3. create `codex/unified-gimp-mode`
+4. activate `assistant_send`, `mode_status`, `mode_refresh_tools`, and
+   `mode_undo` for `gimp` only
+5. close out Phase 4 in docs
 6. continue serial merge order:
    - GIMP provider port
    - Blender provider port
@@ -193,9 +194,8 @@ The next official step after these docs merge is `codex/unified-gimp-mode-docs`:
 
 ## Current Success Condition
 
-The current closeout step is complete only when:
+The current preflight step is complete only when:
 
-- Phase 3 closeout docs are merged into `docs/unified-assistant-spec`
+- Phase 4 GIMP docs are merged into `docs/unified-assistant-spec`
 - those docs are merged into `dev/unified-assistant`
-- the team can branch `codex/unified-gimp-mode-docs` without reopening Phase 3
-  scope
+- the team can branch `codex/unified-gimp-mode` without reopening Phase 4 scope

@@ -75,6 +75,20 @@ Provider assets must stay provider-owned:
 
 This keeps packaging boundaries aligned with the provider architecture.
 
+### 5.2.1 Phase 4 GIMP runtime rule
+
+Phase 4 does not bundle GIMP itself and does not bundle the GIMP MCP plugin as
+part of the unified app.
+
+Phase 4 assumes:
+
+- GIMP is installed separately
+- the GIMP MCP server / plugin is installed separately
+- the unified app connects to that external runtime over TCP
+
+Phase 4 packaging validation covers connection to an external GIMP setup, not
+auto-install or first-run provisioning of GIMP.
+
 ### 5.3 No launcher-owned runtime paths
 
 Do not require packaged resources to live under a launcher-specific directory.

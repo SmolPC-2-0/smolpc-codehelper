@@ -99,11 +99,74 @@ Runtime shape:
 - GIMP MCP server
 - TCP / JSON-RPC communication
 
+Phase 4 transport default:
+
+- host: `127.0.0.1`
+- port: `10008`
+
+Phase 4 implementation rule:
+
+- the unified app connects to an already-available GIMP MCP endpoint
+- the shared `smolpc-mcp-client` crate owns the TCP JSON-RPC transport work
+- the unified app does not port the standalone app's legacy stdio launcher
+  shape into `apps/codehelper`
+
 Rules:
 
 - if GIMP is unavailable, the app shows a friendly actionable error
 - tool discovery is refreshed on reconnect
 - undo support is surfaced when the provider confirms it
+- Phase 4 makes GIMP the first real external-provider mode; `assistant_send`
+  becomes live for `gimp` only while other non-Code modes remain placeholder-
+  only
+
+### 5.2.1 GIMP Phase 4 action surface
+
+Phase 4 targets parity with the existing proven GIMP assistant surface, not
+provider expansion beyond that baseline.
+
+Supported actions:
+
+- GIMP info query
+- current image metadata query
+- describe current image
+- draw line
+- draw heart
+- draw circle
+- draw oval
+- draw triangle
+- draw filled rectangle / square
+- crop to square
+- resize width
+- increase / decrease brightness
+- increase / decrease contrast
+- blur entire image
+- brighten / darken top, bottom, left, or right half
+- increase / decrease contrast in top, bottom, left, or right half
+- blur top, bottom, left, or right half
+- rotate 90 / 180 / 270
+- flip horizontal / vertical
+- undo last change
+
+### 5.2.2 GIMP Phase 4 execution model
+
+Phase 4 GIMP requests use a hybrid execution model:
+
+1. deterministic fast paths for existing proven prompt families
+2. direct MCP info / metadata queries where appropriate
+3. constrained `call_api` fallback for editing requests outside the fast paths
+
+Phase 4 does not attempt to make GIMP fully general.
+
+### 5.2.3 GIMP Phase 4 undo model
+
+Phase 4 preserves the existing clipboard-backed undo behavior from the
+standalone GIMP assistant:
+
+- undo restores the last saved clipboard-backed image state
+- only the most recent operation is guaranteed undoable
+- the frontend only renders Undo when the specific assistant message is marked
+  `undoable`
 
 ### 5.3 Blender provider
 
@@ -265,6 +328,19 @@ The foundation branch intentionally keeps provider behavior narrow:
   later phases
 - `assistant_send` accepts the final request shape but still returns
   `UNIFIED_ASSISTANT_NOT_IMPLEMENTED`
+
+## 9.2 Phase 4 GIMP activation rule
+
+Phase 4 activates the provider-backed command surface only for GIMP:
+
+- `assistant_send` is operational for `mode == gimp`
+- `mode_status(gimp)` reports real connection state and discovered tools
+- `mode_refresh_tools(gimp)` performs a real reconnect / rediscovery attempt
+- `mode_undo(gimp)` performs a real provider-backed undo
+- `assistant_send` remains scaffold-only for `blender`, `writer`, `calc`, and
+  `impress`
+- Code mode keeps the existing Codehelper inference path rather than routing
+  through `assistant_send`
 
 ## 10. Planner Boundary
 

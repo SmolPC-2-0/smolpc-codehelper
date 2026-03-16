@@ -265,6 +265,20 @@ During Phase 3 Code-mode work:
 - switching away from Code during generation is allowed and does not cancel or
   relocate the generation.
 
+### Phase 4 GIMP rule
+
+During Phase 4 GIMP work:
+
+- GIMP mode becomes a live shell mode with an enabled composer.
+- GIMP mode uses `assistant_send()` rather than the existing Codehelper
+  inference path.
+- Code mode keeps the existing Codehelper inference path unchanged.
+- Blender, Writer, Calc, and Slides remain placeholder-only.
+- active GIMP-mode status in the header should come from real provider state
+  rather than placeholder copy.
+- GIMP mode uses structured status / tool events and does not require token
+  streaming in this phase.
+
 ## 10. Suggestion Chips
 
 Suggestion chips are mode-specific empty-state actions.
@@ -272,7 +286,7 @@ Suggestion chips are mode-specific empty-state actions.
 Examples:
 
 - Code: "Explain this error", "Write a function", "Review this snippet"
-- GIMP: "Resize an image", "Remove the background", "Undo the last change"
+- GIMP: "Blur the top half of the image", "Crop this image to a square", "Rotate the image 90 degrees clockwise"
 - Blender: "Explain this scene", "Create a simple material", "Fix this modifier"
 - Writer: "Draft a paragraph", "Rewrite this passage", "Summarize this text"
 - Calc: "Explain this formula", "Build a grade table", "Clean this data"
@@ -303,7 +317,9 @@ mode work begins.
 - Arguments: `AssistantSendRequestDto`, `Channel<AssistantStreamEvent>`
 - Returns: `AssistantResponseDto`
 - Failure mode: engine error, provider error, validation error, cancellation
-- Phase 3 note: remains scaffold-only and is not used by active Code mode yet
+- Phase 4 note: becomes operational for `gimp` only; it remains scaffold-only
+  for the remaining non-Code modes and is still not used by active Code mode
+  yet
 
 ### `assistant_cancel()`
 
@@ -363,6 +379,21 @@ Before provider integrations land:
 - active Code-mode status should reflect real engine/backend/model state.
 - no Phase 3 work should activate non-Code execution paths.
 
+### Phase 4 GIMP activation
+
+- Code and GIMP are the only live execution modes after Phase 4.
+- GIMP assistant messages may include:
+  - `reply`
+  - `explain`
+  - `undoable`
+  - `toolResults`
+  - `plan`
+- GIMP assistant messages render an Undo affordance only when `undoable === true`.
+- GIMP mode keeps mode-specific prompt starters and real image-editing composer
+  copy.
+- switching away from GIMP during execution is allowed and must not corrupt the
+  originating GIMP chat.
+
 ## 14. Migration Path
 
 1. Preserve the current Codehelper shell as the shared shell.
@@ -370,7 +401,8 @@ Before provider integrations land:
 3. Wrap current Codehelper behavior as Code mode.
 4. Polish Code mode inside the unified shell without activating
    `assistant_send`.
-5. Port GIMP behavior into a new GIMP provider.
+5. Port GIMP behavior into a new GIMP provider and activate `assistant_send`
+   for `gimp` only.
 6. Port Blender behavior into a new Blender provider.
 7. Port LibreOffice behavior into one provider with Writer/Calc/Slides
    frontend configs.
