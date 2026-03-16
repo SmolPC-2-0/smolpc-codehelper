@@ -545,7 +545,6 @@ Teaching rules:
 			showQuickExamples={uiStore.showQuickExamples}
 			disabledExamples={!canUseCodePath}
 			disabledReason={composerDisabledReason}
-			showAssistantActions={canUseCodePath}
 			onSelectExample={handleExampleSelect}
 			onToggleExamples={(show) => uiStore.setShowQuickExamples(show)}
 			onUserScrollUp={markScrollIntentUp}

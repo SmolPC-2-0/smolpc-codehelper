@@ -23,7 +23,6 @@
 	interface Props {
 		message: Message;
 		canRegenerate?: boolean;
-		showAssistantActions?: boolean;
 		onRegenerate?: () => void;
 		onContinue?: () => void;
 		onBranchFromHere?: () => void;
@@ -32,7 +31,6 @@
 	let {
 		message,
 		canRegenerate = false,
-		showAssistantActions = true,
 		onRegenerate = () => {},
 		onContinue = () => {},
 		onBranchFromHere = () => {}
@@ -105,7 +103,7 @@
 			</div>
 		{/if}
 
-		{#if message.role === 'assistant' && !message.isStreaming && showAssistantActions}
+		{#if message.role === 'assistant' && !message.isStreaming}
 			<div class="chat-message__actions">
 				{#if canRegenerate}
 					<button

@@ -17,7 +17,6 @@
 		showQuickExamples: boolean;
 		disabledExamples?: boolean;
 		disabledReason?: string | null;
-		showAssistantActions?: boolean;
 		onSelectExample: (prompt: string) => void;
 		onToggleExamples: (show: boolean) => void;
 		onUserScrollUp: () => void;
@@ -41,7 +40,6 @@
 		showQuickExamples,
 		disabledExamples = false,
 		disabledReason = null,
-		showAssistantActions = true,
 		onSelectExample,
 		onToggleExamples,
 		onUserScrollUp,
@@ -111,8 +109,7 @@
 				{#each messages as message (message.id)}
 					<ChatMessage
 						{message}
-						canRegenerate={showAssistantActions && message.id === latestAssistantMessageId}
-						{showAssistantActions}
+						canRegenerate={message.id === latestAssistantMessageId}
 						onRegenerate={() => onRegenerateMessage(message.id)}
 						onContinue={() => onContinueMessage(message.id)}
 						onBranchFromHere={() => onBranchFromMessage(message.id)}
