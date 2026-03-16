@@ -254,6 +254,17 @@ What remains in Code mode:
 During Phase 2 shell work, the existing Codehelper send/generate flow remains
 active only when `activeMode === 'code'`.
 
+### Phase 3 Code-mode rule
+
+During Phase 3 Code-mode work:
+
+- Code mode continues to use the existing Codehelper inference path.
+- `assistant_send` remains scaffold-only and is not activated for Code mode.
+- the visible header/shell status for active Code mode should come from the
+  current inference/backend state rather than the scaffold provider copy.
+- switching away from Code during generation is allowed and does not cancel or
+  relocate the generation.
+
 ## 10. Suggestion Chips
 
 Suggestion chips are mode-specific empty-state actions.
@@ -292,6 +303,7 @@ mode work begins.
 - Arguments: `AssistantSendRequestDto`, `Channel<AssistantStreamEvent>`
 - Returns: `AssistantResponseDto`
 - Failure mode: engine error, provider error, validation error, cancellation
+- Phase 3 note: remains scaffold-only and is not used by active Code mode yet
 
 ### `assistant_cancel()`
 
@@ -344,14 +356,23 @@ Before provider integrations land:
   `This mode is visible in the unified shell, but chat execution is not wired yet.`
 - the shell must not fake Code-mode execution in other modes.
 
+### Phase 3 Code-mode refinement
+
+- Code-mode shell copy should feel like current Codehelper rather than a
+  generic multi-mode placeholder.
+- active Code-mode status should reflect real engine/backend/model state.
+- no Phase 3 work should activate non-Code execution paths.
+
 ## 14. Migration Path
 
 1. Preserve the current Codehelper shell as the shared shell.
 2. Add mode state and per-mode histories.
 3. Wrap current Codehelper behavior as Code mode.
-4. Port GIMP behavior into a new GIMP provider.
-5. Port Blender behavior into a new Blender provider.
-6. Port LibreOffice behavior into one provider with Writer/Calc/Slides
+4. Polish Code mode inside the unified shell without activating
+   `assistant_send`.
+5. Port GIMP behavior into a new GIMP provider.
+6. Port Blender behavior into a new Blender provider.
+7. Port LibreOffice behavior into one provider with Writer/Calc/Slides
    frontend configs.
 
 The frontend should not import or embed standalone app code directly. It should

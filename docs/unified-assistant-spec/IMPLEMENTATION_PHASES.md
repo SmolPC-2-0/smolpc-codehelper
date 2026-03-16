@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-16
-**Status:** Phase 2 shell and shell follow-up are merged; Phase 3 Code-mode docs preflight is next
+**Status:** Phase 2 shell and shell follow-up are merged; Phase 3 Code-mode preflight is locked and implementation is next
 
 ## Phase 0: Documentation Baseline
 
@@ -46,22 +46,19 @@
 
 ## Branch Order After Phase 2
 
-1. `codex/unified-shell-followups-status-docs`
+1. `codex/unified-code-mode-docs`
 2. merge into `docs/unified-assistant-spec`
 3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-4. `codex/unified-code-mode-docs`
-5. merge into `docs/unified-assistant-spec`
-6. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-7. `codex/unified-code-mode`
-8. closeout docs
-9. `codex/unified-gimp-mode-docs`
-10. `codex/unified-gimp-mode`
-11. `codex/unified-blender-mode-docs`
-12. `codex/unified-blender-mode`
-13. `codex/unified-libreoffice-mode-docs`
-14. `codex/unified-libreoffice-mode`
-15. `codex/unified-hardening-docs`
-16. `codex/unified-hardening`
+4. `codex/unified-code-mode`
+5. closeout docs
+6. `codex/unified-gimp-mode-docs`
+7. `codex/unified-gimp-mode`
+8. `codex/unified-blender-mode-docs`
+9. `codex/unified-blender-mode`
+10. `codex/unified-libreoffice-mode-docs`
+11. `codex/unified-libreoffice-mode`
+12. `codex/unified-hardening-docs`
+13. `codex/unified-hardening`
 
 ## Phase 2: Unified Shell
 
@@ -135,6 +132,7 @@
 - Code-mode visible status should prefer real `inferenceStore.status` over scaffold provider copy
 - mode switching during Code generation remains allowed
 - Code-mode shell copy should feel like current Codehelper, not a generic placeholder
+- `assistant_send` remains scaffold-only through Phase 3
 
 **Exit criteria**
 
