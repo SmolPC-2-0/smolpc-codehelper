@@ -18,7 +18,7 @@
 | `codex/unified-shell-followups-status-docs` | Merged shell follow-up docs sync branch |
 | `codex/unified-code-mode-docs` | Merged Phase 3 preflight docs branch |
 | `codex/unified-code-mode` | Merged Phase 3 implementation branch |
-| `codex/unified-code-mode-status-docs` | Phase 3 closeout docs branch |
+| `codex/unified-code-mode-status-docs` | Merged Phase 3 closeout docs branch |
 | `codex/unified-gimp-mode-docs` | Next Phase 4 preflight docs branch |
 
 ## What Is Done
