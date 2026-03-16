@@ -42,6 +42,10 @@
 	let pendingDeleteId: string | null = $state(null);
 	let recentlyDeleted = $state<DeletedChatSnapshot | null>(null);
 	let undoTimeoutId = $state<number | null>(null);
+	const appTitle = $derived(
+		activeMode === 'code' ? 'SmolPC Codehelper' : 'SmolPC Unified Assistant'
+	);
+	const newChatLabel = $derived(activeMode === 'code' ? 'New Code Chat' : 'New Chat');
 
 	const normalizedQuery = $derived(searchQuery.trim().toLowerCase());
 	const currentChatId = $derived(chatsStore.getCurrentChatIdForMode(activeMode));
@@ -189,7 +193,7 @@
 	<div class="sidebar__header">
 		<div class="sidebar__header-row">
 			<div>
-				<h1>SmolPC Unified Assistant</h1>
+				<h1>{appTitle}</h1>
 				<p>{activeModeLabel} · {activeModeSubtitle}</p>
 			</div>
 			{#if onClose}
@@ -208,7 +212,7 @@
 	</div>
 
 	<div class="sidebar__action">
-		<Button onclick={handleNewChat} class="sidebar__new-chat">New Chat</Button>
+		<Button onclick={handleNewChat} class="sidebar__new-chat">{newChatLabel}</Button>
 
 		<div class="sidebar__search-wrap">
 			<span class="sidebar__search-icon" aria-hidden="true">

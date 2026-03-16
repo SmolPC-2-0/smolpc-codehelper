@@ -29,11 +29,15 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 	{
 		id: 'code',
 		label: 'Code',
-		subtitle: 'Coding help inside the shared SmolPC app',
+		subtitle: 'Codehelper workspace for fixes, explanations, and new code',
 		icon: 'code',
 		providerKind: 'local',
 		systemPromptKey: 'mode.code.default',
-		suggestions: ['Explain this error', 'Write a function', 'Review this snippet'],
+		suggestions: [
+			'Fix this bug and explain the root cause',
+			'Write a function from this prompt',
+			'Review this snippet for mistakes'
+		],
 		capabilities: {
 			supportsTools: false,
 			supportsUndo: false,

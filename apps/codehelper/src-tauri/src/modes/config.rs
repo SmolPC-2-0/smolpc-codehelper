@@ -19,14 +19,14 @@ pub fn mode_config(mode: AppMode) -> ModeConfigDto {
         AppMode::Code => ModeConfigDto {
             id: AppMode::Code,
             label: "Code".to_string(),
-            subtitle: "Coding help inside the shared SmolPC app".to_string(),
+            subtitle: "Codehelper workspace for fixes, explanations, and new code".to_string(),
             icon: "code".to_string(),
             provider_kind: ProviderKind::Local,
             system_prompt_key: "mode.code.default".to_string(),
             suggestions: vec![
-                "Explain this error".to_string(),
-                "Write a function".to_string(),
-                "Review this snippet".to_string(),
+                "Fix this bug and explain the root cause".to_string(),
+                "Write a function from this prompt".to_string(),
+                "Review this snippet for mistakes".to_string(),
             ],
             capabilities: ModeCapabilitiesDto {
                 supports_tools: false,

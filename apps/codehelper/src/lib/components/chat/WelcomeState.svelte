@@ -10,6 +10,8 @@
 		modeSubtitle: string;
 		suggestions: string[];
 		providerState?: ProviderStateDto | null;
+		statusLabel?: string | null;
+		statusDetail?: string | null;
 		showQuickExamples: boolean;
 		disabledExamples?: boolean;
 		disabledReason?: string | null;
@@ -23,6 +25,8 @@
 		modeSubtitle,
 		suggestions,
 		providerState = null,
+		statusLabel = null,
+		statusDetail = null,
 		showQuickExamples,
 		disabledExamples = false,
 		disabledReason = null,
@@ -32,34 +36,34 @@
 
 	const MODE_COPY: Record<AppMode, { chip: string; headline: string; description: string }> = {
 		code: {
-			chip: 'Code Mode',
-			headline: 'Build, debug, and explain code inside the unified shell.',
+			chip: 'Codehelper',
+			headline: 'Fix bugs, write new code, and ask for clear explanations.',
 			description:
-				'Phase 2 keeps the current Codehelper generation flow active while the rest of the unified frontend comes online.'
+				'Phase 3 keeps the real Codehelper generation path, model controls, and diagnostics active while the unified shell becomes its long-term home.'
 		},
 		gimp: {
 			chip: 'GIMP Mode',
 			headline: 'Stage image-edit workflows before the tool bridge is wired.',
 			description:
-				'Use this shell pass to see the final GIMP mode layout, prompts, and provider status without enabling execution yet.'
+				'The GIMP mode already reserves its shell layout, prompt surface, and provider status while execution is still disabled.'
 		},
 		blender: {
 			chip: 'Blender Mode',
 			headline: 'Preview scene-assistant workflows from the shared desktop shell.',
 			description:
-				'The Blender bridge is not connected in Phase 2, but the shell already reserves its mode identity and prompt surface.'
+				'The Blender bridge is not connected yet, but the shell already reserves its mode identity and prompt surface.'
 		},
 		writer: {
 			chip: 'Writer Mode',
 			headline: 'Draft document assistance stays visible while LibreOffice wiring lands later.',
 			description:
-				'Writer is present in the unified shell now so the later LibreOffice provider can drop into a stable, reviewed UI.'
+				'Writer is already present in the unified shell so the later LibreOffice provider can drop into a stable, reviewed UI.'
 		},
 		calc: {
 			chip: 'Calc Mode',
 			headline: 'Spreadsheet help gets a dedicated workspace before execution is enabled.',
 			description:
-				'Calc shares the same future LibreOffice backend, but Phase 2 only exposes the shell, history, and prompt starters.'
+				'Calc shares the future LibreOffice backend, but the shell currently only exposes its history, prompt starters, and provider status.'
 		},
 		impress: {
 			chip: 'Slides Mode',
@@ -88,9 +92,10 @@
 	);
 
 	const providerLabel = $derived(
-		providerState ? providerState.state.replace(/_/g, ' ') : 'status pending'
+		statusLabel ?? (providerState ? providerState.state.replace(/_/g, ' ') : 'status pending')
 	);
 	const heroCopy = $derived(MODE_COPY[mode]);
+	const detailCopy = $derived(statusDetail ?? providerState?.detail ?? null);
 </script>
 
 <div class="welcome-state">
@@ -106,8 +111,8 @@
 		<h2>{heroCopy.headline}</h2>
 		<p>{heroCopy.description}</p>
 		<p class="welcome-state__subtitle">{modeLabel} · {modeSubtitle}</p>
-		{#if providerState?.detail}
-			<p class="welcome-state__detail">{providerState.detail}</p>
+		{#if detailCopy}
+			<p class="welcome-state__detail">{detailCopy}</p>
 		{/if}
 	</div>
 
