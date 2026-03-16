@@ -153,6 +153,8 @@ async fn auth_middleware(
     request: axum::extract::Request,
     next: Next,
 ) -> Result<axum::response::Response, StatusCode> {
+    // Keep /health unauthenticated so the addon can verify bridge reachability
+    // before it has loaded the token file.
     if request.uri().path() == "/health" {
         return Ok(next.run(request).await);
     }
@@ -175,11 +177,11 @@ fn build_router(state: BridgeState) -> Router {
         .route("/health", get(health_handler))
         .route("/scene/update", post(scene_update_handler))
         .route("/scene/current", get(scene_current_handler))
-        .layer(DefaultBodyLimit::max(BRIDGE_BODY_LIMIT_BYTES))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
         ))
+        .layer(DefaultBodyLimit::max(BRIDGE_BODY_LIMIT_BYTES))
         .with_state(state)
 }
 
@@ -501,9 +503,14 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         handle.stop();
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        for _ in 0..20 {
+            match reqwest::get(&health_url).await {
+                Err(error) if error.is_connect() => return,
+                Err(error) => panic!("unexpected shutdown error: {error}"),
+                Ok(_) => tokio::time::sleep(std::time::Duration::from_millis(25)).await,
+            }
+        }
 
-        let error = reqwest::get(&health_url).await.expect_err("bridge stopped");
-        assert!(error.is_connect());
+        panic!("bridge health endpoint still responded after shutdown");
     }
 }
