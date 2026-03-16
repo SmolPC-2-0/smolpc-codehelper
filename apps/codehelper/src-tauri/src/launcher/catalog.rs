@@ -151,6 +151,14 @@ fn validate_min_engine_api_major(app_id: &str, major: Option<u64>) -> Result<(),
 mod tests {
     use super::*;
 
+    fn absolute_test_exe_path() -> String {
+        if cfg!(windows) {
+            "C:\\Program Files\\App\\app.exe".to_string()
+        } else {
+            "/opt/app/app".to_string()
+        }
+    }
+
     #[test]
     fn validate_manifest_rejects_relative_executable_path() {
         let manifest = LauncherManifest {
@@ -173,7 +181,7 @@ mod tests {
         let entry = LauncherManifestApp {
             app_id: "dup".to_string(),
             display_name: "App".to_string(),
-            exe_path: "C:\\Program Files\\App\\app.exe".to_string(),
+            exe_path: absolute_test_exe_path(),
             args: vec![],
             focus_command: None,
             min_engine_api_major: Some(1),

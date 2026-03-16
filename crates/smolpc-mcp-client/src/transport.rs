@@ -1,5 +1,6 @@
 use crate::error::McpClientError;
 use crate::jsonrpc::{JsonRpcRequest, JsonRpcResponse};
+use async_trait::async_trait;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,8 +61,9 @@ pub trait JsonRpcTransport: Send + Sync {
     fn config(&self) -> &TransportConfig;
 }
 
+#[async_trait]
 pub trait JsonRpcClient: Send + Sync {
     fn transport(&self) -> &dyn JsonRpcTransport;
 
-    fn call(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse, McpClientError>;
+    async fn call(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse, McpClientError>;
 }

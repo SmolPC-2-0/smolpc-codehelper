@@ -30,7 +30,7 @@ pub async fn mode_undo(
 ) -> Result<(), String> {
     let provider = registry.provider_for_mode(mode);
     provider
-        .undo_last_action()
+        .undo_last_action(mode)
         .await
         .map_err(|_| MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION.to_string())
 }

@@ -1,7 +1,6 @@
 use crate::commands::engine_client_adapter::engine_status;
 use crate::commands::inference::InferenceState;
 use crate::modes::config::list_mode_configs;
-use crate::modes::provider::provider_state_for_mode;
 use crate::modes::registry::ModeProviderRegistry;
 use smolpc_assistant_types::{AppMode, ModeConfigDto, ModeStatusDto, ProviderStateDto};
 
@@ -15,7 +14,7 @@ fn build_mode_status_dto(
     ModeStatusDto {
         mode,
         engine_ready,
-        provider_state: provider_state_for_mode(mode, provider_state),
+        provider_state,
         available_tools,
         last_error,
     }
@@ -28,8 +27,8 @@ async fn collect_mode_status(
     registry: tauri::State<'_, ModeProviderRegistry>,
 ) -> Result<ModeStatusDto, String> {
     let provider = registry.provider_for_mode(mode);
-    let provider_state = provider.status().await?;
-    let available_tools = provider.list_tools().await?;
+    let provider_state = provider.status(mode).await?;
+    let available_tools = provider.list_tools(mode).await?;
 
     let (engine_ready, last_error) = match engine_status(app_handle, inference_state).await {
         Ok(readiness) => (
@@ -74,6 +73,8 @@ pub async fn mode_refresh_tools(
     inference_state: tauri::State<'_, InferenceState>,
     registry: tauri::State<'_, ModeProviderRegistry>,
 ) -> Result<ModeStatusDto, String> {
+    // Phase 1 foundation keeps refresh as a no-op until providers implement
+    // real reconnect and tool discovery flows.
     collect_mode_status(mode, app_handle, inference_state, registry).await
 }
 
@@ -88,7 +89,7 @@ mod tests {
             AppMode::Calc,
             false,
             ProviderStateDto {
-                mode: AppMode::Writer,
+                mode: AppMode::Calc,
                 state: "disconnected".to_string(),
                 detail: Some("Provider not integrated yet".to_string()),
                 supports_tools: true,

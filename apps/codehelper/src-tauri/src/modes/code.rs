@@ -24,31 +24,32 @@ impl CodeProvider {
 
 #[async_trait]
 impl ToolProvider for CodeProvider {
-    async fn connect_if_needed(&self) -> Result<ProviderStateDto, String> {
+    async fn connect_if_needed(&self, _mode: AppMode) -> Result<ProviderStateDto, String> {
         Ok(Self::idle_state())
     }
 
-    async fn status(&self) -> Result<ProviderStateDto, String> {
+    async fn status(&self, _mode: AppMode) -> Result<ProviderStateDto, String> {
         Ok(Self::idle_state())
     }
 
-    async fn list_tools(&self) -> Result<Vec<ToolDefinitionDto>, String> {
+    async fn list_tools(&self, _mode: AppMode) -> Result<Vec<ToolDefinitionDto>, String> {
         Ok(Vec::new())
     }
 
     async fn execute_tool(
         &self,
+        _mode: AppMode,
         _name: &str,
         _arguments: serde_json::Value,
     ) -> Result<ToolExecutionResultDto, String> {
         Err(FOUNDATION_PROVIDER_EXECUTION_NOT_IMPLEMENTED.to_string())
     }
 
-    async fn undo_last_action(&self) -> Result<(), String> {
+    async fn undo_last_action(&self, _mode: AppMode) -> Result<(), String> {
         Err(MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION.to_string())
     }
 
-    async fn disconnect_if_needed(&self) -> Result<(), String> {
+    async fn disconnect_if_needed(&self, _mode: AppMode) -> Result<(), String> {
         Ok(())
     }
 }
@@ -57,11 +58,15 @@ impl ToolProvider for CodeProvider {
 mod tests {
     use super::CodeProvider;
     use crate::modes::provider::ToolProvider;
+    use smolpc_assistant_types::AppMode;
 
     #[tokio::test]
     async fn code_provider_returns_idle_state() {
         let provider = CodeProvider;
-        let state = provider.status().await.expect("provider state");
+        let state = provider
+            .status(AppMode::Code)
+            .await
+            .expect("provider state");
 
         assert_eq!(state.state, "idle");
         assert_eq!(

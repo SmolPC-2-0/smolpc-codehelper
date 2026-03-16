@@ -7,14 +7,14 @@ pub struct AssistantState {
 
 impl AssistantState {
     pub fn clear_cancelled(&self) {
-        self.cancelled.store(false, Ordering::Relaxed);
+        self.cancelled.store(false, Ordering::Release);
     }
 
     pub fn mark_cancelled(&self) {
-        self.cancelled.store(true, Ordering::Relaxed);
+        self.cancelled.store(true, Ordering::Release);
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Relaxed)
+        self.cancelled.load(Ordering::Acquire)
     }
 }
