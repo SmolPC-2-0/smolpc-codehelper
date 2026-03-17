@@ -8,6 +8,9 @@
 This document defines how each non-Code mode becomes self-contained without
 changing the public assistant command surface.
 
+Phase 2 foundation adds app-level setup commands and setup state, but it does
+not change live mode activation behavior.
+
 Public command surface remains:
 
 - `list_modes`
@@ -29,6 +32,9 @@ New app-level setup commands are added separately:
 | `local`       | Code                       | app-owned engine only                                 |
 | `mcp`         | GIMP, Writer, Calc, Slides | app-owned runtime or transport plus external host app |
 | `hybrid`      | Blender                    | app-owned bridge plus provisioned addon               |
+
+Phase 2 keeps the existing live provider behavior intact while adding the
+shared setup/provisioning substrate those providers will later consume.
 
 ## 3. Stable Provider Interface
 
@@ -126,16 +132,33 @@ Ownership rules:
 `setup_status` should expose:
 
 - host app detected/missing
-- provider assets provisioned/outdated/missing
-- provider runtime ready/not ready
+- bundled foundation assets ready/missing/not prepared
 - repair action availability
+
+Phase 2 setup item ids are locked to:
+
+- `engine_runtime`
+- `bundled_model`
+- `bundled_python`
+- `host_gimp`
+- `host_blender`
+- `host_libreoffice`
 
 `setup_prepare` should:
 
-- provision missing bundled assets
-- validate packaged runtime resources
-- repair version drift when safe
-- never silently mutate user profile state without explicit provider/setup intent
+- validate manifests
+- prepare app-local setup directories
+- extract or install the bundled Python runtime when packaged payloads are present
+- validate the packaged model manifest and resource path
+- refresh host-app detection state
+
+`setup_prepare` must not in Phase 2:
+
+- provision Blender addons
+- provision GIMP plugins
+- edit Blender or GIMP user profiles
+- launch GIMP, Blender, or LibreOffice
+- replace `mode_refresh_tools`
 
 ## 7. Provisioning Rules
 
@@ -151,6 +174,9 @@ Expected provisioners:
 - `LibreOfficeProvisioner`
 - `BlenderAddonProvisioner`
 - `GimpPluginProvisioner`
+
+Phase 2 only establishes the shared provisioning foundation. It does not ship
+mode-specific provisioners yet.
 
 ## 8. Runtime Supervision Rules
 
@@ -169,6 +195,10 @@ Expected supervisors:
 - LibreOffice runtime supervisor
 - Blender bridge supervisor
 - GIMP MCP runtime supervisor
+
+Phase 2 introduces the shared setup state and packaged-resource validation
+needed before those provider-specific supervisors take ownership in later
+phases.
 
 ## 9. Non-Goals In This Line
 

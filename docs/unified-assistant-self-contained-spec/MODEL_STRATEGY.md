@@ -36,6 +36,13 @@ That means:
 - the engine auto-start path resolves that model automatically
 - setup status can report if the packaged model is missing or damaged
 
+Phase 2 foundation requirement:
+
+- the packaged app must have a defined resource contract at `resources/models/`
+- the self-contained line keeps the current engine behavior that prefers a bundled
+  `resource_dir/models` when present
+- Phase 2 validates that contract; it does not change model ordering or inference DTOs
+
 ## 3. Fallback And Future Policy
 
 Allowed in the future, but not part of this finish line:
@@ -80,6 +87,12 @@ The self-contained line must validate:
 - engine startup can load the bundled default model
 - no external model setup is required
 - missing/damaged model resources produce honest setup status
+
+Phase 2 additionally requires:
+
+- build-artifact staging for the bundled model is defined and scripted
+- packaged artifact selection for `qwen3-4b-instruct-2507` is pinned and reviewable
+- Windows runtime validation is still treated as required follow-up, not assumed complete
 
 ## 7. Deferred Questions
 
