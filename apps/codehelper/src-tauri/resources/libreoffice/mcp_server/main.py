@@ -1,69 +1,93 @@
 #!/usr/bin/env python3
-import os
-import sys
-import subprocess
-import socket
-import time
-import platform
-import signal
 import atexit
+import logging
+import os
+import platform
+import secrets
+import signal
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Optional
 
-# Global variables to track child processes
-office_process = None
-helper_process = None
+HELPER_PORT = 8765
+OFFICE_PORT = 2002
+STARTUP_TIMEOUT_SECONDS = 20.0
+STARTUP_POLL_INTERVAL_SECONDS = 0.2
+SHUTDOWN_TIMEOUT_SECONDS = 5.0
+HELPER_AUTH_TOKEN_ENV = "SMOLPC_LIBREOFFICE_HELPER_AUTH_TOKEN"
+
+office_process: Optional[subprocess.Popen] = None
+helper_process: Optional[subprocess.Popen] = None
+server_process: Optional[subprocess.Popen] = None
 
 
-def cleanup_processes():
-    """Clean up all child processes when the main process exits"""
-    global office_process, helper_process
+def configure_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        stream=sys.stderr,
+    )
 
-    print("Cleaning up processes...", file=sys.stderr)
 
-    if helper_process and helper_process.poll() is None:
-        print("Terminating helper process...", file=sys.stderr)
-        helper_process.terminate()
+def stop_process(label: str, process: Optional[subprocess.Popen]) -> None:
+    if process is None or process.poll() is not None:
+        return
+
+    logging.info("Stopping %s process", label)
+    process.terminate()
+    try:
+        process.wait(timeout=SHUTDOWN_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        logging.warning("%s process did not exit after terminate(); killing it", label)
+        process.kill()
         try:
-            helper_process.wait(timeout=5)
+            process.wait(timeout=SHUTDOWN_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
-            helper_process.kill()
-
-    if office_process and office_process.poll() is None:
-        print("Terminating office process...", file=sys.stderr)
-        office_process.terminate()
-        try:
-            office_process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            office_process.kill()
+            logging.error("%s process did not exit after kill()", label)
 
 
-def signal_handler(signum, frame):
-    """Handle Ctrl+C and other signals"""
-    print("\nReceived interrupt signal. Shutting down...", file=sys.stderr)
+def cleanup_processes() -> None:
+    global office_process, helper_process, server_process
+
+    stop_process("MCP server", server_process)
+    stop_process("LibreOffice helper", helper_process)
+    stop_process("LibreOffice office", office_process)
+
+    server_process = None
+    helper_process = None
+    office_process = None
+
+
+def signal_handler(signum, _frame) -> None:
+    logging.info("Received signal %s; shutting down LibreOffice MCP runtime", signum)
     cleanup_processes()
-    sys.exit(0)
+    raise SystemExit(0)
 
 
-def get_office_path():
-    """Get the Collabora Office or LibreOffice executable path based on the operating system"""
+def register_shutdown_handlers() -> None:
+    atexit.register(cleanup_processes)
+    signal.signal(signal.SIGINT, signal_handler)
+    if platform.system() != "Windows":
+        signal.signal(signal.SIGTERM, signal_handler)
+
+
+def get_office_path() -> str:
     system = platform.system().lower()
     if system == "windows":
-        # Windows paths
         possible_paths = [
             r"C:\Program Files\Collabora Office\program\soffice.exe",
             r"C:\Program Files (x86)\Collabora Office\program\soffice.exe",
-            r"C:\Program Files\LibreOffice\program\soffice.exe",  # Fallback to LibreOffice
+            r"C:\Program Files\LibreOffice\program\soffice.exe",
         ]
     elif system == "linux":
-        # Linux paths - Collabora Office is typically installed in these locations
         possible_paths = [
-            "/usr/bin/coolwsd",  # Collabora Online WebSocket Daemon
-            "/usr/bin/collaboraoffice",  # Collabora Office main executable
+            "/usr/bin/coolwsd",
+            "/usr/bin/collaboraoffice",
             "/opt/collaboraoffice/program/soffice",
             "/usr/lib/collaboraoffice/program/soffice",
-            # # Fallback to standard LibreOffice paths
-            # '/usr/bin/soffice',
-            # '/usr/lib/libreoffice/program/soffice',
-            # '/opt/libreoffice/program/soffice'
         ]
     else:
         raise OSError(f"Unsupported operating system: {system}")
@@ -76,8 +100,7 @@ def get_office_path():
     )
 
 
-def get_python_path():
-    """Get the Python executable path based on the operating system"""
+def get_python_path() -> str:
     system = platform.system().lower()
     if system == "windows":
         possible_paths = [
@@ -88,103 +111,109 @@ def get_python_path():
         for path in possible_paths:
             if os.path.exists(path):
                 return path
-        return sys.executable  # Fallback to system Python
-    else:
-        return sys.executable  # Use the current Python interpreter on Linux
+    return sys.executable
 
 
-def is_port_in_use(port):
-    """Check if a port is already in use"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(("localhost", port)) == 0
+def is_port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.5)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
-def start_office(port=2002):
-    """Start Collabora Office in headless mode with socket"""
+def wait_for_port_ready(port: int, label: str) -> None:
+    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if is_port_in_use(port):
+            logging.info("%s is ready on port %s", label, port)
+            return
+        time.sleep(STARTUP_POLL_INTERVAL_SECONDS)
+    raise TimeoutError(f"{label} did not become ready on port {port}")
+
+
+def start_office(port: int = OFFICE_PORT) -> None:
     global office_process
 
-    if not is_port_in_use(port):
-        print("Starting Collabora Office with socket...", file=sys.stderr)
-        soffice_path = get_office_path()
-        office_process = subprocess.Popen(
-            [
-                soffice_path,
-                "-env:UserInstallation=file:///C:/Temp/LibreOfficeHeadlessProfile",
-                "--headless",
-                f"--accept=socket,host=localhost,port={port};urp;",
-                "--norestore",
-                "--nodefault",
-                "--nologo",
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        time.sleep(3)  # Give it time to start
-    else:
-        print(f"Office socket already running on port {port}", file=sys.stderr)
+    if is_port_in_use(port):
+        logging.info("Office socket already available on port %s", port)
+        return
+
+    soffice_path = get_office_path()
+    logging.info("Starting headless office process from %s", soffice_path)
+    office_process = subprocess.Popen(
+        [
+            soffice_path,
+            "-env:UserInstallation=file:///C:/Temp/LibreOfficeHeadlessProfile",
+            "--headless",
+            f"--accept=socket,host=localhost,port={port};urp;",
+            "--norestore",
+            "--nodefault",
+            "--nologo",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    wait_for_port_ready(port, "LibreOffice office socket")
 
 
-def start_helper():
-    """Start the Office helper script"""
+def build_child_env(helper_token: str) -> dict:
+    env = os.environ.copy()
+    env[HELPER_AUTH_TOKEN_ENV] = helper_token
+    return env
+
+
+def start_helper(helper_token: str, port: int = HELPER_PORT) -> None:
     global helper_process
 
-    if not is_port_in_use(8765):
-        print("Starting Office helper...", file=sys.stderr)
-        exe_dir = os.path.dirname(sys.argv[0])
-        helper_script = os.path.join(exe_dir, "helper.py")
-        python_path = get_python_path()
-        helper_process = subprocess.Popen(
-            [python_path, helper_script],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+    if is_port_in_use(port):
+        raise RuntimeError(
+            f"LibreOffice helper port {port} is already in use; refusing to talk to an unknown helper process."
         )
-        time.sleep(3)
-    else:
-        print("Helper script already running on port 8765", file=sys.stderr)
+
+    helper_script = Path(__file__).with_name("helper.py")
+    python_path = get_python_path()
+    logging.info("Starting LibreOffice helper from %s", helper_script)
+    helper_process = subprocess.Popen(
+        [python_path, str(helper_script)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=build_child_env(helper_token),
+    )
+    wait_for_port_ready(port, "LibreOffice helper socket")
 
 
-def start_mcp_server():
-    """Start the MCP server, passing stdin/stdout through for JSON-RPC communication"""
-    print("Starting Office MCP server...", file=sys.stderr)
-    server_script = os.path.join(os.path.dirname(__file__), "libre.py")
+def start_mcp_server(helper_token: str) -> int:
+    global server_process
 
-    # Pass stdin/stdout through so the parent process can communicate
-    # via JSON-RPC over stdio with the MCP server (libre.py)
-    subprocess.run(
-        [
-            sys.executable,  # Use the same Python interpreter
-            server_script,
-        ],
+    server_script = Path(__file__).with_name("libre.py")
+    logging.info("Starting LibreOffice MCP server from %s", server_script)
+    server_process = subprocess.Popen(
+        [sys.executable, str(server_script)],
         stdin=sys.stdin,
         stdout=sys.stdout,
         stderr=sys.stderr,
+        env=build_child_env(helper_token),
     )
+    return server_process.wait()
 
 
-def main():
-    # Register cleanup function to run when the program exits
-    atexit.register(cleanup_processes)
-
-    # Register signal handlers for graceful shutdown
-    signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
-    if platform.system() != "Windows":
-        signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
+def main() -> int:
+    configure_logging()
+    register_shutdown_handlers()
+    helper_token = secrets.token_hex(32)
+    logging.info("Starting LibreOffice MCP runtime")
 
     try:
         start_office()
-        start_helper()
-        start_mcp_server()
-    except KeyboardInterrupt:
-        print("\nReceived keyboard interrupt. Shutting down...", file=sys.stderr)
+        start_helper(helper_token)
+        return start_mcp_server(helper_token)
+    except (FileNotFoundError, OSError, RuntimeError, TimeoutError, subprocess.SubprocessError):
+        logging.exception("LibreOffice MCP runtime failed during startup or execution")
+        return 1
+    finally:
         cleanup_processes()
-        sys.exit(0)
-    except Exception as e:
-        print(f"An error occurred: {e}", file=sys.stderr)
-        cleanup_processes()
-        sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

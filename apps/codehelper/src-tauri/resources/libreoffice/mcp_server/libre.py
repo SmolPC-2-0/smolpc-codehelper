@@ -11,20 +11,37 @@ from concurrent.futures import ThreadPoolExecutor
 from queue import Queue, Empty
 import time
 import builtins
+from pathlib import Path
 
 # Redirect all print() to stderr — stdout is reserved for MCP JSON-RPC protocol
 _original_print = builtins.print
+
+
 def _print_to_stderr(*args, **kwargs):
     kwargs.setdefault('file', sys.stderr)
     _original_print(*args, **kwargs)
+
+
 builtins.print = _print_to_stderr
 
+MAX_HELPER_FRAME_SIZE = 10 * 1024 * 1024
+HELPER_AUTH_TOKEN_ENV = "SMOLPC_LIBREOFFICE_HELPER_AUTH_TOKEN"
+HELPER_AUTH_TOKEN = os.getenv(HELPER_AUTH_TOKEN_ENV, "")
+
+
 def _resolve_log_path(filename: str) -> str:
-    log_dir = os.getenv("SMOLPC_MCP_LOG_DIR")
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
-        return os.path.join(log_dir, filename)
-    return os.path.join(os.path.dirname(__file__), filename)
+    configured_dir = os.getenv("SMOLPC_MCP_LOG_DIR")
+    try:
+        if configured_dir:
+            log_dir = Path(configured_dir).expanduser()
+            if not log_dir.is_absolute():
+                raise ValueError("SMOLPC_MCP_LOG_DIR must be an absolute path")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            return str(log_dir.resolve(strict=True) / filename)
+    except (OSError, RuntimeError, ValueError):
+        pass
+
+    return str(Path(__file__).resolve().parent / filename)
 
 log_path = _resolve_log_path("libre.log")
 logging.basicConfig(
@@ -66,6 +83,69 @@ response_lock = threading.Lock()
 thread_pool = ThreadPoolExecutor(max_workers=1)
 
 
+class HelperProtocolError(Exception):
+    pass
+
+
+def _recv_exact(client_socket: socket.socket, size: int) -> bytes:
+    data = bytearray()
+    while len(data) < size:
+        chunk = client_socket.recv(size - len(data))
+        if not chunk:
+            break
+        data.extend(chunk)
+    return bytes(data)
+
+
+def _send_helper_frame(client_socket: socket.socket, command: dict) -> None:
+    payload = json.dumps(command).encode("utf-8")
+    if len(payload) == 0:
+        raise HelperProtocolError("Helper request payload must not be empty")
+    if len(payload) > MAX_HELPER_FRAME_SIZE:
+        raise HelperProtocolError("Helper request exceeded the maximum frame size")
+    client_socket.sendall(len(payload).to_bytes(4, byteorder="big") + payload)
+
+
+def _recv_helper_frame(client_socket: socket.socket) -> dict:
+    length_data = _recv_exact(client_socket, 4)
+    if len(length_data) != 4:
+        raise HelperProtocolError("Incomplete length header from helper")
+
+    msg_length = int.from_bytes(length_data, byteorder="big")
+    if msg_length <= 0:
+        raise HelperProtocolError("Helper returned an invalid frame length")
+    if msg_length > MAX_HELPER_FRAME_SIZE:
+        raise HelperProtocolError("Helper response exceeded the maximum frame size")
+
+    response_data = _recv_exact(client_socket, msg_length)
+    if len(response_data) != msg_length:
+        raise HelperProtocolError("Incomplete response payload from helper")
+
+    try:
+        decoded = json.loads(response_data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise HelperProtocolError(f"Invalid helper response JSON: {error}") from error
+
+    if not isinstance(decoded, dict):
+        raise HelperProtocolError("Helper response must be a top-level object")
+    return decoded
+
+
+def _normalize_helper_response(response: dict) -> dict:
+    status = response.get("status")
+    if status not in {"success", "error"}:
+        raise HelperProtocolError("Helper response missing valid status field")
+
+    if status == "success":
+        if "result" not in response:
+            raise HelperProtocolError("Helper success response missing result field")
+        return {"status": "success", "message": response["result"]}
+
+    if "error" not in response:
+        raise HelperProtocolError("Helper error response missing error field")
+    return {"status": "error", "message": response["error"]}
+
+
 def queue_worker():
     """Worker function that processes requests from the queue sequentially"""
     while True:
@@ -78,47 +158,11 @@ def queue_worker():
                 client_socket.settimeout(30)  # 30 second timeout
                 client_socket.connect(("localhost", 8765))
 
-                logging.info(client_socket)
-
-                # Send command
-                request_data = json.dumps(command).encode("utf-8")
-                client_socket.send(request_data)
-
-                logging.info(request_data)
-
-                # Receive response (helper.py sends 4-byte big-endian length header + JSON)
-                length_data = client_socket.recv(4)
-                if len(length_data) < 4:
-                    client_socket.close()
-                    response = {
-                        "status": "error",
-                        "message": "Incomplete length header from helper",
-                    }
-                else:
-                    msg_length = int.from_bytes(length_data, byteorder="big")
-
-                    # Read exactly msg_length bytes
-                    chunks = []
-                    bytes_remaining = msg_length
-                    while bytes_remaining > 0:
-                        chunk = client_socket.recv(min(bytes_remaining, 16384))
-                        if not chunk:
-                            break
-                        chunks.append(chunk)
-                        bytes_remaining -= len(chunk)
-
-                    client_socket.close()
-                    response_data = b"".join(chunks).decode("utf-8")
-                    logging.info(response_data)
-
-                    if not response_data:
-                        response = {
-                            "status": "error",
-                            "message": "Empty response from helper",
-                        }
-                    else:
-                        response = json.loads(response_data)
-
+                request_payload = dict(command)
+                request_payload["_smolpc_auth_token"] = HELPER_AUTH_TOKEN
+                _send_helper_frame(client_socket, request_payload)
+                response = _normalize_helper_response(_recv_helper_frame(client_socket))
+                client_socket.close()
             except socket.timeout:
                 response = {
                     "status": "error",
@@ -128,6 +172,11 @@ def queue_worker():
                 response = {
                     "status": "error",
                     "message": "Connection refused. Is the helper script running?",
+                }
+            except HelperProtocolError as error:
+                response = {
+                    "status": "error",
+                    "message": f"Error communicating with helper: {error}",
                 }
             except Exception as e:
                 response = {
@@ -229,6 +278,11 @@ async def call_libreoffice_helper(command: dict) -> dict:
     """
     try:
         logging.info("call_libreoffice_helper function called")
+        if not HELPER_AUTH_TOKEN:
+            return {
+                "status": "error",
+                "message": "Missing helper auth token in LibreOffice runtime environment",
+            }
 
         # Generate unique request ID
         request_id = f"{time.time()}_{threading.get_ident()}"
@@ -265,9 +319,8 @@ async def call_libreoffice_helper(command: dict) -> dict:
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError as e:
-    print(f"Dependency Import Error: {e}")
-    print("Ensure you have installed:")
-    print("- mcp[cli]")
+    logging.error("Dependency Import Error: %s", e)
+    logging.error("Ensure you have installed: mcp[cli]")
     sys.exit(1)
 
 # Initialize MCP server
@@ -1614,7 +1667,7 @@ async def main():
     """
     Main entry point for the LibreOffice MCP server.
     """
-    print("Starting LibreOffice MCP server with stdio transport")
+    logging.info("Starting LibreOffice MCP server with stdio transport")
 
     # Check if helper is running
     try:
@@ -1623,12 +1676,9 @@ async def main():
             response["status"] == "error"
             and "Connection refused" in response["message"]
         ):
-            print("⚠️ WARNING: LibreOffice helper is not running!")
-            print("Please start the helper first with:")
-            print('"C:\\Program Files\\LibreOffice\\program\\python.exe" helper.py')
-            print("Continuing anyway, but LibreOffice operations will fail...")
+            logging.warning("LibreOffice helper is not running; continuing but document operations will fail")
     except Exception:
-        print("Failed to check helper status")
+        logging.exception("Failed to check helper status during startup")
 
     # Run the server using stdio transport
     await mcp.run_stdio_async()

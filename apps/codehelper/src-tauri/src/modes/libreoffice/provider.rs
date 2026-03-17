@@ -13,34 +13,52 @@ use smolpc_assistant_types::{
 };
 use smolpc_mcp_client::McpTool;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[derive(Debug)]
 pub struct LibreOfficeProvider {
     resource_dir: Option<PathBuf>,
+    app_local_data_dir: Option<PathBuf>,
     resolution_options: ResourceResolutionOptions,
     state: Mutex<LibreOfficeProviderState>,
+    connect_lock: Mutex<()>,
 }
 
 impl Default for LibreOfficeProvider {
     fn default() -> Self {
-        Self::new(None)
+        Self::new(None, None)
     }
 }
 
 impl LibreOfficeProvider {
-    pub fn new(resource_dir: Option<PathBuf>) -> Self {
-        Self::with_resolution_options(resource_dir, ResourceResolutionOptions::default())
+    pub fn new(resource_dir: Option<PathBuf>, app_local_data_dir: Option<PathBuf>) -> Self {
+        Self::with_paths_and_resolution_options(
+            resource_dir,
+            app_local_data_dir,
+            ResourceResolutionOptions::default(),
+        )
     }
 
+    #[cfg(test)]
     pub(crate) fn with_resolution_options(
         resource_dir: Option<PathBuf>,
         resolution_options: ResourceResolutionOptions,
     ) -> Self {
+        Self::with_paths_and_resolution_options(resource_dir, None, resolution_options)
+    }
+
+    fn with_paths_and_resolution_options(
+        resource_dir: Option<PathBuf>,
+        app_local_data_dir: Option<PathBuf>,
+        resolution_options: ResourceResolutionOptions,
+    ) -> Self {
         Self {
             resource_dir,
+            app_local_data_dir,
             resolution_options,
             state: Mutex::new(LibreOfficeProviderState::default()),
+            connect_lock: Mutex::new(()),
         }
     }
 
@@ -93,16 +111,22 @@ impl LibreOfficeProvider {
     }
 
     fn live_connected_detail(
-        mode: AppMode,
+        profile: super::LibreOfficeModeProfile,
         runtime: &LibreOfficeRuntimeConfig,
         tools: &[ToolDefinitionDto],
     ) -> String {
-        let profile = libreoffice_profile(mode).expect("writer or slides profile");
         format!(
             "{} is connected through the shared LibreOffice stdio MCP runtime. {} {} tool(s) available in this mode.",
             profile.label,
             runtime.summary(),
             tools.len()
+        )
+    }
+
+    fn empty_allowlist_detail(profile: super::LibreOfficeModeProfile) -> String {
+        format!(
+            "{} connected, but the runtime did not expose any {} allowlisted tools.",
+            profile.label, profile.label
         )
     }
 
@@ -139,36 +163,46 @@ impl LibreOfficeProvider {
     > {
         let layout =
             resolve_mcp_server_layout(self.resource_dir.as_deref(), self.resolution_options)?;
-        let runtime = LibreOfficeRuntimeConfig::from_layout(&layout);
+        let runtime =
+            LibreOfficeRuntimeConfig::from_layout(&layout, self.app_local_data_dir.as_deref());
         Ok((layout, runtime))
     }
 
-    async fn connect_live_locked(
-        &self,
-        mode: AppMode,
-        state: &mut LibreOfficeProviderState,
-    ) -> Result<ProviderStateDto, String> {
-        let (layout, runtime) = self.validate_layout()?;
-        state.scaffold_dir = Some(layout.mcp_server_dir.clone());
-        state.runtime_attempted = true;
+    async fn connect_live(&self, mode: AppMode) -> Result<ProviderStateDto, String> {
+        let profile = Self::profile_for_mode(mode)?;
+        let _connect_guard = self.connect_lock.lock().await;
 
-        let session = runtime
-            .connect_session()
-            .await
-            .map_err(|error| Self::friendly_runtime_error(&error))?;
+        {
+            let state = self.state.lock().await;
+            if state.session.is_some() && !state.tools.is_empty() {
+                return Ok(Self::connected_state(mode, state.last_error.clone()));
+            }
+        }
+
+        let (layout, runtime) = self.validate_layout()?;
+        {
+            let mut state = self.state.lock().await;
+            state.scaffold_dir = Some(layout.mcp_server_dir.clone());
+            state.runtime_attempted = true;
+        }
+        let session = Arc::new(
+            runtime
+                .connect_session()
+                .await
+                .map_err(|error| Self::friendly_runtime_error(&error))?,
+        );
         let raw_tools = session
             .list_tools()
             .await
             .map_err(|error| Self::friendly_runtime_error(&error.to_string()))?;
         let tools = Self::filtered_tools(mode, raw_tools);
 
+        let mut state = self.state.lock().await;
+        state.scaffold_dir = Some(layout.mcp_server_dir);
+        state.session = Some(Arc::clone(&session));
+
         if tools.is_empty() {
-            let detail = format!(
-                "{} connected, but the runtime did not expose any {} allowlisted tools.",
-                libreoffice_profile(mode).expect("profile").label,
-                libreoffice_profile(mode).expect("profile").label
-            );
-            state.session = Some(session);
+            let detail = Self::empty_allowlist_detail(profile);
             state.tools.clear();
             state.last_error = Some(detail.clone());
             return Ok(provider_state(
@@ -180,43 +214,46 @@ impl LibreOfficeProvider {
             ));
         }
 
-        state.session = Some(session);
         state.tools = tools.clone();
         state.last_error = None;
         Ok(Self::connected_state(
             mode,
-            Some(Self::live_connected_detail(mode, &runtime, &tools)),
+            Some(Self::live_connected_detail(profile, &runtime, &tools)),
         ))
     }
 
-    async fn refresh_live_state(
-        &self,
-        mode: AppMode,
-        state: &mut LibreOfficeProviderState,
-    ) -> ProviderStateDto {
-        if let Some(session) = state.session.as_ref() {
+    async fn refresh_live_state(&self, mode: AppMode) -> ProviderStateDto {
+        let profile = match Self::profile_for_mode(mode) {
+            Ok(profile) => profile,
+            Err(error) => return provider_state(mode, "error", Some(error.as_str()), true, false),
+        };
+        let (layout, runtime) = match self.validate_layout() {
+            Ok(value) => value,
+            Err(error) => {
+                let mut state = self.state.lock().await;
+                state.scaffold_dir = None;
+                state.last_error = Some(error.clone());
+                return provider_state(mode, "error", Some(error.as_str()), true, false);
+            }
+        };
+
+        {
+            let mut state = self.state.lock().await;
+            state.scaffold_dir = Some(layout.mcp_server_dir);
+        }
+
+        let session = {
+            let state = self.state.lock().await;
+            state.session.clone()
+        };
+
+        if let Some(session) = session {
             match session.list_tools().await {
                 Ok(raw_tools) => {
-                    let (_, runtime) = match self.validate_layout() {
-                        Ok(value) => value,
-                        Err(error) => {
-                            state.last_error = Some(error.clone());
-                            return provider_state(
-                                mode,
-                                "error",
-                                Some(error.as_str()),
-                                true,
-                                false,
-                            );
-                        }
-                    };
                     let tools = Self::filtered_tools(mode, raw_tools);
+                    let mut state = self.state.lock().await;
                     if tools.is_empty() {
-                        let detail = format!(
-                            "{} connected, but the runtime did not expose any {} allowlisted tools.",
-                            libreoffice_profile(mode).expect("profile").label,
-                            libreoffice_profile(mode).expect("profile").label
-                        );
+                        let detail = Self::empty_allowlist_detail(profile);
                         state.tools.clear();
                         state.last_error = Some(detail.clone());
                         return provider_state(mode, "error", Some(detail.as_str()), true, false);
@@ -225,10 +262,11 @@ impl LibreOfficeProvider {
                     state.last_error = None;
                     return Self::connected_state(
                         mode,
-                        Some(Self::live_connected_detail(mode, &runtime, &tools)),
+                        Some(Self::live_connected_detail(profile, &runtime, &tools)),
                     );
                 }
                 Err(error) => {
+                    let mut state = self.state.lock().await;
                     state.session = None;
                     state.tools.clear();
                     state.last_error = Some(Self::friendly_runtime_error(&error.to_string()));
@@ -236,12 +274,12 @@ impl LibreOfficeProvider {
             }
         }
 
-        match self.connect_live_locked(mode, state).await {
+        match self.connect_live(mode).await {
             Ok(provider_state) => provider_state,
             Err(error) => {
-                let friendly = Self::friendly_runtime_error(&error);
-                state.last_error = Some(friendly.clone());
-                Self::disconnected_state(mode, state)
+                let mut state = self.state.lock().await;
+                state.last_error = Some(error);
+                Self::disconnected_state(mode, &state)
             }
         }
     }
@@ -258,8 +296,9 @@ impl ToolProvider for LibreOfficeProvider {
         if state.session.is_some() && !state.tools.is_empty() {
             return Ok(Self::connected_state(mode, state.last_error.clone()));
         }
+        drop(state);
 
-        self.connect_live_locked(mode, &mut state).await
+        self.connect_live(mode).await
     }
 
     async fn status(&self, mode: AppMode) -> Result<ProviderStateDto, String> {
@@ -285,8 +324,9 @@ impl ToolProvider for LibreOfficeProvider {
         if !is_live_libreoffice_mode(mode) {
             return Self::calc_scaffold_state(mode, &mut state);
         }
+        drop(state);
 
-        Ok(self.refresh_live_state(mode, &mut state).await)
+        Ok(self.refresh_live_state(mode).await)
     }
 
     async fn list_tools(&self, mode: AppMode) -> Result<Vec<ToolDefinitionDto>, String> {
@@ -312,28 +352,33 @@ impl ToolProvider for LibreOfficeProvider {
             .iter()
             .any(|candidate| *candidate == name)
         {
+            let profile = Self::profile_for_mode(mode)?;
             return Err(format!(
                 "{name} is not available in {} mode.",
-                libreoffice_profile(mode).expect("profile").label
+                profile.label
             ));
         }
 
-        {
-            let mut state = self.state.lock().await;
-            if state.session.is_none() {
-                self.connect_live_locked(mode, &mut state).await?;
+        let session = {
+            let state = self.state.lock().await;
+            state.session.clone()
+        };
+        let session = match session {
+            Some(session) => session,
+            None => {
+                self.connect_live(mode).await?;
+                let state = self.state.lock().await;
+                state
+                    .session
+                    .clone()
+                    .ok_or_else(|| "LibreOffice provider is not connected".to_string())?
             }
-        }
-
-        let mut state = self.state.lock().await;
-        let session = state
-            .session
-            .as_ref()
-            .ok_or_else(|| "LibreOffice provider is not connected".to_string())?;
+        };
 
         match session.call_tool(name, arguments).await {
             Ok(payload) => {
                 let tool_result = build_tool_execution_result(name, payload);
+                let mut state = self.state.lock().await;
                 if tool_result.ok {
                     state.last_error = None;
                 } else {
@@ -343,6 +388,7 @@ impl ToolProvider for LibreOfficeProvider {
             }
             Err(error) => {
                 let message = Self::friendly_runtime_error(&error.to_string());
+                let mut state = self.state.lock().await;
                 state.session = None;
                 state.tools.clear();
                 state.last_error = Some(message.clone());
@@ -372,12 +418,15 @@ mod tests {
     use super::LibreOfficeProvider;
     use crate::modes::libreoffice::resources::ResourceResolutionOptions;
     use crate::modes::provider::ToolProvider;
+    use serde_json::json;
     use smolpc_assistant_types::AppMode;
     use std::fs;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     const TEST_RUNTIME: &str = r#"#!/usr/bin/env python3
 import json
+import os
 import sys
 
 TOOLS = [
@@ -388,6 +437,8 @@ TOOLS = [
 def send(value):
     sys.stdout.write(json.dumps(value) + "\n")
     sys.stdout.flush()
+
+assert os.getenv("SMOLPC_MCP_LOG_DIR")
 
 for line in sys.stdin:
     payload = json.loads(line)
@@ -519,5 +570,41 @@ for line in sys.stdin:
             .detail
             .expect("detail")
             .contains("resources are not bundled yet"));
+    }
+
+    #[tokio::test]
+    async fn execute_tool_survives_concurrent_status_refresh() {
+        let tempdir = staged_runtime_root(TEST_RUNTIME);
+        let provider = Arc::new(LibreOfficeProvider::with_resolution_options(
+            Some(tempdir.path().to_path_buf()),
+            ResourceResolutionOptions {
+                allow_dev_fallback: false,
+            },
+        ));
+
+        let initial = provider
+            .status(AppMode::Writer)
+            .await
+            .expect("initial status");
+        assert_eq!(initial.state, "connected");
+
+        let execute_provider = Arc::clone(&provider);
+        let status_provider = Arc::clone(&provider);
+
+        let (tool_result, refreshed_state) = tokio::join!(
+            async move {
+                execute_provider
+                    .execute_tool(AppMode::Writer, "add_heading", json!({"text": "Hello"}))
+                    .await
+            },
+            async move { status_provider.status(AppMode::Writer).await }
+        );
+
+        let tool_result = tool_result.expect("tool result");
+        let refreshed_state = refreshed_state.expect("refreshed state");
+
+        assert!(tool_result.ok);
+        assert_eq!(tool_result.name, "add_heading");
+        assert_eq!(refreshed_state.state, "connected");
     }
 }

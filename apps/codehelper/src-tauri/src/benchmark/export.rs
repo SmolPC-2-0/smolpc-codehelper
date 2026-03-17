@@ -137,7 +137,7 @@ pub fn create_readme(app_handle: &tauri::AppHandle) -> Result<(), String> {
     if !readme_path.exists() {
         let readme_content = r"# Benchmark Results
 
-This directory contains benchmark test results for SmolPC Code Helper.
+This directory contains benchmark test results for SmolPC Unified Assistant.
 
 ## File Naming Convention
 

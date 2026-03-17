@@ -2,7 +2,7 @@
 	"name": "@smolpc/codehelper",
 	"private": true,
 	"version": "2.0.0",
-	"description": "SmolPC CodeHelper app (frontend + Tauri shell) that consumes the shared SmolPC engine.",
+	"description": "SmolPC Unified Assistant app (frontend + Tauri shell) that consumes the shared SmolPC engine.",
 	"author": {
 		"name": "Alysonhower Veras Vieira",
 		"email": "contato@alysonhower.dev"

@@ -1,6 +1,6 @@
 {
   "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "SmolPC Code Helper",
+  "productName": "SmolPC Unified Assistant",
   "version": "2.2.0",
   "identifier": "com.smolpc.codehelper",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "SmolPC Code Helper",
+        "title": "SmolPC Unified Assistant",
         "width": 1000,
         "height": 800,
         "resizable": true,
@@ -39,7 +39,7 @@
       "libs/openvino",
       "binaries/*",
       "resources/blender",
-      "resources/launcher/*"
+      "resources/libreoffice"
     ]
   }
 }

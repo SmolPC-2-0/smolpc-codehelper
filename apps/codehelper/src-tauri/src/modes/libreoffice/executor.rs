@@ -15,7 +15,13 @@ use std::sync::Arc;
 use tokio::time::{timeout, Duration};
 
 const ASSISTANT_CANCELLED: &str = "ASSISTANT_CANCELLED";
+// Keep summary generation short because the document mutation already happened
+// in the tool step; the follow-up is only user-facing explanation, not the
+// authoritative source of truth for the document state.
+#[cfg(not(test))]
 const SUMMARY_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const SUMMARY_TIMEOUT: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Debug, PartialEq)]
 struct ToolCall {
@@ -73,7 +79,9 @@ fn build_planner_messages(
     request: &AssistantSendRequestDto,
     tools: &[ToolDefinitionDto],
 ) -> Vec<EngineChatMessage> {
-    let profile = libreoffice_profile(mode).expect("writer or slides profile");
+    let (label, allowed_tools) = libreoffice_profile(mode)
+        .map(|profile| (profile.label, profile.allowed_tools))
+        .unwrap_or(("LibreOffice", &[]));
     let tool_catalog = tools
         .iter()
         .map(|tool| {
@@ -94,8 +102,8 @@ Do not use markdown fences.\n\
 If no tool call is needed, return the final user-facing answer as plain text.\n\
 Only use tools from this allowlist:\n{}\n\
 Tool catalog:\n{}",
-        profile.label,
-        profile.allowed_tools.join(", "),
+        label,
+        allowed_tools.join(", "),
         tool_catalog
     );
 
@@ -124,14 +132,16 @@ fn build_summary_messages(
     user_text: &str,
     tool_result: &ToolExecutionResultDto,
 ) -> Vec<EngineChatMessage> {
-    let profile = libreoffice_profile(mode).expect("writer or slides profile");
+    let label = libreoffice_profile(mode)
+        .map(|profile| profile.label)
+        .unwrap_or("LibreOffice");
 
     vec![
         EngineChatMessage {
             role: "system".to_string(),
             content: format!(
                 "You are the unified LibreOffice {} assistant. A document tool has already run successfully. Summarize the result for the user in 2 or 3 short sentences. Plain text only. Do not suggest replaying the action. Do not mention undo.",
-                profile.label
+                label
             ),
         },
         EngineChatMessage {
@@ -363,7 +373,12 @@ where
         return Ok(response);
     }
 
-    let tool_call = tool_call.expect("checked above");
+    let tool_call = tool_call.ok_or_else(|| {
+        format!(
+            "I couldn't choose a safe {} action for that request.",
+            profile.label
+        )
+    })?;
     let allowlist = allowed_tool_names(mode);
     if !allowlist.iter().any(|name| *name == tool_call.name) {
         return Err(format!(
@@ -397,7 +412,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{execute_libreoffice_request, TextPlanner};
+    use super::{execute_libreoffice_request, extract_tool_call, TextPlanner};
     use crate::assistant::state::AssistantState;
     use crate::modes::provider::{provider_state, ToolProvider};
     use crate::modes::text_generation::TextStreamer;
@@ -503,6 +518,21 @@ mod tests {
         ) -> Result<String, String> {
             state.mark_cancelled();
             Err("ASSISTANT_CANCELLED".to_string())
+        }
+    }
+
+    struct SlowStreamer;
+
+    #[async_trait]
+    impl TextStreamer for SlowStreamer {
+        async fn generate_stream(
+            &self,
+            _messages: &[EngineChatMessage],
+            _state: &AssistantState,
+            _on_token: &mut (dyn FnMut(String) + Send),
+        ) -> Result<String, String> {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            Ok("too late".to_string())
         }
     }
 
@@ -615,6 +645,17 @@ mod tests {
         assert_eq!(response.tool_results[0].name, "add_slide");
     }
 
+    #[test]
+    fn parse_tool_arguments_accepts_stringified_json_objects() {
+        let tool_call = extract_tool_call(
+            "{\"tool_call\":{\"name\":\"add_heading\",\"arguments\":\"{\\\"text\\\":\\\"Hello\\\"}\"}}",
+        )
+        .expect("tool call");
+
+        assert_eq!(tool_call.name, "add_heading");
+        assert_eq!(tool_call.arguments["text"], json!("Hello"));
+    }
+
     #[tokio::test]
     async fn calc_mode_remains_unimplemented() {
         let provider = Arc::new(MockProvider::default());
@@ -692,6 +733,39 @@ mod tests {
                 .to_string(),
         };
         let streamer = CancellableStreamer;
+        let state = AssistantState::default();
+
+        let response = execute_libreoffice_request(
+            provider,
+            &planner,
+            &streamer,
+            &request(AppMode::Writer, "Add heading"),
+            &state,
+            |_| {},
+        )
+        .await
+        .expect("fallback response");
+
+        assert!(response
+            .reply
+            .contains("add_heading completed successfully"));
+        assert_eq!(
+            response.plan.expect("plan")["usedLocalFallbackSummary"],
+            json!(true)
+        );
+    }
+
+    #[tokio::test]
+    async fn summary_timeout_uses_fallback_summary() {
+        let provider = Arc::new(MockProvider {
+            tools: vec![writer_tool()],
+            result: Some(ok_tool_result("add_heading")),
+        });
+        let planner = MockPlanner {
+            reply: "{\"tool_call\":{\"name\":\"add_heading\",\"arguments\":{\"text\":\"Hello\"}}}"
+                .to_string(),
+        };
+        let streamer = SlowStreamer;
         let state = AssistantState::default();
 
         let response = execute_libreoffice_request(

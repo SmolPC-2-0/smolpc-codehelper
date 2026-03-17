@@ -1,6 +1,6 @@
 # Benchmark Results
 
-This directory contains benchmark test results for SmolPC Code Helper.
+This directory contains benchmark test results for SmolPC Unified Assistant.
 
 ## File Naming Convention
 

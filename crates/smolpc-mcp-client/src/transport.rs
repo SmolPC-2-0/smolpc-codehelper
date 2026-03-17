@@ -1,6 +1,7 @@
 use crate::error::McpClientError;
 use crate::jsonrpc::{JsonRpcRequest, JsonRpcResponse};
 use async_trait::async_trait;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8,6 +9,7 @@ pub struct StdioTransportConfig {
     pub command: String,
     pub args: Vec<String>,
     pub cwd: Option<PathBuf>,
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -71,6 +73,7 @@ pub trait JsonRpcClient: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::{StdioTransportConfig, TransportConfig};
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     #[test]
@@ -79,6 +82,7 @@ mod tests {
             command: "   ".to_string(),
             args: vec!["--flag".to_string()],
             cwd: Some(PathBuf::from(".")),
+            env: BTreeMap::new(),
         });
 
         let error = config

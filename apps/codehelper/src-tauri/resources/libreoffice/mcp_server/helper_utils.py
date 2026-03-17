@@ -5,17 +5,26 @@ import traceback
 import logging
 import sys
 from contextlib import contextmanager
+from pathlib import Path
 
 
 # Set up logging immediately when this module is imported
 def _resolve_log_path(filename):
-    """Resolve log file location, preferring SMOLPC_MCP_LOG_DIR when provided."""
-    log_dir = os.getenv("SMOLPC_MCP_LOG_DIR")
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
-        return os.path.join(log_dir, filename)
-    module_dir = os.path.dirname(__file__)
-    return os.path.join(module_dir, filename)
+    """Resolve a trusted log file location."""
+    configured_dir = os.getenv("SMOLPC_MCP_LOG_DIR")
+    try:
+        if configured_dir:
+            log_dir = Path(configured_dir).expanduser()
+            if not log_dir.is_absolute():
+                raise ValueError("SMOLPC_MCP_LOG_DIR must be an absolute path")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            return str(log_dir.resolve(strict=True) / filename)
+    except (OSError, RuntimeError, ValueError):
+        pass
+
+    module_dir = Path(__file__).resolve().parent
+    module_dir.mkdir(parents=True, exist_ok=True)
+    return str(module_dir / filename)
 
 
 def _setup_module_logging():
@@ -41,11 +50,11 @@ def _setup_module_logging():
         logging.info(f"helper_utils module loaded - logging to: {log_path}")
 
     except Exception as e:
-        print(f"Failed to set up logging in helper_utils: {e}")
+        sys.stderr.write(f"Failed to set up logging in helper_utils: {e}\n")
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s %(levelname)s %(message)s",
-            stream=sys.stdout,
+            stream=sys.stderr,
         )
 
 
@@ -53,18 +62,14 @@ def _setup_module_logging():
 _setup_module_logging()
 
 try:
-    print("Importing UNO...")
     logging.info("Importing UNO...")
     import uno
     from com.sun.star.beans import PropertyValue
     from com.sun.star.connection import NoConnectException
 
-    print("UNO imported successfully!")
     logging.info("UNO imported successfully!")
 except ImportError as e:
-    print(f"UNO Import Error: {e}")
     logging.error(f"UNO Import Error: {e}")
-    print("This script must be run with LibreOffice's Python.")
     logging.error("This script must be run with LibreOffice's Python.")
     sys.exit(1)
 
