@@ -99,6 +99,10 @@
 
 - **Scene-query heuristics must stay narrower than workflow questions** (2026-03): Blender retrieval should be skipped for pure scene-state questions like "What is in my scene right now?", but not for workflow questions that happen to mention scene nouns such as "selected object". Broad substring heuristics accidentally suppress retrieval on legitimate tutoring questions.
 
+- **Stdio MCP transports need stderr capture and response timeouts** (2026-03): A child-process MCP transport that drops stderr or waits forever for a matching response ID turns routine runtime failures into opaque hangs. Capture recent stderr lines and bound response waits so the caller gets an actionable transport error instead of a stuck request.
+
+- **Scaffolding phases should land honest provider status before runtime import** (2026-03): Phase 6A stayed merge-safe because LibreOffice modes gained a real shared provider, resource validation, and mode-aware disabled copy without activating `assistant_send` or importing the evolving standalone runtime. That makes the later activation branch a narrower, more auditable diff.
+
 ---
 
 ## Model Selection

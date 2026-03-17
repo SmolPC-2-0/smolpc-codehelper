@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
-**Last Updated:** 2026-03-16
-**Status:** Phase 5 Blender mode is merged; Phase 6 LibreOffice preflight is next
+**Last Updated:** 2026-03-17
+**Status:** Phase 6A LibreOffice scaffolding is merged; Phase 6B activation docs are next
 
 ## Phase 0: Documentation Baseline
 
@@ -44,18 +44,15 @@
   - tracked OpenVINO placeholder directory
   - clean frontend audit lockfile
 
-## Branch Order After Phase 5
+## Branch Order After Phase 6A
 
-1. `codex/unified-libreoffice-mode-docs`
+1. `codex/unified-libreoffice-activation-docs`
 2. merge into `docs/unified-assistant-spec`
 3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-4. `codex/unified-libreoffice-mode`
-5. `codex/unified-libreoffice-mode-status-docs`
-6. `codex/unified-libreoffice-activation-docs`
-7. `codex/unified-libreoffice-activation`
-8. `codex/unified-libreoffice-activation-status-docs`
-9. `codex/unified-hardening-docs`
-10. `codex/unified-hardening`
+4. `codex/unified-libreoffice-activation`
+5. `codex/unified-libreoffice-activation-status-docs`
+6. `codex/unified-hardening-docs`
+7. `codex/unified-hardening`
 
 ## Phase 2: Unified Shell
 
@@ -282,6 +279,24 @@
 - unified LibreOffice provider scaffolding exists under `apps/codehelper/src-tauri/src/modes/libreoffice/`
 - Writer, Calc, and Slides still share one provider family but remain honest placeholders
 - roadmap and docs explicitly defer live LibreOffice activation to a later branch
+
+**Current branch status**
+
+- preflight docs merged into `docs/unified-assistant-spec`, then into
+  `dev/unified-assistant`
+- implementation merged via PR `#75`
+- merged Phase 6A scaffolding now present in `dev/unified-assistant`:
+  - shared stdio MCP transport support in `smolpc-mcp-client`
+  - stateful shared `LibreOfficeProvider` scaffold under
+    `apps/codehelper/src-tauri/src/modes/libreoffice/`
+  - staged placeholder resource root at
+    `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/README.md`
+  - scaffold-aware `mode_status(writer|calc|impress)` and
+    `mode_refresh_tools(writer|calc|impress)`
+  - Writer / Calc / Slides remain disabled placeholder modes with honest shell
+    copy
+  - `assistant_send` remains scaffold-only for `writer`, `calc`, and `impress`
+  - no edits to `apps/libreoffice-assistant/`
 
 ## Phase 6B: LibreOffice Activation
 
