@@ -1,7 +1,7 @@
 # SmolPC Unified Assistant Self-Contained Architecture
 
 **Last Updated:** 2026-03-17
-**Status:** Target architecture with Phase 2 foundation landed and Phase 3 LibreOffice ownership preflight locked
+**Status:** Target architecture with Phase 2 foundation and Phase 3 LibreOffice runtime ownership landed
 
 ## 1. Product Shape
 
@@ -111,9 +111,10 @@ Phase 2 implementation status:
 
 Phase 3 first consumer:
 
-- LibreOffice consumes the prepared bundled-Python substrate from setup state
+- LibreOffice now consumes the prepared bundled-Python substrate from setup state
 - `setup_prepare()` still remains foundation-only and does not launch LibreOffice
-- Writer and Slides use that prepared runtime at provider-use time
+- Writer and Slides now use that prepared runtime at provider-use time
+- the provider resolves LibreOffice through the shared host-app locator and passes the detected host path into the runtime
 
 ### 4.4 Mode providers
 
@@ -208,7 +209,7 @@ Those roots are now part of the implementation contract on
 - bundled runtime scripts stay in unified resources
 - packaged builds use the prepared bundled Python runtime only
 - packaged mode does not fall back to system `python` or `python3`
-- provider auto-detects `soffice` and auto-launches it when needed
+- provider auto-detects the LibreOffice host path and the bundled runtime auto-launches `soffice` when needed
 - `mode_status(writer|impress)` and `mode_refresh_tools(writer|impress)` surface bundled-Python and LibreOffice readiness honestly
 - Writer and Slides remain side-effectful single-tool-turn modes
 - Calc stays scaffold-only
@@ -258,9 +259,9 @@ On first use of a live external mode:
 5. provider reports live status and available tools
 6. assistant flow proceeds normally
 
-Phase 2 does not yet implement this full flow for every provider. Phase 3
-implements the LibreOffice slice first while leaving Blender and GIMP
-provisioning for later phases.
+Phase 2 does not yet implement this full flow for every provider. Phase 3 now
+implements the LibreOffice slice while leaving Blender and GIMP provisioning
+for later phases.
 
 ## 11. Deferred Architecture
 

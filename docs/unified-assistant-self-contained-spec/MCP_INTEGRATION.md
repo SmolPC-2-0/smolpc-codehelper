@@ -1,7 +1,7 @@
 # MCP And Provider Integration For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Integration ownership spec with Phase 2 setup foundation landed and Phase 3 LibreOffice runtime rules locked
+**Status:** Integration ownership spec with Phase 2 setup foundation and Phase 3 LibreOffice runtime ownership landed
 
 ## 1. Scope
 
@@ -36,16 +36,16 @@ New app-level setup commands are added separately:
 | `mcp`         | GIMP, Writer, Calc, Slides | app-owned runtime or transport plus external host app |
 | `hybrid`      | Blender                    | app-owned bridge plus provisioned addon               |
 
-Phase 2 keeps the existing live provider behavior intact while adding the
-shared setup/provisioning substrate those providers will later consume.
+Phase 2 kept the existing live provider behavior intact while adding the shared
+setup/provisioning substrate those providers consume later.
 
-That substrate is now merged into the implementation line. Current mode behavior
-remains unchanged:
+That substrate is now merged into the implementation line. Current live-mode
+surfaces remain unchanged:
 
 - Code stays live as-is
 - GIMP stays live as-is
 - Blender stays live as-is
-- Writer and Slides stay live as-is
+- Writer and Slides stay live while their packaged-mode runtime ownership now uses bundled Python
 - Calc stays disabled
 
 ## 3. Stable Provider Interface
@@ -103,7 +103,7 @@ Ownership rules:
 - LibreOffice / Collabora remains separately installed
 - unified app owns Python runtime and MCP scripts
 - `setup_prepare()` prepares the app-owned Python substrate but does not launch LibreOffice
-- provider auto-detects and auto-launches `soffice` when required
+- provider auto-detects the LibreOffice host path and the bundled runtime auto-launches `soffice` when required
 - no Phase 3 settings UI or manual path override UI is added
 
 Mode rules:
@@ -221,7 +221,7 @@ Expected supervisors:
 Phase 2 introduces the shared setup state and packaged-resource validation
 needed before those provider-specific supervisors take ownership in later
 phases. Phase 3 is the first phase where one of those supervisors becomes a
-real packaged-mode runtime dependency.
+real packaged-mode runtime dependency, and that LibreOffice slice is now merged.
 
 ## 9. Non-Goals In This Line
 

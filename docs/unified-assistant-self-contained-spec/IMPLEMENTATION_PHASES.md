@@ -1,7 +1,7 @@
 # Self-Contained Delivery Phases
 
 **Last Updated:** 2026-03-17
-**Status:** Branch cut, cleanup, and Phase 2 foundation complete; Phase 3 docs preflight next
+**Status:** Branch cut, cleanup, foundation, and Phase 3 complete; Phase 4 docs preflight next
 
 ## Phase 0: Demo Freeze And Branch Cut
 
@@ -138,7 +138,7 @@ Starting in Phase 3:
 
 ## Phase 3: LibreOffice Self-Contained Runtime
 
-**Status:** next
+**Status:** complete
 
 **Branches**
 
@@ -161,7 +161,24 @@ Starting in Phase 3:
 - Writer and Slides work on a machine with LibreOffice installed and no Python installed
 - no manual bootstrap/runtime step remains
 
+**Closeout status**
+
+Complete on the self-contained implementation line:
+
+- Writer and Slides now consume the setup-prepared bundled Python runtime in packaged mode
+- packaged mode no longer falls back to system `python` or `python3`
+- LibreOffice host detection is now wired through the setup locator
+- the detected `soffice` path is passed into the bundled runtime
+- the bundled runtime auto-launches LibreOffice on demand
+- Calc remains scaffold-only
+
+The next official branch after Phase 3 closeout docs is:
+
+- `codex/unified-self-contained-blender-docs`
+
 ## Phase 4: Blender Self-Contained Provisioning
+
+**Status:** next
 
 **Branches**
 
