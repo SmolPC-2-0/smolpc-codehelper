@@ -157,6 +157,8 @@
 
 - **Bridge handles need explicit drop cleanup or Rust tests can hang** (2026-03): Lazy-start provider runtimes that spawn local servers must stop those tasks when the handle is dropped. Without explicit cleanup, the lib test binary can finish its assertions but never exit because detached bridge tasks are still alive.
 
+- **Local helper sockets still need auth and framing limits** (2026-03): Binding a provider helper to loopback is not enough by itself once the runtime becomes live. The LibreOffice helper path needed a per-runtime auth token, hard frame-size ceilings, and strict response validation before Phase 7 could treat it as shippable.
+
 ---
 
 ## Historical VS Code Extension Research

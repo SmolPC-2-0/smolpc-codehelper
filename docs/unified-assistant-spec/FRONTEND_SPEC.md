@@ -465,6 +465,17 @@ Before provider integrations land:
 - the shell must not show Undo, Regenerate, Continue, or Branch Chat for
   Writer or Slides in Phase 6B.
 
+### Phase 7 hardening and packaging
+
+- no new mode activation happens in Phase 7
+- Writer and Slides keep the Phase 6B live behavior
+- Calc stays visible but disabled and remains post-v1 work
+- Code mode keeps the existing inference path and does not switch onto
+  `assistant_send()`
+- the shared shell product identity becomes `SmolPC Unified Assistant`
+- no launcher-owned UI surface, provider toggle UI, or settings UI is added in
+  this phase
+
 ## 14. Migration Path
 
 1. Preserve the current Codehelper shell as the shared shell.
@@ -480,8 +491,8 @@ Before provider integrations land:
    frontend configs while keeping those modes disabled.
 8. Activate live LibreOffice behavior for Writer and Slides in a dedicated
    activation branch while keeping Calc scaffold-only.
-9. Start hardening and packaging work only after the LibreOffice activation
-   closeout docs are merged.
+9. Finish v1 in a hardening and packaging branch after the LibreOffice
+   activation closeout docs are merged, with Calc still deferred.
 
 The frontend should not import or embed standalone app code directly. It should
 consume new unified stores, mode configs, and Tauri command contracts.

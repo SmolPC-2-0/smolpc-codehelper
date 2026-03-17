@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-17
-**Phase:** Phase 6B LibreOffice activation is merged; Phase 7 hardening and packaging is the current next implementation phase
+**Phase:** Phase 6B LibreOffice activation is merged; Phase 7 hardening and packaging is locked as the v1 finish-line phase
 
 ## Branch Roles
 
@@ -335,15 +335,19 @@ Phase 7 hardening and packaging flow:
 
 1. create `codex/unified-hardening-docs`
 2. lock the hardening scope in docs:
+   - LibreOffice runtime security and reliability hardening
    - packaged resource-path validation
+   - packaged identity cleanup to `SmolPC Unified Assistant`
    - Windows runtime validation
    - launcher-assumption cleanup
-   - remaining cross-mode polish and regression-proofing
+   - remaining cross-mode polish and regression-proofing without new mode activation
 3. merge docs into `docs/unified-assistant-spec`
 4. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
 5. create `codex/unified-hardening`
 6. implement the hardening and packaging validation branch
-7. close out hardening in docs
+7. create `codex/unified-hardening-status-docs`
+8. merge closeout docs into `docs/unified-assistant-spec`
+9. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
 
 The current merged GIMP and Blender implementations plus the merged
 LibreOffice activation leave these future phase boundaries intact:
@@ -359,6 +363,8 @@ LibreOffice activation leave these future phase boundaries intact:
    functionality branch and is not a merge base for unified work
 7. Phase 7 hardening starts only after the Phase 6B activation closeout docs are
    merged
+8. Phase 7 can still call v1 complete with Calc deferred; Calc activation is
+   post-v1 work rather than a hardening requirement
 
 ## Known Risks
 
@@ -389,3 +395,5 @@ The current next-step baseline is correct only when:
 4. the next branch starts from a baseline that records hardening as the next
    official step
 5. Writer and Slides are documented as live while Calc remains scaffold-only
+6. hardening is documented as the v1 finish-line phase rather than another
+   activation phase
