@@ -1,6 +1,6 @@
 # Packaging And Distribution
 
-**Last Updated:** 2026-03-16
+**Last Updated:** 2026-03-17
 **Status:** Packaging baseline for the unified app
 
 ## 1. Packaging Direction
@@ -44,13 +44,13 @@ scope of the unified frontend.
 
 ## 4. Bundled Resource Categories
 
-| Resource group          | Needed for         | Notes                                                                          |
-| ----------------------- | ------------------ | ------------------------------------------------------------------------------ |
-| Engine runtime bundle   | all modes          | shared engine startup and backend runtime selection                            |
-| Models                  | all modes          | shared model discovery                                                         |
-| GIMP provider assets    | GIMP               | provider-owned configuration or helper assets only; not the GIMP app itself    |
-| Blender bridge assets   | Blender            | bridge helpers and any bundled support files                                   |
-| LibreOffice MCP runtime | Writer/Calc/Slides | staged placeholder in Phase 6A, bundled provider runtime only after activation |
+| Resource group          | Needed for         | Notes                                                                              |
+| ----------------------- | ------------------ | ---------------------------------------------------------------------------------- |
+| Engine runtime bundle   | all modes          | shared engine startup and backend runtime selection                                |
+| Models                  | all modes          | shared model discovery                                                             |
+| GIMP provider assets    | GIMP               | provider-owned configuration or helper assets only; not the GIMP app itself        |
+| Blender bridge assets   | Blender            | bridge helpers and any bundled support files                                       |
+| LibreOffice MCP runtime | Writer/Calc/Slides | bundled provider runtime for Writer/Slides in Phase 6B; Calc remains scaffold-only |
 
 ## 5. Resource Rules
 
@@ -201,4 +201,4 @@ These remain for later implementation phases:
 - final model distribution approach
 - whether some provider assets ship always or are staged optionally
 - exact bundle layout for Blender supplementary tooling
-- exact bundle timing for the full LibreOffice MCP runtime import
+- future Calc runtime/tool activation scope beyond the current Writer/Slides import
