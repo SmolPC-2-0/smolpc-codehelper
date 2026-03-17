@@ -117,6 +117,9 @@ impl StdioJsonRpcClient {
         if let Some(cwd) = config.cwd.as_ref() {
             command.current_dir(cwd);
         }
+        if !config.env.is_empty() {
+            command.envs(&config.env);
+        }
 
         let mut child = command.spawn().map_err(|error| {
             McpClientError::Transport(format!(

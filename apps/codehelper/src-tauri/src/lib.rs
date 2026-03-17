@@ -2,7 +2,6 @@ mod assistant;
 mod benchmark;
 mod commands;
 mod hardware;
-mod launcher;
 mod modes;
 mod security;
 
@@ -18,9 +17,7 @@ use commands::inference::{
     inference_generate_messages, is_generating, list_models, load_model,
     set_inference_runtime_mode, unload_model, InferenceState,
 };
-use commands::launcher::{launcher_launch_or_focus, launcher_list_apps};
 use commands::modes::{list_modes, mode_refresh_tools, mode_status};
-use launcher::orchestrator::LauncherState;
 use modes::registry::ModeProviderRegistry;
 use tauri::Manager;
 #[allow(clippy::missing_panics_doc)]
@@ -44,13 +41,19 @@ pub fn run() {
                     None
                 }
             };
-            app.manage(ModeProviderRegistry::new(resource_dir));
+            let app_local_data_dir = match app.path().app_local_data_dir() {
+                Ok(path) => Some(path),
+                Err(error) => {
+                    log::warn!("Unable to resolve Tauri app-local-data directory: {error}");
+                    None
+                }
+            };
+            app.manage(ModeProviderRegistry::new(resource_dir, app_local_data_dir));
             Ok(())
         })
         .manage(AssistantState::default())
         .manage(HardwareCache::default())
         .manage(InferenceState::default())
-        .manage(LauncherState::default())
         .invoke_handler(tauri::generate_handler![
             read,
             write,
@@ -80,10 +83,38 @@ pub fn run() {
             mode_refresh_tools,
             assistant_send,
             assistant_cancel,
-            mode_undo,
-            launcher_list_apps,
-            launcher_launch_or_focus
+            mode_undo
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tauri_config_uses_unified_branding_and_resources() {
+        let raw = include_str!("../tauri.conf.json");
+        let value: serde_json::Value = serde_json::from_str(raw).expect("parse tauri config");
+
+        assert_eq!(value["productName"], "SmolPC Unified Assistant");
+        assert_eq!(value["identifier"], "com.smolpc.codehelper");
+        assert_eq!(
+            value["app"]["windows"][0]["title"],
+            "SmolPC Unified Assistant"
+        );
+
+        let resources = value["bundle"]["resources"]
+            .as_array()
+            .expect("bundle resources");
+        assert!(resources
+            .iter()
+            .any(|entry| entry == "resources/libreoffice"));
+        assert!(resources.iter().any(|entry| entry == "resources/blender"));
+        assert!(!resources.iter().any(|entry| {
+            entry
+                .as_str()
+                .map(|value| value.contains("resources/launcher"))
+                .unwrap_or(false)
+        }));
+    }
 }

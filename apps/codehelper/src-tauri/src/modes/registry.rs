@@ -24,17 +24,17 @@ pub struct ModeProviderRegistry {
 
 impl Default for ModeProviderRegistry {
     fn default() -> Self {
-        Self::new(None)
+        Self::new(None, None)
     }
 }
 
 impl ModeProviderRegistry {
-    pub fn new(resource_dir: Option<PathBuf>) -> Self {
+    pub fn new(resource_dir: Option<PathBuf>, app_local_data_dir: Option<PathBuf>) -> Self {
         Self {
             code: Arc::new(CodeProvider),
             gimp: Arc::new(GimpProvider::default()),
             blender: Arc::new(BlenderProvider::new(resource_dir.clone())),
-            libreoffice: Arc::new(LibreOfficeProvider::new(resource_dir)),
+            libreoffice: Arc::new(LibreOfficeProvider::new(resource_dir, app_local_data_dir)),
         }
     }
 

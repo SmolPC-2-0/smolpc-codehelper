@@ -1,5 +1,6 @@
 use serde_json::json;
 use smolpc_mcp_client::{McpSession, StdioTransportConfig};
+use std::collections::BTreeMap;
 
 #[tokio::test]
 async fn stdio_client_round_trips_initialize_list_and_call() {
@@ -8,6 +9,7 @@ async fn stdio_client_round_trips_initialize_list_and_call() {
             command: env!("CARGO_BIN_EXE_mcp_stdio_fixture").to_string(),
             args: Vec::new(),
             cwd: None,
+            env: BTreeMap::new(),
         },
         "smolpc-test",
         "0.1.0",

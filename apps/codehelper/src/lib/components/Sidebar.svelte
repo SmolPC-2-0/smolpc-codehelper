@@ -42,9 +42,7 @@
 	let pendingDeleteId: string | null = $state(null);
 	let recentlyDeleted = $state<DeletedChatSnapshot | null>(null);
 	let undoTimeoutId = $state<number | null>(null);
-	const appTitle = $derived(
-		activeMode === 'code' ? 'SmolPC Codehelper' : 'SmolPC Unified Assistant'
-	);
+	const appTitle = $derived('SmolPC Unified Assistant');
 	const newChatLabel = $derived(activeMode === 'code' ? 'New Code Chat' : 'New Chat');
 
 	const normalizedQuery = $derived(searchQuery.trim().toLowerCase());
