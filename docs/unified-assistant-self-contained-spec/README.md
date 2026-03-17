@@ -92,6 +92,17 @@ Never branch new self-contained work from the frozen demo branches.
 3. [IMPLEMENTATION_PHASES.md](IMPLEMENTATION_PHASES.md)
 4. [SELF_CONTAINED_PLAN.md](SELF_CONTAINED_PLAN.md)
 
+### Historical carried-over references
+
+These documents were carried forward from the frozen demo-spec line. They remain
+useful as reference material, but they are not the primary drivers for the
+self-contained roadmap phases.
+
+1. [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)
+2. [CODE_MODE_SPEC.md](CODE_MODE_SPEC.md)
+3. [FRONTEND_SPEC.md](FRONTEND_SPEC.md)
+4. [VSCODE_EXTENSION_SPEC.md](VSCODE_EXTENSION_SPEC.md)
+
 ## Document Index
 
 | Document                                               | Purpose                                                                           |
@@ -107,6 +118,10 @@ Never branch new self-contained work from the frozen demo branches.
 | [GIT_WORKFLOW.md](GIT_WORKFLOW.md)                     | Required branch policy for the self-contained line                                |
 | [LEARNINGS.md](LEARNINGS.md)                           | Cross-phase corrections and non-obvious productization gotchas                    |
 | [RESOURCES.md](RESOURCES.md)                           | External repos, packaging tools, and upstream integration references              |
+| [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)             | Shared coding standards carried forward from the demo line                        |
+| [FRONTEND_SPEC.md](FRONTEND_SPEC.md)                   | Shared shell/UI reference carried forward from the demo line                      |
+| [CODE_MODE_SPEC.md](CODE_MODE_SPEC.md)                 | Historical Code-mode reference from the demo line; not a self-contained driver    |
+| [VSCODE_EXTENSION_SPEC.md](VSCODE_EXTENSION_SPEC.md)   | Historical extension research reference from the demo line                        |
 
 ## Locked Decisions
 
