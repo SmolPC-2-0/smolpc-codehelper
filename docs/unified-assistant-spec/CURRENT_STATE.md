@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-17
-**Phase:** Phase 6A LibreOffice scaffolding is merged; Phase 6B activation docs are next
+**Phase:** Phase 6A LibreOffice scaffolding is merged; Phase 6B LibreOffice activation is the current next implementation phase
 
 ## Branch Roles
 
@@ -292,22 +292,33 @@ Validation completed for the merged LibreOffice scaffolding:
 
 ## Next Workstreams
 
-The next official step after this LibreOffice scaffolding closeout docs merge
-is the Phase 6B LibreOffice activation docs branch:
+The next official step from the current merged Phase 6A baseline is the
+Phase 6B LibreOffice activation implementation flow:
 
 1. create `codex/unified-libreoffice-activation-docs`
-2. lock the first live LibreOffice activation scope in docs
+2. lock the first live LibreOffice activation scope in docs:
+   - Writer live
+   - Slides live
+   - Calc still scaffold-only
+   - imported Python runtime assets pinned to
+     `7acad1fa0eb31e32a5485069e85c021d14284455`
+   - one shared `LibreOfficeProvider`
+   - stdio MCP child process via `main.py`
+   - helper socket on `localhost:8765`
+   - headless office socket on `localhost:2002`
 3. merge docs into `docs/unified-assistant-spec`
 4. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
 5. create `codex/unified-libreoffice-activation`
-6. close out LibreOffice activation in docs
-7. continue serial merge order:
+6. activate Writer and Slides only through the shared unified provider
+7. close out LibreOffice activation in docs
+8. continue serial merge order:
    - Hardening and Windows packaging validation
 
-The current merged GIMP and Blender implementations leave these future phase
-boundaries intact:
+The current merged GIMP and Blender implementations plus the merged
+LibreOffice scaffold leave these future phase boundaries intact:
 
-1. `assistant_send` remains scaffold-only for Writer / Calc / Slides
+1. `assistant_send` remains scaffold-only for Writer / Calc / Slides until the
+   dedicated Phase 6B activation branch lands
 2. Code mode still does not use the unified provider/orchestration path
 3. packaging still assumes an external GIMP install plus external MCP
    plugin/server runtime
@@ -315,6 +326,8 @@ boundaries intact:
 5. no standalone app directories were taken over by the unified branch
 6. `origin/codex/libreoffice-port-track-a` remains the separate LibreOffice
    functionality branch and is not a merge base for unified work
+7. Phase 7 hardening does not start until the Phase 6B activation closeout docs
+   are merged
 
 ## Known Risks
 
@@ -344,3 +357,5 @@ The current next-step baseline is correct only when:
 3. those docs are merged back into `dev/unified-assistant`
 4. the next branch starts from a baseline that records LibreOffice activation
    as the next official step rather than hardening
+5. the next live LibreOffice scope is explicitly Writer + Slides first while
+   Calc remains scaffold-only
