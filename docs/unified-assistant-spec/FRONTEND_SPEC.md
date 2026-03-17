@@ -292,18 +292,26 @@ During Phase 5 Blender work:
   competing live-mode request while Blender still owns the shared engine is
   blocked until the active request finishes or is cancelled.
 
-### Phase 6A LibreOffice scaffolding rule
+### Phase 6B LibreOffice activation rule
 
-During Phase 6A LibreOffice work:
+During Phase 6B LibreOffice work:
 
-- Writer, Calc, and Slides remain visible but disabled.
-- LibreOffice modes do not use `assistant_send()` yet.
-- LibreOffice mode copy should say the integration is scaffolded rather than
-  pretending document actions are live.
-- the disabled composer reason for LibreOffice modes is:
+- Writer and Slides become live shell modes with enabled composers.
+- Calc remains visible but disabled.
+- Writer and Slides use `assistant_send()`.
+- Calc does not use `assistant_send()`.
+- Writer and Slides keep mode-specific live copy and live suggestion chips.
+- Calc copy should stay scaffold-honest rather than pretending spreadsheet
+  actions are live.
+- the disabled composer reason for Calc is:
   `LibreOffice integration is scaffolded in the unified app, but live document actions are not wired yet.`
 - the disabled composer placeholder remains mode-specific rather than falling
   back to a generic placeholder string
+- Writer and Slides render tool activity through the existing `toolResults`
+  metadata path.
+- Writer and Slides do not expose `Regenerate`, `Continue`, or `Branch Chat`
+  in Phase 6B because document tool calls are side-effectful.
+- Writer and Slides do not render Undo in Phase 6B.
 - Code, GIMP, and Blender execution paths remain unchanged.
 
 ## 10. Suggestion Chips
@@ -315,9 +323,9 @@ Examples:
 - Code: "Explain this error", "Write a function", "Review this snippet"
 - GIMP: "Blur the top half of the image", "Crop this image to a square", "Rotate the image 90 degrees clockwise"
 - Blender: "What is in my scene right now?", "How do I add a bevel to the selected object?", "Explain what this modifier stack is doing"
-- Writer: "Draft an introduction for this report", "Rewrite this paragraph for clarity", "Summarize these meeting notes"
-- Calc: "Explain what this formula should do", "Outline a grade tracker sheet", "Suggest a clean table layout"
-- Slides: "Turn these notes into slide bullets", "Suggest a three-slide deck outline", "Improve this presentation structure"
+- Writer: "Create a blank document called lesson-plan.odt", "Add a level 1 heading called Local AI in Schools", "Insert a two-column table for topic and notes"
+- Calc: "LibreOffice Calc activation is planned next", "Spreadsheet tools are not wired yet", "Check back after the activation follow-up"
+- Slides: "Create a blank presentation called demo-pitch.odp", "Add a title slide for Local AI in Classrooms", "Insert an image on slide 2 and scale it to fit"
 
 ## 11. Tauri Command Contracts
 
@@ -349,6 +357,8 @@ mode work begins.
   yet
 - Phase 5 note: becomes operational for `blender` as well, using token
   streaming plus structured provider events
+- Phase 6B note: becomes operational for `writer` and `impress`; `calc`
+  remains scaffold-only
 
 ### `assistant_cancel()`
 
@@ -443,13 +453,17 @@ Before provider integrations land:
   is still streaming through the shared engine until the active request finishes
   or is cancelled.
 
-### Phase 6A LibreOffice scaffolding
+### Phase 6B LibreOffice activation
 
-- Writer, Calc, and Slides keep mode-aware subtitles, welcome copy, and staged
+- Writer and Slides keep mode-aware subtitles, welcome copy, and live
   suggestion chips.
-- Writer, Calc, and Slides keep the composer visible but disabled.
+- Writer and Slides route through `assistantSend()` and may stream status,
+  tool, token, complete, and error events.
+- Calc keeps mode-aware scaffold copy and a disabled composer.
 - the shell must not show a fake send path, fake tool list, or fake document
-  execution state for LibreOffice modes.
+  execution state for Calc.
+- the shell must not show Undo, Regenerate, Continue, or Branch Chat for
+  Writer or Slides in Phase 6B.
 
 ## 14. Migration Path
 
@@ -464,8 +478,8 @@ Before provider integrations land:
    `assistant_send` for `blender`.
 7. Land LibreOffice scaffolding into one shared provider with Writer/Calc/Slides
    frontend configs while keeping those modes disabled.
-8. Activate live LibreOffice behavior in a later dedicated branch once the
-   separate source work is stable enough to port.
+8. Activate live LibreOffice behavior for Writer and Slides in a later
+   dedicated branch while keeping Calc scaffold-only.
 
 The frontend should not import or embed standalone app code directly. It should
 consume new unified stores, mode configs, and Tauri command contracts.

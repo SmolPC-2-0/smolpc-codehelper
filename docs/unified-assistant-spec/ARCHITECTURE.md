@@ -169,8 +169,9 @@ only in the command layer.
   unified app.
 - `LibreOfficeProvider` ports behavior from the LibreOffice branch into new
   unified files and serves three frontend submodes.
-- Phase 6A lands only the LibreOffice provider scaffold and shared stdio MCP
-  prep; live LibreOffice execution is deferred to a later activation branch.
+- Phase 6A lands the LibreOffice provider scaffold and shared stdio MCP prep.
+- Phase 6B activates Writer and Slides through that same shared provider while
+  Calc remains scaffold-only.
 
 ## 7. Frontend Shell
 
@@ -235,19 +236,31 @@ After Phase 5:
    - generate the tutoring answer through the shared engine
 3. Blender remains bridge-first. Supplemental MCP work stays deferred.
 
-### Phase 6A LibreOffice scaffold path
+### Phase 6B LibreOffice activation path
 
-After Phase 6A:
+After Phase 6B:
 
 1. `LibreOfficeProvider` is still shared by Writer / Calc / Slides.
-2. Writer / Calc / Slides remain disabled placeholder modes in the shell.
-3. `assistant_send` remains scaffold-only for LibreOffice modes.
-4. Shared stdio MCP transport support now exists in `smolpc-mcp-client`
-   through the same client layer used by future MCP-backed providers.
-5. The LibreOffice provider remains scaffold-only and validates resources
-   without launching a runtime.
-6. The tracked staged resource root for future LibreOffice MCP assets is:
+2. Writer and Slides are live runtime-backed modes in the shell.
+3. Calc remains a visible scaffold-only mode with disabled composer.
+4. `assistant_send` is operational for `writer` and `impress` only.
+5. `assistant_send(calc)` remains scaffold-only.
+6. Shared stdio MCP transport in `smolpc-mcp-client` now drives a real
+   LibreOffice runtime through the staged Python `main.py` entrypoint.
+7. The shared runtime contract remains:
+   - stdio MCP child process
+   - helper socket bridge on `localhost:8765`
+   - headless office socket on `localhost:2002`
+8. The imported runtime assets live under:
    `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/`
+9. Live tool execution is mode-filtered at the provider boundary:
+   - Writer uses the Writer allowlist
+   - Slides uses the Slides allowlist
+   - Calc exposes no live tools in this phase
+10. The unified branch imports the runtime assets from
+    `origin/codex/libreoffice-port-track-a` commit
+    `7acad1fa0eb31e32a5485069e85c021d14284455` and continues treating that
+    branch as a read-only reference source.
 
 ## 9. Repository Boundaries
 
