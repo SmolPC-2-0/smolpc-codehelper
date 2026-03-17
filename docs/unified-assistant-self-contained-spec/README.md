@@ -4,7 +4,7 @@
 > and document map for the self-contained delivery line.
 
 **Last Updated:** 2026-03-17
-**Status:** Single-mainline self-contained workflow active; Phase 3 docs preflight next
+**Status:** Single-mainline self-contained workflow active; Phase 4 Blender docs preflight next
 
 ## Project Summary
 
@@ -157,13 +157,14 @@ self-contained roadmap phases.
 
 ## Current Phase
 
-The current active docs-first phase is Phase 3 LibreOffice self-contained
-runtime preflight:
+The current active docs-first phase is Phase 4 Blender self-contained
+provisioning preflight:
 
-- keep the new single-mainline workflow rigorous while removing docs-sync PRs
-- switch Writer and Slides packaged-mode runtime ownership onto bundled Python
+- keep the single-mainline workflow explicit on `dev/unified-assistant-self-contained`
+- copy the Blender addon snapshot into unified resources
+- lock Blender addon provisioning and enablement through Blender CLI background execution
+- keep GIMP provisioning deferred to the following phase
 - keep Calc scaffold-only
-- keep GIMP and Blender provisioning work deferred to later phases
 
 ## Rule Of Thumb
 

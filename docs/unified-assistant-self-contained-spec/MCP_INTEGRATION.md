@@ -1,7 +1,7 @@
 # MCP And Provider Integration For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Integration ownership spec with Phase 2 setup foundation and Phase 3 LibreOffice runtime ownership landed
+**Status:** Integration ownership spec with Phase 2 setup foundation, Phase 3 LibreOffice runtime ownership landed, and Phase 4 Blender provisioning preflight locked
 
 ## 1. Scope
 
@@ -126,8 +126,13 @@ Ownership rules:
 
 - Blender remains separately installed
 - addon payload becomes bundled provider-owned resource
-- unified app provisions and enables addon automatically
-- unified app launches Blender when needed
+- authoritative addon source remains `apps/blender-assistant/blender_addon/blender_helper_http.py`
+- unified app repackages a pinned snapshot under `resources/blender/addon/blender_helper_http.py`
+- addon module id is locked to `blender_helper_http`
+- unified app provisions and enables the addon automatically
+- unified app resolves the addon target directory by asking Blender itself through background CLI execution
+- unified app launches Blender when needed only if no matching Blender process is already running
+- unified app never kills or force-restarts an already running Blender instance
 
 ### 5.4 GIMP
 
@@ -161,6 +166,10 @@ Phase 2 setup item ids are locked to:
 - `host_blender`
 - `host_libreoffice`
 
+Phase 4 adds one new setup item id:
+
+- `blender_addon`
+
 Those item ids now define the live `setup_status` wire contract.
 
 The Phase 3 workflow change does not alter those item ids or the
@@ -181,6 +190,11 @@ The Phase 3 workflow change does not alter those item ids or the
 - edit Blender or GIMP user profiles
 - launch GIMP, Blender, or LibreOffice
 - replace `mode_refresh_tools`
+
+Phase 4 locked extension:
+
+- `setup_prepare()` may provision and enable the Blender addon through Blender CLI background execution when Blender is installed
+- `setup_prepare()` still must not launch the interactive Blender UI
 
 ## 7. Provisioning Rules
 

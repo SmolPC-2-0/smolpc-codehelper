@@ -122,6 +122,20 @@ The app has one persistent shell:
 The shell does not fork per mode. Mode switching only changes content and
 capabilities.
 
+### Self-contained setup surface
+
+The setup banner and setup panel remain app-level shell surfaces, not mode-specific
+mini UIs.
+
+Phase 4 preflight locks:
+
+- `setup_status` will gain a `blender_addon` item
+- the setup panel keeps one `Prepare` action
+- no Blender-specific setup wizard or path-settings UI is added
+- setup copy should no longer describe itself as "Phase 2 only"
+- Blender mode may surface honest provisioning detail through provider status, but
+  chat routing and mode capabilities stay unchanged in this phase
+
 ### Shared layout
 
 ```text
