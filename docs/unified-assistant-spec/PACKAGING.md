@@ -1,12 +1,20 @@
 # Packaging And Distribution
 
 **Last Updated:** 2026-03-17
-**Status:** Packaging baseline for the unified app
+**Status:** Packaging baseline for the unified app; Phase 7 hardening is the v1 finish-line packaging phase
 
 ## 1. Packaging Direction
 
 The shipping target is **one unified Windows desktop app** built from
 `apps/codehelper`.
+
+Phase 7 packaging decisions:
+
+- visible packaged identity is `SmolPC Unified Assistant`
+- Tauri `productName` and window title should use that name
+- the bundle identifier remains `com.smolpc.codehelper` in Phase 7
+- launcher-owned resources are removed from the unified app package
+- Calc remains scaffold-only and does not block v1 packaging closeout
 
 The launcher is not required for:
 
@@ -137,6 +145,21 @@ Phase 6B assumes:
 
 Phase 6B packaging validation covers the first real LibreOffice runtime
 connection checks for Writer and Slides while Calc remains scaffold-only.
+
+### 5.2.4 Phase 7 hardening and packaging rule
+
+Phase 7 keeps the Phase 6B runtime addresses unchanged:
+
+- helper socket bridge on `localhost:8765`
+- headless office socket on `localhost:2002`
+
+Phase 7 adds:
+
+- authenticated helper traffic inside the imported LibreOffice runtime
+- explicit helper message-size bounds and response validation
+- explicit bundled LibreOffice runtime resources in Tauri config
+- removal of launcher resources from the unified app bundle
+- visible packaged branding aligned to `SmolPC Unified Assistant`
 
 ### 5.3 No launcher-owned runtime paths
 

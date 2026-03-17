@@ -533,6 +533,28 @@ keeping Calc scaffold-only:
     out, or is cancelled after a successful tool call
   - cancellation does not roll back an already executed document tool
 
+## 9.5 Phase 7 LibreOffice hardening rule
+
+Phase 7 keeps the Phase 6B runtime contract and tool allowlists unchanged while
+hardening the internal LibreOffice runtime boundary:
+
+- helper socket stays on `localhost:8765`
+- office socket stays on `localhost:2002`
+- helper transport gains a per-runtime auth token
+- helper framing gains explicit size bounds
+- helper responses are schema-validated before use
+- provider session ownership becomes shareable so document tool execution does
+  not depend on holding the provider state lock across MCP calls
+- Writer and Slides remain the only live LibreOffice submodes
+- Calc remains scaffold-only and post-v1
+
+Phase 7 does not:
+
+- activate Calc
+- change the public Tauri command names
+- change the assistant DTO wire shapes
+- change the Code-mode execution path
+
 ## 10. Planner Boundary
 
 The frontend never executes tools directly.

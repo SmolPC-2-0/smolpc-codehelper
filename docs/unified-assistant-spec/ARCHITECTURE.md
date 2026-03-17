@@ -172,6 +172,9 @@ only in the command layer.
 - Phase 6A lands the LibreOffice provider scaffold and shared stdio MCP prep.
 - Phase 6B activates Writer and Slides through that same shared provider while
   Calc remains scaffold-only.
+- Phase 7 keeps that provider split intact while hardening the imported
+  LibreOffice runtime, removing launcher assumptions, and finishing v1 with
+  Calc still deferred.
 
 ## 7. Frontend Shell
 
@@ -321,3 +324,4 @@ and then be pulled into the unified branches.
 6. Standalone apps remain merge-safe sources of truth while the port is in
    progress.
 7. Windows is the delivery target for packaging and validation.
+8. V1 completion does not require Calc activation; Calc remains post-v1 work.
