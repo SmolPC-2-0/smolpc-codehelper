@@ -94,6 +94,9 @@ interface SetupStatusDto {
 }
 ```
 
+`detail` should be non-null whenever the app needs to explain why an item is
+missing, not prepared, or in error. It may be `null` for clean ready states.
+
 ## 5. Locked Phase 2 Setup Item Ids
 
 Phase 2 uses these item ids and no others:
