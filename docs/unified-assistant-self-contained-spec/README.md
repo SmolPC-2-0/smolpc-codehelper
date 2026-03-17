@@ -76,7 +76,8 @@ Never branch new self-contained work from the frozen demo branches.
 1. [ARCHITECTURE.md](ARCHITECTURE.md)
 2. [MCP_INTEGRATION.md](MCP_INTEGRATION.md)
 3. [PACKAGING.md](PACKAGING.md)
-4. [THIRD_PARTY_PROVENANCE.md](THIRD_PARTY_PROVENANCE.md)
+4. [SETUP_SPEC.md](SETUP_SPEC.md)
+5. [THIRD_PARTY_PROVENANCE.md](THIRD_PARTY_PROVENANCE.md)
 
 ### Runtime / model work
 
@@ -90,7 +91,8 @@ Never branch new self-contained work from the frozen demo branches.
 1. [CURRENT_STATE.md](CURRENT_STATE.md)
 2. [GIT_WORKFLOW.md](GIT_WORKFLOW.md)
 3. [IMPLEMENTATION_PHASES.md](IMPLEMENTATION_PHASES.md)
-4. [SELF_CONTAINED_PLAN.md](SELF_CONTAINED_PLAN.md)
+4. [SETUP_SPEC.md](SETUP_SPEC.md)
+5. [SELF_CONTAINED_PLAN.md](SELF_CONTAINED_PLAN.md)
 
 ### Historical carried-over references
 
@@ -113,6 +115,7 @@ self-contained roadmap phases.
 | [MCP_INTEGRATION.md](MCP_INTEGRATION.md)               | Mode-by-mode integration ownership, transports, and runtime supervision rules     |
 | [PACKAGING.md](PACKAGING.md)                           | Packaged layout, bundled runtime rules, and Windows validation checklist          |
 | [MODEL_STRATEGY.md](MODEL_STRATEGY.md)                 | Bundled default model decision and future model packaging policy                  |
+| [SETUP_SPEC.md](SETUP_SPEC.md)                         | App-level setup subsystem, public setup DTOs, setup commands, and Phase 2 limits  |
 | [SELF_CONTAINED_PLAN.md](SELF_CONTAINED_PLAN.md)       | Master roadmap from demo baseline to externally usable self-contained app         |
 | [THIRD_PARTY_PROVENANCE.md](THIRD_PARTY_PROVENANCE.md) | Pinned source, license, and modification tracking for imported third-party assets |
 | [GIT_WORKFLOW.md](GIT_WORKFLOW.md)                     | Required branch policy for the self-contained line                                |
@@ -137,6 +140,15 @@ self-contained roadmap phases.
 | Blender integration   | Reuse existing repo addon source; provision automatically              |
 | GIMP integration      | Vendor pinned upstream `gimp-mcp` snapshot and provision automatically |
 | Provenance            | Mandatory before bundling imported third-party runtime assets          |
+
+## Current Phase
+
+The current active docs-first phase is Phase 2 foundation:
+
+- add the setup subsystem and app-level setup UI surface
+- add host-app detection
+- add bundled Python and model ownership scaffolding
+- keep current live mode behavior unchanged
 
 ## Rule Of Thumb
 

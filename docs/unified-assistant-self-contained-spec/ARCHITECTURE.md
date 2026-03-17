@@ -94,6 +94,14 @@ Responsibilities:
 - expose setup health and repair state
 - launch host apps on demand
 
+Phase 2 foundation limits:
+
+- the subsystem is app-level, not mode-level
+- it reports readiness for the whole app
+- it does not replace `mode_status`
+- it does not launch host apps in Phase 2
+- it does not provision Blender or GIMP user-profile integrations in Phase 2
+
 ### 4.4 Mode providers
 
 Responsibilities:
@@ -125,6 +133,20 @@ New internal interfaces to establish in the implementation line:
 - `RuntimeSupervisor`
 - `BundledPythonRuntime`
 
+Phase 2 public setup surface:
+
+- `setup_status`
+- `setup_prepare`
+
+Phase 2 setup item ids:
+
+- `engine_runtime`
+- `bundled_model`
+- `bundled_python`
+- `host_gimp`
+- `host_blender`
+- `host_libreoffice`
+
 Expected responsibilities:
 
 - `OwnedIntegration`: one provider-owned packaged integration bundle
@@ -133,7 +155,30 @@ Expected responsibilities:
 - `RuntimeSupervisor`: start/stop/check long-lived provider runtimes
 - `BundledPythonRuntime`: resolve packaged interpreter, wheels, and environment
 
-## 7. Mode-Specific Architecture
+## 7. Phase 2 Resource And State Layout
+
+Phase 2 establishes these packaged resource roots:
+
+- `resources/python/`
+- `resources/gimp/`
+- `resources/blender/`
+- `resources/libreoffice/`
+- `resources/models/`
+
+Each resource root must have a tracked manifest with:
+
+- `version`
+- `source`
+- `expectedPaths`
+- `status`
+
+Phase 2 also establishes app-local-data setup roots under:
+
+- `setup/python/`
+- `setup/state/`
+- `setup/logs/`
+
+## 8. Mode-Specific Architecture
 
 ### 7.1 Code
 
@@ -141,32 +186,32 @@ Expected responsibilities:
 - engine + bundled model only
 - remains on current inference path
 
-### 7.2 LibreOffice
+### 8.2 LibreOffice
 
 - host app remains external: LibreOffice / Collabora
 - bundled runtime scripts stay in unified resources
-- packaged Python runtime replaces system Python dependency
+- packaged Python runtime replaces system Python dependency in Phase 3
 - provider auto-launches `soffice` when needed
 - Writer and Slides remain side-effectful single-tool-turn modes
 - Calc stays scaffold-only
 
-### 7.3 Blender
+### 8.3 Blender
 
 - bridge server stays inside the unified app
 - addon payload becomes bundled unified-app-owned resource
-- provider auto-installs/enables addon in Blender profile
-- provider launches Blender when needed
+- provider auto-installs/enables addon in Blender profile in Phase 4
+- provider launches Blender when needed in Phase 4
 - addon-facing token-file contract remains unchanged
 
-### 7.4 GIMP
+### 8.4 GIMP
 
 - provider transport stays TCP on `127.0.0.1:10008`
 - self-contained line vendors a pinned `gimp-mcp` snapshot
 - plugin/server payload becomes bundled unified-app-owned resource
-- provider provisions plugin files into the GIMP profile
-- provider launches both GIMP and the bundled GIMP MCP runtime when needed
+- provider provisions plugin files into the GIMP profile in Phase 5
+- provider launches both GIMP and the bundled GIMP MCP runtime when needed in Phase 5
 
-## 8. Boot Flow
+## 9. Boot Flow
 
 On app launch:
 
@@ -177,7 +222,14 @@ On app launch:
 5. collect host-app presence status in background
 6. do not eagerly launch host apps unless explicitly configured later
 
-## 9. Mode Activation Flow
+Phase 2 stop-point:
+
+- steps 1, 4, and 5 are introduced now
+- step 2 stays as it already exists on the demo baseline
+- step 3 becomes a formal packaged-resource contract in Phase 2, not a new model-selection change
+- step 6 remains the rule
+
+## 10. Mode Activation Flow
 
 On first use of a live external mode:
 
@@ -188,7 +240,10 @@ On first use of a live external mode:
 5. provider reports live status and available tools
 6. assistant flow proceeds normally
 
-## 10. Deferred Architecture
+Phase 2 does not yet implement this full flow. It only adds the shared setup
+and readiness layer that later phases call into.
+
+## 11. Deferred Architecture
 
 Not part of this line:
 

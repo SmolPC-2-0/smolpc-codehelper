@@ -1,7 +1,7 @@
 # Self-Contained Delivery Phases
 
 **Last Updated:** 2026-03-17
-**Status:** Branch cut complete; baseline cleanup is the current phase
+**Status:** Branch cut and baseline cleanup complete; Phase 2 foundation docs are current
 
 ## Phase 0: Demo Freeze And Branch Cut
 
@@ -69,29 +69,43 @@
 
 1. `codex/unified-self-contained-foundation-docs`
 2. merge into `docs/unified-assistant-self-contained-spec`
-3. merge docs into `dev/unified-assistant-self-contained`
-4. `codex/unified-self-contained-foundation`
-5. merge into `dev/unified-assistant-self-contained`
-6. `codex/unified-self-contained-foundation-status-docs`
-7. merge into `docs/unified-assistant-self-contained-spec`
-8. merge docs into `dev/unified-assistant-self-contained`
+3. `codex/unified-self-contained-foundation-docs-sync`
+4. merge into `dev/unified-assistant-self-contained`
+5. `codex/unified-self-contained-foundation`
+6. merge into `dev/unified-assistant-self-contained`
+7. `codex/unified-self-contained-foundation-status-docs`
+8. merge into `docs/unified-assistant-self-contained-spec`
+9. `codex/unified-self-contained-foundation-status-sync`
+10. merge into `dev/unified-assistant-self-contained`
 
 **Scope**
 
 - setup/provisioning subsystem
 - host-app detection for GIMP, Blender, LibreOffice
 - resource version manifests
-- bundled app-private Python ownership
-- one bundled default model
-- startup orchestration for engine and model
+- bundled app-private Python ownership scaffolding
+- one bundled default model ownership scaffolding
 - setup status/repair surface
+- packaged resource contract for Python and models
+
+**Locked Phase 2 non-goals**
+
+- no mode activation changes
+- no Blender addon provisioning yet
+- no GIMP plugin/server provisioning yet
+- no LibreOffice runtime switchover yet
+- no host-app launch orchestration yet
+- no Calc activation
+- no GitHub workflow redesign
 
 **Exit criteria**
 
-- fresh install requires no system Python
-- engine auto-starts
-- bundled default model resolves from packaged resources
-- setup layer reports host-app, provisioned-asset, and runtime readiness state honestly
+- setup subsystem exists in the implementation line
+- `setup_status` and `setup_prepare` exist
+- setup layer reports host-app and bundled-asset readiness honestly
+- packaged resource contracts for bundled Python and the default model are established
+- existing Code, GIMP, Blender, Writer, and Slides behavior remains unchanged
+- Calc remains explicitly out of scope
 
 ## Phase 3: LibreOffice Self-Contained Runtime
 
