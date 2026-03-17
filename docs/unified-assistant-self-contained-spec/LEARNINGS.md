@@ -20,6 +20,10 @@
 
 - **Provenance must be documented before third-party imports land** (2026-03-17): Any vendored runtime, addon, plugin, or model payload needs a pinned source reference, license notes, and local modification tracking in `THIRD_PARTY_PROVENANCE.md` before implementation branches import it.
 
+- **Keep setup state app-level and phase-limited at first** (2026-03-17): Phase 2 stayed low-risk because it introduced setup state, detection, manifests, and a lightweight UI without changing any mode activation paths. That kept the foundation branch additive and made later runtime/provisioning phases narrower.
+
+- **Track resource roots before payloads land** (2026-03-17): Adding manifests, placeholder READMEs, and staging hooks in Phase 2 is worthwhile even before the large Python/model payloads are imported. It gives the setup subsystem something honest to validate and avoids mixing contract work with heavy runtime imports.
+
 ---
 
 ## How to Use This Document
