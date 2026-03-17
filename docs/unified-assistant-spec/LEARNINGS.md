@@ -4,7 +4,7 @@
 >
 > **Audience:** Every AI session. Read relevant sections before working on that subsystem.
 >
-> **Last Updated:** 2026-03-16
+> **Last Updated:** 2026-03-17
 
 ---
 
@@ -75,6 +75,8 @@
 
 - **Live non-Code modes still need a single shared-generation gate** (2026-03): Phase 5 made Blender a second live non-Code mode, but it still shares the same engine runtime as Code. The shell can allow mode switching during Blender generation, yet it must block starting any competing live-mode request until the active non-Code run finishes or is cancelled.
 
+- **Side-effectful document modes should not inherit replay-style chat actions** (2026-03): Writer and Slides tool calls mutate real documents, so automatically replayable actions like `Regenerate`, `Continue`, and `Branch Chat` are a bad fit by default. Keep those affordances on tutoring/code modes unless the document workflow has explicit idempotency or undo semantics.
+
 ---
 
 ## MCP
@@ -82,6 +84,8 @@
 - **Make the shared MCP client async before real transports land** (2026-03): stdio and TCP transports are inherently async. If the shared JSON-RPC client starts synchronous, every real implementation either blocks a thread or forces a breaking trait change later.
 
 - **Shared providers must be mode-aware at the provider boundary** (2026-03): LibreOffice serves Writer, Calc, and Slides from one runtime. Patching `ProviderStateDto.mode` later in the command layer is too fragile; the provider contract itself must accept the requested mode for status, tool discovery, undo, and execution.
+
+- **Planner allowlists are not enough for side-effectful tools** (2026-03): Once Writer and Slides went live, the backend still had to enforce the per-mode tool allowlist in `list_tools()` and `execute_tool()`. Relying on prompt instructions alone would leave document-modifying tools exposed to planner mistakes or malformed fallback payloads.
 
 - **GIMP MCP uses TCP, not stdio** (2026-03): `maorcc/gimp-mcp` connects to GIMP's Script-Fu console via TCP. The MCP server itself listens on TCP port 10008. This is different from most MCP servers which use stdio.
 
@@ -148,6 +152,8 @@
 - **Context compaction is the biggest risk** (2026-03): Long AI sessions lose synthesized research when context compacts. Always persist findings to documentation files before they're lost. This entire docs/unified-assistant-spec directory was created specifically to prevent research loss.
 
 - **Dirty clones need selective staging, not cleanup churn** (2026-03): The shared clone used for unified work can contain unrelated local diffs from other workstreams. For implementation branches, stage only the files that belong to the phase and leave unrelated dirt alone instead of widening the branch scope with cleanup commits.
+
+- **Reference-branch runtime imports should be pinned to an exact commit** (2026-03): Pulling large runtime assets from an active standalone branch is only reviewable if the unified branch records the exact source commit it imported from. That keeps follow-up syncs auditable and avoids silently drifting with unrelated standalone work.
 
 - **Bridge handles need explicit drop cleanup or Rust tests can hang** (2026-03): Lazy-start provider runtimes that spawn local servers must stop those tasks when the handle is dropped. Without explicit cleanup, the lib test binary can finish its assertions but never exit because detached bridge tasks are still alive.
 

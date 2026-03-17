@@ -1,33 +1,36 @@
 # Current State
 
 **Last Updated:** 2026-03-17
-**Phase:** Phase 6A LibreOffice scaffolding is merged; Phase 6B LibreOffice activation is the current next implementation phase
+**Phase:** Phase 6B LibreOffice activation is merged; Phase 7 hardening and packaging is the current next implementation phase
 
 ## Branch Roles
 
-| Branch                                       | Role                                       |
-| -------------------------------------------- | ------------------------------------------ |
-| `docs/unified-assistant-spec`                | Canonical architecture/spec branch         |
-| `dev/unified-assistant`                      | Implementation mainline after docs merge   |
-| `codex/unified-foundation`                   | Merged Phase 1 implementation branch       |
-| `codex/unified-foundation-status-docs`       | Phase 1 closeout docs branch               |
-| `codex/unified-shell-docs`                   | Merged Phase 2 preflight docs branch       |
-| `codex/unified-shell`                        | Merged Phase 2 shell implementation branch |
-| `codex/unified-shell-status-docs`            | Merged Phase 2 closeout docs branch        |
-| `codex/unified-shell-followups`              | Merged post-Phase-2 shell hardening branch |
-| `codex/unified-shell-followups-status-docs`  | Merged shell follow-up docs sync branch    |
-| `codex/unified-code-mode-docs`               | Merged Phase 3 preflight docs branch       |
-| `codex/unified-code-mode`                    | Merged Phase 3 implementation branch       |
-| `codex/unified-code-mode-status-docs`        | Merged Phase 3 closeout docs branch        |
-| `codex/unified-gimp-mode-docs`               | Merged Phase 4 preflight docs branch       |
-| `codex/unified-gimp-mode`                    | Merged Phase 4 implementation branch       |
-| `codex/unified-gimp-mode-status-docs`        | Phase 4 closeout docs branch               |
-| `codex/unified-blender-mode-docs`            | Merged Phase 5 preflight docs branch       |
-| `codex/unified-blender-mode`                 | Merged Phase 5 implementation branch       |
-| `codex/unified-blender-mode-status-docs`     | Phase 5 closeout docs branch               |
-| `codex/unified-libreoffice-mode-docs`        | Merged Phase 6A preflight docs branch      |
-| `codex/unified-libreoffice-mode`             | Merged Phase 6A implementation branch      |
-| `codex/unified-libreoffice-mode-status-docs` | Phase 6A closeout docs branch              |
+| Branch                                             | Role                                       |
+| -------------------------------------------------- | ------------------------------------------ |
+| `docs/unified-assistant-spec`                      | Canonical architecture/spec branch         |
+| `dev/unified-assistant`                            | Implementation mainline after docs merge   |
+| `codex/unified-foundation`                         | Merged Phase 1 implementation branch       |
+| `codex/unified-foundation-status-docs`             | Phase 1 closeout docs branch               |
+| `codex/unified-shell-docs`                         | Merged Phase 2 preflight docs branch       |
+| `codex/unified-shell`                              | Merged Phase 2 shell implementation branch |
+| `codex/unified-shell-status-docs`                  | Merged Phase 2 closeout docs branch        |
+| `codex/unified-shell-followups`                    | Merged post-Phase-2 shell hardening branch |
+| `codex/unified-shell-followups-status-docs`        | Merged shell follow-up docs sync branch    |
+| `codex/unified-code-mode-docs`                     | Merged Phase 3 preflight docs branch       |
+| `codex/unified-code-mode`                          | Merged Phase 3 implementation branch       |
+| `codex/unified-code-mode-status-docs`              | Merged Phase 3 closeout docs branch        |
+| `codex/unified-gimp-mode-docs`                     | Merged Phase 4 preflight docs branch       |
+| `codex/unified-gimp-mode`                          | Merged Phase 4 implementation branch       |
+| `codex/unified-gimp-mode-status-docs`              | Merged Phase 4 closeout docs branch        |
+| `codex/unified-blender-mode-docs`                  | Merged Phase 5 preflight docs branch       |
+| `codex/unified-blender-mode`                       | Merged Phase 5 implementation branch       |
+| `codex/unified-blender-mode-status-docs`           | Merged Phase 5 closeout docs branch        |
+| `codex/unified-libreoffice-mode-docs`              | Merged Phase 6A preflight docs branch      |
+| `codex/unified-libreoffice-mode`                   | Merged Phase 6A implementation branch      |
+| `codex/unified-libreoffice-mode-status-docs`       | Merged Phase 6A closeout docs branch       |
+| `codex/unified-libreoffice-activation-docs`        | Merged Phase 6B preflight docs branch      |
+| `codex/unified-libreoffice-activation`             | Merged Phase 6B implementation branch      |
+| `codex/unified-libreoffice-activation-status-docs` | Merged Phase 6B closeout docs branch       |
 
 ## What Is Done
 
@@ -283,42 +286,70 @@ Validation completed for the merged LibreOffice scaffolding:
 - PR `#75` checks green, including `Incremental Style Gates` and
   `Tauri Build Check`
 
+Phase 6B LibreOffice activation is now merged into `dev/unified-assistant`
+via PR `#78`.
+
+Merged LibreOffice activation now present in `dev/unified-assistant`:
+
+- imported Python MCP runtime assets now live under
+  `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/`
+- `assistant_send` is now operational for `writer` and `impress`
+- `assistant_send(calc)` remains scaffold-only
+- `mode_status(writer|impress)` now reports real runtime-backed provider state
+- `mode_refresh_tools(writer|impress)` now starts or refreshes the shared stdio
+  MCP runtime and returns mode-filtered allowlisted tools
+- `mode_status(calc)` and `mode_refresh_tools(calc)` remain scaffold-aware and
+  do not launch the runtime
+- Writer and Slides now use the unified shell's live request path with status,
+  tool, token, complete, and error events
+- Writer and Slides enforce one tool call maximum per assistant turn plus one
+  summary follow-up maximum
+- Writer and Slides fall back to a deterministic local summary if the summary
+  generation step fails, times out, or is cancelled after a successful tool
+  call
+- Writer and Slides do not expose Undo, Regenerate, Continue, or Branch Chat
+  because document tool calls are side-effectful
+- Calc remains an honest scaffold-only mode with disabled composer and no fake
+  tool surface
+- no files under `apps/libreoffice-assistant/` were modified
+
+Validation completed for the merged LibreOffice activation:
+
+- `cargo test -p smolpc-mcp-client`
+- `cargo check -p smolpc-code-helper`
+- `cargo test -p smolpc-code-helper --lib`
+- `npm run check --workspace apps/codehelper`
+- PR `#78` merged into `dev/unified-assistant`
+
 ## What Has Not Started
 
-- live LibreOffice activation inside the unified app
+- live Calc activation inside the unified app
 - launcher cleanup beyond the foundation test fix
 - unified-app packaging hardening beyond the tracked OpenVINO placeholder
 - Windows end-to-end validation for the unified app
 
 ## Next Workstreams
 
-The next official step from the current merged Phase 6A baseline is the
-Phase 6B LibreOffice activation implementation flow:
+The next official step from the current merged Phase 6B baseline is the
+Phase 7 hardening and packaging flow:
 
-1. create `codex/unified-libreoffice-activation-docs`
-2. lock the first live LibreOffice activation scope in docs:
-   - Writer live
-   - Slides live
-   - Calc still scaffold-only
-   - imported Python runtime assets pinned to
-     `7acad1fa0eb31e32a5485069e85c021d14284455`
-   - one shared `LibreOfficeProvider`
-   - stdio MCP child process via `main.py`
-   - helper socket on `localhost:8765`
-   - headless office socket on `localhost:2002`
+1. create `codex/unified-hardening-docs`
+2. lock the hardening scope in docs:
+   - packaged resource-path validation
+   - Windows runtime validation
+   - launcher-assumption cleanup
+   - remaining cross-mode polish and regression-proofing
 3. merge docs into `docs/unified-assistant-spec`
 4. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-5. create `codex/unified-libreoffice-activation`
-6. activate Writer and Slides only through the shared unified provider
-7. close out LibreOffice activation in docs
-8. continue serial merge order:
-   - Hardening and Windows packaging validation
+5. create `codex/unified-hardening`
+6. implement the hardening and packaging validation branch
+7. close out hardening in docs
 
 The current merged GIMP and Blender implementations plus the merged
-LibreOffice scaffold leave these future phase boundaries intact:
+LibreOffice activation leave these future phase boundaries intact:
 
-1. `assistant_send` remains scaffold-only for Writer / Calc / Slides until the
-   dedicated Phase 6B activation branch lands
+1. `assistant_send` is now live for Writer / Slides but remains scaffold-only
+   for Calc
 2. Code mode still does not use the unified provider/orchestration path
 3. packaging still assumes an external GIMP install plus external MCP
    plugin/server runtime
@@ -326,8 +357,8 @@ LibreOffice scaffold leave these future phase boundaries intact:
 5. no standalone app directories were taken over by the unified branch
 6. `origin/codex/libreoffice-port-track-a` remains the separate LibreOffice
    functionality branch and is not a merge base for unified work
-7. Phase 7 hardening does not start until the Phase 6B activation closeout docs
-   are merged
+7. Phase 7 hardening starts only after the Phase 6B activation closeout docs are
+   merged
 
 ## Known Risks
 
@@ -352,10 +383,9 @@ LibreOffice scaffold leave these future phase boundaries intact:
 
 The current next-step baseline is correct only when:
 
-1. Phase 6A LibreOffice scaffolding is merged into `dev/unified-assistant`
-2. the Phase 6A closeout docs are merged into `docs/unified-assistant-spec`
+1. Phase 6B LibreOffice activation is merged into `dev/unified-assistant`
+2. the Phase 6B closeout docs are merged into `docs/unified-assistant-spec`
 3. those docs are merged back into `dev/unified-assistant`
-4. the next branch starts from a baseline that records LibreOffice activation
-   as the next official step rather than hardening
-5. the next live LibreOffice scope is explicitly Writer + Slides first while
-   Calc remains scaffold-only
+4. the next branch starts from a baseline that records hardening as the next
+   official step
+5. Writer and Slides are documented as live while Calc remains scaffold-only

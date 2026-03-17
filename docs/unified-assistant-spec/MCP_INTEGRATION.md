@@ -1,6 +1,6 @@
 # MCP And Provider Integration
 
-**Last Updated:** 2026-03-16
+**Last Updated:** 2026-03-17
 **Status:** Canonical tool-integration spec for the unified app
 
 ## 1. Scope
@@ -464,6 +464,9 @@ keeping Calc scaffold-only:
   runtime and returns submode-filtered tool lists
 - `mode_refresh_tools(calc)` revalidates scaffold state only and does not start
   the runtime
+- Writer and Slides expose only their allowlisted subset through
+  `list_tools(...)`, even though the imported runtime has a broader raw tool
+  catalog
 - the shared runtime contract remains:
   - stdio MCP child process via `main.py`
   - helper socket on `localhost:8765`
