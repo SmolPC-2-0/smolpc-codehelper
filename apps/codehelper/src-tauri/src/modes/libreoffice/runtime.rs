@@ -3,6 +3,10 @@ use smolpc_mcp_client::StdioTransportConfig;
 use std::path::PathBuf;
 
 pub const LIBREOFFICE_HELPER_SOCKET_ADDR: &str = "localhost:8765";
+#[cfg(windows)]
+const DEFAULT_PYTHON_COMMAND: &str = "python";
+#[cfg(not(windows))]
+const DEFAULT_PYTHON_COMMAND: &str = "python3";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LibreOfficeRuntimeScaffold {
@@ -22,7 +26,7 @@ impl LibreOfficeRuntimeScaffold {
 
     pub fn stdio_transport_config(&self) -> StdioTransportConfig {
         StdioTransportConfig {
-            command: "python".to_string(),
+            command: DEFAULT_PYTHON_COMMAND.to_string(),
             args: vec![self.entrypoint.to_string_lossy().to_string()],
             cwd: Some(self.working_dir.clone()),
         }
@@ -52,7 +56,10 @@ mod tests {
         let runtime = LibreOfficeRuntimeScaffold::from_layout(&layout);
         let config = runtime.stdio_transport_config();
 
+        #[cfg(windows)]
         assert_eq!(config.command, "python");
+        #[cfg(not(windows))]
+        assert_eq!(config.command, "python3");
         assert_eq!(
             config.args,
             vec!["/tmp/libreoffice/mcp_server/main.py".to_string()]

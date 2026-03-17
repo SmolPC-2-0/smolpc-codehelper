@@ -5,14 +5,20 @@ use crate::transport::{JsonRpcClient, JsonRpcTransport, StdioTransportConfig, Tr
 use async_trait::async_trait;
 use serde_json::Value;
 use std::process::Stdio;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StdioJsonRpcTransport {
     config: TransportConfig,
 }
+
+const STDIO_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+const STDERR_BUFFER_LIMIT: usize = 8;
 
 impl StdioJsonRpcTransport {
     fn new(config: StdioTransportConfig) -> Self {
@@ -33,6 +39,7 @@ struct StdioConnection {
     child: Child,
     reader: BufReader<ChildStdout>,
     writer: BufWriter<ChildStdin>,
+    stderr_lines: Arc<Mutex<Vec<String>>>,
 }
 
 impl StdioConnection {
@@ -66,15 +73,25 @@ impl StdioConnection {
             let status = self.child.try_wait().map_err(|error| {
                 McpClientError::Transport(format!("check child status: {error}"))
             })?;
-            let detail = match status {
+            let mut detail = match status {
                 Some(status) => format!("child process exited with status {status}"),
                 None => "child process closed stdio unexpectedly".to_string(),
             };
+            let stderr_summary = self.stderr_summary().await;
+            if !stderr_summary.is_empty() {
+                detail.push_str(". stderr: ");
+                detail.push_str(&stderr_summary);
+            }
             return Err(McpClientError::Transport(detail));
         }
 
         serde_json::from_str(line.trim_end())
             .map_err(|error| McpClientError::JsonRpc(format!("invalid response json: {error}")))
+    }
+
+    async fn stderr_summary(&self) -> String {
+        let lines = self.stderr_lines.lock().await;
+        lines.join(" | ")
     }
 }
 
@@ -94,7 +111,7 @@ impl StdioJsonRpcClient {
             .args(&config.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
 
         if let Some(cwd) = config.cwd.as_ref() {
@@ -114,6 +131,11 @@ impl StdioJsonRpcClient {
         let stdin = child.stdin.take().ok_or_else(|| {
             McpClientError::Transport("stdio MCP command did not expose stdin".to_string())
         })?;
+        let stderr = child.stderr.take().ok_or_else(|| {
+            McpClientError::Transport("stdio MCP command did not expose stderr".to_string())
+        })?;
+        let stderr_lines = Arc::new(Mutex::new(Vec::new()));
+        spawn_stderr_drain(stderr, Arc::clone(&stderr_lines));
 
         Ok(Self {
             transport: StdioJsonRpcTransport::new(config),
@@ -121,6 +143,7 @@ impl StdioJsonRpcClient {
                 child,
                 reader: BufReader::new(stdout),
                 writer: BufWriter::new(stdin),
+                stderr_lines,
             }),
             request_ids: RequestIdGenerator::new(),
         })
@@ -165,7 +188,14 @@ impl JsonRpcClient for StdioJsonRpcClient {
         connection.send_json(&request_value).await?;
 
         loop {
-            let message = connection.read_json().await?;
+            let message = timeout(STDIO_RESPONSE_TIMEOUT, connection.read_json())
+                .await
+                .map_err(|_| {
+                    McpClientError::Transport(format!(
+                        "timed out waiting for stdio MCP response after {}s",
+                        STDIO_RESPONSE_TIMEOUT.as_secs()
+                    ))
+                })??;
             let response: JsonRpcResponse = match serde_json::from_value(message.clone()) {
                 Ok(response) => response,
                 Err(_) => {
@@ -178,4 +208,31 @@ impl JsonRpcClient for StdioJsonRpcClient {
             }
         }
     }
+}
+
+fn spawn_stderr_drain(stderr: ChildStderr, stderr_lines: Arc<Mutex<Vec<String>>>) {
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) => break,
+                Ok(_) => {
+                    let entry = line.trim_end().to_string();
+                    if entry.is_empty() {
+                        continue;
+                    }
+
+                    let mut lines = stderr_lines.lock().await;
+                    if lines.len() == STDERR_BUFFER_LIMIT {
+                        lines.remove(0);
+                    }
+                    lines.push(entry);
+                }
+                Err(_) => break,
+            }
+        }
+    });
 }

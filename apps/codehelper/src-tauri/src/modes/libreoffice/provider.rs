@@ -57,7 +57,6 @@ impl LibreOfficeProvider {
                 let future_transport = runtime.stdio_transport_config();
                 state.scaffold_dir = Some(layout.mcp_server_dir.clone());
                 state.last_error = None;
-                state.validated_once = true;
 
                 let detail = format!(
                     "{} scaffold is present in the unified app, but live document actions are deferred to the activation branch. {} Future runtime: {}. Planned stdio entrypoint: {}.",
@@ -79,7 +78,6 @@ impl LibreOfficeProvider {
                 let detail = format!("LibreOffice scaffold validation failed: {error}");
                 state.scaffold_dir = None;
                 state.last_error = Some(detail.clone());
-                state.validated_once = true;
 
                 Ok(provider_state(
                     mode,
