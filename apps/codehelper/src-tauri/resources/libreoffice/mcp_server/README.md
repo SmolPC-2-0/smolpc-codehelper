@@ -1,30 +1,28 @@
-# LibreOffice MCP Runtime Placeholder
+# MCP Server Resources
 
-This directory is intentionally staged as a tracked placeholder during unified
-Phase 6A scaffolding.
+This directory contains the Python MCP runtime assets imported into the unified
+app for Phase 6B LibreOffice activation.
 
-Reference source branch:
+Imported baseline:
 
-- `codex/libreoffice-port-track-a`
+1. source branch: `origin/codex/libreoffice-port-track-a`
+2. pinned source commit: `7acad1fa0eb31e32a5485069e85c021d14284455`
+3. imported files:
+   - `main.py`
+   - `libre.py`
+   - `helper.py`
+   - `helper_utils.py`
+   - `helper_test_functions.py`
 
-Reference source commit observed during planning:
+Runtime contract:
 
-- `7acad1fa0eb31e32a5485069e85c021d14284455`
+1. Rust launches `main.py` over stdio MCP through `smolpc-mcp-client`
+2. `libre.py` communicates with `helper.py` over `localhost:8765`
+3. headless office socket remains `localhost:2002`
 
-Expected future imported files from the standalone branch:
+Notes:
 
-- `main.py`
-- `libre.py`
-- `helper.py`
-- `helper_utils.py`
-- `helper_test_functions.py`
-
-Expected future runtime shape:
-
-- Rust child-process stdio MCP transport
-- Python `main.py` entrypoint
-- helper socket bridge on `localhost:8765`
-
-This branch does **not** import the full Python MCP runtime yet. The standalone
-LibreOffice work is still evolving on `codex/libreoffice-port-track-a`, so the
-unified app only stages the resource path and provider scaffolding here.
+1. `libre.py` currently exposes 27 active MCP tools upstream.
+2. Unified Phase 6B activates Writer and Slides only; Calc remains scaffold-only.
+3. Keep this integration engine-only in this repo; do not add Ollama runtime
+   dependencies while porting.

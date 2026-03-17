@@ -54,25 +54,24 @@
 				'Blender mode is live in Phase 5. Ask about the current scene, modifiers, modeling workflows, or general Blender questions and the assistant will ground answers with scene context and local Blender reference docs when helpful.'
 		},
 		writer: {
-			chip: 'Writer Scaffold',
-			headline:
-				'LibreOffice Writer is staged in the unified shell, but live document actions are still deferred.',
+			chip: 'Writer Mode',
+			headline: 'Create and edit LibreOffice Writer documents from the unified assistant shell.',
 			description:
-				'Phase 6A keeps Writer visible, mode-aware, and merge-safe while the shared LibreOffice provider and runtime import stay deferred to the later activation branch.'
+				'Writer is live in Phase 6B. Ask the unified assistant to create documents, add headings or paragraphs, insert tables, or apply supported Writer formatting actions through the shared LibreOffice runtime.'
 		},
 		calc: {
 			chip: 'Calc Scaffold',
 			headline:
 				'LibreOffice Calc stays scaffolded in the shell while spreadsheet functionality catches up.',
 			description:
-				'Calc shares the future LibreOffice provider family, but this phase deliberately keeps it placeholder-only because the standalone branch is not yet at parity.'
+				'Calc still shares the future LibreOffice provider family, but Phase 6B deliberately keeps it placeholder-only because the reference branch is not yet at parity for spreadsheet workflows.'
 		},
 		impress: {
-			chip: 'Slides Scaffold',
+			chip: 'Slides Mode',
 			headline:
-				'LibreOffice Slides is staged in the shell so activation work can land on a stable UI.',
+				'Create and edit LibreOffice Slides presentations from the unified assistant shell.',
 			description:
-				'Slides is the user-facing label for Impress and remains placeholder-only in Phase 6A while the shared LibreOffice runtime stays out of the unified app.'
+				'Slides is the user-facing label for Impress and is live in Phase 6B. Ask for supported presentation actions such as creating a deck, adding slides, editing titles or content, and inserting slide images through the shared LibreOffice runtime.'
 		}
 	};
 

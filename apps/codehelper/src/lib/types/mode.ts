@@ -96,14 +96,14 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 		id: 'writer',
 		label: 'Writer',
 		subtitle:
-			'LibreOffice Writer scaffold in the unified shell; live document actions land in the activation phase',
+			'Live LibreOffice Writer help for creating and editing documents through the unified assistant shell',
 		icon: 'file-text',
 		providerKind: 'mcp',
 		systemPromptKey: 'mode.writer.default',
 		suggestions: [
-			'Draft an introduction for this report',
-			'Rewrite this paragraph for clarity',
-			'Summarize these meeting notes'
+			'Create a blank document called lesson-plan.odt',
+			'Add a level 1 heading called Local AI in Schools',
+			'Insert a two-column table for topic and notes'
 		],
 		capabilities: {
 			supportsTools: true,
@@ -124,9 +124,9 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 		providerKind: 'mcp',
 		systemPromptKey: 'mode.calc.default',
 		suggestions: [
-			'Explain what this formula should do',
-			'Outline a grade tracker sheet',
-			'Suggest a clean table layout'
+			'LibreOffice Calc activation is planned next',
+			'Spreadsheet tools are not wired yet',
+			'Check back after the activation follow-up'
 		],
 		capabilities: {
 			supportsTools: true,
@@ -142,14 +142,14 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 		id: 'impress',
 		label: 'Slides',
 		subtitle:
-			'LibreOffice Slides scaffold in the unified shell; live presentation actions land in the activation phase',
+			'Live LibreOffice Slides help for creating and editing presentations through the unified assistant shell',
 		icon: 'presentation',
 		providerKind: 'mcp',
 		systemPromptKey: 'mode.impress.default',
 		suggestions: [
-			'Turn these notes into slide bullets',
-			'Suggest a three-slide deck outline',
-			'Improve this presentation structure'
+			'Create a blank presentation called demo-pitch.odp',
+			'Add a title slide for Local AI in Classrooms',
+			'Insert an image on slide 2 and scale it to fit'
 		],
 		capabilities: {
 			supportsTools: true,

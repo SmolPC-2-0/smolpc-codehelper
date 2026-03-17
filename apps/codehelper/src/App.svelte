@@ -50,11 +50,11 @@
 	const BLENDER_COMPOSER_PLACEHOLDER =
 		'Ask about your Blender scene or a Blender workflow (Shift+Enter for new line)...';
 	const WRITER_COMPOSER_PLACEHOLDER =
-		'LibreOffice Writer is scaffolded here, but live document chat is not active yet.';
+		'Ask LibreOffice Writer to create or edit a document (Shift+Enter for new line)...';
 	const CALC_COMPOSER_PLACEHOLDER =
 		'LibreOffice Calc is scaffolded here, but live spreadsheet chat is not active yet.';
 	const SLIDES_COMPOSER_PLACEHOLDER =
-		'LibreOffice Slides is scaffolded here, but live presentation chat is not active yet.';
+		'Ask LibreOffice Slides to create or edit a presentation (Shift+Enter for new line)...';
 
 	const activeMode = $derived(modeStore.activeMode);
 	const activeModeConfig = $derived(modeStore.activeConfig);
@@ -66,6 +66,8 @@
 	const canUseCodePath = $derived(activeMode === 'code');
 	const canUseGimpPath = $derived(activeMode === 'gimp');
 	const canUseBlenderPath = $derived(activeMode === 'blender');
+	const canUseWriterPath = $derived(activeMode === 'writer');
+	const canUseImpressPath = $derived(activeMode === 'impress');
 	const isUnifiedRequestRunning = $derived(
 		currentUnifiedMode !== null && currentUnifiedChatId !== null && currentUnifiedMessageId !== null
 	);
@@ -73,10 +75,18 @@
 	const isBlenderRequestRunning = $derived(
 		currentUnifiedMode === 'blender' && isUnifiedRequestRunning
 	);
+	const isWriterRequestRunning = $derived(
+		currentUnifiedMode === 'writer' && isUnifiedRequestRunning
+	);
+	const isImpressRequestRunning = $derived(
+		currentUnifiedMode === 'impress' && isUnifiedRequestRunning
+	);
 	const currentUnifiedModeLabel = $derived(
 		currentUnifiedMode ? (modeStore.getConfig(currentUnifiedMode)?.label ?? 'Another mode') : null
 	);
-	const hasLiveComposer = $derived(canUseCodePath || canUseGimpPath || canUseBlenderPath);
+	const hasLiveComposer = $derived(
+		canUseCodePath || canUseGimpPath || canUseBlenderPath || canUseWriterPath || canUseImpressPath
+	);
 	const modeLabel = $derived(activeModeConfig?.label ?? 'Mode');
 	const modeSubtitle = $derived(activeModeConfig?.subtitle ?? 'Unified assistant workspace');
 	const modeSuggestions = $derived(activeModeConfig?.suggestions ?? []);
@@ -134,16 +144,19 @@
 			return `${currentUnifiedModeLabel ?? 'Another mode'} is still processing a request. Switch back to that mode to wait or cancel it.`;
 		}
 
-		if ((canUseGimpPath || canUseBlenderPath) && inferenceStore.isGenerating) {
+		if (
+			(canUseGimpPath || canUseBlenderPath || canUseWriterPath || canUseImpressPath) &&
+			inferenceStore.isGenerating
+		) {
 			return `Code mode is still generating a response. Wait for it to finish before starting a ${modeLabel} request.`;
 		}
 
-		if (canUseGimpPath && isBlenderRequestRunning) {
-			return 'Blender mode is still processing a request. Switch back to Blender to wait or cancel it.';
-		}
-
-		if (canUseBlenderPath && isGimpRequestRunning) {
-			return 'GIMP mode is still processing a request. Switch back to GIMP to wait or cancel it.';
+		if (
+			(canUseGimpPath || canUseBlenderPath || canUseWriterPath || canUseImpressPath) &&
+			isUnifiedRequestRunning &&
+			currentUnifiedMode !== activeMode
+		) {
+			return `${currentUnifiedModeLabel ?? 'Another mode'} is still processing a request. Switch back to that mode to wait or cancel it.`;
 		}
 
 		return null;
@@ -156,7 +169,11 @@
 				? isGimpRequestRunning
 				: canUseBlenderPath
 					? isBlenderRequestRunning
-					: false
+					: canUseWriterPath
+						? isWriterRequestRunning
+						: canUseImpressPath
+							? isImpressRequestRunning
+							: false
 	);
 	const composerPlaceholder = $derived(composerPlaceholderForMode(activeMode));
 	const pageTitle = $derived(currentChat?.title ?? defaultChatTitleForMode(activeMode));
@@ -394,6 +411,16 @@ Teaching rules:
 
 		if (activeMode === 'blender') {
 			await handleBlenderMessage(content);
+			return;
+		}
+
+		if (activeMode === 'writer') {
+			await handleWriterMessage(content);
+			return;
+		}
+
+		if (activeMode === 'impress') {
+			await handleImpressMessage(content);
 			return;
 		}
 
@@ -657,12 +684,93 @@ Teaching rules:
 		}
 	}
 
-	async function handleUnifiedModeMessage(mode: 'gimp' | 'blender', content: string) {
+	function applyLibreOfficeEvent(
+		mode: 'writer' | 'impress',
+		chatId: string,
+		messageId: string,
+		event: AssistantStreamEvent,
+		streamedResponse: UnifiedStreamAccumulator
+	) {
+		switch (event.kind) {
+			case 'status':
+				if (!streamedResponse.hasSeenToken) {
+					updateUnifiedStreamingMessage(mode, chatId, messageId, {
+						content: event.detail,
+						toolResults: streamedResponse.toolResults,
+						isStreaming: true
+					});
+				}
+				break;
+			case 'tool_call':
+				if (!streamedResponse.hasSeenToken) {
+					updateUnifiedStreamingMessage(mode, chatId, messageId, {
+						content: `Running ${event.name}...`,
+						toolResults: streamedResponse.toolResults,
+						isStreaming: true
+					});
+				}
+				break;
+			case 'tool_result': {
+				const toolResults = [...(streamedResponse.toolResults ?? []), event.result];
+				streamedResponse.toolResults = toolResults;
+				updateUnifiedStreamingMessage(mode, chatId, messageId, {
+					content: streamedResponse.hasSeenToken
+						? streamedResponse.accumulatedText
+						: event.result.summary,
+					toolResults,
+					isStreaming: true
+				});
+				break;
+			}
+			case 'token':
+				streamedResponse.hasSeenToken = true;
+				streamedResponse.accumulatedText += event.token;
+				updateUnifiedStreamingMessage(mode, chatId, messageId, {
+					content: streamedResponse.accumulatedText,
+					toolResults: streamedResponse.toolResults,
+					isStreaming: true
+				});
+				break;
+			case 'complete': {
+				streamedResponse.current = event.response;
+				finalizeUnifiedResponse(mode, chatId, messageId, {
+					...event.response,
+					reply:
+						streamedResponse.hasSeenToken && streamedResponse.accumulatedText.length > 0
+							? streamedResponse.accumulatedText
+							: event.response.reply,
+					toolResults: streamedResponse.toolResults ?? event.response.toolResults
+				});
+				break;
+			}
+			case 'error':
+				updateUnifiedStreamingMessage(mode, chatId, messageId, {
+					content: `Error: ${event.message}`,
+					explain: null,
+					undoable: false,
+					toolResults: streamedResponse.toolResults,
+					plan: undefined,
+					isStreaming: false
+				});
+				break;
+		}
+	}
+
+	async function handleUnifiedModeMessage(
+		mode: 'gimp' | 'blender' | 'writer' | 'impress',
+		content: string
+	) {
 		if (
 			activeMode !== mode ||
 			currentUnifiedMode !== null ||
 			inferenceStore.isGenerating ||
-			(mode === 'gimp' ? !canUseGimpPath : !canUseBlenderPath)
+			(mode === 'gimp'
+				? !canUseGimpPath
+				: mode === 'blender'
+					? !canUseBlenderPath
+					: mode === 'writer'
+						? !canUseWriterPath
+						: !canUseImpressPath)
 		) {
 			return;
 		}
@@ -694,7 +802,11 @@ Teaching rules:
 			content:
 				mode === 'gimp'
 					? 'Selecting the best GIMP action for this request.'
-					: 'Starting the Blender tutoring request.',
+					: mode === 'blender'
+						? 'Starting the Blender tutoring request.'
+						: mode === 'writer'
+							? 'Starting the Writer request.'
+							: 'Starting the Slides request.',
 			timestamp: Date.now(),
 			isStreaming: true
 		};
@@ -729,14 +841,19 @@ Teaching rules:
 					return;
 				}
 
-				applyBlenderEvent(chatId, messageId, event, streamedResponse);
+				if (mode === 'blender') {
+					applyBlenderEvent(chatId, messageId, event, streamedResponse);
+					return;
+				}
+
+				applyLibreOfficeEvent(mode, chatId, messageId, event, streamedResponse);
 			});
 
 			if (!streamedResponse.current) {
 				finalizeUnifiedResponse(mode, chatId, messageId, {
 					...response,
 					reply:
-						mode === 'blender' &&
+						(mode === 'blender' || mode === 'writer' || mode === 'impress') &&
 						streamedResponse.hasSeenToken &&
 						streamedResponse.accumulatedText.length > 0
 							? streamedResponse.accumulatedText
@@ -768,6 +885,14 @@ Teaching rules:
 
 	async function handleBlenderMessage(content: string) {
 		await handleUnifiedModeMessage('blender', content);
+	}
+
+	async function handleWriterMessage(content: string) {
+		await handleUnifiedModeMessage('writer', content);
+	}
+
+	async function handleImpressMessage(content: string) {
+		await handleUnifiedModeMessage('impress', content);
 	}
 
 	function findNearestUserPrompt(messageId: string): string | null {
@@ -868,14 +993,23 @@ Teaching rules:
 	}
 
 	function handleExampleSelect(prompt: string) {
-		if (activeMode !== 'code' && activeMode !== 'gimp' && activeMode !== 'blender') return;
+		if (
+			activeMode !== 'code' &&
+			activeMode !== 'gimp' &&
+			activeMode !== 'blender' &&
+			activeMode !== 'writer' &&
+			activeMode !== 'impress'
+		)
+			return;
 		handleSendMessage(prompt);
 	}
 
 	async function handleCancelGeneration() {
 		if (
 			(activeMode === 'gimp' && isGimpRequestRunning) ||
-			(activeMode === 'blender' && isBlenderRequestRunning)
+			(activeMode === 'blender' && isBlenderRequestRunning) ||
+			(activeMode === 'writer' && isWriterRequestRunning) ||
+			(activeMode === 'impress' && isImpressRequestRunning)
 		) {
 			try {
 				await assistantCancel();

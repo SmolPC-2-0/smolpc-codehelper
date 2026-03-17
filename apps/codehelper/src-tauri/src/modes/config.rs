@@ -78,11 +78,11 @@ pub fn mode_config(mode: AppMode) -> ModeConfigDto {
                 icon: "file-text".to_string(),
                 provider_kind: ProviderKind::Mcp,
                 system_prompt_key: "mode.writer.default".to_string(),
-                suggestions: vec![
-                    "Draft an introduction for this report".to_string(),
-                    "Rewrite this paragraph for clarity".to_string(),
-                    "Summarize these meeting notes".to_string(),
-                ],
+                suggestions: profile
+                    .suggestions
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect(),
                 capabilities: shared_tool_mode_capabilities(false),
             }
         }
@@ -95,11 +95,11 @@ pub fn mode_config(mode: AppMode) -> ModeConfigDto {
                 icon: "table".to_string(),
                 provider_kind: ProviderKind::Mcp,
                 system_prompt_key: "mode.calc.default".to_string(),
-                suggestions: vec![
-                    "Explain what this formula should do".to_string(),
-                    "Outline a grade tracker sheet".to_string(),
-                    "Suggest a clean table layout".to_string(),
-                ],
+                suggestions: profile
+                    .suggestions
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect(),
                 capabilities: shared_tool_mode_capabilities(false),
             }
         }
@@ -112,11 +112,11 @@ pub fn mode_config(mode: AppMode) -> ModeConfigDto {
                 icon: "presentation".to_string(),
                 provider_kind: ProviderKind::Mcp,
                 system_prompt_key: "mode.impress.default".to_string(),
-                suggestions: vec![
-                    "Turn these notes into slide bullets".to_string(),
-                    "Suggest a three-slide deck outline".to_string(),
-                    "Improve this presentation structure".to_string(),
-                ],
+                suggestions: profile
+                    .suggestions
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect(),
                 capabilities: shared_tool_mode_capabilities(false),
             }
         }
