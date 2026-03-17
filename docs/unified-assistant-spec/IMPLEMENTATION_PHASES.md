@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-17
-**Status:** Phase 6B LibreOffice activation is merged; Phase 7 hardening and packaging is the current next implementation phase
+**Status:** Phase 6B LibreOffice activation is merged; Phase 7 hardening and packaging is locked as the v1 finish-line phase
 
 ## Phase 0: Documentation Baseline
 
@@ -51,7 +51,9 @@
 3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
 4. `codex/unified-hardening`
 5. merge into `dev/unified-assistant`
-6. hardening closeout docs as needed
+6. `codex/unified-hardening-status-docs`
+7. merge into `docs/unified-assistant-spec`
+8. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
 
 ## Phase 2: Unified Shell
 
@@ -421,13 +423,34 @@
 
 **Scope**
 
+- finish the unified app for v1 with Calc still deferred
+- harden the imported LibreOffice runtime and shared provider session handling
 - remove remaining launcher assumptions
-- validate packaged resource paths
-- Windows-only end-to-end verification
+- validate packaged resource paths and packaged identity cleanup
+- Windows-only end-to-end verification and launcher-independent startup
+
+**Phase 7 preflight decisions**
+
+- Phase 7 is the v1 finish-line phase for the unified app.
+- Calc remains scaffold-only after Phase 7 and is explicitly post-v1 work.
+- No new mode activation happens in Phase 7.
+- Code mode does not switch onto `assistant_send` in Phase 7.
+- LibreOffice helper transport stays on `localhost:8765`; office socket stays
+  `localhost:2002`.
+- Hardening focuses on authentication, framing bounds, subprocess lifecycle,
+  response validation, packaging cleanup, and launcher removal rather than a new
+  transport family.
+- Visible packaged app branding becomes `SmolPC Unified Assistant`.
+- The bundle identifier remains `com.smolpc.codehelper` in Phase 7 to avoid an
+  installer-migration decision inside the hardening branch.
+- Phase 7 closeout is explicit:
+  `codex/unified-hardening-status-docs`.
 
 **Exit criteria**
 
 - unified app is Windows-valid without launcher runtime ownership
+- v1 is considered complete with Code, GIMP, Blender, Writer, and Slides live
+  while Calc remains deferred
 
 ## Merge-Safety Constraints
 
@@ -440,12 +463,12 @@ These apply to every implementation phase:
 
 ## Windows Validation Milestones
 
-| Milestone         | Required proof                               |
-| ----------------- | -------------------------------------------- |
-| Foundation ready  | commands and DTOs compile cleanly            |
-| Shell ready       | six modes visible in one shell               |
-| Code ready        | existing Codehelper experience preserved     |
-| GIMP ready        | tool call and undo work                      |
-| Blender ready     | bridge-backed workflow works                 |
-| LibreOffice ready | Writer/Calc/Slides all work via one provider |
-| Packaging ready   | packaged app runs without launcher ownership |
+| Milestone         | Required proof                                     |
+| ----------------- | -------------------------------------------------- |
+| Foundation ready  | commands and DTOs compile cleanly                  |
+| Shell ready       | six modes visible in one shell                     |
+| Code ready        | existing Codehelper experience preserved           |
+| GIMP ready        | tool call and undo work                            |
+| Blender ready     | bridge-backed workflow works                       |
+| LibreOffice ready | Writer/Slides live via one provider; Calc deferred |
+| Packaging ready   | packaged app runs without launcher ownership       |
