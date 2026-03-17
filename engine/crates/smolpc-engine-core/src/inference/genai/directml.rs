@@ -296,6 +296,7 @@ impl Drop for GenAiDirectMlInner {
 
 pub struct GenAiDirectMlGenerator {
     inner: Arc<Mutex<GenAiDirectMlInner>>,
+    hung: Arc<AtomicBool>,
 }
 
 impl GenAiDirectMlGenerator {
@@ -373,10 +374,15 @@ impl GenAiDirectMlGenerator {
                 tokenizer: tokenizer_ptr,
                 eos_token_ids,
             })),
+            hung: Arc::new(AtomicBool::new(false)),
         })
     }
 
     pub fn run_preflight(&self, prompt: &str) -> Result<(), String> {
+        if self.hung.load(Ordering::SeqCst) {
+            return Err("DirectML adapter is unrecoverable after a hung generation".to_string());
+        }
+
         let guard = self
             .inner
             .lock()
@@ -433,9 +439,18 @@ impl GenAiDirectMlGenerator {
     where
         F: FnMut(String),
     {
+        if self.hung.load(Ordering::SeqCst) {
+            return Err(
+                "DirectML adapter is unrecoverable: a previous generation is stuck. \
+                 Reload the model to recover."
+                    .to_string(),
+            );
+        }
+
         let gen_config = config.unwrap_or_default();
         let prompt_owned = prompt.to_string();
         let inner = Arc::clone(&self.inner);
+        let hung_flag = Arc::clone(&self.hung);
         let cancelled_worker = Arc::clone(&cancelled);
         let (token_tx, mut token_rx) = unbounded_channel();
         let worker = tokio::task::spawn_blocking(move || {
@@ -463,6 +478,7 @@ impl GenAiDirectMlGenerator {
                 }
                 _ = &mut deadline => {
                     cancelled.store(true, Ordering::SeqCst);
+                    hung_flag.store(true, Ordering::SeqCst);
                     return Err(
                         "DirectML generation timed out: no tokens received within 45 seconds. \
                          This may indicate a model compatibility issue with DirectML.".to_string()
