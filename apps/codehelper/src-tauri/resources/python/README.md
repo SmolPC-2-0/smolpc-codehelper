@@ -1,10 +1,16 @@
-# Bundled Python Placeholder
+# Bundled Python Payload Contract
 
 This directory defines the packaged resource contract for the app-private
 Python runtime used by the self-contained line.
 
-Phase 2 tracks the manifest and staging contract here, but it does not commit
-the final large runtime payload into git history.
+Phase 3 locks the delivery source to:
+
+- the official Windows x64 CPython embeddable distribution from `python.org`
+- a pinned `uv` Windows binary from Astral
+- provider-owned wheel/runtime inputs staged into `payload/`
+
+The final large runtime payload still stays out of git history. Packaging-stage
+scripts populate `payload/` at build time.
 
 Expected future staged contents:
 

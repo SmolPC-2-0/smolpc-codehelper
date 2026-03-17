@@ -18,6 +18,7 @@ STARTUP_TIMEOUT_SECONDS = 20.0
 STARTUP_POLL_INTERVAL_SECONDS = 0.2
 SHUTDOWN_TIMEOUT_SECONDS = 5.0
 HELPER_AUTH_TOKEN_ENV = "SMOLPC_LIBREOFFICE_HELPER_AUTH_TOKEN"
+OFFICE_PATH_ENV = "SMOLPC_LIBREOFFICE_OFFICE_PATH"
 
 office_process: Optional[subprocess.Popen] = None
 helper_process: Optional[subprocess.Popen] = None
@@ -75,6 +76,14 @@ def register_shutdown_handlers() -> None:
 
 
 def get_office_path() -> str:
+    configured_path = os.environ.get(OFFICE_PATH_ENV)
+    if configured_path:
+        if os.path.exists(configured_path):
+            return configured_path
+        raise FileNotFoundError(
+            f"Configured LibreOffice executable from {OFFICE_PATH_ENV} does not exist: {configured_path}"
+        )
+
     system = platform.system().lower()
     if system == "windows":
         possible_paths = [
@@ -101,16 +110,6 @@ def get_office_path() -> str:
 
 
 def get_python_path() -> str:
-    system = platform.system().lower()
-    if system == "windows":
-        possible_paths = [
-            r"C:\Program Files\Collabora Office\program\python.exe",
-            r"C:\Program Files (x86)\Collabora Office\program\python.exe",
-            r"C:\Program Files\LibreOffice\program\python.exe",
-        ]
-        for path in possible_paths:
-            if os.path.exists(path):
-                return path
     return sys.executable
 
 

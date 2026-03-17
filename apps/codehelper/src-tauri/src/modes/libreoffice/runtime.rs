@@ -1,4 +1,5 @@
 use super::resources::LibreOfficeResourceLayout;
+use crate::setup::python::resolve_prepared_python_command;
 use smolpc_mcp_client::{McpSession, StdioTransportConfig};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -7,8 +8,9 @@ pub const LIBREOFFICE_HELPER_SOCKET_ADDR: &str = "localhost:8765";
 pub const LIBREOFFICE_OFFICE_SOCKET_ADDR: &str = "localhost:2002";
 const LIBREOFFICE_CLIENT_NAME: &str = "smolpc-unified-libreoffice";
 const LIBREOFFICE_CONNECT_HINT: &str =
-    "Make sure Python 3 is available and LibreOffice or Collabora is installed.";
+    "Make sure bundled Python has been prepared and LibreOffice or Collabora is installed.";
 const LIBREOFFICE_LOG_SUBDIR: &str = "libreoffice/logs";
+const LIBREOFFICE_OFFICE_PATH_ENV: &str = "SMOLPC_LIBREOFFICE_OFFICE_PATH";
 
 #[cfg(windows)]
 const DEFAULT_PYTHON_COMMAND: &str = "python";
@@ -22,6 +24,7 @@ pub struct LibreOfficeRuntimeConfig {
     pub helper_socket_addr: String,
     pub office_socket_addr: String,
     pub python_command: String,
+    pub office_path: Option<PathBuf>,
     pub log_dir: PathBuf,
 }
 
@@ -29,15 +32,22 @@ impl LibreOfficeRuntimeConfig {
     pub fn from_layout(
         layout: &LibreOfficeResourceLayout,
         app_local_data_dir: Option<&Path>,
-    ) -> Self {
-        Self {
+        allow_system_python_fallback: bool,
+        office_path: Option<PathBuf>,
+    ) -> Result<Self, String> {
+        Ok(Self {
             entrypoint: layout.main_py_path.clone(),
             working_dir: layout.mcp_server_dir.clone(),
             helper_socket_addr: LIBREOFFICE_HELPER_SOCKET_ADDR.to_string(),
             office_socket_addr: LIBREOFFICE_OFFICE_SOCKET_ADDR.to_string(),
-            python_command: resolve_python_command(&layout.mcp_server_dir),
+            python_command: resolve_python_command(
+                &layout.mcp_server_dir,
+                app_local_data_dir,
+                allow_system_python_fallback,
+            )?,
+            office_path,
             log_dir: resolve_log_dir(app_local_data_dir),
-        }
+        })
     }
 
     pub fn stdio_transport_config(&self) -> Result<StdioTransportConfig, String> {
@@ -46,6 +56,12 @@ impl LibreOfficeRuntimeConfig {
             "SMOLPC_MCP_LOG_DIR".to_string(),
             ensure_log_dir(&self.log_dir)?.to_string_lossy().to_string(),
         );
+        if let Some(office_path) = &self.office_path {
+            env.insert(
+                LIBREOFFICE_OFFICE_PATH_ENV.to_string(),
+                office_path.to_string_lossy().to_string(),
+            );
+        }
 
         Ok(StdioTransportConfig {
             command: self.python_command.clone(),
@@ -72,23 +88,43 @@ impl LibreOfficeRuntimeConfig {
 
     pub fn summary(&self) -> String {
         format!(
-            "shared LibreOffice MCP runtime over stdio via {} main.py with helper socket bridge on {} and office socket {}",
-            self.python_command, self.helper_socket_addr, self.office_socket_addr
+            "shared LibreOffice MCP runtime over stdio via {} main.py with helper socket bridge on {}, office socket {}, and host app {}",
+            self.python_command,
+            self.helper_socket_addr,
+            self.office_socket_addr,
+            self.office_path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "auto-detected LibreOffice".to_string())
         )
     }
 }
 
-fn resolve_python_command(working_dir: &Path) -> String {
-    for candidate in bundled_python_candidates(working_dir) {
-        if candidate.is_file() {
-            return candidate.to_string_lossy().to_string();
-        }
+fn resolve_python_command(
+    working_dir: &Path,
+    app_local_data_dir: Option<&Path>,
+    allow_system_python_fallback: bool,
+) -> Result<String, String> {
+    if let Some(command) = resolve_prepared_python_command(app_local_data_dir) {
+        return Ok(command);
     }
 
-    DEFAULT_PYTHON_COMMAND.to_string()
+    if allow_system_python_fallback {
+        for candidate in development_python_candidates(working_dir) {
+            if candidate.is_file() {
+                return Ok(candidate.to_string_lossy().to_string());
+            }
+        }
+
+        return Ok(DEFAULT_PYTHON_COMMAND.to_string());
+    }
+
+    Err(
+        "Bundled Python is not prepared yet. Use setup_prepare() from the setup panel before starting Writer or Slides.".to_string(),
+    )
 }
 
-fn bundled_python_candidates(working_dir: &Path) -> Vec<PathBuf> {
+fn development_python_candidates(working_dir: &Path) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     let venv_dir = working_dir.join(".venv");
 
@@ -522,8 +558,13 @@ asyncio.run(main())
             ),
         };
 
-        let runtime =
-            LibreOfficeRuntimeConfig::from_layout(&layout, Some(Path::new("/tmp/smolpc")));
+        let runtime = LibreOfficeRuntimeConfig::from_layout(
+            &layout,
+            Some(Path::new("/tmp/smolpc")),
+            true,
+            Some(PathBuf::from("/tmp/libreoffice/program/soffice")),
+        )
+        .expect("runtime");
         let config = runtime
             .stdio_transport_config()
             .expect("stdio transport config");
@@ -536,6 +577,10 @@ asyncio.run(main())
             config.args,
             vec!["/tmp/libreoffice/mcp_server/main.py".to_string()]
         );
+        assert_eq!(
+            config.env.get("SMOLPC_LIBREOFFICE_OFFICE_PATH"),
+            Some(&"/tmp/libreoffice/program/soffice".to_string())
+        );
         assert_eq!(runtime.helper_socket_addr, LIBREOFFICE_HELPER_SOCKET_ADDR);
         assert_eq!(runtime.office_socket_addr, LIBREOFFICE_OFFICE_SOCKET_ADDR);
         let expected_log_dir =
@@ -544,6 +589,31 @@ asyncio.run(main())
             config.env.get("SMOLPC_MCP_LOG_DIR"),
             Some(&expected_log_dir.to_string_lossy().to_string())
         );
+    }
+
+    #[test]
+    fn runtime_config_requires_prepared_python_when_system_fallback_disabled() {
+        let layout = LibreOfficeResourceLayout {
+            mcp_server_dir: PathBuf::from("/tmp/libreoffice/mcp_server"),
+            readme_path: PathBuf::from("/tmp/libreoffice/mcp_server/README.md"),
+            main_py_path: PathBuf::from("/tmp/libreoffice/mcp_server/main.py"),
+            libre_py_path: PathBuf::from("/tmp/libreoffice/mcp_server/libre.py"),
+            helper_py_path: PathBuf::from("/tmp/libreoffice/mcp_server/helper.py"),
+            helper_utils_py_path: PathBuf::from("/tmp/libreoffice/mcp_server/helper_utils.py"),
+            helper_test_functions_py_path: PathBuf::from(
+                "/tmp/libreoffice/mcp_server/helper_test_functions.py",
+            ),
+        };
+
+        let error = LibreOfficeRuntimeConfig::from_layout(
+            &layout,
+            Some(Path::new("/tmp/phase3-missing-python")),
+            false,
+            Some(PathBuf::from("/tmp/libreoffice/program/soffice")),
+        )
+        .expect_err("strict packaged mode should require prepared python");
+
+        assert!(error.contains("Bundled Python is not prepared yet"));
     }
 
     #[test]
