@@ -1,0 +1,6 @@
+{
+  "version": "phase2-foundation-placeholder",
+  "source": "pending pinned gimp-mcp import",
+  "expectedPaths": ["README.md"],
+  "status": "placeholder"
+}

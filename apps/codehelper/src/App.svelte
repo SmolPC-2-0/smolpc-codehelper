@@ -7,6 +7,8 @@
 	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
 	import ModelInfoPanel from '$lib/components/ModelInfoPanel.svelte';
 	import KeyboardShortcutsOverlay from '$lib/components/KeyboardShortcutsOverlay.svelte';
+	import SetupBanner from '$lib/components/setup/SetupBanner.svelte';
+	import SetupPanel from '$lib/components/setup/SetupPanel.svelte';
 	import WorkspaceHeader from '$lib/components/layout/WorkspaceHeader.svelte';
 	import WorkspaceControls from '$lib/components/layout/WorkspaceControls.svelte';
 	import ConversationView from '$lib/components/chat/ConversationView.svelte';
@@ -16,6 +18,7 @@
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { inferenceStore } from '$lib/stores/inference.svelte';
 	import { hardwareStore } from '$lib/stores/hardware.svelte';
+	import { setupStore } from '$lib/stores/setup.svelte';
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
@@ -41,6 +44,7 @@
 	let currentUnifiedMode = $state<AppMode | null>(null);
 	let bottomOffset = $state(0);
 	let showShortcutsOverlay = $state(false);
+	let showSetupPanel = $state(false);
 	const NON_CODE_DISABLED_REASON =
 		'This mode is visible in the unified shell, but chat execution is not wired yet.';
 	const LIBREOFFICE_DISABLED_REASON =
@@ -91,6 +95,9 @@
 	const modeSubtitle = $derived(activeModeConfig?.subtitle ?? 'Unified assistant workspace');
 	const modeSuggestions = $derived(activeModeConfig?.suggestions ?? []);
 	const showContextControls = $derived(activeModeConfig?.capabilities.showContextControls ?? false);
+	const setupStatus = $derived(setupStore.status);
+	const setupNeedsAttention = $derived(setupStore.initialized && setupStore.needsAttention);
+	const setupError = $derived(setupStore.error);
 	const canExport = $derived(
 		Boolean(activeModeConfig?.capabilities.showExport) && messages.length > 0
 	);
@@ -1132,6 +1139,10 @@ Teaching rules:
 		bottomOffset = Math.max(0, windowHeight - visualViewportHeight);
 	}
 
+	function openSetupPanel() {
+		showSetupPanel = true;
+	}
+
 	onMount(() => {
 		calculateBottomOffset();
 
@@ -1159,6 +1170,7 @@ Teaching rules:
 
 		async function initApp() {
 			await modeStore.initialize();
+			void setupStore.initialize();
 			await initInference();
 			hardwareStore.getCached();
 			await modeStore.refreshModeStatus();
@@ -1254,7 +1266,11 @@ Teaching rules:
 			onExportChat={handleExportChat}
 		/>
 
-		<WorkspaceControls {showContextControls} />
+		<WorkspaceControls {showContextControls} {setupNeedsAttention} onOpenSetup={openSetupPanel} />
+
+		{#if setupNeedsAttention}
+			<SetupBanner status={setupStatus} error={setupError} onOpen={openSetupPanel} />
+		{/if}
 
 		<ConversationView
 			mode={activeMode}
@@ -1296,6 +1312,16 @@ Teaching rules:
 	<BenchmarkPanel visible={showBenchmarkPanel} onClose={() => uiStore.closeOverlay()} />
 	<HardwarePanel visible={showHardwarePanel} onClose={() => uiStore.closeOverlay()} />
 	<ModelInfoPanel visible={showModelInfoPanel} onClose={() => uiStore.closeOverlay()} />
+	<SetupPanel
+		visible={showSetupPanel}
+		status={setupStatus}
+		error={setupError}
+		loading={setupStore.loading}
+		preparing={setupStore.preparing}
+		onRefresh={() => setupStore.refresh()}
+		onPrepare={() => setupStore.prepare()}
+		onClose={() => (showSetupPanel = false)}
+	/>
 	<KeyboardShortcutsOverlay
 		open={showShortcutsOverlay}
 		onClose={() => (showShortcutsOverlay = false)}

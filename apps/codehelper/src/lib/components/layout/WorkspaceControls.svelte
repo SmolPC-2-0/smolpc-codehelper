@@ -1,12 +1,16 @@
 <script lang="ts">
 	import ContextToggle from '$lib/components/ContextToggle.svelte';
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
+	import { Button } from '$lib/components/ui/button';
+	import { Wrench } from '@lucide/svelte';
 
 	interface Props {
 		showContextControls?: boolean;
+		setupNeedsAttention?: boolean;
+		onOpenSetup?: () => void;
 	}
 
-	let { showContextControls = true }: Props = $props();
+	let { showContextControls = true, setupNeedsAttention = false, onOpenSetup }: Props = $props();
 </script>
 
 <section class="workspace-controls" aria-label="Session controls">
@@ -16,6 +20,13 @@
 		</div>
 	{/if}
 	<div class="workspace-controls__row workspace-controls__row--compact">
+		<Button variant="outline" class="workspace-controls__setup" onclick={() => onOpenSetup?.()}>
+			<Wrench class="h-4 w-4" />
+			<span>Setup</span>
+			{#if setupNeedsAttention}
+				<span class="workspace-controls__badge">Needs attention</span>
+			{/if}
+		</Button>
 		<ThemeSelector />
 	</div>
 </section>
@@ -49,6 +60,24 @@
 
 	.workspace-controls__row--compact {
 		margin-left: auto;
+	}
+
+	:global(.workspace-controls__setup) {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+	}
+
+	.workspace-controls__badge {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.12rem 0.42rem;
+		border-radius: 999px;
+		font-size: 0.65rem;
+		font-weight: 700;
+		color: color-mix(in srgb, var(--color-primary) 72%, var(--color-foreground));
+		background: color-mix(in srgb, var(--brand-soft) 74%, transparent);
+		border: 1px solid color-mix(in srgb, var(--color-primary) 18%, transparent);
 	}
 
 	@media (max-width: 768px) {
