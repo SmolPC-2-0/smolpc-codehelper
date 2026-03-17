@@ -5,6 +5,7 @@ use crate::commands::inference::{
 };
 use crate::modes::blender::execute_blender_request;
 use crate::modes::gimp::{execute_gimp_request, EngineTextGenerator};
+use crate::modes::libreoffice::{execute_libreoffice_request, EngineTextPlanner};
 use crate::modes::registry::ModeProviderRegistry;
 use crate::modes::text_generation::EngineTextStreamer;
 use smolpc_assistant_types::{
@@ -48,6 +49,19 @@ pub async fn assistant_send(
             })
             .await
         }
+        AppMode::Writer | AppMode::Impress => {
+            let provider = registry.provider_for_mode(request.mode);
+            let engine_client = resolve_generation_client(&app_handle, &inference_state).await?;
+            let planner = EngineTextPlanner::new(engine_client.clone());
+            let generator = EngineTextStreamer::new(engine_client);
+
+            execute_libreoffice_request(provider, &planner, &generator, &request, &state, |event| {
+                if let Err(error) = on_event.send(event) {
+                    log::warn!("Failed to emit LibreOffice assistant event: {error}");
+                }
+            })
+            .await
+        }
         _ => Err(UNIFIED_ASSISTANT_NOT_IMPLEMENTED.to_string()),
     };
 
@@ -58,6 +72,8 @@ pub async fn assistant_send(
             "UNIFIED_ASSISTANT_NOT_IMPLEMENTED"
         } else if request.mode == AppMode::Blender {
             "BLENDER_ASSISTANT_FAILED"
+        } else if matches!(request.mode, AppMode::Writer | AppMode::Impress) {
+            "LIBREOFFICE_ASSISTANT_FAILED"
         } else {
             "GIMP_ASSISTANT_FAILED"
         };
