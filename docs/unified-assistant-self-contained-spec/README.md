@@ -1,0 +1,131 @@
+# SmolPC Unified Assistant Self-Contained Spec Index
+
+> Read this document first. It defines the branch policy, frozen demo baseline,
+> and document map for the self-contained delivery line.
+
+**Last Updated:** 2026-03-17
+**Status:** Self-contained delivery planning baseline
+
+## Project Summary
+
+This spec line defines how SmolPC Unified Assistant moves from a
+demo-capable unified app into a self-contained Windows product.
+
+Finish-line definition:
+
+- one installed Windows app: `SmolPC Unified Assistant`
+- user manually installs only the host creative/office apps:
+  - GIMP
+  - Blender
+  - LibreOffice / Collabora
+- the unified app owns and auto-manages:
+  - engine startup
+  - bundled default model
+  - app-private Python runtime
+  - LibreOffice runtime scripts
+  - Blender addon provisioning
+  - GIMP plugin/server provisioning
+  - on-demand host-app launch orchestration
+- live shipped modes:
+  - Code
+  - GIMP
+  - Blender
+  - Writer
+  - Slides
+- `Calc` remains intentionally deferred
+
+## Branch Roles
+
+| Branch                                       | Role                                                              |
+| -------------------------------------------- | ----------------------------------------------------------------- |
+| `dev/unified-assistant`                      | Frozen demo implementation baseline                               |
+| `docs/unified-assistant-spec`                | Frozen demo/spec baseline                                         |
+| `dev/unified-assistant-self-contained`       | New long-lived implementation mainline                            |
+| `docs/unified-assistant-self-contained-spec` | New long-lived canonical spec branch                              |
+| `codex/*`                                    | Narrow work branches from one of the two self-contained mainlines |
+
+## Freeze Tags
+
+The demo baseline is frozen at:
+
+- `demo/unified-assistant-freeze-2026-03-17` -> `ad31a8e92419557cda9e7e0eb560d18e1c065a54`
+- `demo/unified-assistant-spec-freeze-2026-03-17` -> `78412914cacbad183db70cb76eaa541352a55c8c`
+
+## Required Workflow
+
+1. Update design/spec on `docs/unified-assistant-self-contained-spec`.
+2. Merge the docs work into `docs/unified-assistant-self-contained-spec`.
+3. Merge `docs/unified-assistant-self-contained-spec` into
+   `dev/unified-assistant-self-contained`.
+4. Create implementation branches only from
+   `dev/unified-assistant-self-contained`.
+
+Never branch new self-contained work from the frozen demo branches.
+
+## Reading Order
+
+### New session
+
+1. This README
+2. [CURRENT_STATE.md](CURRENT_STATE.md)
+3. [GIT_WORKFLOW.md](GIT_WORKFLOW.md)
+4. [SELF_CONTAINED_PLAN.md](SELF_CONTAINED_PLAN.md)
+
+### Architecture / backend work
+
+1. [ARCHITECTURE.md](ARCHITECTURE.md)
+2. [MCP_INTEGRATION.md](MCP_INTEGRATION.md)
+3. [PACKAGING.md](PACKAGING.md)
+4. [THIRD_PARTY_PROVENANCE.md](THIRD_PARTY_PROVENANCE.md)
+
+### Runtime / model work
+
+1. [MODEL_STRATEGY.md](MODEL_STRATEGY.md)
+2. [PACKAGING.md](PACKAGING.md)
+3. [RESOURCES.md](RESOURCES.md)
+4. [LEARNINGS.md](LEARNINGS.md)
+
+### Workflow / delivery work
+
+1. [CURRENT_STATE.md](CURRENT_STATE.md)
+2. [GIT_WORKFLOW.md](GIT_WORKFLOW.md)
+3. [IMPLEMENTATION_PHASES.md](IMPLEMENTATION_PHASES.md)
+4. [SELF_CONTAINED_PLAN.md](SELF_CONTAINED_PLAN.md)
+
+## Document Index
+
+| Document                                               | Purpose                                                                           |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| [CURRENT_STATE.md](CURRENT_STATE.md)                   | Frozen demo baseline, new mainlines, current gap to self-contained shipping       |
+| [IMPLEMENTATION_PHASES.md](IMPLEMENTATION_PHASES.md)   | Ordered self-contained delivery phases after the branch cut                       |
+| [ARCHITECTURE.md](ARCHITECTURE.md)                     | Target architecture for owned runtimes, provisioning, and host-app orchestration  |
+| [MCP_INTEGRATION.md](MCP_INTEGRATION.md)               | Mode-by-mode integration ownership, transports, and runtime supervision rules     |
+| [PACKAGING.md](PACKAGING.md)                           | Packaged layout, bundled runtime rules, and Windows validation checklist          |
+| [MODEL_STRATEGY.md](MODEL_STRATEGY.md)                 | Bundled default model decision and future model packaging policy                  |
+| [SELF_CONTAINED_PLAN.md](SELF_CONTAINED_PLAN.md)       | Master roadmap from demo baseline to externally usable self-contained app         |
+| [THIRD_PARTY_PROVENANCE.md](THIRD_PARTY_PROVENANCE.md) | Pinned source, license, and modification tracking for imported third-party assets |
+| [GIT_WORKFLOW.md](GIT_WORKFLOW.md)                     | Required branch policy for the self-contained line                                |
+| [LEARNINGS.md](LEARNINGS.md)                           | Cross-phase corrections and non-obvious productization gotchas                    |
+| [RESOURCES.md](RESOURCES.md)                           | External repos, packaging tools, and upstream integration references              |
+
+## Locked Decisions
+
+| Area                  | Decision                                                               |
+| --------------------- | ---------------------------------------------------------------------- |
+| Host apps             | GIMP, Blender, and LibreOffice remain separately installed             |
+| External dependencies | No external Python, MCP server, plugin, addon, or model setup allowed  |
+| Default bundled model | `qwen3-4b-instruct-2507`                                               |
+| Calc                  | Deferred and disabled                                                  |
+| Bundle identifier     | `com.smolpc.codehelper` remains unchanged                              |
+| Shipping OS           | Windows only                                                           |
+| Python ownership      | Bundled app-private runtime                                            |
+| Blender integration   | Reuse existing repo addon source; provision automatically              |
+| GIMP integration      | Vendor pinned upstream `gimp-mcp` snapshot and provision automatically |
+| Provenance            | Mandatory before bundling imported third-party runtime assets          |
+
+## Rule Of Thumb
+
+If a change improves demo behavior only, it belongs on the frozen demo line only
+if a real demo issue exists. If a change improves self-contained ownership,
+provisioning, packaging, or first-run experience, it belongs exclusively on the
+self-contained line.
