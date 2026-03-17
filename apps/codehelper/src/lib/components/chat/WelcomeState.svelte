@@ -54,22 +54,25 @@
 				'Blender mode is live in Phase 5. Ask about the current scene, modifiers, modeling workflows, or general Blender questions and the assistant will ground answers with scene context and local Blender reference docs when helpful.'
 		},
 		writer: {
-			chip: 'Writer Mode',
-			headline: 'Draft document assistance stays visible while LibreOffice wiring lands later.',
+			chip: 'Writer Scaffold',
+			headline:
+				'LibreOffice Writer is staged in the unified shell, but live document actions are still deferred.',
 			description:
-				'Writer is already present in the unified shell so the later LibreOffice provider can drop into a stable, reviewed UI.'
+				'Phase 6A keeps Writer visible, mode-aware, and merge-safe while the shared LibreOffice provider and runtime import stay deferred to the later activation branch.'
 		},
 		calc: {
-			chip: 'Calc Mode',
-			headline: 'Spreadsheet help gets a dedicated workspace before execution is enabled.',
+			chip: 'Calc Scaffold',
+			headline:
+				'LibreOffice Calc stays scaffolded in the shell while spreadsheet functionality catches up.',
 			description:
-				'Calc shares the future LibreOffice backend, but the shell currently only exposes its history, prompt starters, and provider status.'
+				'Calc shares the future LibreOffice provider family, but this phase deliberately keeps it placeholder-only because the standalone branch is not yet at parity.'
 		},
 		impress: {
-			chip: 'Slides Mode',
-			headline: 'Presentation support is visible now so the later provider can slot in cleanly.',
+			chip: 'Slides Scaffold',
+			headline:
+				'LibreOffice Slides is staged in the shell so activation work can land on a stable UI.',
 			description:
-				'Slides is the user-facing label for Impress and stays read-only in the shell until the LibreOffice provider is integrated.'
+				'Slides is the user-facing label for Impress and remains placeholder-only in Phase 6A while the shared LibreOffice runtime stays out of the unified app.'
 		}
 	};
 

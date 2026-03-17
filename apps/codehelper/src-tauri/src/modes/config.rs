@@ -1,3 +1,4 @@
+use super::libreoffice::libreoffice_profile;
 use smolpc_assistant_types::{AppMode, ModeCapabilitiesDto, ModeConfigDto, ProviderKind};
 
 pub fn list_mode_configs() -> Vec<ModeConfigDto> {
@@ -68,48 +69,57 @@ pub fn mode_config(mode: AppMode) -> ModeConfigDto {
             ],
             capabilities: shared_tool_mode_capabilities(false),
         },
-        AppMode::Writer => ModeConfigDto {
-            id: AppMode::Writer,
-            label: "Writer".to_string(),
-            subtitle: "Writing help for LibreOffice Writer".to_string(),
-            icon: "file-text".to_string(),
-            provider_kind: ProviderKind::Mcp,
-            system_prompt_key: "mode.writer.default".to_string(),
-            suggestions: vec![
-                "Draft a paragraph".to_string(),
-                "Rewrite this passage".to_string(),
-                "Summarize this text".to_string(),
-            ],
-            capabilities: shared_tool_mode_capabilities(false),
-        },
-        AppMode::Calc => ModeConfigDto {
-            id: AppMode::Calc,
-            label: "Calc".to_string(),
-            subtitle: "Spreadsheet help for LibreOffice Calc".to_string(),
-            icon: "table".to_string(),
-            provider_kind: ProviderKind::Mcp,
-            system_prompt_key: "mode.calc.default".to_string(),
-            suggestions: vec![
-                "Explain this formula".to_string(),
-                "Build a grade table".to_string(),
-                "Clean this data".to_string(),
-            ],
-            capabilities: shared_tool_mode_capabilities(false),
-        },
-        AppMode::Impress => ModeConfigDto {
-            id: AppMode::Impress,
-            label: "Slides".to_string(),
-            subtitle: "Presentation help for LibreOffice Slides".to_string(),
-            icon: "presentation".to_string(),
-            provider_kind: ProviderKind::Mcp,
-            system_prompt_key: "mode.impress.default".to_string(),
-            suggestions: vec![
-                "Draft slide bullets".to_string(),
-                "Turn notes into slides".to_string(),
-                "Improve this outline".to_string(),
-            ],
-            capabilities: shared_tool_mode_capabilities(false),
-        },
+        AppMode::Writer => {
+            let profile = libreoffice_profile(AppMode::Writer).expect("writer profile");
+            ModeConfigDto {
+                id: AppMode::Writer,
+                label: profile.label.to_string(),
+                subtitle: profile.subtitle.to_string(),
+                icon: "file-text".to_string(),
+                provider_kind: ProviderKind::Mcp,
+                system_prompt_key: "mode.writer.default".to_string(),
+                suggestions: vec![
+                    "Draft an introduction for this report".to_string(),
+                    "Rewrite this paragraph for clarity".to_string(),
+                    "Summarize these meeting notes".to_string(),
+                ],
+                capabilities: shared_tool_mode_capabilities(false),
+            }
+        }
+        AppMode::Calc => {
+            let profile = libreoffice_profile(AppMode::Calc).expect("calc profile");
+            ModeConfigDto {
+                id: AppMode::Calc,
+                label: profile.label.to_string(),
+                subtitle: profile.subtitle.to_string(),
+                icon: "table".to_string(),
+                provider_kind: ProviderKind::Mcp,
+                system_prompt_key: "mode.calc.default".to_string(),
+                suggestions: vec![
+                    "Explain what this formula should do".to_string(),
+                    "Outline a grade tracker sheet".to_string(),
+                    "Suggest a clean table layout".to_string(),
+                ],
+                capabilities: shared_tool_mode_capabilities(false),
+            }
+        }
+        AppMode::Impress => {
+            let profile = libreoffice_profile(AppMode::Impress).expect("impress profile");
+            ModeConfigDto {
+                id: AppMode::Impress,
+                label: profile.label.to_string(),
+                subtitle: profile.subtitle.to_string(),
+                icon: "presentation".to_string(),
+                provider_kind: ProviderKind::Mcp,
+                system_prompt_key: "mode.impress.default".to_string(),
+                suggestions: vec![
+                    "Turn these notes into slide bullets".to_string(),
+                    "Suggest a three-slide deck outline".to_string(),
+                    "Improve this presentation structure".to_string(),
+                ],
+                capabilities: shared_tool_mode_capabilities(false),
+            }
+        }
     }
 }
 

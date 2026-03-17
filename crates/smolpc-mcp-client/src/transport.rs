@@ -67,3 +67,26 @@ pub trait JsonRpcClient: Send + Sync {
 
     async fn call(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse, McpClientError>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{StdioTransportConfig, TransportConfig};
+    use std::path::PathBuf;
+
+    #[test]
+    fn stdio_config_rejects_empty_command() {
+        let config = TransportConfig::Stdio(StdioTransportConfig {
+            command: "   ".to_string(),
+            args: vec!["--flag".to_string()],
+            cwd: Some(PathBuf::from(".")),
+        });
+
+        let error = config
+            .validate()
+            .expect_err("empty stdio command should fail");
+        assert_eq!(
+            error.to_string(),
+            "invalid transport configuration: stdio command must not be empty"
+        );
+    }
+}

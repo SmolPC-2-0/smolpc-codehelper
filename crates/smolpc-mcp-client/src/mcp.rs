@@ -1,7 +1,8 @@
 use crate::error::McpClientError;
 use crate::jsonrpc::JsonRpcRequest;
+use crate::stdio::StdioJsonRpcClient;
 use crate::tcp::TcpJsonRpcClient;
-use crate::transport::TcpTransportConfig;
+use crate::transport::{StdioTransportConfig, TcpTransportConfig, TransportConfig};
 use crate::JsonRpcClient;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -16,7 +17,46 @@ pub struct McpTool {
 
 #[derive(Debug)]
 pub struct McpSession {
-    client: TcpJsonRpcClient,
+    client: SessionClient,
+}
+
+#[derive(Debug)]
+enum SessionClient {
+    Tcp(TcpJsonRpcClient),
+    Stdio(StdioJsonRpcClient),
+}
+
+impl SessionClient {
+    fn transport_config(&self) -> &TransportConfig {
+        match self {
+            Self::Tcp(client) => client.transport().config(),
+            Self::Stdio(client) => client.transport().config(),
+        }
+    }
+
+    fn next_request_id(&self) -> crate::jsonrpc::JsonRpcId {
+        match self {
+            Self::Tcp(client) => client.next_request_id(),
+            Self::Stdio(client) => client.next_request_id(),
+        }
+    }
+
+    async fn notify(&self, method: &str, params: Option<Value>) -> Result<(), McpClientError> {
+        match self {
+            Self::Tcp(client) => client.notify(method, params).await,
+            Self::Stdio(client) => client.notify(method, params).await,
+        }
+    }
+
+    async fn call(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Result<crate::jsonrpc::JsonRpcResponse, McpClientError> {
+        match self {
+            Self::Tcp(client) => client.call(request).await,
+            Self::Stdio(client) => client.call(request).await,
+        }
+    }
 }
 
 impl McpSession {
@@ -25,7 +65,32 @@ impl McpSession {
         client_name: &str,
         client_version: &str,
     ) -> Result<Self, McpClientError> {
-        let client = TcpJsonRpcClient::connect(config).await?;
+        Self::initialize(
+            SessionClient::Tcp(TcpJsonRpcClient::connect(config).await?),
+            client_name,
+            client_version,
+        )
+        .await
+    }
+
+    pub async fn connect_stdio(
+        config: StdioTransportConfig,
+        client_name: &str,
+        client_version: &str,
+    ) -> Result<Self, McpClientError> {
+        Self::initialize(
+            SessionClient::Stdio(StdioJsonRpcClient::connect(config).await?),
+            client_name,
+            client_version,
+        )
+        .await
+    }
+
+    async fn initialize(
+        client: SessionClient,
+        client_name: &str,
+        client_version: &str,
+    ) -> Result<Self, McpClientError> {
         let initialize_request = JsonRpcRequest::new(
             client.next_request_id(),
             "initialize",
@@ -56,7 +121,7 @@ impl McpSession {
         Ok(Self { client })
     }
 
-    pub fn transport_config(&self) -> &TcpTransportConfig {
+    pub fn transport_config(&self) -> &TransportConfig {
         self.client.transport_config()
     }
 

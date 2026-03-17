@@ -95,11 +95,16 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 	{
 		id: 'writer',
 		label: 'Writer',
-		subtitle: 'Writing help for LibreOffice Writer',
+		subtitle:
+			'LibreOffice Writer scaffold in the unified shell; live document actions land in the activation phase',
 		icon: 'file-text',
 		providerKind: 'mcp',
 		systemPromptKey: 'mode.writer.default',
-		suggestions: ['Draft a paragraph', 'Rewrite this passage', 'Summarize this text'],
+		suggestions: [
+			'Draft an introduction for this report',
+			'Rewrite this paragraph for clarity',
+			'Summarize these meeting notes'
+		],
 		capabilities: {
 			supportsTools: true,
 			supportsUndo: false,
@@ -113,11 +118,16 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 	{
 		id: 'calc',
 		label: 'Calc',
-		subtitle: 'Spreadsheet help for LibreOffice Calc',
+		subtitle:
+			'LibreOffice Calc scaffold in the unified shell; spreadsheet actions remain deferred for now',
 		icon: 'table',
 		providerKind: 'mcp',
 		systemPromptKey: 'mode.calc.default',
-		suggestions: ['Explain this formula', 'Build a grade table', 'Clean this data'],
+		suggestions: [
+			'Explain what this formula should do',
+			'Outline a grade tracker sheet',
+			'Suggest a clean table layout'
+		],
 		capabilities: {
 			supportsTools: true,
 			supportsUndo: false,
@@ -131,11 +141,16 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 	{
 		id: 'impress',
 		label: 'Slides',
-		subtitle: 'Presentation help for LibreOffice Slides',
+		subtitle:
+			'LibreOffice Slides scaffold in the unified shell; live presentation actions land in the activation phase',
 		icon: 'presentation',
 		providerKind: 'mcp',
 		systemPromptKey: 'mode.impress.default',
-		suggestions: ['Draft slide bullets', 'Turn notes into slides', 'Improve this outline'],
+		suggestions: [
+			'Turn these notes into slide bullets',
+			'Suggest a three-slide deck outline',
+			'Improve this presentation structure'
+		],
 		capabilities: {
 			supportsTools: true,
 			supportsUndo: false,
