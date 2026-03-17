@@ -8,6 +8,10 @@ Canonical reference for all external links, documentation sources, GitHub repos,
 
 ---
 
+Note: much of this document was inherited from the frozen demo baseline during
+the self-contained branch cut. Section-level "Verified" dates reflect that
+source snapshot unless a newer verification date is called out explicitly.
+
 ## Self-Contained Delivery Sources
 
 | Resource                    | Source                                                                                           | Why it matters for the self-contained line                                                                                                 |
