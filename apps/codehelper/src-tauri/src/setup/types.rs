@@ -7,6 +7,7 @@ pub const SETUP_ITEM_BUNDLED_MODEL: &str = "bundled_model";
 pub const SETUP_ITEM_BUNDLED_PYTHON: &str = "bundled_python";
 pub const SETUP_ITEM_HOST_GIMP: &str = "host_gimp";
 pub const SETUP_ITEM_HOST_BLENDER: &str = "host_blender";
+pub const SETUP_ITEM_BLENDER_ADDON: &str = "blender_addon";
 pub const SETUP_ITEM_HOST_LIBREOFFICE: &str = "host_libreoffice";
 
 #[allow(dead_code)]

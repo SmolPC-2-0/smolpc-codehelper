@@ -19,20 +19,39 @@ struct HostAppSpec {
     standard_paths: Vec<PathBuf>,
 }
 
+#[allow(dead_code)]
 pub fn detect_all(cached: &HashMap<String, PathBuf>) -> Vec<HostAppDetection> {
+    detect_all_with_policy(cached, true)
+}
+
+pub fn detect_all_with_policy(
+    cached: &HashMap<String, PathBuf>,
+    allow_system_lookup: bool,
+) -> Vec<HostAppDetection> {
     all_specs()
         .into_iter()
-        .map(|spec| detect_host_app(&spec, cached.get(spec.id)))
+        .map(|spec| detect_host_app_with_policy(&spec, cached.get(spec.id), allow_system_lookup))
         .collect()
 }
 
 fn detect_host_app(spec: &HostAppSpec, cached: Option<&PathBuf>) -> HostAppDetection {
-    let resolved = cached
-        .filter(|path| path.exists())
-        .cloned()
-        .or_else(|| lookup_windows_app_paths(spec))
-        .or_else(|| lookup_standard_paths(spec))
-        .or_else(|| lookup_on_path(spec));
+    detect_host_app_with_policy(spec, cached, true)
+}
+
+fn detect_host_app_with_policy(
+    spec: &HostAppSpec,
+    cached: Option<&PathBuf>,
+    allow_system_lookup: bool,
+) -> HostAppDetection {
+    let resolved = cached.filter(|path| path.exists()).cloned().or_else(|| {
+        if allow_system_lookup {
+            lookup_windows_app_paths(spec)
+                .or_else(|| lookup_standard_paths(spec))
+                .or_else(|| lookup_on_path(spec))
+        } else {
+            None
+        }
+    });
 
     let detail = resolved
         .as_ref()
@@ -233,6 +252,22 @@ fn lookup_windows_app_paths(_spec: &HostAppSpec) -> Option<PathBuf> {
 pub fn detect_libreoffice(cached: Option<&Path>) -> HostAppDetection {
     let cached = cached.map(Path::to_path_buf);
     detect_host_app(&libreoffice_spec(), cached.as_ref())
+}
+
+pub fn detect_blender(cached: Option<&Path>) -> HostAppDetection {
+    detect_blender_with_policy(cached, true)
+}
+
+pub fn detect_blender_with_policy(
+    cached: Option<&Path>,
+    allow_system_lookup: bool,
+) -> HostAppDetection {
+    let cached = cached.map(Path::to_path_buf);
+    let spec = all_specs()
+        .into_iter()
+        .find(|candidate| candidate.id == SETUP_ITEM_HOST_BLENDER)
+        .expect("blender spec");
+    detect_host_app_with_policy(&spec, cached.as_ref(), allow_system_lookup)
 }
 
 #[allow(dead_code)]

@@ -117,8 +117,9 @@
 			<div class="setup-panel__note">
 				<ShieldCheck class="h-4 w-4" />
 				<span>
-					Phase 2 only validates manifests, prepares app-local setup state, and reports host-app
-					detection. It does not launch or provision external host apps yet.
+					Setup validates bundled manifests, prepares app-local runtime state, and can repair
+					provider-owned integrations. Interactive host apps still launch only when a mode needs
+					them.
 				</span>
 			</div>
 		</div>
