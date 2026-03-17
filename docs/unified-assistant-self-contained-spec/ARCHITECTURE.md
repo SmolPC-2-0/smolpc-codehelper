@@ -190,7 +190,7 @@ Those roots are now part of the implementation contract on
 
 ## 8. Mode-Specific Architecture
 
-### 7.1 Code
+### 8.1 Code
 
 - no external host app
 - engine + bundled model only
