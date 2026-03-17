@@ -27,6 +27,22 @@ not changed since then.
 | Bundled Python packaging    | `uv`, `uv tool`, `uv pip`, and packaged wheel/runtime inputs                                     | This is the planned app-private Python foundation for LibreOffice first, and likely for GIMP-side runtime ownership later.                 |
 | Bundled model packaging     | Engine model registry plus packaged resource layout under `apps/codehelper/src-tauri/resources/` | The self-contained finish line requires shipping a default model payload instead of expecting external model installation.                 |
 
+Phase 2 adds the first tracked packaged-resource manifests for:
+
+- `apps/codehelper/src-tauri/resources/python/`
+- `apps/codehelper/src-tauri/resources/gimp/`
+- `apps/codehelper/src-tauri/resources/blender/`
+- `apps/codehelper/src-tauri/resources/libreoffice/`
+- `apps/codehelper/src-tauri/resources/models/`
+
+Re-verify any upstream resource or toolchain link relied on by a new phase
+before opening that phase's docs branch. This is especially important for:
+
+- Python packaging inputs
+- Blender CLI/bootstrap behavior
+- GIMP plugin/runtime provenance
+- Windows packaging/runtime assumptions
+
 ---
 
 ## Table of Contents

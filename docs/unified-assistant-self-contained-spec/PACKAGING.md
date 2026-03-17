@@ -45,6 +45,9 @@ The installer must not assume the user will separately install:
       host-data/
 ```
 
+Phase 2 adds the resource and manifest contract for `resources/models/` and
+`resources/python/`, but it does not yet ship the final packaged payloads.
+
 ## 4. Bundled Resource Categories
 
 | Resource group              | Needed for                          | Notes                                       |
@@ -71,6 +74,12 @@ Not external:
 - Python runtime
 - model provisioning
 
+Phase 2 stop-point:
+
+- host-app detection becomes real
+- host-app launch remains deferred
+- plugin/addon provisioning remains deferred
+
 ## 6. Packaging Invariants
 
 1. One installer.
@@ -90,6 +99,12 @@ Packaged builds must support:
 - version markers so upgrades can reapply only when required
 - repair flow through setup commands/UI
 
+Phase 2 establishes the manifest and staging-hook contract behind those goals:
+
+- tracked resource manifests under each provider-owned resource root
+- staging scripts for bundled model and bundled Python payloads
+- setup commands that validate packaged resource presence without mutating host-app profiles
+
 ## 8. Validation Checklist
 
 Before calling the self-contained line ready, verify on Windows:
@@ -104,6 +119,13 @@ Before calling the self-contained line ready, verify on Windows:
 8. first GIMP use provisions plugin/server and launches GIMP
 9. Calc remains disabled
 10. upgrade path preserves chats and reprovisions only when asset version changed
+
+Phase 2 validation focuses on:
+
+1. packaged resource manifests resolve honestly
+2. setup status reports missing vs ready foundation items
+3. setup prepare does not launch host apps
+4. existing live mode behavior does not regress
 
 ## 9. Deferred Packaging Questions
 
