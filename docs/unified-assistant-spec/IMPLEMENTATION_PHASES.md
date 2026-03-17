@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-17
-**Status:** Phase 6B LibreOffice activation is merged; Phase 7 hardening and packaging is locked as the v1 finish-line phase
+**Status:** Phase 7 hardening and packaging is merged; v1 is complete with Calc deferred
 
 ## Phase 0: Documentation Baseline
 
@@ -49,7 +49,7 @@
   - tracked OpenVINO placeholder directory
   - clean frontend audit lockfile
 
-## Branch Order After Phase 6B
+## Branch Order Through Phase 7
 
 1. `codex/unified-hardening-docs`
 2. merge into `docs/unified-assistant-spec`
@@ -455,6 +455,33 @@
 - unified app is Windows-valid without launcher runtime ownership
 - v1 is considered complete with Code, GIMP, Blender, Writer, and Slides live
   while Calc remains deferred
+
+**Current branch status**
+
+- preflight docs merged into `docs/unified-assistant-spec`, then into
+  `dev/unified-assistant`
+- implementation merged via PR `#82`
+- merged Phase 7 hardening now present in `dev/unified-assistant`:
+  - LibreOffice helper traffic now uses a per-runtime auth token
+  - LibreOffice helper framing now enforces hard request/response size bounds
+  - LibreOffice helper responses are schema-validated before use
+  - LibreOffice runtime startup/shutdown now use bounded polling and explicit
+    terminate-then-kill cleanup
+  - provider-owned LibreOffice log paths are resolved and validated by the
+    unified app
+  - `LibreOfficeProvider` now uses shareable session ownership for live tool
+    execution
+  - launcher commands/resources/state have been removed from the unified app
+  - visible packaged identity now uses `SmolPC Unified Assistant`
+  - bundle identifier remains `com.smolpc.codehelper`
+  - Calc remains scaffold-only and post-v1
+- validation completed in the implementation branch:
+  - `cargo test -p smolpc-mcp-client`
+  - `cargo check -p smolpc-code-helper`
+  - `cargo test -p smolpc-code-helper --lib`
+  - `npm run check --workspace apps/codehelper`
+  - Windows packaged-app validation is still a manual follow-up outside this
+    branch environment
 
 ## Merge-Safety Constraints
 

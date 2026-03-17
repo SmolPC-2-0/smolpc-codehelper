@@ -535,14 +535,18 @@ keeping Calc scaffold-only:
 
 ## 9.5 Phase 7 LibreOffice hardening rule
 
-Phase 7 keeps the Phase 6B runtime contract and tool allowlists unchanged while
+Phase 7 kept the Phase 6B runtime contract and tool allowlists unchanged while
 hardening the internal LibreOffice runtime boundary:
 
 - helper socket stays on `localhost:8765`
 - office socket stays on `localhost:2002`
 - helper transport gains a per-runtime auth token
-- helper framing gains explicit size bounds
+- helper framing gains explicit `10 MiB` size bounds
 - helper responses are schema-validated before use
+- provider-owned log-path resolution now happens on the Rust side and the
+  Python runtime validates the supplied absolute path before use
+- runtime startup/shutdown now use bounded polling plus terminate-then-kill
+  cleanup
 - provider session ownership becomes shareable so document tool execution does
   not depend on holding the provider state lock across MCP calls
 - Writer and Slides remain the only live LibreOffice submodes

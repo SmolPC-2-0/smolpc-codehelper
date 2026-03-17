@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-17
-**Phase:** Phase 6B LibreOffice activation is merged; Phase 7 hardening and packaging is locked as the v1 finish-line phase
+**Phase:** Phase 7 hardening and packaging is merged; v1 unified app is complete with Calc deferred
 
 ## Branch Roles
 
@@ -31,6 +31,9 @@
 | `codex/unified-libreoffice-activation-docs`        | Merged Phase 6B preflight docs branch      |
 | `codex/unified-libreoffice-activation`             | Merged Phase 6B implementation branch      |
 | `codex/unified-libreoffice-activation-status-docs` | Merged Phase 6B closeout docs branch       |
+| `codex/unified-hardening-docs`                     | Merged Phase 7 preflight docs branch       |
+| `codex/unified-hardening`                          | Merged Phase 7 implementation branch       |
+| `codex/unified-hardening-status-docs`              | Merged Phase 7 closeout docs branch        |
 
 ## What Is Done
 
@@ -321,50 +324,67 @@ Validation completed for the merged LibreOffice activation:
 - `npm run check --workspace apps/codehelper`
 - PR `#78` merged into `dev/unified-assistant`
 
+Phase 7 hardening and packaging is now merged into `dev/unified-assistant`
+via PR `#82`.
+
+Merged Phase 7 hardening now present in `dev/unified-assistant`:
+
+- LibreOffice helper traffic now uses a per-runtime auth token inside the
+  imported Python runtime
+- LibreOffice helper framing now enforces a hard `10 MiB` message-size ceiling
+  on both request and response payloads
+- LibreOffice helper responses are now schema-validated before use and malformed
+  responses are treated as hard runtime errors
+- the LibreOffice runtime now receives a provider-owned validated log directory
+  path from Rust rather than trusting arbitrary external log-path input
+- LibreOffice runtime startup and shutdown now use bounded polling and
+  terminate-then-kill cleanup instead of blind sleeps
+- `LibreOfficeProvider` now keeps session ownership behind a clonable shared
+  handle so tool execution no longer depends on holding the provider state lock
+  across MCP calls
+- launcher commands, launcher state wiring, launcher resources, and launcher
+  ownership assumptions have been removed from the unified app
+- packaged product identity now uses `SmolPC Unified Assistant` for visible app
+  naming while keeping the bundle identifier `com.smolpc.codehelper`
+- Calc remains scaffold-only and post-v1
+
+Validation completed for the merged Phase 7 hardening branch:
+
+- `cargo test -p smolpc-mcp-client`
+- `cargo check -p smolpc-code-helper`
+- `cargo test -p smolpc-code-helper --lib`
+- `npm run check --workspace apps/codehelper`
+- local packaging/resource validation in the unified Tauri config test now
+  verifies bundled LibreOffice and Blender resources while excluding launcher
+  resources
+- real Windows packaged-app validation was not executed in this branch and
+  remains a manual shipping follow-up
+
 ## What Has Not Started
 
 - live Calc activation inside the unified app
-- launcher cleanup beyond the foundation test fix
-- unified-app packaging hardening beyond the tracked OpenVINO placeholder
-- Windows end-to-end validation for the unified app
+- migrating Code mode onto `assistant_send`
+- a real Windows packaged-app smoke test on target hardware
+- any bundle-identifier migration away from `com.smolpc.codehelper`
 
 ## Next Workstreams
 
-The next official step from the current merged Phase 6B baseline is the
-Phase 7 hardening and packaging flow:
+Phase 7 closes the required v1 unified-app branch flow. There is no mandatory
+Phase 8 branch locked yet.
 
-1. create `codex/unified-hardening-docs`
-2. lock the hardening scope in docs:
-   - LibreOffice runtime security and reliability hardening
-   - packaged resource-path validation
-   - packaged identity cleanup to `SmolPC Unified Assistant`
-   - Windows runtime validation
-   - launcher-assumption cleanup
-   - remaining cross-mode polish and regression-proofing without new mode activation
-3. merge docs into `docs/unified-assistant-spec`
-4. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-5. create `codex/unified-hardening`
-6. implement the hardening and packaging validation branch
-7. create `codex/unified-hardening-status-docs`
-8. merge closeout docs into `docs/unified-assistant-spec`
-9. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
+If post-v1 work starts, it should still follow the same docs-first workflow:
 
-The current merged GIMP and Blender implementations plus the merged
-LibreOffice activation leave these future phase boundaries intact:
+1. create a docs branch from `origin/docs/unified-assistant-spec`
+2. merge docs into `docs/unified-assistant-spec`
+3. merge docs into `dev/unified-assistant`
+4. create the implementation branch from updated `origin/dev/unified-assistant`
 
-1. `assistant_send` is now live for Writer / Slides but remains scaffold-only
-   for Calc
-2. Code mode still does not use the unified provider/orchestration path
-3. packaging still assumes an external GIMP install plus external MCP
-   plugin/server runtime
-4. Blender stays bridge-first and does not require `blender-mcp` in Phase 5
-5. no standalone app directories were taken over by the unified branch
-6. `origin/codex/libreoffice-port-track-a` remains the separate LibreOffice
-   functionality branch and is not a merge base for unified work
-7. Phase 7 hardening starts only after the Phase 6B activation closeout docs are
-   merged
-8. Phase 7 can still call v1 complete with Calc deferred; Calc activation is
-   post-v1 work rather than a hardening requirement
+The most likely post-v1 follow-ups are:
+
+1. live Calc activation
+2. a real Windows packaged-app validation pass
+3. optional packaging/distribution follow-ups such as bundle-identifier
+   migration
 
 ## Known Risks
 
@@ -386,13 +406,12 @@ LibreOffice activation leave these future phase boundaries intact:
 
 ## Current Success Condition
 
-The current next-step baseline is correct only when:
+The current v1 baseline is correct only when:
 
-1. Phase 6B LibreOffice activation is merged into `dev/unified-assistant`
-2. the Phase 6B closeout docs are merged into `docs/unified-assistant-spec`
+1. Phase 7 hardening is merged into `dev/unified-assistant`
+2. the Phase 7 closeout docs are merged into `docs/unified-assistant-spec`
 3. those docs are merged back into `dev/unified-assistant`
-4. the next branch starts from a baseline that records hardening as the next
-   official step
-5. Writer and Slides are documented as live while Calc remains scaffold-only
-6. hardening is documented as the v1 finish-line phase rather than another
-   activation phase
+4. Code, GIMP, Blender, Writer, and Slides are documented as live
+5. Calc remains documented as scaffold-only and post-v1
+6. launcher assumptions are documented as removed from the unified app runtime
+7. Windows packaged-app validation is recorded as still pending manual follow-up

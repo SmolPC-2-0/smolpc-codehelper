@@ -159,6 +159,8 @@
 
 - **Local helper sockets still need auth and framing limits** (2026-03): Binding a provider helper to loopback is not enough by itself once the runtime becomes live. The LibreOffice helper path needed a per-runtime auth token, hard frame-size ceilings, and strict response validation before Phase 7 could treat it as shippable.
 
+- **Fake dependency shims are enough to regression-test local runtimes** (2026-03): The Phase 7 hardening branch could test the LibreOffice helper auth/framing behavior and the LibreOffice MCP client's response validation without a real LibreOffice install by spawning the imported Python scripts with fake UNO/MCP shim modules. That is a practical way to keep protocol hardening covered in `cargo test`.
+
 ---
 
 ## Historical VS Code Extension Research
