@@ -40,10 +40,9 @@ use tokio::sync::{mpsc, Mutex, Notify, Semaphore};
 use tokio::time::{sleep, timeout};
 
 use crate::openvino::{
-    openvino_generation_controls_for_model,
-    inspect_openvino_artifact, is_blocking_openvino_probe_failure, probe_openvino_startup,
-    resolve_openvino_npu_tuning, run_openvino_preflight, OpenVinoPreflightResult,
-    OpenVinoStartupProbeResult,
+    inspect_openvino_artifact, is_blocking_openvino_probe_failure,
+    openvino_generation_controls_for_model, probe_openvino_startup, resolve_openvino_npu_tuning,
+    run_openvino_preflight, OpenVinoPreflightResult, OpenVinoStartupProbeResult,
 };
 use crate::runtime_bundles::{resolve_runtime_bundles, ResolvedRuntimeBundles};
 #[cfg(test)]
@@ -2509,7 +2508,7 @@ fn build_openvino_cpu_runtime_adapter(
 ) -> Result<InferenceRuntimeAdapter, String> {
     let pipeline_config = OpenVinoPipelineConfig::cpu()
         .with_generation_controls(openvino_generation_controls_for_model(model_id))
-        .with_disable_thinking(true);
+        .with_disable_thinking(model_has_thinking_mode(model_id));
     let generator = smolpc_engine_core::inference::OpenVinoGenAiGenerator::new(
         bundle,
         model_dir,
@@ -2618,7 +2617,7 @@ fn constant_time_eq(lhs: &[u8], rhs: &[u8]) -> bool {
 }
 
 /// Returns true for model families that default to "thinking" mode (e.g. Qwen3).
-fn model_has_thinking_mode(model_id: &str) -> bool {
+pub(crate) fn model_has_thinking_mode(model_id: &str) -> bool {
     model_id.starts_with("qwen3")
 }
 

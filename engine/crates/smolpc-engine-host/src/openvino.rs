@@ -33,10 +33,11 @@ impl OpenVinoNpuTuning {
         self,
         cache_dir: &Path,
         generation_controls: OpenVinoGenerationControls,
+        disable_thinking: bool,
     ) -> OpenVinoPipelineConfig {
         OpenVinoPipelineConfig::npu(cache_dir, self.max_prompt_len, self.min_response_len)
             .with_generation_controls(generation_controls)
-            .with_disable_thinking(true)
+            .with_disable_thinking(disable_thinking)
     }
 }
 
@@ -432,16 +433,20 @@ pub fn run_openvino_preflight(
         };
 
         let generation_controls = openvino_generation_controls_for_model(model_id);
+        let disable_thinking = crate::model_has_thinking_mode(model_id);
         log::info!(
-            "OpenVINO generation controls for {}: eos_token_id={:?}, min_new_tokens={:?}, stop_token_ids={:?}, stop_strings={:?}, ignore_eos={:?}",
+            "OpenVINO generation controls for {}: eos_token_id={:?}, min_new_tokens={:?}, stop_token_ids={:?}, stop_strings={:?}, include_stop_str_in_output={:?}, ignore_eos={:?}, disable_thinking={}",
             model_id,
             generation_controls.eos_token_id,
             generation_controls.min_new_tokens,
             generation_controls.stop_token_ids,
             generation_controls.stop_strings,
-            generation_controls.ignore_eos
+            generation_controls.include_stop_str_in_output,
+            generation_controls.ignore_eos,
+            disable_thinking
         );
-        let pipeline_config = tuning.pipeline_config(cache_dir, generation_controls);
+        let pipeline_config =
+            tuning.pipeline_config(cache_dir, generation_controls, disable_thinking);
         let generator = match OpenVinoGenAiGenerator::new(bundle, model_dir, &pipeline_config) {
             Ok(generator) => generator,
             Err(message) => {
@@ -542,22 +547,15 @@ fn parse_positive_env_usize(name: &str, default: usize) -> Result<usize, String>
 }
 
 #[cfg(target_os = "windows")]
-pub(crate) fn openvino_generation_controls_for_model(_model_id: &str) -> OpenVinoGenerationControls {
-    // All catalog models (qwen2.5-coder-1.5b, qwen3-4b-instruct) use ChatML with identical
-    // special token IDs: <|im_end|>=151645, <|endoftext|>=151643.
-    // Explicit controls are required because the OpenVINO C config is built manually and does
-    // not inherit generation_config.json defaults.
+pub(crate) fn openvino_generation_controls_for_model(
+    _model_id: &str,
+) -> OpenVinoGenerationControls {
+    // The staged OpenVINO generation_config.json is the source of truth for model-specific
+    // EOS / stop behavior. Only runtime overrides belong here.
     OpenVinoGenerationControls {
-        eos_token_id: Some(151645),
         min_new_tokens: Some(1),
-        stop_token_ids: Some(vec![151643, 151645]),
-        // stop_strings operates on accumulated decoded text (incl. special tokens) — catches
-        // <|im_end|> even when the NPU StaticLLMPipeline doesn't honour stop_token_ids reliably.
-        stop_strings: Some(vec![
-            "<|im_end|>".to_string(),
-            "<|endoftext|>".to_string(),
-        ]),
         ignore_eos: Some(false),
+        ..Default::default()
     }
 }
 
@@ -580,7 +578,7 @@ fn parse_version(raw: &str) -> Option<Vec<u32>> {
 mod tests {
     use super::{
         classify_openvino_runtime_activation_error, inspect_openvino_artifact,
-        resolve_openvino_npu_tuning, version_is_older_than,
+        openvino_generation_controls_for_model, resolve_openvino_npu_tuning, version_is_older_than,
     };
     use std::fs;
     use std::sync::{Mutex, OnceLock};
@@ -620,6 +618,17 @@ mod tests {
 
         let artifact = inspect_openvino_artifact(&manifest_path);
         assert!(artifact.is_ready());
+    }
+
+    #[test]
+    fn openvino_generation_controls_only_apply_runtime_overrides() {
+        let controls = openvino_generation_controls_for_model("qwen2.5-coder-1.5b");
+        assert_eq!(controls.min_new_tokens, Some(1));
+        assert_eq!(controls.ignore_eos, Some(false));
+        assert_eq!(controls.eos_token_id, None);
+        assert_eq!(controls.stop_token_ids, None);
+        assert_eq!(controls.stop_strings, None);
+        assert_eq!(controls.include_stop_str_in_output, None);
     }
 
     #[test]
