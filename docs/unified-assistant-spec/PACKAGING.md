@@ -121,9 +121,12 @@ Phase 6A assumes:
   assets independently
 - the unified app only prepares the resource boundary and future stdio transport
   path in this phase
+- future runtime activation will use the staged Python `main.py` entrypoint plus
+  the helper socket bridge on `localhost:8765`
 
 Phase 6A packaging validation covers staged resource-path correctness only, not
-live LibreOffice runtime execution.
+live LibreOffice runtime execution. Phase 6B is responsible for the first live
+connection validation.
 
 ### 5.3 No launcher-owned runtime paths
 

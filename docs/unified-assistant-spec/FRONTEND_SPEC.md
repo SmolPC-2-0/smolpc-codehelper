@@ -302,6 +302,8 @@ During Phase 6A LibreOffice work:
   pretending document actions are live.
 - the disabled composer reason for LibreOffice modes is:
   `LibreOffice integration is scaffolded in the unified app, but live document actions are not wired yet.`
+- the disabled composer placeholder remains mode-specific rather than falling
+  back to a generic placeholder string
 - Code, GIMP, and Blender execution paths remain unchanged.
 
 ## 10. Suggestion Chips
@@ -313,9 +315,9 @@ Examples:
 - Code: "Explain this error", "Write a function", "Review this snippet"
 - GIMP: "Blur the top half of the image", "Crop this image to a square", "Rotate the image 90 degrees clockwise"
 - Blender: "What is in my scene right now?", "How do I add a bevel to the selected object?", "Explain what this modifier stack is doing"
-- Writer: "Draft a paragraph", "Rewrite this passage", "Summarize this text"
-- Calc: "Explain this formula", "Build a grade table", "Clean this data"
-- Slides: "Draft slide bullets", "Turn notes into slides", "Improve this outline"
+- Writer: "Draft an introduction for this report", "Rewrite this paragraph for clarity", "Summarize these meeting notes"
+- Calc: "Explain what this formula should do", "Outline a grade tracker sheet", "Suggest a clean table layout"
+- Slides: "Turn these notes into slide bullets", "Suggest a three-slide deck outline", "Improve this presentation structure"
 
 ## 11. Tauri Command Contracts
 
