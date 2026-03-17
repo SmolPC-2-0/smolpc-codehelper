@@ -1,7 +1,7 @@
 # SmolPC Unified Assistant Self-Contained Architecture
 
 **Last Updated:** 2026-03-17
-**Status:** Target architecture with Phase 2 foundation, Phase 3 LibreOffice runtime ownership landed, and Phase 4 Blender provisioning preflight locked
+**Status:** Target architecture with Phase 2 foundation, Phase 3 LibreOffice runtime ownership landed, and Phase 4 Blender addon provisioning landed
 
 ## 1. Product Shape
 
@@ -116,11 +116,11 @@ Phase 3 first consumer:
 - Writer and Slides now use that prepared runtime at provider-use time
 - the provider resolves LibreOffice through the shared host-app locator and passes the detected host path into the runtime
 
-Phase 4 next consumer:
+Phase 4 landed:
 
-- Blender extends setup state with addon provisioning and repair visibility
-- `setup_prepare()` may provision and enable the Blender addon through Blender CLI background execution
-- interactive Blender launch remains mode-driven rather than setup-panel-driven
+- Blender now extends setup state with addon provisioning and repair visibility
+- `setup_prepare()` provisions and enables the Blender addon through Blender CLI background execution
+- interactive Blender launch is mode-driven rather than setup-panel-driven
 
 ### 4.4 Mode providers
 
@@ -167,7 +167,7 @@ Phase 2 setup item ids:
 - `host_blender`
 - `host_libreoffice`
 
-Phase 4 setup addition:
+Phase 4 setup addition (landed):
 
 - `blender_addon`
 
@@ -228,9 +228,9 @@ Those roots are now part of the implementation contract on
 
 - bridge server stays inside the unified app
 - addon payload becomes bundled unified-app-owned resource
-- provider auto-installs and enables the addon in the Blender profile in Phase 4
+- provider auto-installs and enables the addon in the Blender profile (landed in Phase 4)
 - addon target resolution comes from Blender CLI background probing, not guessed profile paths
-- provider launches Blender when needed in Phase 4 only if Blender is not already running
+- provider launches Blender when needed, only if Blender is not already running (landed in Phase 4)
 - an already running Blender session is never killed or restarted automatically
 - if the addon is provisioned after Blender is already open, provider status must explain that the current session may need reopening once
 - addon-facing token-file contract remains unchanged

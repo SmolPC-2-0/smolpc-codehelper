@@ -1,7 +1,7 @@
 # MCP And Provider Integration For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Integration ownership spec with Phase 2 setup foundation, Phase 3 LibreOffice runtime ownership landed, and Phase 4 Blender provisioning preflight locked
+**Status:** Integration ownership spec with Phase 2 setup foundation, Phase 3 LibreOffice runtime ownership landed, and Phase 4 Blender addon provisioning landed
 
 ## 1. Scope
 
@@ -166,7 +166,7 @@ Phase 2 setup item ids are locked to:
 - `host_blender`
 - `host_libreoffice`
 
-Phase 4 adds one new setup item id:
+Phase 4 added one new setup item id:
 
 - `blender_addon`
 
@@ -191,10 +191,10 @@ The Phase 3 workflow change does not alter those item ids or the
 - launch GIMP, Blender, or LibreOffice
 - replace `mode_refresh_tools`
 
-Phase 4 locked extension:
+Phase 4 landed extension:
 
-- `setup_prepare()` may provision and enable the Blender addon through Blender CLI background execution when Blender is installed
-- `setup_prepare()` still must not launch the interactive Blender UI
+- `setup_prepare()` provisions and enables the Blender addon through Blender CLI background execution when Blender is installed
+- `setup_prepare()` does not launch the interactive Blender UI
 
 ## 7. Provisioning Rules
 

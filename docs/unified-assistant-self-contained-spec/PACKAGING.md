@@ -1,7 +1,7 @@
 # Packaging And Distribution For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Packaging target with Phase 2 foundation contract, Phase 3 LibreOffice bundled-Python ownership landed, and Phase 4 Blender packaging rules locked
+**Status:** Packaging target with Phase 2 foundation contract, Phase 3 LibreOffice bundled-Python ownership landed, and Phase 4 Blender addon delivery landed
 
 ## 1. Packaging Direction
 
@@ -73,7 +73,7 @@ Phase 2 also adds tracked resource roots for:
 
 ## 4.2 Phase 4 Blender Addon Delivery
 
-Phase 4 locks the Blender addon delivery shape to:
+Phase 4 landed the Blender addon delivery shape:
 
 - source snapshot from:
   - `apps/blender-assistant/blender_addon/blender_helper_http.py`
@@ -84,11 +84,11 @@ Phase 4 locks the Blender addon delivery shape to:
 - existing bridge token path unchanged:
   - `%LOCALAPPDATA%/SmolPC/engine-runtime/bridge-token.txt` or platform equivalent
 
-Phase 4 provisioning rule:
+Phase 4 provisioning rule (landed):
 
 - the app resolves the Blender addon directory through Blender CLI background execution
 - the app enables the addon through Blender CLI background execution
-- the setup panel may repair or provision the addon, but it must not launch the interactive Blender UI
+- the setup panel may repair or provision the addon, but does not launch the interactive Blender UI
 
 ## 4.1 Phase 3 Bundled Python Delivery
 
@@ -130,10 +130,10 @@ Phase 3 live state:
 - the bundled LibreOffice runtime auto-launches LibreOffice on demand
 - GIMP and Blender host-app launch remain deferred
 
-Phase 4 next state:
+Phase 4 landed:
 
-- Blender addon provisioning becomes live
-- Blender interactive launch may happen on first Blender mode use
+- Blender addon provisioning is now live
+- Blender interactive launch happens on first Blender mode use
 - already running Blender sessions are not forcibly restarted
 
 ## 6. Packaging Invariants
