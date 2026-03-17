@@ -12,6 +12,8 @@ SmolPC Code Helper is an **offline AI coding assistant** for secondary school st
 
 **Backend selection priority:** `openvino_npu` > `directml` > `cpu`
 
+**Current runtime status:** DirectML model loading, switching, and recovery are the currently working Windows path on `main`. OpenVINO CPU/NPU still has known generation and compiler issues; keep OpenVINO work isolated to dedicated follow-up branches/PRs until those bugs are resolved.
+
 ---
 
 ## Quick Reference
@@ -25,7 +27,7 @@ cargo test -p smolpc-engine-core       # Core tests
 cargo test -p smolpc-engine-host       # Host tests
 
 # Tauri app (from apps/codehelper/)
-npm run tauri dev                      # Full app with hot reload
+npm run tauri:dev                      # Full app with hot reload and shared-engine cleanup
 npm run dev                            # Frontend only
 npm run check                          # TypeScript check
 npm run lint                           # Lint
