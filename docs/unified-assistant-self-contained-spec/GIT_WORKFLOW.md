@@ -31,16 +31,24 @@ Every self-contained phase follows this exact sequence:
 1. create `codex/<phase>-docs` from
    `origin/docs/unified-assistant-self-contained-spec`
 2. merge into `docs/unified-assistant-self-contained-spec`
-3. merge `docs/unified-assistant-self-contained-spec` into
-   `dev/unified-assistant-self-contained`
-4. create `codex/<phase>` from
+3. create `codex/<phase>-docs-sync` from
    `origin/dev/unified-assistant-self-contained`
-5. merge into `dev/unified-assistant-self-contained`
-6. create `codex/<phase>-status-docs` from
-   `origin/docs/unified-assistant-self-contained-spec`
-7. merge into `docs/unified-assistant-self-contained-spec`
-8. merge `docs/unified-assistant-self-contained-spec` into
+4. merge updated `docs/unified-assistant-self-contained-spec` into
+   `codex/<phase>-docs-sync`
+5. merge `codex/<phase>-docs-sync` into
    `dev/unified-assistant-self-contained`
+6. create `codex/<phase>` from
+   `origin/dev/unified-assistant-self-contained`
+7. merge into `dev/unified-assistant-self-contained`
+8. create `codex/<phase>-status-docs` from
+   `origin/docs/unified-assistant-self-contained-spec`
+9. merge into `docs/unified-assistant-self-contained-spec`
+10. create `codex/<phase>-status-sync` from
+    `origin/dev/unified-assistant-self-contained`
+11. merge updated `docs/unified-assistant-self-contained-spec` into
+    `codex/<phase>-status-sync`
+12. merge `codex/<phase>-status-sync` into
+    `dev/unified-assistant-self-contained`
 
 ## 4. Clone Rule
 
@@ -62,6 +70,7 @@ Do not do self-contained work from the stale local `main` checkout.
 
 - no direct pushes to either self-contained mainline
 - narrow `codex/*` branch per phase
+- use merge-only sync branches for docs-to-dev alignment
 - merge demo hotfixes forward only when still relevant
 - do not merge self-contained work back into the demo line
 
@@ -138,10 +147,27 @@ No third-party asset import should land without provenance recorded first.
 | Branch type    | PR target                                    |
 | -------------- | -------------------------------------------- |
 | phase docs     | `docs/unified-assistant-self-contained-spec` |
+| docs sync      | `dev/unified-assistant-self-contained`       |
 | implementation | `dev/unified-assistant-self-contained`       |
 | closeout docs  | `docs/unified-assistant-self-contained-spec` |
+| status sync    | `dev/unified-assistant-self-contained`       |
 
-## 10. First Branch In This Line
+## 10. Per-Phase Checklist
+
+Use this checklist for every self-contained phase:
+
+- docs branch opened from `origin/docs/unified-assistant-self-contained-spec`
+- docs branch merged into `docs/unified-assistant-self-contained-spec`
+- docs-sync branch opened from `origin/dev/unified-assistant-self-contained`
+- docs-sync branch merged into `dev/unified-assistant-self-contained`
+- implementation branch opened from updated `origin/dev/unified-assistant-self-contained`
+- implementation branch merged into `dev/unified-assistant-self-contained`
+- status-docs branch opened from updated `origin/docs/unified-assistant-self-contained-spec`
+- status-docs branch merged into `docs/unified-assistant-self-contained-spec`
+- status-sync branch opened from updated `origin/dev/unified-assistant-self-contained`
+- status-sync branch merged into `dev/unified-assistant-self-contained`
+
+## 11. First Branch In This Line
 
 The first required branch is:
 

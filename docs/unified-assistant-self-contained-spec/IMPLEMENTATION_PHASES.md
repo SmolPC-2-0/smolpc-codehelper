@@ -1,7 +1,7 @@
 # Self-Contained Delivery Phases
 
 **Last Updated:** 2026-03-17
-**Status:** Branch cut complete; Step 1 docs baseline is the current phase
+**Status:** Branch cut complete; baseline cleanup is the current phase
 
 ## Phase 0: Demo Freeze And Branch Cut
 
@@ -40,6 +40,28 @@
 - the full self-contained roadmap is documented
 - the new branch policy is documented
 - no implementation branch opens before these docs merge through both new mainlines
+
+## Phase 1A: Pre-Phase-2 Baseline Cleanup
+
+**Branches**
+
+1. `codex/unified-self-contained-baseline-cleanup-docs`
+2. merge into `docs/unified-assistant-self-contained-spec`
+3. `codex/unified-self-contained-baseline-cleanup-sync`
+4. merge into `dev/unified-assistant-self-contained`
+
+**Scope**
+
+- clear the remaining non-blocking docs debt from the branch-cut PRs
+- add the required docs-sync and status-sync workflow pattern
+- keep provenance/license wording honest and explicit
+- standardize the self-contained docs terminology around phases
+
+**Exit criteria**
+
+- cleanup docs are merged into `docs/unified-assistant-self-contained-spec`
+- cleanup sync is merged into `dev/unified-assistant-self-contained`
+- Phase 2 begins only after this cleanup sync branch is merged
 
 ## Phase 2: Self-Contained Foundation
 
