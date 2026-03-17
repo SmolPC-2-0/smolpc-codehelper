@@ -1,7 +1,7 @@
 # Setup Subsystem Spec
 
 **Last Updated:** 2026-03-17
-**Status:** Phase 2 foundation contract
+**Status:** Phase 2 foundation contract, now merged into the self-contained implementation line
 
 ## 1. Purpose
 
@@ -26,6 +26,13 @@ Phase 2 setup work is limited to:
 - bundled Python preparation scaffolding
 - bundled model readiness validation
 - one lightweight setup banner and setup panel
+
+Phase 2 closeout status:
+
+- backend setup subsystem landed
+- `setup_status` and `setup_prepare` landed
+- setup banner and setup panel landed
+- current mode behavior remained unchanged
 
 Phase 2 setup work does not include:
 
@@ -179,3 +186,7 @@ Later phases build on this subsystem:
 - Phase 4: Blender addon provisioning plugs into setup/provision state
 - Phase 5: GIMP plugin/server provisioning plugs into setup/provision state
 - Phase 6: packaged release validation uses setup status as the first-run and repair surface
+
+The next official branch after Phase 2 closeout is:
+
+- `codex/unified-self-contained-libreoffice-docs`

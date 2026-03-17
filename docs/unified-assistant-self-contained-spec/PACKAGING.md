@@ -1,7 +1,7 @@
 # Packaging And Distribution For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Packaging target for self-contained external delivery
+**Status:** Packaging target with Phase 2 foundation contract landed
 
 ## 1. Packaging Direction
 
@@ -47,6 +47,12 @@ The installer must not assume the user will separately install:
 
 Phase 2 adds the resource and manifest contract for `resources/models/` and
 `resources/python/`, but it does not yet ship the final packaged payloads.
+
+Phase 2 also adds tracked resource roots for:
+
+- `resources/gimp/`
+- `resources/blender/`
+- `resources/libreoffice/`
 
 ## 4. Bundled Resource Categories
 
@@ -104,6 +110,12 @@ Phase 2 establishes the manifest and staging-hook contract behind those goals:
 - tracked resource manifests under each provider-owned resource root
 - staging scripts for bundled model and bundled Python payloads
 - setup commands that validate packaged resource presence without mutating host-app profiles
+
+Those staging hooks now exist in the implementation line under:
+
+- `apps/codehelper/scripts/self-contained/stage-bundled-model.mjs`
+- `apps/codehelper/scripts/self-contained/stage-python-runtime.mjs`
+- `apps/codehelper/scripts/self-contained/validate-resource-manifests.mjs`
 
 ## 8. Validation Checklist
 

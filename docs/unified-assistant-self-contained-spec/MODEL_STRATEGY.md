@@ -1,7 +1,7 @@
 # Model Strategy For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Bundled default model decision is locked for self-contained delivery
+**Status:** Bundled default model decision is locked and Phase 2 staging contract is landed
 
 ## 1. Shipping Decision
 
@@ -93,6 +93,13 @@ Phase 2 additionally requires:
 - build-artifact staging for the bundled model is defined and scripted
 - packaged artifact selection for `qwen3-4b-instruct-2507` is pinned and reviewable
 - Windows runtime validation is still treated as required follow-up, not assumed complete
+
+Phase 2 closeout:
+
+- tracked `resources/models/manifest.json` now exists
+- tracked `resources/models/README.md` now exists
+- bundled model staging script now exists
+- final packaged model payload is still deferred to later staging/release work
 
 ## 7. Deferred Questions
 
