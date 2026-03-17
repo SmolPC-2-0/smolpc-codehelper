@@ -35,6 +35,9 @@ Phase 2 adds the first tracked packaged-resource manifests for:
 - `apps/codehelper/src-tauri/resources/libreoffice/`
 - `apps/codehelper/src-tauri/resources/models/`
 
+That manifest/resource-root contract is now merged into
+`dev/unified-assistant-self-contained`.
+
 Re-verify any upstream resource or toolchain link relied on by a new phase
 before opening that phase's docs branch. This is especially important for:
 
