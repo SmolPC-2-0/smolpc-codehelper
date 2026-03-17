@@ -1,7 +1,7 @@
 # MCP And Provider Integration For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Integration ownership spec with Phase 2 setup foundation landed
+**Status:** Integration ownership spec with Phase 2 setup foundation landed and Phase 3 LibreOffice runtime rules locked
 
 ## 1. Scope
 
@@ -10,6 +10,9 @@ changing the public assistant command surface.
 
 Phase 2 foundation adds app-level setup commands and setup state, but it does
 not change live mode activation behavior.
+
+Phase 3 uses that foundation to remove packaged-mode external Python from
+Writer and Slides without changing the public assistant command surface.
 
 Public command surface remains:
 
@@ -91,6 +94,7 @@ Transport/runtime rules:
 - stdio MCP child process via bundled `main.py`
 - helper socket stays `localhost:8765`
 - office socket stays `localhost:2002`
+- provider consumes the prepared bundled Python runtime from setup state
 - packaged mode must use bundled Python only
 - no packaged-mode fallback to system `python` or `python3`
 
@@ -98,13 +102,17 @@ Ownership rules:
 
 - LibreOffice / Collabora remains separately installed
 - unified app owns Python runtime and MCP scripts
-- provider auto-launches `soffice` when required
+- `setup_prepare()` prepares the app-owned Python substrate but does not launch LibreOffice
+- provider auto-detects and auto-launches `soffice` when required
+- no Phase 3 settings UI or manual path override UI is added
 
 Mode rules:
 
 - Writer live
 - Slides live
 - Calc scaffold-only
+- `mode_status(writer|impress)` and `mode_refresh_tools(writer|impress)` report bundled-Python and `soffice` readiness honestly
+- `mode_status(calc)` and `mode_refresh_tools(calc)` remain scaffold-only
 
 ### 5.3 Blender
 
@@ -154,6 +162,9 @@ Phase 2 setup item ids are locked to:
 - `host_libreoffice`
 
 Those item ids now define the live `setup_status` wire contract.
+
+The Phase 3 workflow change does not alter those item ids or the
+`setup_status` / `setup_prepare` wire contract.
 
 `setup_prepare` should:
 
@@ -209,7 +220,8 @@ Expected supervisors:
 
 Phase 2 introduces the shared setup state and packaged-resource validation
 needed before those provider-specific supervisors take ownership in later
-phases.
+phases. Phase 3 is the first phase where one of those supervisors becomes a
+real packaged-mode runtime dependency.
 
 ## 9. Non-Goals In This Line
 

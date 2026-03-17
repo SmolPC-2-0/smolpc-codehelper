@@ -13,7 +13,7 @@ the self-contained branch cut. Section-level "Verified" dates reflect that
 source snapshot unless a newer verification date is called out explicitly.
 
 Re-verify the upstream links and toolchain references used by any planned phase
-before opening that phase's docs branch. Treat the section-level dates here as
+before opening that phase's docs-only branch. Treat the section-level dates here as
 the last known verification point, not a guarantee that the linked content has
 not changed since then.
 
@@ -39,7 +39,7 @@ That manifest/resource-root contract is now merged into
 `dev/unified-assistant-self-contained`.
 
 Re-verify any upstream resource or toolchain link relied on by a new phase
-before opening that phase's docs branch. This is especially important for:
+before opening that phase's docs-only branch. This is especially important for:
 
 - Python packaging inputs
 - Blender CLI/bootstrap behavior

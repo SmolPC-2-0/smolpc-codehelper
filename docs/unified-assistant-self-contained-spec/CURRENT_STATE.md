@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-17
-**Status:** Demo line frozen; Phase 2 foundation merged on the self-contained line
+**Status:** Demo line frozen; Phase 2 foundation complete; Phase 3 starts on a single self-contained mainline
 
 ## 1. Branch State
 
@@ -14,10 +14,10 @@
 
 ### Self-contained line
 
-| Branch                                       | Role                        |
-| -------------------------------------------- | --------------------------- |
-| `dev/unified-assistant-self-contained`       | New implementation mainline |
-| `docs/unified-assistant-self-contained-spec` | New docs/spec mainline      |
+| Branch                                       | Role                                                  |
+| -------------------------------------------- | ----------------------------------------------------- |
+| `dev/unified-assistant-self-contained`       | Sole active implementation and documentation mainline |
+| `docs/unified-assistant-self-contained-spec` | Frozen archive/reference snapshot                     |
 
 Current implementation head after Phase 2 foundation:
 
@@ -25,6 +25,17 @@ Current implementation head after Phase 2 foundation:
   - baseline cleanup sync
   - Phase 2 docs sync
   - Phase 2 foundation implementation
+  - Phase 2 closeout docs sync
+  - Phase 2 docs cleanup sync
+
+Current frozen archive snapshot:
+
+- `docs/unified-assistant-self-contained-spec` remains frozen at:
+  - `06d32a5219b69d8182079843c79661aca98ad220`
+
+No docs sync is pending. The docs tree under
+`docs/unified-assistant-self-contained-spec/` is already identical between the
+archive branch snapshot and `dev/unified-assistant-self-contained`.
 
 ### Freeze tags
 
@@ -143,6 +154,15 @@ Phase 2 intentionally did not land:
 - host-app launch orchestration
 - Calc activation
 
+### Workflow transition
+
+Starting with Phase 3:
+
+- `dev/unified-assistant-self-contained` becomes the only active self-contained mainline
+- docs-first rigor stays in place
+- future self-contained docs land directly on the implementation mainline
+- `docs/unified-assistant-self-contained-spec` is archive/reference only
+
 ## 7. Phase 2 Scope
 
 Phase 2 established the self-contained foundation only:
@@ -167,10 +187,8 @@ Phase 2 does not include:
 The next required branch sequence is:
 
 1. `codex/unified-self-contained-libreoffice-docs`
-2. `codex/unified-self-contained-libreoffice-docs-sync`
-3. `codex/unified-self-contained-libreoffice`
-4. `codex/unified-self-contained-libreoffice-status-docs`
-5. `codex/unified-self-contained-libreoffice-status-sync`
+2. `codex/unified-self-contained-libreoffice`
+3. `codex/unified-self-contained-libreoffice-status-docs`
 
 ## 9. Known Risks
 

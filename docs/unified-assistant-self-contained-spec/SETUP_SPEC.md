@@ -1,7 +1,7 @@
 # Setup Subsystem Spec
 
 **Last Updated:** 2026-03-17
-**Status:** Phase 2 foundation contract, now merged into the self-contained implementation line
+**Status:** Phase 2 foundation contract, now merged; single-mainline workflow does not change the setup API
 
 ## 1. Purpose
 
@@ -189,6 +189,10 @@ Later phases build on this subsystem:
 - Phase 4: Blender addon provisioning plugs into setup/provision state
 - Phase 5: GIMP plugin/server provisioning plugs into setup/provision state
 - Phase 6: packaged release validation uses setup status as the first-run and repair surface
+
+The single-mainline workflow adopted after Phase 2 does not change the
+`setup_status` or `setup_prepare` wire contract. It only changes where the
+future docs PRs land.
 
 The next official branch after Phase 2 closeout is:
 
