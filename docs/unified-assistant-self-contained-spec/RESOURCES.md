@@ -46,6 +46,14 @@ before opening that phase's docs-only branch. This is especially important for:
 - GIMP plugin/runtime provenance
 - Windows packaging/runtime assumptions
 
+Phase 4 preflight locks the Blender addon snapshot source to:
+
+- `apps/blender-assistant/blender_addon/blender_helper_http.py`
+
+Phase 4 implementation should repack that snapshot into:
+
+- `apps/codehelper/src-tauri/resources/blender/addon/blender_helper_http.py`
+
 ---
 
 ## Table of Contents

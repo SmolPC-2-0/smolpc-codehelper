@@ -1,7 +1,7 @@
 # Setup Subsystem Spec
 
 **Last Updated:** 2026-03-17
-**Status:** Phase 2 foundation contract merged; Phase 3 now consumes prepared bundled Python without changing the setup API
+**Status:** Phase 2 foundation contract merged; Phase 3 consumes prepared bundled Python; Phase 4 Blender provisioning preflight is locked without changing setup command names
 
 ## 1. Purpose
 
@@ -39,6 +39,12 @@ Phase 3 follow-on status:
 - Writer and Slides now consume the setup-prepared bundled Python runtime in packaged mode
 - setup remains app-level and foundation-only
 - `setup_status` and `setup_prepare` remain wire-compatible with the Phase 2 contract
+
+Phase 4 locked next step:
+
+- setup gains one additional status item for Blender addon readiness
+- `setup_prepare()` may provision and enable the Blender addon through Blender CLI background execution
+- `setup_prepare()` still must not launch the interactive Blender UI
 
 Phase 2 setup work does not include:
 
@@ -79,6 +85,13 @@ returns the updated app-level setup snapshot.
 - provision addons or plugins
 - replace existing mode-specific commands
 
+Phase 4 locked extension:
+
+- `setup_prepare()` may provision and enable the Blender addon
+- it does so through Blender CLI background execution
+- it may update app-local provision markers under `setup/state/`
+- it still must not launch the interactive Blender UI
+
 ## 4. Public DTOs
 
 ```ts
@@ -103,9 +116,9 @@ interface SetupStatusDto {
 `detail` should be non-null whenever the app needs to explain why an item is
 missing, not prepared, or in error. It may be `null` for clean ready states.
 
-## 5. Locked Phase 2 Setup Item Ids
+## 5. Locked Setup Item Ids
 
-Phase 2 uses these item ids and no others:
+Current live setup item ids:
 
 - `engine_runtime`
 - `bundled_model`
@@ -113,6 +126,10 @@ Phase 2 uses these item ids and no others:
 - `host_gimp`
 - `host_blender`
 - `host_libreoffice`
+
+Phase 4 adds:
+
+- `blender_addon`
 
 Expected meanings:
 

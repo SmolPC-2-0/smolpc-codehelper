@@ -1,7 +1,7 @@
 # Self-Contained Delivery Phases
 
 **Last Updated:** 2026-03-17
-**Status:** Branch cut, cleanup, foundation, and Phase 3 complete; Phase 4 docs preflight next
+**Status:** Branch cut, cleanup, foundation, and Phase 3 complete; Phase 4 Blender docs preflight next
 
 ## Phase 0: Demo Freeze And Branch Cut
 
@@ -195,6 +195,23 @@ The next official branch after Phase 3 closeout docs is:
 - auto-install and auto-enable addon into user profile
 - auto-launch Blender when required
 - keep current bridge-first design intact
+
+**Locked Phase 4 decisions**
+
+- authoritative addon source remains:
+  - `apps/blender-assistant/blender_addon/blender_helper_http.py`
+- the unified app copies a pinned snapshot into:
+  - `apps/codehelper/src-tauri/resources/blender/addon/blender_helper_http.py`
+- addon module id is locked to:
+  - `blender_helper_http`
+- setup gains one new status item:
+  - `blender_addon`
+- `setup_prepare()` may provision and enable the addon through Blender CLI background execution, but it must not launch the interactive Blender UI
+- Blender mode itself may auto-provision on first use if the addon is missing
+- Blender profile and addon target resolution must come from Blender itself, not guessed profile paths
+- the app may auto-launch Blender only when no matching Blender process is already running
+- the app must not kill or restart an already running Blender instance
+- if Blender is already running without the addon loaded, the app must report that the addon is provisioned for future sessions and that the current session may need reopening once
 
 **Exit criteria**
 

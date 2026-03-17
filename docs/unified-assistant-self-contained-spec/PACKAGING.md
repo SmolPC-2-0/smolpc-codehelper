@@ -1,7 +1,7 @@
 # Packaging And Distribution For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Packaging target with Phase 2 foundation contract and Phase 3 LibreOffice bundled-Python ownership landed
+**Status:** Packaging target with Phase 2 foundation contract, Phase 3 LibreOffice bundled-Python ownership landed, and Phase 4 Blender packaging rules locked
 
 ## 1. Packaging Direction
 
@@ -71,6 +71,25 @@ Phase 2 also adds tracked resource roots for:
 | Blender provider assets     | Blender                             | addon payload, bridge helpers, manifests    |
 | LibreOffice provider assets | Writer/Slides                       | bundled runtime scripts and manifests       |
 
+## 4.2 Phase 4 Blender Addon Delivery
+
+Phase 4 locks the Blender addon delivery shape to:
+
+- source snapshot from:
+  - `apps/blender-assistant/blender_addon/blender_helper_http.py`
+- bundled unified resource target:
+  - `apps/codehelper/src-tauri/resources/blender/addon/blender_helper_http.py`
+- existing bridge host and port unchanged:
+  - `127.0.0.1:5179`
+- existing bridge token path unchanged:
+  - `%LOCALAPPDATA%/SmolPC/engine-runtime/bridge-token.txt` or platform equivalent
+
+Phase 4 provisioning rule:
+
+- the app resolves the Blender addon directory through Blender CLI background execution
+- the app enables the addon through Blender CLI background execution
+- the setup panel may repair or provision the addon, but it must not launch the interactive Blender UI
+
 ## 4.1 Phase 3 Bundled Python Delivery
 
 Phase 3 locks the bundled Python delivery source for Writer and Slides to:
@@ -110,6 +129,12 @@ Phase 3 live state:
 - LibreOffice host detection becomes live for Writer and Slides
 - the bundled LibreOffice runtime auto-launches LibreOffice on demand
 - GIMP and Blender host-app launch remain deferred
+
+Phase 4 next state:
+
+- Blender addon provisioning becomes live
+- Blender interactive launch may happen on first Blender mode use
+- already running Blender sessions are not forcibly restarted
 
 ## 6. Packaging Invariants
 

@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-17
-**Status:** Demo line frozen; Phase 3 LibreOffice runtime ownership complete on the single self-contained mainline
+**Status:** Demo line frozen; Phase 3 complete; Phase 4 Blender docs preflight is next on the single self-contained mainline
 
 ## 1. Branch State
 
@@ -24,8 +24,9 @@ Current implementation head after Phase 3 LibreOffice runtime ownership:
 - `dev/unified-assistant-self-contained` includes:
   - Phase 3 workflow migration docs
   - Phase 3 LibreOffice implementation
+  - Phase 3 closeout docs
   - current implementation head:
-    - `a4119ddd642bee18ea8c31dc29913bee869c5edf`
+    - `bfc4d6c2c55f29b60bad0a574a216ba2bb38ae6b`
   - earlier self-contained history:
     - baseline cleanup sync
     - Phase 2 docs sync
@@ -138,7 +139,7 @@ Complete:
 
 - baseline cleanup docs merged into `docs/unified-assistant-self-contained-spec`
 - baseline cleanup sync merged into `dev/unified-assistant-self-contained`
-- docs-sync and status-sync workflow now documented as required branch policy
+- dual-mainline docs-sync and status-sync workflow preserved in the docs as historical Phase 0-2 branch policy
 
 ### Phase 2
 
@@ -217,6 +218,14 @@ The next required branch sequence is:
 1. `codex/unified-self-contained-blender-docs`
 2. `codex/unified-self-contained-blender`
 3. `codex/unified-self-contained-blender-status-docs`
+
+Phase 4 preflight focus:
+
+- bundle the Blender addon under unified resources
+- provision and enable the addon through Blender CLI background execution
+- expose Blender addon readiness in setup state
+- auto-launch Blender on first Blender-mode use when Blender is installed
+- keep GIMP, LibreOffice, Code, and Calc behavior unchanged
 
 ## 10. Known Risks
 
