@@ -1659,6 +1659,8 @@ impl EngineState {
         if self.generating.load(Ordering::SeqCst) {
             return Err("Cannot load or unload model while generation is in progress".to_string());
         }
+        let current_backend = self.active_backend().await;
+        let has_loaded_model = self.current_model.lock().await.is_some();
         let directml_required =
             model_requires_directml(&model_id) || startup_mode.requires_directml();
         let openvino_required = model_requires_openvino(&model_id);
@@ -1939,6 +1941,11 @@ impl EngineState {
             has_dml_candidate,
             has_openvino_candidate,
         );
+        let release_current_adapter = should_release_current_adapter_for_load(
+            current_backend,
+            preferred_backend,
+            has_loaded_model,
+        );
 
         let mut active_backend = preferred_backend;
         let mut active_reason = decision_reason.clone();
@@ -1948,6 +1955,15 @@ impl EngineState {
             selection_state = BackendSelectionState::Fallback;
         }
         let active_model_path: String;
+
+        if release_current_adapter {
+            log::info!(
+                "Unloading current model before reload to avoid overlapping adapter residency: current_backend={} next_backend={}",
+                current_backend.map(InferenceBackend::as_str).unwrap_or("none"),
+                preferred_backend.as_str(),
+            );
+            self.unload_model(false).await?;
+        }
 
         let adapter = if preferred_backend == InferenceBackend::OpenVinoNpu {
             let ready = openvino_ready.take().ok_or_else(|| {
@@ -2453,6 +2469,16 @@ fn choose_preferred_backend(
         );
     }
     (InferenceBackend::Cpu, DecisionReason::NoDirectMLCandidate)
+}
+
+fn should_release_current_adapter_for_load(
+    current_backend: Option<InferenceBackend>,
+    next_backend: InferenceBackend,
+    has_loaded_model: bool,
+) -> bool {
+    has_loaded_model
+        && (current_backend == Some(InferenceBackend::DirectML)
+            || next_backend == InferenceBackend::DirectML)
 }
 
 struct GenerationPermit {
@@ -3628,6 +3654,30 @@ mod tests {
 
         assert_eq!(backend, InferenceBackend::DirectML);
         assert_eq!(reason, DecisionReason::DefaultDirectMLCandidate);
+    }
+
+    #[test]
+    fn directml_model_reload_releases_current_adapter_before_rebuild() {
+        assert!(should_release_current_adapter_for_load(
+            Some(InferenceBackend::DirectML),
+            InferenceBackend::Cpu,
+            true,
+        ));
+        assert!(should_release_current_adapter_for_load(
+            Some(InferenceBackend::Cpu),
+            InferenceBackend::DirectML,
+            true,
+        ));
+        assert!(!should_release_current_adapter_for_load(
+            Some(InferenceBackend::Cpu),
+            InferenceBackend::Cpu,
+            true,
+        ));
+        assert!(!should_release_current_adapter_for_load(
+            Some(InferenceBackend::DirectML),
+            InferenceBackend::DirectML,
+            false,
+        ));
     }
 
     #[test]
