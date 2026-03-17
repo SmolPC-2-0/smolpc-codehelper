@@ -36,7 +36,9 @@ Implemented on this branch as of 2026-03-12:
 - automatic live selection now prefers `openvino_npu -> directml -> cpu` when OpenVINO preflight succeeds
 - the selection fingerprint now uses `selection_profile=openvino_native_v1` so stale pre-activation records are invalidated cleanly
 - development now includes a guarded `npm run runtime:setup:openvino` path that downloads the official 2026 Windows GenAI archive, verifies its SHA256, validates `openvino_genai_c.dll`, and stages the app-local runtime bundle locally
-- development now includes an official OpenVINO-only Qwen3 smoke target via `npm run model:setup:qwen3:openvino` with local model id `qwen3-4b-int4-ov`
+- development now stages the supported shared baseline through `npm run model:setup:qwen25-instruct` and `npm run model:setup:qwen3-4b`
+- OpenVINO CPU and OpenVINO NPU now use structured chat history by default for normal chat requests
+- `qwen3-4b` currently runs on OpenVINO in non-thinking mode only
 - OpenVINO NPU pipeline creation now applies tuned defaults that work on this PC:
   - `MAX_PROMPT_LEN=512`
   - `MIN_RESPONSE_LEN=1024`
@@ -44,8 +46,7 @@ Implemented on this branch as of 2026-03-12:
 
 Still pending for the remaining Phase 1 work:
 
-- exact-parity OpenVINO export for `qwen3-4b-instruct-2507` when benchmark parity across lanes matters
-- default catalog migration away from `qwen3-4b-instruct-2507`
+- final end-to-end validation for the supported `qwen2.5-1.5b-instruct` and `qwen3-4b` baseline
 - final Intel NPU validation and installer-time OpenVINO bundle population
 
 ## Responsibilities
@@ -295,7 +296,7 @@ See `ENGINE_SURFACE_TARGET.md` for the target contract.
   - define the per-lane engine status and model-readiness contract
   - split the machine-scoped OpenVINO startup probe from the model-scoped preflight entrypoint in host code
 - still pending before broader rollout:
-  - define lane-specific manifest layout and the default catalog migration away from `qwen3-4b-instruct-2507`
+  - keep the supported shared catalog and setup flow aligned with `qwen2.5-1.5b-instruct` and `qwen3-4b`
 
 ### Phase 1
 

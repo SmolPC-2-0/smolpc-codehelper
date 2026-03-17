@@ -20,7 +20,10 @@ As of 2026-03-12, this branch has completed native runtime activation and Window
 - automatic selection now prefers `openvino_npu -> directml -> cpu` when the OpenVINO lane is viable
 - the selection fingerprint now uses the `openvino_native_v1` profile so stale pre-activation records do not block rollout
 - `npm run runtime:setup:openvino` now downloads the official 2026 Windows OpenVINO GenAI archive, verifies its SHA256, validates the `openvino_genai_c.dll` exports, and stages the app-local bundle into `apps/codehelper/src-tauri/libs/openvino`
-- `npm run model:setup:qwen3:openvino` now stages the official `OpenVINO/Qwen3-4B-int4-ov` artifact into `%LOCALAPPDATA%/SmolPC/models/qwen3-4b-int4-ov/openvino_npu`
+- `npm run model:setup:qwen25-instruct` stages the supported `qwen2.5-1.5b-instruct` shared model with official OpenVINO IR + DirectML artifacts
+- `npm run model:setup:qwen3-4b` stages the supported `qwen3-4b` shared model with official `OpenVINO/Qwen3-4B-int4-ov` IR + DirectML artifacts
+- OpenVINO CPU and OpenVINO NPU now use structured chat history by default; the prompt-string path remains only for explicit legacy ChatML input compatibility
+- OpenVINO `qwen3-4b` is currently non-thinking only and follows upstream non-thinking defaults (`temperature=0.7`, `top_p=0.8`, `top_k=20`, `presence_penalty=1.5`)
 - the native OpenVINO lane now applies NPU creation defaults that work on this PC:
   - `MAX_PROMPT_LEN=512`
   - `MIN_RESPONSE_LEN=1024`
@@ -31,8 +34,7 @@ As of 2026-03-12, this branch has completed native runtime activation and Window
 Still pending for the remaining Phase 1 / Phase 1b work:
 
 - final end-to-end Intel NPU validation inside the full app flow on this machine
-- exact-parity OpenVINO export for `qwen3-4b-instruct-2507` if benchmark parity across lanes is still required
-- default catalog migration away from `qwen3-4b-instruct-2507`
+- final end-to-end validation for the supported `qwen2.5-1.5b-instruct` and `qwen3-4b` baseline
 - installer-time OpenVINO bundle population
 - workload tuning, cache policy, and prompt-default calibration
 

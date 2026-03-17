@@ -20,27 +20,21 @@ Monorepo placement convention for new apps:
 
 1. Read [ENGINE_API.md](./ENGINE_API.md).
 2. Read [SMOLPC_SUITE_INTEGRATION.md](./SMOLPC_SUITE_INTEGRATION.md).
-3. Run shared model bootstrap once on the machine for the default shared model:
-   - `npm run model:setup:qwen3`
-4. Optional Intel NPU smoke path:
+3. Run shared model bootstrap once on the machine for the supported shared baseline:
    - `npm run runtime:setup:openvino`
-   - This now downloads the official 2026 Windows OpenVINO GenAI archive, verifies its SHA256, and validates that `openvino_genai_c.dll` exports the native `ov_genai_*` C API used by the shared engine.
-   - `npm run model:setup:qwen3:openvino`
+   - `npm run model:setup:qwen25-instruct`
+   - `npm run model:setup:qwen3-4b`
 5. Use this playbook as the implementation checklist.
 
 ## Shared Model Baseline
 
 Default shared model for onboarding:
 
-1. `qwen3-4b-instruct-2507`
+1. `qwen2.5-1.5b-instruct`
 
-Optional OpenVINO smoke-test model:
+Higher-capability supported model:
 
-1. `qwen3-4b-int4-ov`
-
-Fallback model:
-
-1. `qwen2.5-coder-1.5b`
+1. `qwen3-4b`
 
 Shared model root (recommended):
 
@@ -83,7 +77,7 @@ Do not depend on:
    - Header: `Authorization: Bearer <token>`
 3. Required flow:
    1. `GET /engine/meta`
-   2. `POST /engine/load` with the selected shared model id (for example `qwen3-4b-instruct-2507`)
+   2. `POST /engine/load` with the selected shared model id (for example `qwen2.5-1.5b-instruct`)
    3. `POST /v1/chat/completions`
 
 ## Minimum Onboarding Checklist
@@ -111,7 +105,7 @@ Every app integration must pass all checks below.
    - Client handles `504` (queue timeout).
 7. Backend diagnostics:
    - App can surface/log `active_backend`, `runtime_engine`, `selection_reason`, and `backend_status.lanes.*`.
-   - For targeted validation, verify the backend expected for the selected model and runtime mode. Example: `qwen3-4b-int4-ov` with `SMOLPC_FORCE_EP=openvino_npu` should report `active_backend=openvino_npu`.
+   - For targeted validation, verify the backend expected for the selected model and runtime mode. Example: `qwen3-4b` with `SMOLPC_FORCE_EP=openvino_npu` should report `active_backend=openvino_npu`.
 
 ## Required Error Handling
 
@@ -128,10 +122,12 @@ Treat these as expected operational states:
 
 1. Automatic selection now prefers `openvino_npu -> directml -> cpu` when the OpenVINO lane passes preflight.
    - For targeted debugging, force `SMOLPC_FORCE_EP=openvino_npu`, `dml`, or `cpu` and inspect `/engine/status`.
-2. `qwen3-4b-int4-ov` is an OpenVINO-only smoke-test model.
-   - It is not the same checkpoint as `qwen3-4b-instruct-2507`, so it should not be treated as an exact cross-lane benchmark-parity result.
-3. The current Windows PyPI `openvino-genai` wheel is not a valid native runtime bundle for this repo's OpenVINO adapter.
-   - Windows provisioning now uses the official archive path instead. The app-local bundle must include `openvino_genai_c.dll`, and the current working NPU defaults on this PC are `MAX_PROMPT_LEN=256` and `MIN_RESPONSE_LEN=8`.
+2. OpenVINO CPU and OpenVINO NPU must use structured chat history for normal chat requests.
+   - Only explicit legacy single-message ChatML payloads stay on the prompt compatibility path.
+3. `qwen3-4b` is OpenVINO non-thinking only in the current supported baseline.
+   - Internal OpenVINO defaults follow the upstream non-thinking guidance: `temperature=0.7`, `top_p=0.8`, `top_k=20`, `presence_penalty=1.5`.
+4. The current Windows PyPI `openvino-genai` wheel is not a valid native runtime bundle for this repo's OpenVINO adapter.
+   - Windows provisioning now uses the official archive path instead. The app-local bundle must include `openvino_genai_c.dll`, and the current working NPU defaults on this PC are `MAX_PROMPT_LEN=512` and `MIN_RESPONSE_LEN=1024`.
    - For targeted debugging, `SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN` and `SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN` can override those defaults. Invalid values block the OpenVINO lane before a false-ready status is reported.
 
 ## Definition of Done (Per App)

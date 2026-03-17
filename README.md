@@ -50,7 +50,9 @@ npm run check
 Shared model bootstrap:
 
 ```bash
-npm run model:setup:qwen3
+npm run runtime:setup:openvino
+npm run model:setup:qwen25-instruct
+npm run model:setup:qwen3-4b
 ```
 
 ## Boundary Rules

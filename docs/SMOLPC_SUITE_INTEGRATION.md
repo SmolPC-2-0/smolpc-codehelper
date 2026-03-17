@@ -58,10 +58,11 @@ Recommended local launch:
 2. Sets `SMOLPC_ENGINE_DEV_FORCE_RESPAWN=1` for deterministic host reuse behavior.
 3. Requests host shutdown pre-launch so force overrides (`SMOLPC_FORCE_EP`) apply cleanly.
 
-Shared Qwen3 bootstrap:
+Shared model bootstrap:
 
-- `npm run model:setup:qwen3`
-- Creates `qwen3-4b-instruct-2507` under shared models root for cross-app reuse.
+- `npm run model:setup:qwen25-instruct`
+- `npm run model:setup:qwen3-4b`
+- Creates `qwen2.5-1.5b-instruct` and `qwen3-4b` under shared models root for cross-app reuse.
 
 ## Automatic Backend Selection (Current)
 
@@ -82,8 +83,8 @@ Behavior details:
 
 Current model priority in registry:
 
-1. `qwen3-4b-instruct-2507`
-2. `qwen2.5-coder-1.5b`
+1. `qwen2.5-1.5b-instruct`
+2. `qwen3-4b`
 
 ## Packaging
 
