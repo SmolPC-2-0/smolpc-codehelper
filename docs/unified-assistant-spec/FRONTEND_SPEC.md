@@ -472,9 +472,10 @@ Before provider integrations land:
 - Calc stays visible but disabled and remains post-v1 work
 - Code mode keeps the existing inference path and does not switch onto
   `assistant_send()`
-- the shared shell product identity becomes `SmolPC Unified Assistant`
-- no launcher-owned UI surface, provider toggle UI, or settings UI is added in
+- the shared shell product identity is now `SmolPC Unified Assistant`
+- no launcher-owned UI surface, provider toggle UI, or settings UI was added in
   this phase
+- launcher-only commands are no longer part of the unified app surface
 
 ## 14. Migration Path
 

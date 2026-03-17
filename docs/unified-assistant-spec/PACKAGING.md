@@ -1,7 +1,7 @@
 # Packaging And Distribution
 
 **Last Updated:** 2026-03-17
-**Status:** Packaging baseline for the unified app; Phase 7 hardening is the v1 finish-line packaging phase
+**Status:** Phase 7 hardening is merged; v1 packaging baseline is closed out with Calc deferred
 
 ## 1. Packaging Direction
 
@@ -11,7 +11,7 @@ The shipping target is **one unified Windows desktop app** built from
 Phase 7 packaging decisions:
 
 - visible packaged identity is `SmolPC Unified Assistant`
-- Tauri `productName` and window title should use that name
+- Tauri `productName` and window title now use that name
 - the bundle identifier remains `com.smolpc.codehelper` in Phase 7
 - launcher-owned resources are removed from the unified app package
 - Calc remains scaffold-only and does not block v1 packaging closeout
@@ -160,6 +160,7 @@ Phase 7 adds:
 - explicit bundled LibreOffice runtime resources in Tauri config
 - removal of launcher resources from the unified app bundle
 - visible packaged branding aligned to `SmolPC Unified Assistant`
+- shareable provider-side LibreOffice session ownership during tool execution
 
 ### 5.3 No launcher-owned runtime paths
 
@@ -177,6 +178,11 @@ The packaging plan is valid only after Windows verification covers:
 5. Blender provider connection behavior
 6. LibreOffice provider connection behavior
 7. packaged resource path resolution
+
+**Current recorded result:** the Phase 7 branch completed local compile/test
+validation and packaged-resource config validation, but no real Windows
+packaged-app run was executed in this branch environment. Windows validation is
+still a manual shipping follow-up.
 
 ## 7. Dev vs Packaged Resolution
 
@@ -215,6 +221,17 @@ Before calling the packaging plan complete, verify:
 - Blender mode fails gracefully if Blender bridge is unavailable
 - Blender mode fails gracefully if port `5179` is already occupied
 - staged LibreOffice resource paths resolve correctly in the unified app
+
+Phase 7 merged with these validation results already recorded:
+
+- `cargo test -p smolpc-mcp-client`
+- `cargo check -p smolpc-code-helper`
+- `cargo test -p smolpc-code-helper --lib`
+- `npm run check --workspace apps/codehelper`
+- unified Tauri config tests now verify:
+  - visible packaged identity uses `SmolPC Unified Assistant`
+  - bundled resources include LibreOffice and Blender assets
+  - launcher resources are excluded from the unified app package
 
 ## 10. Deferred Packaging Questions
 
