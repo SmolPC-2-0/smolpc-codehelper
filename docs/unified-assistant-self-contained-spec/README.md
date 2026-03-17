@@ -4,7 +4,7 @@
 > and document map for the self-contained delivery line.
 
 **Last Updated:** 2026-03-17
-**Status:** Self-contained delivery planning baseline
+**Status:** Single-mainline self-contained workflow active; Phase 3 docs preflight next
 
 ## Project Summary
 
@@ -36,13 +36,13 @@ Finish-line definition:
 
 ## Branch Roles
 
-| Branch                                       | Role                                                              |
-| -------------------------------------------- | ----------------------------------------------------------------- |
-| `dev/unified-assistant`                      | Frozen demo implementation baseline                               |
-| `docs/unified-assistant-spec`                | Frozen demo/spec baseline                                         |
-| `dev/unified-assistant-self-contained`       | New long-lived implementation mainline                            |
-| `docs/unified-assistant-self-contained-spec` | New long-lived canonical spec branch                              |
-| `codex/*`                                    | Narrow work branches from one of the two self-contained mainlines |
+| Branch                                       | Role                                                                 |
+| -------------------------------------------- | -------------------------------------------------------------------- |
+| `dev/unified-assistant`                      | Frozen demo implementation baseline                                  |
+| `docs/unified-assistant-spec`                | Frozen demo/spec baseline                                            |
+| `dev/unified-assistant-self-contained`       | Sole active self-contained implementation and documentation mainline |
+| `docs/unified-assistant-self-contained-spec` | Frozen self-contained archive/reference snapshot                     |
+| `codex/*`                                    | Narrow work branches from `dev/unified-assistant-self-contained`     |
 
 ## Freeze Tags
 
@@ -53,12 +53,22 @@ The demo baseline is frozen at:
 
 ## Required Workflow
 
-1. Update design/spec on `docs/unified-assistant-self-contained-spec`.
-2. Merge the docs work into `docs/unified-assistant-self-contained-spec`.
-3. Merge `docs/unified-assistant-self-contained-spec` into
-   `dev/unified-assistant-self-contained`.
-4. Create implementation branches only from
-   `dev/unified-assistant-self-contained`.
+Phase 0 through Phase 2 used a temporary dual-mainline workflow to get the
+self-contained line established cleanly.
+
+Starting with Phase 3, all new self-contained work lands directly on
+`dev/unified-assistant-self-contained` in this three-PR sequence:
+
+1. open `codex/<phase>-docs` from `origin/dev/unified-assistant-self-contained`
+2. merge the docs-only preflight PR into `dev/unified-assistant-self-contained`
+3. open `codex/<phase>` from updated `origin/dev/unified-assistant-self-contained`
+4. merge the implementation PR into `dev/unified-assistant-self-contained`
+5. open `codex/<phase>-status-docs` from updated `origin/dev/unified-assistant-self-contained`
+6. merge the closeout docs PR into `dev/unified-assistant-self-contained`
+
+No future self-contained PRs should target
+`docs/unified-assistant-self-contained-spec`. That branch remains as an
+archived reference snapshot of the dual-mainline period.
 
 Never branch new self-contained work from the frozen demo branches.
 
@@ -147,12 +157,13 @@ self-contained roadmap phases.
 
 ## Current Phase
 
-The current active docs-first phase is Phase 2 foundation:
+The current active docs-first phase is Phase 3 LibreOffice self-contained
+runtime preflight:
 
-- add the setup subsystem and app-level setup UI surface
-- add host-app detection
-- add bundled Python and model ownership scaffolding
-- keep current live mode behavior unchanged
+- keep the new single-mainline workflow rigorous while removing docs-sync PRs
+- switch Writer and Slides packaged-mode runtime ownership onto bundled Python
+- keep Calc scaffold-only
+- keep GIMP and Blender provisioning work deferred to later phases
 
 ## Rule Of Thumb
 

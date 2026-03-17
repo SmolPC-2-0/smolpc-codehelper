@@ -49,9 +49,9 @@ The app is considered self-contained when all of these are true:
 ## Workstream Rules
 
 - frozen demo baseline stays available for demos
-- self-contained work happens only on:
+- all future self-contained work happens only on:
   - `dev/unified-assistant-self-contained`
-  - `docs/unified-assistant-self-contained-spec`
+- `docs/unified-assistant-self-contained-spec` remains as a frozen historical/reference snapshot of the dual-mainline transition period
 - no self-contained work is merged back into the frozen demo line
 - third-party provenance must be documented before asset import
 

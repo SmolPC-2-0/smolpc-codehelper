@@ -1,7 +1,7 @@
 # SmolPC Unified Assistant Self-Contained Architecture
 
 **Last Updated:** 2026-03-17
-**Status:** Target architecture with Phase 2 foundation landed
+**Status:** Target architecture with Phase 2 foundation landed and Phase 3 LibreOffice ownership preflight locked
 
 ## 1. Product Shape
 
@@ -109,6 +109,12 @@ Phase 2 implementation status:
 - host-app detection now exists
 - packaged resource manifest validation now exists
 
+Phase 3 first consumer:
+
+- LibreOffice consumes the prepared bundled-Python substrate from setup state
+- `setup_prepare()` still remains foundation-only and does not launch LibreOffice
+- Writer and Slides use that prepared runtime at provider-use time
+
 ### 4.4 Mode providers
 
 Responsibilities:
@@ -200,8 +206,10 @@ Those roots are now part of the implementation contract on
 
 - host app remains external: LibreOffice / Collabora
 - bundled runtime scripts stay in unified resources
-- packaged Python runtime replaces system Python dependency in Phase 3
-- provider auto-launches `soffice` when needed
+- packaged builds use the prepared bundled Python runtime only
+- packaged mode does not fall back to system `python` or `python3`
+- provider auto-detects `soffice` and auto-launches it when needed
+- `mode_status(writer|impress)` and `mode_refresh_tools(writer|impress)` surface bundled-Python and LibreOffice readiness honestly
 - Writer and Slides remain side-effectful single-tool-turn modes
 - Calc stays scaffold-only
 
@@ -250,8 +258,9 @@ On first use of a live external mode:
 5. provider reports live status and available tools
 6. assistant flow proceeds normally
 
-Phase 2 does not yet implement this full flow. It only adds the shared setup
-and readiness layer that later phases call into.
+Phase 2 does not yet implement this full flow for every provider. Phase 3
+implements the LibreOffice slice first while leaving Blender and GIMP
+provisioning for later phases.
 
 ## 11. Deferred Architecture
 

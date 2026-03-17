@@ -10,7 +10,9 @@
 
 ## Self-Contained Line
 
-- **Freeze the demo line before productization work starts** (2026-03-17): `dev/unified-assistant` and `docs/unified-assistant-spec` are now the frozen demo baseline. Self-contained delivery work must continue only on `dev/unified-assistant-self-contained` and `docs/unified-assistant-self-contained-spec` so demo stability and productization risk stay separated.
+- **Freeze the demo line before productization work starts** (2026-03-17): `dev/unified-assistant` and `docs/unified-assistant-spec` are now the frozen demo baseline. Self-contained delivery work continues on `dev/unified-assistant-self-contained`, with the archived `docs/unified-assistant-self-contained-spec` branch retained only as reference for the branch-cut period.
+
+- **Dual-mainline docs control was a transition tool, not a permanent policy** (2026-03-17): The separate self-contained docs branch was useful while the branch cut, master plan, and Phase 2 foundation were still settling. Once the docs tree was already fully present on `dev/unified-assistant-self-contained`, the extra docs-sync/status-sync PRs created more CI noise and branch churn than protection. Phase 3 onward keeps docs-first rigor but lands docs directly on the implementation mainline.
 
 - **Host apps may remain external while integrations become app-owned** (2026-03-17): The self-contained finish line does not require bundling GIMP, Blender, or LibreOffice themselves. It does require the unified app to own everything else: model files, Python runtime, MCP servers, plugins, addons, provisioning, and launch orchestration.
 

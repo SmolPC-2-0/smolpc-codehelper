@@ -1,7 +1,7 @@
 # Self-Contained Delivery Phases
 
 **Last Updated:** 2026-03-17
-**Status:** Branch cut, cleanup, and Phase 2 foundation complete
+**Status:** Branch cut, cleanup, and Phase 2 foundation complete; Phase 3 docs preflight next
 
 ## Phase 0: Demo Freeze And Branch Cut
 
@@ -121,6 +121,21 @@ The next official branch after Phase 2 closeout docs is:
 
 - `codex/unified-self-contained-libreoffice-docs`
 
+## Workflow Transition After Phase 2
+
+Phases 0 through 2 used the temporary dual-mainline workflow that kept
+`docs/unified-assistant-self-contained-spec` and
+`dev/unified-assistant-self-contained` moving in lockstep.
+
+That transition period is complete.
+
+Starting in Phase 3:
+
+- `dev/unified-assistant-self-contained` is the sole active self-contained mainline
+- `docs/unified-assistant-self-contained-spec` remains as a frozen archive/reference snapshot
+- every future phase uses a 3-PR docs-only -> implementation -> closeout-docs flow on
+  `dev/unified-assistant-self-contained`
+
 ## Phase 3: LibreOffice Self-Contained Runtime
 
 **Status:** next
@@ -128,13 +143,11 @@ The next official branch after Phase 2 closeout docs is:
 **Branches**
 
 1. `codex/unified-self-contained-libreoffice-docs`
-2. merge docs into `docs/unified-assistant-self-contained-spec`
-3. merge docs into `dev/unified-assistant-self-contained`
-4. `codex/unified-self-contained-libreoffice`
-5. merge into `dev/unified-assistant-self-contained`
-6. `codex/unified-self-contained-libreoffice-status-docs`
-7. merge into `docs/unified-assistant-self-contained-spec`
-8. merge docs into `dev/unified-assistant-self-contained`
+2. merge docs into `dev/unified-assistant-self-contained`
+3. `codex/unified-self-contained-libreoffice`
+4. merge into `dev/unified-assistant-self-contained`
+5. `codex/unified-self-contained-libreoffice-status-docs`
+6. merge docs into `dev/unified-assistant-self-contained`
 
 **Scope**
 
@@ -153,13 +166,11 @@ The next official branch after Phase 2 closeout docs is:
 **Branches**
 
 1. `codex/unified-self-contained-blender-docs`
-2. merge docs into `docs/unified-assistant-self-contained-spec`
-3. merge docs into `dev/unified-assistant-self-contained`
-4. `codex/unified-self-contained-blender`
-5. merge into `dev/unified-assistant-self-contained`
-6. `codex/unified-self-contained-blender-status-docs`
-7. merge into `docs/unified-assistant-self-contained-spec`
-8. merge docs into `dev/unified-assistant-self-contained`
+2. merge docs into `dev/unified-assistant-self-contained`
+3. `codex/unified-self-contained-blender`
+4. merge into `dev/unified-assistant-self-contained`
+5. `codex/unified-self-contained-blender-status-docs`
+6. merge docs into `dev/unified-assistant-self-contained`
 
 **Scope**
 
@@ -178,13 +189,11 @@ The next official branch after Phase 2 closeout docs is:
 **Branches**
 
 1. `codex/unified-self-contained-gimp-docs`
-2. merge docs into `docs/unified-assistant-self-contained-spec`
-3. merge docs into `dev/unified-assistant-self-contained`
-4. `codex/unified-self-contained-gimp`
-5. merge into `dev/unified-assistant-self-contained`
-6. `codex/unified-self-contained-gimp-status-docs`
-7. merge into `docs/unified-assistant-self-contained-spec`
-8. merge docs into `dev/unified-assistant-self-contained`
+2. merge docs into `dev/unified-assistant-self-contained`
+3. `codex/unified-self-contained-gimp`
+4. merge into `dev/unified-assistant-self-contained`
+5. `codex/unified-self-contained-gimp-status-docs`
+6. merge docs into `dev/unified-assistant-self-contained`
 
 **Scope**
 
@@ -204,13 +213,11 @@ The next official branch after Phase 2 closeout docs is:
 **Branches**
 
 1. `codex/unified-self-contained-release-docs`
-2. merge docs into `docs/unified-assistant-self-contained-spec`
-3. merge docs into `dev/unified-assistant-self-contained`
-4. `codex/unified-self-contained-release`
-5. merge into `dev/unified-assistant-self-contained`
-6. `codex/unified-self-contained-release-status-docs`
-7. merge into `docs/unified-assistant-self-contained-spec`
-8. merge docs into `dev/unified-assistant-self-contained`
+2. merge docs into `dev/unified-assistant-self-contained`
+3. `codex/unified-self-contained-release`
+4. merge into `dev/unified-assistant-self-contained`
+5. `codex/unified-self-contained-release-status-docs`
+6. merge docs into `dev/unified-assistant-self-contained`
 
 **Scope**
 

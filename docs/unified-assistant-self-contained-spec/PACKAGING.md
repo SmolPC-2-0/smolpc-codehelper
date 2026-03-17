@@ -1,7 +1,7 @@
 # Packaging And Distribution For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Packaging target with Phase 2 foundation contract landed
+**Status:** Packaging target with Phase 2 foundation contract landed and Phase 3 LibreOffice packaging rules locked
 
 ## 1. Packaging Direction
 
@@ -65,6 +65,19 @@ Phase 2 also adds tracked resource roots for:
 | Blender provider assets     | Blender                             | addon payload, bridge helpers, manifests    |
 | LibreOffice provider assets | Writer/Slides                       | bundled runtime scripts and manifests       |
 
+## 4.1 Phase 3 Bundled Python Delivery
+
+Phase 3 locks the bundled Python delivery source for Writer and Slides to:
+
+- the official Windows x64 CPython embeddable distribution from `python.org`
+- a pinned `uv` Windows binary from Astral for packaging/runtime management
+- provider-owned wheel/runtime inputs staged into `resources/python/payload/`
+
+Phase 3 packaged-mode rule:
+
+- Writer and Slides must launch from the prepared bundled Python runtime only
+- packaged mode must not fall back to system `python` or `python3`
+
 ## 5. Host-App Expectations
 
 Still external at shipping time:
@@ -85,6 +98,12 @@ Phase 2 stop-point:
 - host-app detection becomes real
 - host-app launch remains deferred
 - plugin/addon provisioning remains deferred
+
+Phase 3 exception:
+
+- LibreOffice host detection becomes live for Writer and Slides
+- the provider may auto-launch LibreOffice on demand
+- GIMP and Blender host-app launch remain deferred
 
 ## 6. Packaging Invariants
 
@@ -124,7 +143,7 @@ Before calling the self-contained line ready, verify on Windows:
 1. packaged app launches without launcher help
 2. engine starts automatically
 3. bundled default model resolves and loads
-4. no system Python is required
+4. Writer and Slides use bundled Python only; no system Python is required
 5. first Writer use launches runtime plus LibreOffice
 6. first Slides use launches runtime plus LibreOffice
 7. first Blender use provisions addon and launches Blender
