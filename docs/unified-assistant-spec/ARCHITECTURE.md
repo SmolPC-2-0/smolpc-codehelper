@@ -175,6 +175,11 @@ only in the command layer.
 - Phase 7 keeps that provider split intact while hardening the imported
   LibreOffice runtime, removing launcher assumptions, and finishing v1 with
   Calc still deferred.
+- After Phase 7, the shared LibreOffice provider owns:
+  - provider-validated runtime log-path setup
+  - authenticated helper-socket traffic
+  - bounded helper request/response framing
+  - shareable session ownership during live tool execution
 
 ## 7. Frontend Shell
 
@@ -311,7 +316,7 @@ and then be pulled into the unified branches.
 | Standalone apps | Port behavior into adapters; do not merge directories        |
 | Engine          | Prefer contract reuse over direct internal edits             |
 | Packaging       | Document and validate after provider integration, not before |
-| Launcher        | Out of scope for runtime ownership                           |
+| Launcher        | Removed from unified runtime ownership after Phase 7         |
 
 ## 11. Critical Invariants
 
