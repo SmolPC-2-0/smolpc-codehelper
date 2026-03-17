@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-17
-**Status:** Demo line frozen; Phase 2 foundation complete; Phase 3 starts on a single self-contained mainline
+**Status:** Demo line frozen; Phase 3 LibreOffice runtime ownership complete on the single self-contained mainline
 
 ## 1. Branch State
 
@@ -19,14 +19,19 @@
 | `dev/unified-assistant-self-contained`       | Sole active implementation and documentation mainline |
 | `docs/unified-assistant-self-contained-spec` | Frozen archive/reference snapshot                     |
 
-Current implementation head after Phase 2 foundation:
+Current implementation head after Phase 3 LibreOffice runtime ownership:
 
 - `dev/unified-assistant-self-contained` includes:
-  - baseline cleanup sync
-  - Phase 2 docs sync
-  - Phase 2 foundation implementation
-  - Phase 2 closeout docs sync
-  - Phase 2 docs cleanup sync
+  - Phase 3 workflow migration docs
+  - Phase 3 LibreOffice implementation
+  - current implementation head:
+    - `a4119ddd642bee18ea8c31dc29913bee869c5edf`
+  - earlier self-contained history:
+    - baseline cleanup sync
+    - Phase 2 docs sync
+    - Phase 2 foundation implementation
+    - Phase 2 closeout docs sync
+    - Phase 2 docs cleanup sync
 
 Current frozen archive snapshot:
 
@@ -75,8 +80,8 @@ The current unified app is not yet self-contained for external users.
 | ----------------------------- | ---------------------------------------------------- | ----------------------------------------------- |
 | Engine                        | App-owned and auto-started                           | Keep                                            |
 | Models                        | Not guaranteed bundled for external install          | Bundle one default model                        |
-| LibreOffice Python            | External Python still assumed in packaged mode       | Bundle app-private Python                       |
-| LibreOffice runtime bootstrap | Runtime is app-launched but not fully self-contained | Keep app-owned, remove system Python dependency |
+| LibreOffice Python            | External Python still assumed in packaged mode       | Closed on self-contained line for Writer/Slides |
+| LibreOffice runtime bootstrap | Runtime is app-launched but not fully self-contained | Keep app-owned, keep host app external          |
 | Blender addon                 | External manual addon install/enable                 | Auto-provision from bundled resources           |
 | Blender launch                | External manual app launch                           | Detect and launch automatically                 |
 | GIMP plugin/server            | External manual plugin/server setup                  | Bundle and provision automatically              |
@@ -112,7 +117,7 @@ The self-contained delivery line must ship:
 | Mode family | Current source status                                             | Self-contained ownership direction                          |
 | ----------- | ----------------------------------------------------------------- | ----------------------------------------------------------- |
 | Code        | Already owned in `apps/codehelper`                                | Keep                                                        |
-| LibreOffice | Runtime scripts already imported into unified resources           | Replace system Python dependency with bundled Python        |
+| LibreOffice | Runtime scripts already imported into unified resources           | Bundled Python now owns packaged Writer/Slides runtime path |
 | Blender     | Bridge already owned by unified app; addon still external         | Bundle and provision addon from repo source                 |
 | GIMP        | Unified provider exists, but runtime/plugin ownership is external | Vendor pinned upstream `gimp-mcp` snapshot and provision it |
 
@@ -163,6 +168,8 @@ Starting with Phase 3:
 - future self-contained docs land directly on the implementation mainline
 - `docs/unified-assistant-self-contained-spec` is archive/reference only
 
+That workflow transition is now merged and active.
+
 ## 7. Phase 2 Scope
 
 Phase 2 established the self-contained foundation only:
@@ -182,15 +189,36 @@ Phase 2 does not include:
 - host-app launch orchestration
 - Calc activation
 
-## 8. Next Official Branches
+## 8. Phase 3 Scope
+
+Phase 3 is now merged into `dev/unified-assistant-self-contained`.
+
+Phase 3 landed:
+
+- bundled-Python runtime ownership for Writer and Slides in packaged mode
+- no packaged-mode fallback to system `python` or `python3`
+- LibreOffice host detection through the setup host-app locator
+- passing the detected `soffice` path into the bundled LibreOffice runtime
+- on-demand LibreOffice host launch through the existing bundled runtime bootstrap
+- honest Writer/Slides runtime readiness errors when bundled Python or LibreOffice is unavailable
+
+Phase 3 intentionally did not land:
+
+- Blender addon provisioning
+- GIMP plugin/server provisioning
+- Blender or GIMP host-app launch orchestration
+- Calc activation
+- settings UI for manual LibreOffice path overrides
+
+## 9. Next Official Branches
 
 The next required branch sequence is:
 
-1. `codex/unified-self-contained-libreoffice-docs`
-2. `codex/unified-self-contained-libreoffice`
-3. `codex/unified-self-contained-libreoffice-status-docs`
+1. `codex/unified-self-contained-blender-docs`
+2. `codex/unified-self-contained-blender`
+3. `codex/unified-self-contained-blender-status-docs`
 
-## 9. Known Risks
+## 10. Known Risks
 
 | Risk                   | Why it matters                                                                                                   |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------- |

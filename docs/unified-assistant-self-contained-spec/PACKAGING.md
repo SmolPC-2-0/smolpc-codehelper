@@ -1,7 +1,7 @@
 # Packaging And Distribution For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Packaging target with Phase 2 foundation contract landed and Phase 3 LibreOffice packaging rules locked
+**Status:** Packaging target with Phase 2 foundation contract and Phase 3 LibreOffice bundled-Python ownership landed
 
 ## 1. Packaging Direction
 
@@ -47,6 +47,12 @@ The installer must not assume the user will separately install:
 
 Phase 2 adds the resource and manifest contract for `resources/models/` and
 `resources/python/`, but it does not yet ship the final packaged payloads.
+
+Phase 3 uses that contract for Writer and Slides:
+
+- packaged-mode runtime startup now resolves the prepared bundled Python runtime
+- the detected LibreOffice host path is injected into the bundled runtime
+- final staged CPython and `uv` payloads still remain packaging-time inputs rather than committed git history
 
 Phase 2 also adds tracked resource roots for:
 
@@ -99,10 +105,10 @@ Phase 2 stop-point:
 - host-app launch remains deferred
 - plugin/addon provisioning remains deferred
 
-Phase 3 exception:
+Phase 3 live state:
 
 - LibreOffice host detection becomes live for Writer and Slides
-- the provider may auto-launch LibreOffice on demand
+- the bundled LibreOffice runtime auto-launches LibreOffice on demand
 - GIMP and Blender host-app launch remain deferred
 
 ## 6. Packaging Invariants
@@ -143,7 +149,7 @@ Before calling the self-contained line ready, verify on Windows:
 1. packaged app launches without launcher help
 2. engine starts automatically
 3. bundled default model resolves and loads
-4. Writer and Slides use bundled Python only; no system Python is required
+4. Writer and Slides use bundled Python only; no system Python is required in packaged mode
 5. first Writer use launches runtime plus LibreOffice
 6. first Slides use launches runtime plus LibreOffice
 7. first Blender use provisions addon and launches Blender

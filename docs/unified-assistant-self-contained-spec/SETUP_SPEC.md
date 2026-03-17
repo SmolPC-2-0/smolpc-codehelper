@@ -1,7 +1,7 @@
 # Setup Subsystem Spec
 
 **Last Updated:** 2026-03-17
-**Status:** Phase 2 foundation contract, now merged; single-mainline workflow does not change the setup API
+**Status:** Phase 2 foundation contract merged; Phase 3 now consumes prepared bundled Python without changing the setup API
 
 ## 1. Purpose
 
@@ -33,6 +33,12 @@ Phase 2 closeout status:
 - `setup_status` and `setup_prepare` landed
 - setup banner and setup panel landed
 - current mode behavior remained unchanged
+
+Phase 3 follow-on status:
+
+- Writer and Slides now consume the setup-prepared bundled Python runtime in packaged mode
+- setup remains app-level and foundation-only
+- `setup_status` and `setup_prepare` remain wire-compatible with the Phase 2 contract
 
 Phase 2 setup work does not include:
 
@@ -185,7 +191,7 @@ The setup surface must remain lightweight:
 
 Later phases build on this subsystem:
 
-- Phase 3: LibreOffice uses bundled Python ownership from setup
+- Phase 3: LibreOffice now uses bundled Python ownership from setup
 - Phase 4: Blender addon provisioning plugs into setup/provision state
 - Phase 5: GIMP plugin/server provisioning plugs into setup/provision state
 - Phase 6: packaged release validation uses setup status as the first-run and repair surface
@@ -194,6 +200,6 @@ The single-mainline workflow adopted after Phase 2 does not change the
 `setup_status` or `setup_prepare` wire contract. It only changes where the
 future docs PRs land.
 
-The next official branch after Phase 2 closeout is:
+The next official branch after Phase 3 closeout is:
 
-- `codex/unified-self-contained-libreoffice-docs`
+- `codex/unified-self-contained-blender-docs`
