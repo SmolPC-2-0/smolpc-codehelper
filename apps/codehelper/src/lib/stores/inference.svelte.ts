@@ -469,9 +469,8 @@ export const inferenceStore = {
 			try {
 				const hostGenerating = await invoke<boolean>('is_generating');
 				if (hostGenerating) {
-					// Host is still generating — leave state alone, it will resolve eventually
-					clearCancelTimeout(sessionId);
-					return;
+					// Host is stuck — force-clear UI anyway so the user isn't trapped
+					console.warn('Host still generating after cancel timeout — forcing UI reset');
 				}
 			} catch {
 				// Can't reach host — fall through to force-clear so UI isn't stuck
