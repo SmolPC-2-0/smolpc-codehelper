@@ -1,6 +1,6 @@
 param(
-    [string]$ModelId = "qwen2.5-coder-1.5b",
-    [string]$HuggingFaceModel = "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+    [string]$ModelId = "qwen2.5-1.5b-instruct",
+    [string]$HuggingFaceModel = "Qwen/Qwen2.5-1.5B-Instruct",
     [ValidateSet("int4", "fp16", "fp32", "bf16")]
     [string]$Precision = "int4"
 )

@@ -91,6 +91,8 @@ struct OpenVinoGenAiApi {
     set_top_p: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, f32) -> OvStatus,
     set_top_k: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, usize) -> OvStatus,
     set_repetition_penalty: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, f32) -> OvStatus,
+    set_presence_penalty:
+        Option<unsafe extern "C" fn(*mut OvGenAiGenerationConfig, f32) -> OvStatus>,
     validate_generation_config: unsafe extern "C" fn(*mut OvGenAiGenerationConfig) -> OvStatus,
     destroy_decoded_results: unsafe extern "C" fn(*mut OvGenAiDecodedResults),
     get_perf_metrics: unsafe extern "C" fn(
@@ -124,7 +126,10 @@ impl OpenVinoDeviceTarget {
 }
 
 impl OpenVinoGenAiApi {
-    fn load(bundle: &OpenVinoRuntimeBundle, target: OpenVinoDeviceTarget) -> Result<Arc<Self>, String> {
+    fn load(
+        bundle: &OpenVinoRuntimeBundle,
+        target: OpenVinoDeviceTarget,
+    ) -> Result<Arc<Self>, String> {
         match target {
             OpenVinoDeviceTarget::Cpu => OpenVinoRuntimeLoader::ensure_initialized_for_cpu(bundle)?,
             OpenVinoDeviceTarget::Npu => OpenVinoRuntimeLoader::ensure_initialized_for_npu(bundle)?,
@@ -223,6 +228,10 @@ impl OpenVinoGenAiApi {
                     &openvino_genai_c,
                     b"ov_genai_generation_config_set_repetition_penalty\0",
                 )?,
+                set_presence_penalty: try_load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_generation_config_set_presence_penalty\0",
+                ),
                 validate_generation_config: load_symbol(
                     &openvino_genai_c,
                     b"ov_genai_generation_config_validate\0",
@@ -257,6 +266,10 @@ impl OpenVinoGenAiApi {
 
 unsafe fn load_symbol<T: Copy>(lib: &RetainedLibrary, name: &[u8]) -> Result<T, String> {
     lib.get(name)
+}
+
+unsafe fn try_load_symbol<T: Copy>(lib: &RetainedLibrary, name: &[u8]) -> Option<T> {
+    lib.get(name).ok()
 }
 
 fn cstring(value: &str, field: &str) -> Result<CString, String> {
@@ -377,16 +390,17 @@ pub struct OpenVinoGenAiGenerator {
     inner: Arc<Mutex<OpenVinoGenAiInner>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct OpenVinoGenerationControls {
     pub eos_token_id: Option<i64>,
     pub min_new_tokens: Option<usize>,
     pub stop_token_ids: Option<Vec<i64>>,
     pub stop_strings: Option<Vec<String>>,
     pub ignore_eos: Option<bool>,
+    pub presence_penalty: Option<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum OpenVinoPipelineConfig {
     Cpu {
         generation_controls: OpenVinoGenerationControls,
@@ -486,7 +500,9 @@ impl OpenVinoGenAiGenerator {
                 generation_controls,
                 disable_thinking,
             } => (
-                unsafe { (api.create_pipeline)(model_dir.as_ptr(), device.as_ptr(), 0, &mut pipeline_ptr) },
+                unsafe {
+                    (api.create_pipeline)(model_dir.as_ptr(), device.as_ptr(), 0, &mut pipeline_ptr)
+                },
                 usize::MAX,
                 generation_controls.clone(),
                 *disable_thinking,
@@ -711,7 +727,11 @@ fn generate_stream_blocking(
         cancelled,
         trailing_dot_run: 0,
         accumulated: String::new(),
-        stop_strings: guard.generation_controls.stop_strings.clone().unwrap_or_default(),
+        stop_strings: guard
+            .generation_controls
+            .stop_strings
+            .clone()
+            .unwrap_or_default(),
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -739,7 +759,11 @@ fn generate_stream_with_history_blocking(
         cancelled,
         trailing_dot_run: 0,
         accumulated: String::new(),
-        stop_strings: guard.generation_controls.stop_strings.clone().unwrap_or_default(),
+        stop_strings: guard
+            .generation_controls
+            .stop_strings
+            .clone()
+            .unwrap_or_default(),
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -897,6 +921,18 @@ fn create_generation_config(
             },
             "ov_genai_generation_config_set_repetition_penalty",
         )?;
+    }
+
+    if let Some(presence_penalty) = controls.presence_penalty {
+        if presence_penalty.is_finite() {
+            if let Some(set_presence_penalty) = api.set_presence_penalty {
+                check_status(
+                    api,
+                    unsafe { set_presence_penalty(config_handle.as_ptr(), presence_penalty) },
+                    "ov_genai_generation_config_set_presence_penalty",
+                )?;
+            }
+        }
     }
 
     check_status(
@@ -1292,10 +1328,9 @@ fn openvino_genai_api_for_target(
         Err(poisoned) => poisoned.into_inner(),
     };
     guard.active_fingerprint = Some(fingerprint.clone());
-    guard.results.insert(
-        cache_key,
-        CachedOpenVinoGenAiApi::Success(Arc::clone(&api)),
-    );
+    guard
+        .results
+        .insert(cache_key, CachedOpenVinoGenAiApi::Success(Arc::clone(&api)));
     Ok(api)
 }
 
@@ -1326,10 +1361,11 @@ mod tests {
 
         let temp = tempdir().expect("temp dir");
         let bundle = build_bundle(temp.path(), None);
-        let api = match super::openvino_genai_api_for_target(&bundle, super::OpenVinoDeviceTarget::Cpu) {
-            Ok(api) => api,
-            Err(_) => return,
-        };
+        let api =
+            match super::openvino_genai_api_for_target(&bundle, super::OpenVinoDeviceTarget::Cpu) {
+                Ok(api) => api,
+                Err(_) => return,
+            };
 
         let value =
             metric_ms_pair(&api, std::ptr::null(), getter, "metric").expect("metric rounding");

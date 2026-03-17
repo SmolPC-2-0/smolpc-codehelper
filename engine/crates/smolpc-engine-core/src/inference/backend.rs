@@ -489,7 +489,7 @@ mod tests {
 
     fn decision_key() -> BackendDecisionKey {
         BackendDecisionKey {
-            model_id: "qwen2.5-coder-1.5b".to_string(),
+            model_id: "qwen2.5-1.5b-instruct".to_string(),
             model_artifact_fingerprint: Some("artifact-v1".to_string()),
             app_version: "2.2.0".to_string(),
             selector_engine_id: "engine_host".to_string(),
@@ -642,7 +642,7 @@ mod tests {
     #[test]
     fn check_model_response_any_ready_requires_a_ready_lane() {
         let response = CheckModelResponse {
-            model_id: "qwen2.5-coder-1.5b".to_string(),
+            model_id: "qwen2.5-1.5b-instruct".to_string(),
             lanes: ModelLaneReadinessByBackend {
                 openvino_npu: ModelLaneReadiness {
                     artifact_ready: true,
@@ -667,7 +667,7 @@ mod tests {
     #[test]
     fn check_model_response_any_ready_is_false_when_only_artifacts_exist() {
         let response = CheckModelResponse {
-            model_id: "qwen2.5-coder-1.5b".to_string(),
+            model_id: "qwen2.5-1.5b-instruct".to_string(),
             lanes: ModelLaneReadinessByBackend {
                 openvino_npu: ModelLaneReadiness {
                     artifact_ready: true,

@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const DEFAULT_ENGINE_BASE_URL: &str = "http://127.0.0.1:19432";
-const DEFAULT_MODEL: &str = "qwen2.5-coder-1.5b";
-const MODEL_FALLBACKS: &[&str] = &["qwen3.5-2b", "qwen3-4b-instruct-2507"];
+const DEFAULT_MODEL: &str = "qwen2.5-1.5b-instruct";
+const MODEL_FALLBACKS: &[&str] = &["qwen3-4b"];
 const DEFAULT_MAX_TOKENS_NON_STREAM: usize = 768;
 const DEFAULT_MAX_TOKENS_STREAM: usize = 1024;
 const ENGINE_AVAILABILITY_CACHE_TTL: Duration = Duration::from_secs(10);

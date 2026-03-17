@@ -1406,11 +1406,11 @@ mod tests {
     fn parse_models_response_accepts_known_model() {
         let payload = serde_json::json!({
             "object": "list",
-            "data": [{"id": "qwen2.5-coder-1.5b", "object": "model"}]
+            "data": [{"id": "qwen2.5-1.5b-instruct", "object": "model"}]
         });
         let models = parse_models_response(&payload).expect("known model should parse");
         assert_eq!(models.len(), 1);
-        assert_eq!(models[0].id, "qwen2.5-coder-1.5b");
+        assert_eq!(models[0].id, "qwen2.5-1.5b-instruct");
     }
 
     #[test]
@@ -1507,13 +1507,13 @@ mod tests {
             "startup_phase": "ready",
             "state_since": "2026-03-05T18:45:00Z",
             "active_backend": "cpu",
-            "active_model_id": "qwen2.5-coder-1.5b",
+            "active_model_id": "qwen2.5-1.5b-instruct",
             "error_code": null,
             "error_message": null,
             "retryable": null,
             "last_error": null,
             "engine_api_version": "1.0.0",
-            "current_model": "qwen2.5-coder-1.5b",
+            "current_model": "qwen2.5-1.5b-instruct",
             "generating": false,
             "backend_status": {}
         });
@@ -1525,7 +1525,7 @@ mod tests {
         assert_eq!(status.state.as_deref(), Some("ready"));
         assert_eq!(
             status.active_model_id.as_deref(),
-            Some("qwen2.5-coder-1.5b")
+            Some("qwen2.5-1.5b-instruct")
         );
         assert_eq!(status.engine_api_version, "1.0.0");
     }

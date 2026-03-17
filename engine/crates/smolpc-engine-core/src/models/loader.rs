@@ -175,8 +175,8 @@ mod tests {
 
     #[test]
     fn openvino_manifest_file_uses_lane_directory() {
-        let path = ModelLoader::openvino_manifest_file("qwen2.5-coder-1.5b");
-        assert!(path.ends_with("qwen2.5-coder-1.5b/openvino/manifest.json"));
+        let path = ModelLoader::openvino_manifest_file("qwen2.5-1.5b-instruct");
+        assert!(path.ends_with("qwen2.5-1.5b-instruct/openvino/manifest.json"));
     }
 
     #[test]

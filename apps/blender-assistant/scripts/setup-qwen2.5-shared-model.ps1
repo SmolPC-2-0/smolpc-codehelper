@@ -1,6 +1,6 @@
 param(
-    [string]$ModelId = "qwen2.5-coder-1.5b",
-    [string]$RepoId = "onnx-community/Qwen2.5-Coder-1.5B-Instruct",
+    [string]$ModelId = "qwen2.5-1.5b-instruct",
+    [string]$RepoId = "onnx-community/Qwen2.5-1.5B-Instruct",
     [ValidateSet("q4", "bnb4", "int8", "uint8", "fp16", "fp32")]
     [string]$CpuVariant = "q4",
     [string]$ModelsRoot = "",

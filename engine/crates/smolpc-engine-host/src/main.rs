@@ -40,10 +40,10 @@ use tokio::sync::{mpsc, Mutex, Notify, Semaphore};
 use tokio::time::{sleep, timeout};
 
 use crate::openvino::{
-    openvino_generation_controls_for_model,
-    inspect_openvino_artifact, is_blocking_openvino_probe_failure, probe_openvino_startup,
-    resolve_openvino_npu_tuning, run_openvino_preflight, OpenVinoPreflightResult,
-    OpenVinoStartupProbeResult,
+    inspect_openvino_artifact, is_blocking_openvino_probe_failure,
+    openvino_generation_controls_for_model, openvino_model_tuning_for_model,
+    probe_openvino_startup, resolve_openvino_npu_tuning, run_openvino_preflight,
+    OpenVinoPreflightResult, OpenVinoStartupProbeResult,
 };
 use crate::runtime_bundles::{resolve_runtime_bundles, ResolvedRuntimeBundles};
 #[cfg(test)]
@@ -1178,6 +1178,14 @@ impl EngineState {
 
     async fn active_backend(&self) -> Option<InferenceBackend> {
         self.backend_status.lock().await.active_backend
+    }
+
+    async fn uses_openvino_genai_runtime(&self) -> bool {
+        self.runtime_adapter
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(InferenceRuntimeAdapter::is_openvino_genai)
     }
 
     fn openvino_cache_dir(&self, model_id: &str, artifacts: &ModelLaneArtifacts) -> PathBuf {
@@ -2507,9 +2515,10 @@ fn build_openvino_cpu_runtime_adapter(
     model_id: &str,
     model_dir: &Path,
 ) -> Result<InferenceRuntimeAdapter, String> {
+    let model_tuning = openvino_model_tuning_for_model(model_id);
     let pipeline_config = OpenVinoPipelineConfig::cpu()
-        .with_generation_controls(openvino_generation_controls_for_model(model_id))
-        .with_disable_thinking(true);
+        .with_generation_controls(openvino_generation_controls_for_model(model_id, model_dir))
+        .with_disable_thinking(model_tuning.disable_thinking);
     let generator = smolpc_engine_core::inference::OpenVinoGenAiGenerator::new(
         bundle,
         model_dir,
@@ -2841,9 +2850,32 @@ fn max_tokens_hard_cap() -> usize {
         .unwrap_or(OPENVINO_MAX_TOKENS_HARD_CAP_DEFAULT)
 }
 
-fn request_to_config(request: &ChatCompletionRequest) -> Result<Option<GenerationConfig>, String> {
-    let mut c = GenerationConfig::default();
-    let mut changed = false;
+fn openvino_request_defaults(
+    model_id: Option<&str>,
+    runtime_is_openvino_genai: bool,
+) -> Option<GenerationConfig> {
+    if !runtime_is_openvino_genai {
+        return None;
+    }
+
+    model_id
+        .map(openvino_model_tuning_for_model)
+        .and_then(|tuning| tuning.request_defaults)
+}
+
+fn should_use_openvino_structured_messages(
+    runtime_is_openvino_genai: bool,
+    use_legacy_prompt: bool,
+) -> bool {
+    runtime_is_openvino_genai && !use_legacy_prompt
+}
+
+fn request_to_config(
+    request: &ChatCompletionRequest,
+    default_config: Option<GenerationConfig>,
+) -> Result<Option<GenerationConfig>, String> {
+    let mut changed = default_config.is_some();
+    let mut c = default_config.unwrap_or_default();
     if let Some(v) = request.max_tokens {
         if v == 0 {
             return Err("max_tokens must be greater than zero".to_string());
@@ -3102,16 +3134,20 @@ async fn v1_chat_completions(
 
     drop(queue_permit);
 
-    let config = request_to_config(&req)
-        .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
-    let openvino_active =
-        state.engine.active_backend().await == Some(InferenceBackend::OpenVinoNpu);
     let current_model_id = state.engine.current_model.lock().await.clone();
+    let openvino_runtime_loaded = state.engine.uses_openvino_genai_runtime().await;
+    let config = request_to_config(
+        &req,
+        openvino_request_defaults(current_model_id.as_deref(), openvino_runtime_loaded),
+    )
+    .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
     let disable_thinking = current_model_id
         .as_deref()
         .is_some_and(model_has_thinking_mode);
     let use_legacy_prompt = is_preformatted_chatml_single_user_message(&req.messages);
-    let completion_input = if openvino_active && !use_legacy_prompt {
+    let use_structured_messages =
+        should_use_openvino_structured_messages(openvino_runtime_loaded, use_legacy_prompt);
+    let completion_input = if use_structured_messages {
         let messages = request_to_structured_messages(&req.messages)
             .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
         (
@@ -3128,7 +3164,7 @@ async fn v1_chat_completions(
         };
         (mode, CompletionInput::Prompt(prompt))
     };
-    if openvino_active {
+    if openvino_runtime_loaded {
         let mut backend_status = state.engine.backend_status.lock().await;
         backend_status.openvino_message_mode = Some(completion_input.0.to_string());
     }
@@ -3445,9 +3481,9 @@ mod tests {
 
     #[test]
     fn model_has_thinking_mode_matches_qwen3() {
-        assert!(model_has_thinking_mode("qwen3-4b-instruct"));
+        assert!(model_has_thinking_mode("qwen3-4b"));
         assert!(model_has_thinking_mode("qwen3-0.6b"));
-        assert!(!model_has_thinking_mode("qwen2.5-coder-1.5b"));
+        assert!(!model_has_thinking_mode("qwen2.5-1.5b-instruct"));
         assert!(!model_has_thinking_mode("phi-4-mini-instruct"));
     }
 
@@ -3516,7 +3552,7 @@ mod tests {
             repetition_penalty_last_n: None,
         };
 
-        let error = request_to_config(&request).expect_err("zero max_tokens should fail");
+        let error = request_to_config(&request, None).expect_err("zero max_tokens should fail");
         assert!(error.contains("max_tokens"));
     }
 
@@ -3539,10 +3575,27 @@ mod tests {
             repetition_penalty_last_n: None,
         };
 
-        let config = request_to_config(&request)
+        let config = request_to_config(&request, None)
             .expect("config parse")
             .expect("config");
         assert_eq!(config.max_length, OPENVINO_MAX_TOKENS_HARD_CAP_DEFAULT);
+    }
+
+    #[test]
+    fn openvino_qwen3_request_defaults_match_upstream_non_thinking_guidance() {
+        let defaults = openvino_request_defaults(Some("qwen3-4b"), true)
+            .expect("qwen3 openvino defaults should exist");
+
+        assert_eq!(defaults.temperature, 0.7);
+        assert_eq!(defaults.top_p, Some(0.8));
+        assert_eq!(defaults.top_k, Some(20));
+    }
+
+    #[test]
+    fn structured_messages_follow_loaded_openvino_runtime_not_backend_name() {
+        assert!(should_use_openvino_structured_messages(true, false));
+        assert!(!should_use_openvino_structured_messages(false, false));
+        assert!(!should_use_openvino_structured_messages(true, true));
     }
 
     #[test]
@@ -3684,7 +3737,7 @@ mod tests {
     fn backend_selection_keeps_persisted_cpu_choice() {
         let record = BackendDecisionRecord {
             key: BackendDecisionKey {
-                model_id: "qwen2.5-coder-1.5b".to_string(),
+                model_id: "qwen2.5-1.5b-instruct".to_string(),
                 model_artifact_fingerprint: Some("artifact-v1".to_string()),
                 app_version: "test".to_string(),
                 selector_engine_id: "engine_host".to_string(),
@@ -3729,7 +3782,7 @@ mod tests {
     fn backend_selection_keeps_persisted_openvino_choice_when_candidate_is_ready() {
         let record = BackendDecisionRecord {
             key: BackendDecisionKey {
-                model_id: "qwen2.5-coder-1.5b".to_string(),
+                model_id: "qwen2.5-1.5b-instruct".to_string(),
                 model_artifact_fingerprint: Some("artifact-v1".to_string()),
                 app_version: "test".to_string(),
                 selector_engine_id: "engine_host".to_string(),
@@ -3769,7 +3822,7 @@ mod tests {
     fn backend_selection_falls_back_when_persisted_openvino_candidate_is_unavailable() {
         let record = BackendDecisionRecord {
             key: BackendDecisionKey {
-                model_id: "qwen2.5-coder-1.5b".to_string(),
+                model_id: "qwen2.5-1.5b-instruct".to_string(),
                 model_artifact_fingerprint: Some("artifact-v1".to_string()),
                 app_version: "test".to_string(),
                 selector_engine_id: "engine_host".to_string(),
@@ -3817,7 +3870,7 @@ mod tests {
         let resource_dir = temp.path().join("resources");
         let libs = resource_dir.join("libs");
         let models_dir = temp.path().join("models");
-        let model_dir = models_dir.join("qwen2.5-coder-1.5b");
+        let model_dir = models_dir.join("qwen2.5-1.5b-instruct");
         let dml_dir = model_dir.join("dml");
         let openvino_dir = model_dir.join("openvino");
 
@@ -3859,7 +3912,7 @@ mod tests {
         };
 
         let response =
-            build_check_model_response("qwen2.5-coder-1.5b", &bundles, Some(&probe), None);
+            build_check_model_response("qwen2.5-1.5b-instruct", &bundles, Some(&probe), None);
         drop(models_guard);
 
         assert!(response.lanes.cpu.ready);
@@ -3877,7 +3930,7 @@ mod tests {
         let resource_dir = temp.path().join("resources");
         let libs = resource_dir.join("libs");
         let models_dir = temp.path().join("models");
-        let model_dir = models_dir.join("qwen2.5-coder-1.5b");
+        let model_dir = models_dir.join("qwen2.5-1.5b-instruct");
         let dml_dir = model_dir.join("dml");
         let openvino_dir = model_dir.join("openvino");
 
@@ -3929,7 +3982,7 @@ mod tests {
         };
 
         let response = build_check_model_response(
-            "qwen2.5-coder-1.5b",
+            "qwen2.5-1.5b-instruct",
             &bundles,
             Some(&probe),
             Some(&openvino_probe),
@@ -3949,7 +4002,7 @@ mod tests {
         let resource_dir = temp.path().join("resources");
         let libs = resource_dir.join("libs");
         let models_dir = temp.path().join("models");
-        let model_dir = models_dir.join("qwen3-4b-instruct");
+        let model_dir = models_dir.join("qwen3-4b");
         let openvino_dir = model_dir.join("openvino");
 
         create_ort_files(
@@ -4014,12 +4067,8 @@ mod tests {
             failure_message: None,
         };
 
-        let response = build_check_model_response(
-            "qwen3-4b-instruct",
-            &bundles,
-            Some(&probe),
-            Some(&openvino_probe),
-        );
+        let response =
+            build_check_model_response("qwen3-4b", &bundles, Some(&probe), Some(&openvino_probe));
         drop(models_guard);
 
         assert!(response.lanes.openvino_npu.ready);

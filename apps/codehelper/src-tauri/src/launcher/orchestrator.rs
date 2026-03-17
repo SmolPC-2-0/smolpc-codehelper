@@ -329,7 +329,7 @@ mod tests {
             startup_phase: Some("ready".to_string()),
             state_since: None,
             active_backend: Some("directml".to_string()),
-            active_model_id: Some("qwen3-4b-instruct-2507".to_string()),
+            active_model_id: Some("qwen2.5-1.5b-instruct".to_string()),
             error_code: None,
             error_message: None,
             retryable: Some(true),
@@ -337,7 +337,7 @@ mod tests {
             engine_api_version: engine_api_version.to_string(),
             effective_mode: Some("auto".to_string()),
             effective_startup_policy: Some(StartupPolicy::default()),
-            current_model: Some("qwen3-4b-instruct-2507".to_string()),
+            current_model: Some("qwen2.5-1.5b-instruct".to_string()),
             generating: false,
             backend_status: Default::default(),
         }
