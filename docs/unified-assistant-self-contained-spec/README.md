@@ -94,6 +94,10 @@ Never branch new self-contained work from the frozen demo branches.
 4. [SETUP_SPEC.md](SETUP_SPEC.md)
 5. [SELF_CONTAINED_PLAN.md](SELF_CONTAINED_PLAN.md)
 
+`SETUP_SPEC.md` is intentionally cross-listed in both architecture and workflow
+reading orders because it defines both the technical setup contract and the
+phase-boundary rules for how that setup surface evolves.
+
 ### Historical carried-over references
 
 These documents were carried forward from the frozen demo-spec line. They remain
