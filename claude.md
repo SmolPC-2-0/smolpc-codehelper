@@ -12,7 +12,7 @@ SmolPC Code Helper is an **offline AI coding assistant** for secondary school st
 
 **Backend selection priority:** `openvino_npu` > `directml` > `cpu`
 
-**Current runtime status:** DirectML model loading, switching, and recovery are the currently working Windows path on `main`. OpenVINO CPU/NPU still has known generation and compiler issues; keep OpenVINO work isolated to dedicated follow-up branches/PRs until those bugs are resolved. For OpenVINO CPU, treat each model's staged `generation_config.json` as the source of truth for EOS / stop behavior.
+**Current runtime status:** DirectML model loading, switching, and recovery are the currently working Windows path on `main`. OpenVINO CPU/NPU still has known generation and compiler issues; keep OpenVINO work isolated to dedicated follow-up branches/PRs until those bugs are resolved. For OpenVINO CPU, treat each model's staged `generation_config.json` as the source of truth for EOS / stop behavior. For `qwen2.5-coder-1.5b`, stage the official OpenVINO `int8` artifact by default; the official `int4` artifact still loops indefinitely in one-sentence regressions on this repo's pinned OpenVINO lane.
 
 ---
 
@@ -84,6 +84,7 @@ Corrections discovered during development. **When you correct a mistake, append 
 - Use `AtomicBool` over `try_lock()` for state tracking — `try_lock()` creates TOCTOU races
 - Bundle fingerprint auto-invalidates on DLL change — mtime change forces fresh backend selection
 - OpenVINO C stream callbacks receive decoded text, not token IDs â€” do not use callback stop-string matching as a surrogate for EOS handling; load staged `generation_config.json` instead
+- Qwen2.5-Coder on OpenVINO CPU defaults to the official `int8` artifact for now; the official `int4` artifact still overruns one-sentence prompts instead of stopping cleanly
 - Don't dismiss broken checks as "pre-existing" - if verification fails, fix it in the current session
 - Selection profile constant (`OPENVINO_SELECTION_PROFILE`) change forces re-evaluation of all cached decisions
 - NPU compilation is slow on first load but fast after - `CACHE_DIR` enables compiled blob reuse
@@ -100,4 +101,4 @@ Corrections discovered during development. **When you correct a mistake, append 
 - [Svelte 5 Runes](https://svelte.dev/docs/svelte/what-are-runes)
 - [Tailwind CSS 4](https://tailwindcss.com/docs)
 - [HuggingFace: Qwen2.5-1.5B-Instruct-int4-ov](https://huggingface.co/OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov)
-- [HuggingFace: Qwen2.5-Coder-1.5B-Instruct-int4-ov](https://huggingface.co/OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int4-ov)
+- [HuggingFace: Qwen2.5-Coder-1.5B-Instruct-int8-ov](https://huggingface.co/OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int8-ov)

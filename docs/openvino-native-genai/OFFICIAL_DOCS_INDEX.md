@@ -31,7 +31,7 @@ Principle: primary sources only.
 | Source | Why it matters |
 |---|---|
 | https://huggingface.co/OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov | primary native OpenVINO bring-up model |
-| https://huggingface.co/OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int4-ov | coding-oriented native OpenVINO backup |
+| https://huggingface.co/OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int8-ov | coding-oriented native OpenVINO backup and current default artifact for repo testing |
 | https://huggingface.co/OpenVINO/Qwen3-4B-int4-ov | current official Qwen3 OpenVINO smoke-test artifact |
 | https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct | upstream base model reference |
 

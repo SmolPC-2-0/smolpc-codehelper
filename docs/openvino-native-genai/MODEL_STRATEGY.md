@@ -27,17 +27,18 @@ Sources:
 
 ## Coding-Oriented Backup Model
 
-`OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int4-ov`
+`OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int8-ov`
 
 Why:
 
 - stronger coding-assistant fit
 - still small enough to be realistic on weak laptops
 - keeps the same native OpenVINO artifact shape as the primary bring-up lane
+- use `int8` as the repo default until the official `int4` artifact stops overrunning one-sentence prompts on the pinned OpenVINO runtime
 
 Sources:
 
-- https://huggingface.co/OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int4-ov
+- https://huggingface.co/OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int8-ov
 - https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct
 
 ## Fastest Small Sanity-Check Option

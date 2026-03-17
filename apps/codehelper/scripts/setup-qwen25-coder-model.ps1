@@ -1,6 +1,6 @@
 param(
     [string]$ModelId = "qwen2.5-coder-1.5b",
-    [string]$OpenVinoRepoId = "OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int4-ov",
+    [string]$OpenVinoRepoId = "OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int8-ov",
     [string]$DmlSourceModel = "Qwen/Qwen2.5-Coder-1.5B-Instruct",
     [ValidateSet("int4", "fp16")]
     [string]$DmlPrecision = "int4",
