@@ -109,24 +109,34 @@ Phase 5 assumes:
 Phase 5 packaging validation covers connection to an external Blender setup and
 addon, not Blender installation or addon auto-provisioning.
 
-### 5.2.3 Phase 6A LibreOffice runtime rule
+### 5.2.3 Phase 6B LibreOffice runtime rule
 
-Phase 6A does not bundle the full LibreOffice Python MCP runtime yet.
+Phase 6B imports and bundles the selected LibreOffice Python MCP runtime
+assets under the unified app resource root:
 
-Phase 6A assumes:
+- `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/main.py`
+- `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/libre.py`
+- `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/helper.py`
+- `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/helper_utils.py`
+- `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/helper_test_functions.py`
 
-- the unified app tracks a staged placeholder directory at
-  `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/README.md`
-- the separate LibreOffice functionality branch continues evolving its runtime
-  assets independently
-- the unified app only prepares the resource boundary and future stdio transport
-  path in this phase
-- future runtime activation will use the staged Python `main.py` entrypoint plus
-  the helper socket bridge on `localhost:8765`
+Phase 6B assumes:
 
-Phase 6A packaging validation covers staged resource-path correctness only, not
-live LibreOffice runtime execution. Phase 6B is responsible for the first live
-connection validation.
+- imported runtime assets are pinned to
+  `origin/codex/libreoffice-port-track-a` commit
+  `7acad1fa0eb31e32a5485069e85c021d14284455`
+- the unified app launches the runtime through the shared stdio MCP path
+- the runtime contract remains:
+  - stdio MCP child process via `main.py`
+  - helper socket bridge on `localhost:8765`
+  - headless office socket on `localhost:2002`
+- the unified app does not bundle LibreOffice or Collabora itself
+- the unified app does not add a LibreOffice settings UI in this phase
+- runtime activation assumes an external LibreOffice or Collabora install plus
+  Python 3 available on the target system
+
+Phase 6B packaging validation covers the first real LibreOffice runtime
+connection checks for Writer and Slides while Calc remains scaffold-only.
 
 ### 5.3 No launcher-owned runtime paths
 

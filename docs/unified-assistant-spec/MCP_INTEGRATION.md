@@ -297,8 +297,12 @@ Rules:
    provider processes.
 4. Shared providers still surface the requested submode back through
    `ProviderStateDto.mode` and any mode-sensitive tool list decisions.
-5. Phase 6A only lands the shared provider scaffold; live LibreOffice runtime
-   activation is deferred to a later follow-up branch.
+5. Phase 6B activates Writer and Slides through the shared provider while Calc
+   remains scaffold-only.
+6. The unified app reuses the shared stdio MCP layer in `smolpc-mcp-client`
+   rather than importing the standalone LibreOffice Rust MCP client.
+7. Live tool discovery is filtered by submode allowlist before the frontend
+   sees it.
 
 ## 5.5 `smolpc-mcp-client` scaffolding contract
 
@@ -319,9 +323,9 @@ The transport call is async from the start because stdio and TCP MCP flows are
 inherently asynchronous. The foundation branch must not ship a synchronous call
 signature that later mode branches would need to break.
 
-Phase 6A now extends this crate with shared stdio transport support so the
-unified LibreOffice provider can later use the same client layer as the other
-provider families instead of importing a standalone-app-specific MCP client.
+Phase 6A extends this crate with shared stdio transport support, and Phase 6B
+uses that same client layer to activate the unified LibreOffice runtime instead
+of importing a standalone-app-specific MCP client.
 
 ## 6. DTO Contracts
 
@@ -390,7 +394,7 @@ Current placeholder behavior:
 | Code        | Not applicable                                      | No-op                                                                              |
 | GIMP        | No, depends on external app availability            | Disconnect cleanly; do not claim ownership of the external app                     |
 | Blender     | Lazy-start local bridge server on first Blender use | Cleanly stop bridge runtime on app exit; do not claim ownership of Blender itself  |
-| LibreOffice | Phase 6A: no; activation deferred                   | Keep shared runtime alive across Writer/Calc/Slides switches once activation lands |
+| LibreOffice | Writer/Slides: yes in Phase 6B; Calc: scaffold-only | Keep shared runtime alive across Writer/Calc/Slides switches once activation lands |
 
 ## 8. Undo Support
 
@@ -399,9 +403,9 @@ Current placeholder behavior:
 | Code    | Optional; not guaranteed in v1              |
 | GIMP    | Yes, first-class where provider supports it |
 | Blender | No in Phase 5                               |
-| Writer  | Optional; provider-backed if available      |
-| Calc    | Optional; provider-backed if available      |
-| Slides  | Optional; provider-backed if available      |
+| Writer  | No in Phase 6B                              |
+| Calc    | No in Phase 6A / 6B                         |
+| Slides  | No in Phase 6B                              |
 
 The frontend should only render undo affordances when:
 
@@ -462,21 +466,69 @@ Code and GIMP behavior stable:
 - GIMP mode keeps the current Phase 4 MCP-backed execution path
 - `assistant_send` remains scaffold-only for `writer`, `calc`, and `impress`
 
-## 9.4 Phase 6A LibreOffice scaffolding rule
+## 9.4 Phase 6B LibreOffice activation rule
 
-Phase 6A keeps LibreOffice execution non-live while landing the merge-safe
-provider scaffold:
+Phase 6B activates the shared LibreOffice provider for Writer and Slides while
+keeping Calc scaffold-only:
 
-- `assistant_send` remains scaffold-only for `writer`, `calc`, and `impress`
-- `mode_status(writer|calc|impress)` returns scaffold-aware provider detail
-  rather than the original generic foundation placeholder wording
-- `mode_refresh_tools(writer|calc|impress)` validates the staged scaffold only
-  and does not launch a LibreOffice runtime
-- `available_tools` remains empty for LibreOffice modes in this phase
-- the shared MCP layer now exposes `StdioJsonRpcClient` and
-  `McpSession::connect_stdio(...)` for the later activation phase
-- Calc is explicitly not required to be live in this phase because the current
-  source branch does not yet provide parity-level spreadsheet tooling
+- `assistant_send` is operational for `writer` and `impress`
+- `assistant_send(calc)` remains scaffold-only
+- `mode_status(writer|impress)` reports real runtime-backed connection state
+- `mode_status(calc)` remains scaffold-aware provider detail
+- `mode_refresh_tools(writer|impress)` starts or refreshes the shared stdio MCP
+  runtime and returns submode-filtered tool lists
+- `mode_refresh_tools(calc)` revalidates scaffold state only and does not start
+  the runtime
+- the shared runtime contract remains:
+  - stdio MCP child process via `main.py`
+  - helper socket on `localhost:8765`
+  - headless office socket on `localhost:2002`
+- imported Python runtime assets are staged under
+  `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/`
+- the unified import baseline is pinned to
+  `origin/codex/libreoffice-port-track-a` commit
+  `7acad1fa0eb31e32a5485069e85c021d14284455`
+- Writer allowlist:
+  - `create_blank_document`
+  - `read_text_document`
+  - `get_document_properties`
+  - `list_documents`
+  - `copy_document`
+  - `add_text`
+  - `add_heading`
+  - `add_paragraph`
+  - `add_table`
+  - `insert_image`
+  - `insert_page_break`
+  - `format_text`
+  - `search_replace_text`
+  - `delete_text`
+  - `format_table`
+  - `delete_paragraph`
+  - `apply_document_style`
+- Slides allowlist:
+  - `create_blank_presentation`
+  - `read_presentation`
+  - `get_document_properties`
+  - `list_documents`
+  - `copy_document`
+  - `add_slide`
+  - `edit_slide_content`
+  - `edit_slide_title`
+  - `delete_slide`
+  - `apply_presentation_template`
+  - `format_slide_content`
+  - `format_slide_title`
+  - `insert_slide_image`
+- Calc allowlist: none in Phase 6B
+- execution remains intentionally narrow:
+  - one tool call maximum per assistant turn
+  - structured tool-call parsing first
+  - JSON fallback tool-call extraction retained as a compatibility path
+  - one follow-up summary turn maximum after tool execution
+  - deterministic local summary fallback when summary generation fails, times
+    out, or is cancelled after a successful tool call
+  - cancellation does not roll back an already executed document tool
 
 ## 10. Planner Boundary
 

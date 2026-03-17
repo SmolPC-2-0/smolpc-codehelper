@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-17
-**Status:** Phase 6A LibreOffice scaffolding is merged; Phase 6B activation docs are next
+**Status:** Phase 6A LibreOffice scaffolding is merged; Phase 6B LibreOffice activation is the current next implementation phase
 
 ## Phase 0: Documentation Baseline
 
@@ -55,9 +55,12 @@
 2. merge into `docs/unified-assistant-spec`
 3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
 4. `codex/unified-libreoffice-activation`
-5. `codex/unified-libreoffice-activation-status-docs`
-6. `codex/unified-hardening-docs`
-7. `codex/unified-hardening`
+5. merge into `dev/unified-assistant`
+6. `codex/unified-libreoffice-activation-status-docs`
+7. merge into `docs/unified-assistant-spec`
+8. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
+9. `codex/unified-hardening-docs`
+10. `codex/unified-hardening`
 
 ## Phase 2: Unified Shell
 
@@ -309,13 +312,93 @@
 **Scope**
 
 - import the selected LibreOffice MCP runtime assets from the separate source branch
-- activate the shared LibreOffice provider for live mode execution
-- decide the first live Writer / Calc / Slides surface from the then-current source branch state
+- activate the shared LibreOffice provider for live Writer and Slides execution
+- keep Calc scaffold-only while the source branch continues maturing spreadsheet coverage
+- reuse the unified app's shared stdio MCP transport rather than porting the standalone Rust MCP client
+- keep the work integration-focused and avoid porting the standalone LibreOffice UI
+
+**Locked decisions**
+
+- `origin/codex/libreoffice-port-track-a` remains a read-only reference source pinned to commit
+  `7acad1fa0eb31e32a5485069e85c021d14284455` for this phase
+- `apps/libreoffice-assistant/` remains untouched in unified activation work
+- Writer and Slides are the only live LibreOffice submodes in Phase 6B
+- Calc remains visible but scaffold-only after this branch
+- `assistant_send` becomes operational for `writer` and `impress` only
+- `assistant_send(calc)` remains scaffold-only
+- one shared `LibreOfficeProvider` still owns `writer`, `calc`, and `impress`
+- the unified app imports these Python runtime assets into
+  `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/`:
+  - `main.py`
+  - `libre.py`
+  - `helper.py`
+  - `helper_utils.py`
+  - `helper_test_functions.py`
+- runtime activation uses the existing shared stdio MCP support in
+  `smolpc-mcp-client`, not the standalone `mcp_client.rs`
+- runtime contract remains:
+  - stdio MCP child process via `main.py`
+  - helper socket on `localhost:8765`
+  - headless office socket on `localhost:2002`
+- runtime remains engine-only
+- no Ollama paths, provider toggles, settings UI, or standalone MCP diagnostics
+  panels are ported
+- Writer and Slides use one tool call maximum per assistant turn
+- Writer and Slides use one summary follow-up maximum after tool execution
+- if summary generation fails, times out, or is cancelled after a successful tool
+  call, the unified app returns a deterministic local summary from the tool result
+- cancellation stops generation and follow-up summary work but does not roll back
+  an already executed LibreOffice document tool
+
+**Writer tool allowlist**
+
+- `create_blank_document`
+- `read_text_document`
+- `get_document_properties`
+- `list_documents`
+- `copy_document`
+- `add_text`
+- `add_heading`
+- `add_paragraph`
+- `add_table`
+- `insert_image`
+- `insert_page_break`
+- `format_text`
+- `search_replace_text`
+- `delete_text`
+- `format_table`
+- `delete_paragraph`
+- `apply_document_style`
+
+**Slides tool allowlist**
+
+- `create_blank_presentation`
+- `read_presentation`
+- `get_document_properties`
+- `list_documents`
+- `copy_document`
+- `add_slide`
+- `edit_slide_content`
+- `edit_slide_title`
+- `delete_slide`
+- `apply_presentation_template`
+- `format_slide_content`
+- `format_slide_title`
+- `insert_slide_image`
+
+**Calc tool allowlist**
+
+- none in Phase 6B
 
 **Exit criteria**
 
-- at least the agreed first LibreOffice submodes are live through the shared provider
-- `assistant_send` is operational for the agreed LibreOffice submodes
+- Writer and Slides are live through the shared LibreOffice provider
+- `assistant_send(writer)` and `assistant_send(impress)` are operational
+- Calc remains an honest scaffold-only mode with disabled composer and no fake
+  tool surface
+- imported Python runtime assets resolve from unified app resources
+- `mode_status(writer|impress)` and `mode_refresh_tools(writer|impress)` are
+  runtime-backed
 - hardening can begin from a real LibreOffice integration baseline
 
 ## Phase 7: Hardening And Packaging
