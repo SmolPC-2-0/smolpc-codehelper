@@ -21,6 +21,11 @@ variant is already validation-complete. Phase 2 must still verify the exact
 packaged `qwen3-4b-instruct-2507` artifact used on the self-contained line,
 including Windows packaging behavior and target hardware readiness.
 
+Phase 2 must also define the build-artifact staging contract for this bundled
+model. The model remains the locked packaged default, but staging, packaging
+validation, and Windows runtime validation are still required before the
+self-contained line can treat it as release-ready.
+
 ## 2. Finish-Line Rule
 
 External users must not manually install or fetch models.

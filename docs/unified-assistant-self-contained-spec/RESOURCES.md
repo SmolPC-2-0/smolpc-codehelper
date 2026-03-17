@@ -12,6 +12,11 @@ Note: much of this document was inherited from the frozen demo baseline during
 the self-contained branch cut. Section-level "Verified" dates reflect that
 source snapshot unless a newer verification date is called out explicitly.
 
+Re-verify the upstream links and toolchain references used by any planned phase
+before opening that phase's docs branch. Treat the section-level dates here as
+the last known verification point, not a guarantee that the linked content has
+not changed since then.
+
 ## Self-Contained Delivery Sources
 
 | Resource                    | Source                                                                                           | Why it matters for the self-contained line                                                                                                 |
