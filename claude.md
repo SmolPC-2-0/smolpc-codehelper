@@ -81,9 +81,10 @@ Corrections discovered during development. **When you correct a mistake, append 
 - Use `OnceLock<Result>` over `Once` for fallible init — `Once::call_once` can't return values
 - Use `AtomicBool` over `try_lock()` for state tracking — `try_lock()` creates TOCTOU races
 - Bundle fingerprint auto-invalidates on DLL change — mtime change forces fresh backend selection
-- Don't dismiss broken checks as "pre-existing" — if verification fails, fix it in the current session
+- Don't dismiss broken checks as "pre-existing" - if verification fails, fix it in the current session
 - Selection profile constant (`OPENVINO_SELECTION_PROFILE`) change forces re-evaluation of all cached decisions
-- NPU compilation is slow on first load but fast after — `CACHE_DIR` enables compiled blob reuse
+- NPU compilation is slow on first load but fast after - `CACHE_DIR` enables compiled blob reuse
+- Qwen2.5-Coder NPU compilation fails on OpenVINO 2026.0.0 (MLIR StopLocationVerifierPass); existing NPU->auto fallback handles this
 
 ---
 
