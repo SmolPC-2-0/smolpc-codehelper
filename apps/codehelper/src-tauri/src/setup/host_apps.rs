@@ -1,6 +1,4 @@
-use super::types::{
-    SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP, SETUP_ITEM_HOST_LIBREOFFICE,
-};
+use super::types::{SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP, SETUP_ITEM_HOST_LIBREOFFICE};
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -36,13 +34,9 @@ fn detect_host_app(spec: &HostAppSpec, cached: Option<&PathBuf>) -> HostAppDetec
         .or_else(|| lookup_standard_paths(spec))
         .or_else(|| lookup_on_path(spec));
 
-    let detail = resolved.as_ref().map(|path| {
-        format!(
-            "{} detected at {}",
-            spec.label,
-            path.to_string_lossy()
-        )
-    });
+    let detail = resolved
+        .as_ref()
+        .map(|path| format!("{} detected at {}", spec.label, path.to_string_lossy()));
 
     HostAppDetection {
         id: spec.id,
@@ -74,17 +68,21 @@ fn all_specs() -> Vec<HostAppSpec> {
             },
             standard_paths: standard_paths_for_blender(),
         },
-        HostAppSpec {
-            id: SETUP_ITEM_HOST_LIBREOFFICE,
-            label: "LibreOffice",
-            executable_names: if cfg!(windows) {
-                &["soffice.exe"]
-            } else {
-                &["soffice"]
-            },
-            standard_paths: standard_paths_for_libreoffice(),
-        },
+        libreoffice_spec(),
     ]
+}
+
+fn libreoffice_spec() -> HostAppSpec {
+    HostAppSpec {
+        id: SETUP_ITEM_HOST_LIBREOFFICE,
+        label: "LibreOffice",
+        executable_names: if cfg!(windows) {
+            &["soffice.exe"]
+        } else {
+            &["soffice"]
+        },
+        standard_paths: standard_paths_for_libreoffice(),
+    }
 }
 
 fn program_files_candidates() -> Vec<PathBuf> {
@@ -112,7 +110,10 @@ fn standard_paths_for_gimp() -> Vec<PathBuf> {
             PathBuf::from("/opt/homebrew/bin/gimp"),
         ]
     } else {
-        vec![PathBuf::from("/usr/bin/gimp"), PathBuf::from("/usr/local/bin/gimp")]
+        vec![
+            PathBuf::from("/usr/bin/gimp"),
+            PathBuf::from("/usr/local/bin/gimp"),
+        ]
     }
 }
 
@@ -154,7 +155,9 @@ fn standard_paths_for_libreoffice() -> Vec<PathBuf> {
             .flat_map(|root| {
                 [
                     root.join("LibreOffice").join("program").join("soffice.exe"),
-                    root.join("Collabora Office").join("program").join("soffice.exe"),
+                    root.join("Collabora Office")
+                        .join("program")
+                        .join("soffice.exe"),
                 ]
             })
             .collect()
@@ -173,7 +176,10 @@ fn standard_paths_for_libreoffice() -> Vec<PathBuf> {
 }
 
 fn lookup_standard_paths(spec: &HostAppSpec) -> Option<PathBuf> {
-    spec.standard_paths.iter().find(|path| path.exists()).cloned()
+    spec.standard_paths
+        .iter()
+        .find(|path| path.exists())
+        .cloned()
 }
 
 fn lookup_on_path(spec: &HostAppSpec) -> Option<PathBuf> {
@@ -222,6 +228,11 @@ fn parse_reg_query_path(stdout: &str) -> Option<PathBuf> {
 #[cfg(not(windows))]
 fn lookup_windows_app_paths(_spec: &HostAppSpec) -> Option<PathBuf> {
     None
+}
+
+pub fn detect_libreoffice(cached: Option<&Path>) -> HostAppDetection {
+    let cached = cached.map(Path::to_path_buf);
+    detect_host_app(&libreoffice_spec(), cached.as_ref())
 }
 
 #[allow(dead_code)]

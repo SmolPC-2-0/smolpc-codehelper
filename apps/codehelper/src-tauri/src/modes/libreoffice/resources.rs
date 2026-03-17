@@ -3,12 +3,14 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResourceResolutionOptions {
     pub allow_dev_fallback: bool,
+    pub allow_system_python_fallback: bool,
 }
 
 impl Default for ResourceResolutionOptions {
     fn default() -> Self {
         Self {
             allow_dev_fallback: cfg!(debug_assertions),
+            allow_system_python_fallback: cfg!(debug_assertions),
         }
     }
 }
@@ -136,6 +138,7 @@ mod tests {
             Some(tempdir.path()),
             ResourceResolutionOptions {
                 allow_dev_fallback: false,
+                allow_system_python_fallback: true,
             },
         )
         .expect("resolve layout");
@@ -162,6 +165,7 @@ mod tests {
             Some(tempdir.path()),
             ResourceResolutionOptions {
                 allow_dev_fallback: false,
+                allow_system_python_fallback: true,
             },
         )
         .expect_err("missing readme should fail");

@@ -7,6 +7,7 @@ use crate::assistant::MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION;
 use crate::modes::provider::{
     provider_state, ToolProvider, FOUNDATION_PROVIDER_EXECUTION_NOT_IMPLEMENTED,
 };
+use crate::setup::host_apps::detect_libreoffice;
 use async_trait::async_trait;
 use smolpc_assistant_types::{
     AppMode, ProviderStateDto, ToolDefinitionDto, ToolExecutionResultDto,
@@ -99,14 +100,20 @@ impl LibreOfficeProvider {
     }
 
     fn friendly_runtime_error(error: &str) -> String {
+        if error.contains("Bundled Python is not prepared yet") {
+            return format!(
+                "LibreOffice runtime is not ready yet. Prepare bundled Python from the setup panel before using Writer or Slides. {error}"
+            );
+        }
+
         if error.contains("spawn stdio MCP command") {
             return format!(
-                "Unable to start the LibreOffice MCP runtime. Make sure Python 3 is available or a bundled .venv exists. {error}"
+                "Unable to start the LibreOffice MCP runtime. Bundled Python should be prepared first, and LibreOffice or Collabora must be installed. {error}"
             );
         }
 
         format!(
-            "LibreOffice runtime failed. Make sure Python 3 and LibreOffice or Collabora are installed. {error}"
+            "LibreOffice runtime failed. Make sure bundled Python is prepared and LibreOffice or Collabora is installed. {error}"
         )
     }
 
@@ -152,7 +159,7 @@ impl LibreOfficeProvider {
         ))
     }
 
-    fn validate_layout(
+    fn validate_runtime_prerequisites(
         &self,
     ) -> Result<
         (
@@ -163,8 +170,16 @@ impl LibreOfficeProvider {
     > {
         let layout =
             resolve_mcp_server_layout(self.resource_dir.as_deref(), self.resolution_options)?;
-        let runtime =
-            LibreOfficeRuntimeConfig::from_layout(&layout, self.app_local_data_dir.as_deref());
+        let office_detection = detect_libreoffice(None);
+        let office_path = office_detection.path.ok_or_else(|| {
+            "LibreOffice or Collabora is not installed or could not be detected yet.".to_string()
+        })?;
+        let runtime = LibreOfficeRuntimeConfig::from_layout(
+            &layout,
+            self.app_local_data_dir.as_deref(),
+            self.resolution_options.allow_system_python_fallback,
+            Some(office_path),
+        )?;
         Ok((layout, runtime))
     }
 
@@ -179,7 +194,7 @@ impl LibreOfficeProvider {
             }
         }
 
-        let (layout, runtime) = self.validate_layout()?;
+        let (layout, runtime) = self.validate_runtime_prerequisites()?;
         {
             let mut state = self.state.lock().await;
             state.scaffold_dir = Some(layout.mcp_server_dir.clone());
@@ -226,7 +241,7 @@ impl LibreOfficeProvider {
             Ok(profile) => profile,
             Err(error) => return provider_state(mode, "error", Some(error.as_str()), true, false),
         };
-        let (layout, runtime) = match self.validate_layout() {
+        let (layout, runtime) = match self.validate_runtime_prerequisites() {
             Ok(value) => value,
             Err(error) => {
                 let mut state = self.state.lock().await;
@@ -303,7 +318,7 @@ impl ToolProvider for LibreOfficeProvider {
     async fn status(&self, mode: AppMode) -> Result<ProviderStateDto, String> {
         let mut state = self.state.lock().await;
 
-        match self.validate_layout() {
+        match self.validate_runtime_prerequisites() {
             Ok((layout, _runtime)) => {
                 state.scaffold_dir = Some(layout.mcp_server_dir);
             }
@@ -478,6 +493,7 @@ for line in sys.stdin:
             Some(tempdir.path().to_path_buf()),
             ResourceResolutionOptions {
                 allow_dev_fallback: false,
+                allow_system_python_fallback: true,
             },
         );
 
@@ -496,6 +512,7 @@ for line in sys.stdin:
             Some(tempdir.path().to_path_buf()),
             ResourceResolutionOptions {
                 allow_dev_fallback: false,
+                allow_system_python_fallback: true,
             },
         );
 
@@ -516,6 +533,7 @@ for line in sys.stdin:
             Some(tempdir.path().to_path_buf()),
             ResourceResolutionOptions {
                 allow_dev_fallback: false,
+                allow_system_python_fallback: true,
             },
         );
 
@@ -540,6 +558,7 @@ for line in sys.stdin:
             Some(tempdir.path().to_path_buf()),
             ResourceResolutionOptions {
                 allow_dev_fallback: false,
+                allow_system_python_fallback: true,
             },
         );
 
@@ -559,6 +578,7 @@ for line in sys.stdin:
             Some(tempdir.path().to_path_buf()),
             ResourceResolutionOptions {
                 allow_dev_fallback: false,
+                allow_system_python_fallback: true,
             },
         );
 
@@ -578,6 +598,7 @@ for line in sys.stdin:
             Some(tempdir.path().to_path_buf()),
             ResourceResolutionOptions {
                 allow_dev_fallback: false,
+                allow_system_python_fallback: true,
             },
         ));
 

@@ -22,8 +22,9 @@ pub fn bundled_python_item(
                         id: SETUP_ITEM_BUNDLED_PYTHON.to_string(),
                         label: "Bundled Python".to_string(),
                         state: SetupItemStateDto::Ready,
-                        detail: prepared_root
-                            .map(|path| format!("Bundled Python is prepared at {}", path.display())),
+                        detail: prepared_root.map(|path| {
+                            format!("Bundled Python is prepared at {}", path.display())
+                        }),
                         required: true,
                         can_prepare: false,
                     };
@@ -99,18 +100,29 @@ pub fn prepare_bundled_python(
     })?;
 
     copy_payload_entries(&root, &prepared_root)?;
-    std::fs::write(prepared_root.join(PREPARED_VERSION_FILE), manifest.version).map_err(|error| {
-        format!(
-            "Failed to write prepared Python version marker in {}: {error}",
-            prepared_root.display()
-        )
-    })?;
+    std::fs::write(prepared_root.join(PREPARED_VERSION_FILE), manifest.version).map_err(
+        |error| {
+            format!(
+                "Failed to write prepared Python version marker in {}: {error}",
+                prepared_root.display()
+            )
+        },
+    )?;
 
     Ok(())
 }
 
 pub fn prepared_python_root(app_local_data_dir: Option<&Path>) -> Option<PathBuf> {
     app_local_data_dir.map(|path| path.join("setup").join("python"))
+}
+
+pub fn resolve_prepared_python_command(app_local_data_dir: Option<&Path>) -> Option<String> {
+    prepared_python_root(app_local_data_dir).and_then(|root| {
+        prepared_python_candidates(&root)
+            .into_iter()
+            .find(|candidate| candidate.is_file())
+            .map(|path| path.to_string_lossy().to_string())
+    })
 }
 
 fn prepared_version_matches(root: Option<&Path>, version: &str) -> bool {
@@ -123,11 +135,44 @@ fn prepared_version_matches(root: Option<&Path>, version: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn copy_payload_entries(source_root: &Path, target_root: &Path) -> Result<(), String> {
-    for entry in std::fs::read_dir(source_root)
-        .map_err(|error| format!("Failed to read Python payload root {}: {error}", source_root.display()))?
+fn prepared_python_candidates(root: &Path) -> Vec<PathBuf> {
+    let payload_root = root.join("payload");
+    let mut candidates = Vec::new();
+
+    #[cfg(windows)]
     {
-        let entry = entry.map_err(|error| format!("Failed to inspect Python payload entry: {error}"))?;
+        candidates.extend([
+            payload_root.join("python.exe"),
+            payload_root.join("python").join("python.exe"),
+            payload_root.join("Scripts").join("python.exe"),
+            root.join("python.exe"),
+        ]);
+    }
+
+    #[cfg(not(windows))]
+    {
+        candidates.extend([
+            payload_root.join("bin").join("python3"),
+            payload_root.join("bin").join("python"),
+            payload_root.join("python").join("bin").join("python3"),
+            payload_root.join("python").join("bin").join("python"),
+            root.join("bin").join("python3"),
+            root.join("bin").join("python"),
+        ]);
+    }
+
+    candidates
+}
+
+fn copy_payload_entries(source_root: &Path, target_root: &Path) -> Result<(), String> {
+    for entry in std::fs::read_dir(source_root).map_err(|error| {
+        format!(
+            "Failed to read Python payload root {}: {error}",
+            source_root.display()
+        )
+    })? {
+        let entry =
+            entry.map_err(|error| format!("Failed to inspect Python payload entry: {error}"))?;
         let path = entry.path();
         let name = entry.file_name();
         if name.to_str() == Some(MANIFEST_FILE) || name.to_str() == Some(README_FILE) {
@@ -155,7 +200,10 @@ fn copy_path_recursively(source: &Path, target: &Path) -> Result<(), String> {
     } else {
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
-                format!("Failed to create parent directory {}: {error}", parent.display())
+                format!(
+                    "Failed to create parent directory {}: {error}",
+                    parent.display()
+                )
             })?;
         }
         std::fs::copy(source, target).map_err(|error| {
@@ -171,7 +219,7 @@ fn copy_path_recursively(source: &Path, target: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{bundled_python_item, prepare_bundled_python};
+    use super::{bundled_python_item, prepare_bundled_python, resolve_prepared_python_command};
     use smolpc_assistant_types::SetupItemStateDto;
     use tempfile::TempDir;
 
@@ -218,7 +266,24 @@ mod tests {
         prepare_bundled_python(Some(resource_temp.path()), Some(app_temp.path())).expect("prepare");
 
         let prepared_root = app_temp.path().join("setup").join("python");
-        assert!(prepared_root.join("payload").join("bin").join("python").exists());
+        assert!(prepared_root
+            .join("payload")
+            .join("bin")
+            .join("python")
+            .exists());
         assert!(prepared_root.join(".prepared-version").exists());
+    }
+
+    #[test]
+    fn resolve_prepared_python_command_detects_prepared_runtime() {
+        let app_temp = TempDir::new().expect("app temp");
+        let prepared_root = app_temp.path().join("setup").join("python").join("payload");
+        std::fs::create_dir_all(prepared_root.join("bin")).expect("python payload");
+        std::fs::write(prepared_root.join("bin").join("python3"), "python").expect("runtime");
+
+        let command =
+            resolve_prepared_python_command(Some(app_temp.path())).expect("prepared python");
+
+        assert!(command.ends_with("python3"));
     }
 }
