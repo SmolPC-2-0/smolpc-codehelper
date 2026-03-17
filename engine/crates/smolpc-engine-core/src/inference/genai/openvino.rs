@@ -76,6 +76,8 @@ struct OpenVinoGenAiApi {
         unsafe extern "C" fn(*mut OvGenAiChatHistory, *const OvGenAiJsonContainer) -> OvStatus,
     destroy_chat_history: unsafe extern "C" fn(*mut OvGenAiChatHistory),
     create_generation_config: unsafe extern "C" fn(*mut *mut OvGenAiGenerationConfig) -> OvStatus,
+    create_generation_config_from_json:
+        unsafe extern "C" fn(*const c_char, *mut *mut OvGenAiGenerationConfig) -> OvStatus,
     destroy_generation_config: unsafe extern "C" fn(*mut OvGenAiGenerationConfig),
     set_max_new_tokens: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, usize) -> OvStatus,
     set_eos_token_id: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, i64) -> OvStatus,
@@ -84,6 +86,8 @@ struct OpenVinoGenAiApi {
         unsafe extern "C" fn(*mut OvGenAiGenerationConfig, *const i64, usize) -> OvStatus,
     set_stop_strings:
         unsafe extern "C" fn(*mut OvGenAiGenerationConfig, *const *const c_char, usize) -> OvStatus,
+    set_include_stop_str_in_output:
+        unsafe extern "C" fn(*mut OvGenAiGenerationConfig, bool) -> OvStatus,
     set_ignore_eos: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, bool) -> OvStatus,
     set_echo: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, bool) -> OvStatus,
     set_do_sample: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, bool) -> OvStatus,
@@ -124,7 +128,10 @@ impl OpenVinoDeviceTarget {
 }
 
 impl OpenVinoGenAiApi {
-    fn load(bundle: &OpenVinoRuntimeBundle, target: OpenVinoDeviceTarget) -> Result<Arc<Self>, String> {
+    fn load(
+        bundle: &OpenVinoRuntimeBundle,
+        target: OpenVinoDeviceTarget,
+    ) -> Result<Arc<Self>, String> {
         match target {
             OpenVinoDeviceTarget::Cpu => OpenVinoRuntimeLoader::ensure_initialized_for_cpu(bundle)?,
             OpenVinoDeviceTarget::Npu => OpenVinoRuntimeLoader::ensure_initialized_for_npu(bundle)?,
@@ -174,6 +181,10 @@ impl OpenVinoGenAiApi {
                     &openvino_genai_c,
                     b"ov_genai_generation_config_create\0",
                 )?,
+                create_generation_config_from_json: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_generation_config_create_from_json\0",
+                )?,
                 destroy_generation_config: load_symbol(
                     &openvino_genai_c,
                     b"ov_genai_generation_config_free\0",
@@ -197,6 +208,10 @@ impl OpenVinoGenAiApi {
                 set_stop_strings: load_symbol(
                     &openvino_genai_c,
                     b"ov_genai_generation_config_set_stop_strings\0",
+                )?,
+                set_include_stop_str_in_output: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_generation_config_set_include_stop_str_in_output\0",
                 )?,
                 set_ignore_eos: load_symbol(
                     &openvino_genai_c,
@@ -355,6 +370,7 @@ impl<T> Drop for OvOwned<T> {
 struct OpenVinoGenAiInner {
     api: Arc<OpenVinoGenAiApi>,
     pipeline: *mut OvGenAiLlmPipeline,
+    model_dir: PathBuf,
     /// NPU StaticLLMPipeline response budget (MIN_RESPONSE_LEN at pipeline creation).
     /// max_new_tokens must be clamped to this value to avoid KV cache overflow.
     max_new_tokens_cap: usize,
@@ -383,6 +399,7 @@ pub struct OpenVinoGenerationControls {
     pub min_new_tokens: Option<usize>,
     pub stop_token_ids: Option<Vec<i64>>,
     pub stop_strings: Option<Vec<String>>,
+    pub include_stop_str_in_output: Option<bool>,
     pub ignore_eos: Option<bool>,
 }
 
@@ -477,6 +494,7 @@ impl OpenVinoGenAiGenerator {
                 .map_err(|error| format!("Failed to create OpenVINO cache dir: {error}"))?;
         }
 
+        let model_dir_path = model_dir.to_path_buf();
         let model_dir = path_to_cstring(model_dir, "models_path")?;
         let device = cstring(target.as_str(), "device")?;
 
@@ -486,7 +504,9 @@ impl OpenVinoGenAiGenerator {
                 generation_controls,
                 disable_thinking,
             } => (
-                unsafe { (api.create_pipeline)(model_dir.as_ptr(), device.as_ptr(), 0, &mut pipeline_ptr) },
+                unsafe {
+                    (api.create_pipeline)(model_dir.as_ptr(), device.as_ptr(), 0, &mut pipeline_ptr)
+                },
                 usize::MAX,
                 generation_controls.clone(),
                 *disable_thinking,
@@ -532,6 +552,7 @@ impl OpenVinoGenAiGenerator {
             inner: Arc::new(Mutex::new(OpenVinoGenAiInner {
                 api: Arc::clone(&api),
                 pipeline: pipeline_ptr,
+                model_dir: model_dir_path,
                 max_new_tokens_cap,
                 generation_controls,
                 disable_thinking,
@@ -710,8 +731,6 @@ fn generate_stream_blocking(
         sender: token_tx,
         cancelled,
         trailing_dot_run: 0,
-        accumulated: String::new(),
-        stop_strings: guard.generation_controls.stop_strings.clone().unwrap_or_default(),
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -738,8 +757,6 @@ fn generate_stream_with_history_blocking(
         sender: token_tx,
         cancelled,
         trailing_dot_run: 0,
-        accumulated: String::new(),
-        stop_strings: guard.generation_controls.stop_strings.clone().unwrap_or_default(),
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -760,35 +777,7 @@ fn create_generation_config(
     controls: &OpenVinoGenerationControls,
 ) -> Result<OvOwned<OvGenAiGenerationConfig>, String> {
     let api = &guard.api;
-    let mut config_ptr: *mut OvGenAiGenerationConfig = ptr::null_mut();
-    let inherited = unsafe {
-        (api.pipeline_get_generation_config)(
-            guard.pipeline as *const OvGenAiLlmPipeline,
-            &mut config_ptr,
-        )
-    };
-    let inherited_from_pipeline = inherited == OV_STATUS_OK && !config_ptr.is_null();
-    if !inherited_from_pipeline {
-        if inherited != OV_STATUS_OK {
-            if let Err(error) = check_status(
-                api,
-                inherited,
-                "ov_genai_llm_pipeline_get_generation_config",
-            ) {
-                log::warn!("{error}; falling back to empty generation config initialization");
-            }
-        } else {
-            log::warn!(
-                "ov_genai_llm_pipeline_get_generation_config returned null config; falling back to empty generation config initialization"
-            );
-        }
-        check_status(
-            api,
-            unsafe { (api.create_generation_config)(&mut config_ptr) },
-            "ov_genai_generation_config_create",
-        )?;
-    }
-    let config_handle = OvOwned::new(Arc::clone(api), config_ptr, api.destroy_generation_config);
+    let config_handle = load_base_generation_config(guard)?;
 
     check_status(
         api,
@@ -852,6 +841,18 @@ fn create_generation_config(
             )?;
         }
     }
+    if let Some(include_stop_str_in_output) = controls.include_stop_str_in_output {
+        check_status(
+            api,
+            unsafe {
+                (api.set_include_stop_str_in_output)(
+                    config_handle.as_ptr(),
+                    include_stop_str_in_output,
+                )
+            },
+            "ov_genai_generation_config_set_include_stop_str_in_output",
+        )?;
+    }
     if let Some(ignore_eos) = controls.ignore_eos {
         check_status(
             api,
@@ -906,6 +907,183 @@ fn create_generation_config(
     )?;
 
     Ok(config_handle)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GenerationConfigBaseSource {
+    StagedJson,
+    PipelineDefault,
+    Empty,
+}
+
+impl GenerationConfigBaseSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::StagedJson => "staged_json",
+            Self::PipelineDefault => "pipeline_default",
+            Self::Empty => "empty",
+        }
+    }
+}
+
+fn staged_generation_config_path(model_dir: &Path) -> PathBuf {
+    model_dir.join("generation_config.json")
+}
+
+fn read_staged_generation_stop_token_ids(json_path: &Path) -> Result<Vec<i64>, String> {
+    let raw = std::fs::read_to_string(json_path).map_err(|error| {
+        format!(
+            "Failed to read staged generation config {}: {error}",
+            json_path.display()
+        )
+    })?;
+    let value = serde_json::from_str::<serde_json::Value>(&raw).map_err(|error| {
+        format!(
+            "Failed to parse staged generation config {}: {error}",
+            json_path.display()
+        )
+    })?;
+
+    match value.get("eos_token_id") {
+        Some(serde_json::Value::Array(ids)) => ids
+            .iter()
+            .map(|value| {
+                value.as_i64().ok_or_else(|| {
+                    format!(
+                        "staged generation config {} has non-integer eos_token_id entry",
+                        json_path.display()
+                    )
+                })
+            })
+            .collect(),
+        Some(serde_json::Value::Number(id)) => id.as_i64().map(|id| vec![id]).ok_or_else(|| {
+            format!(
+                "staged generation config {} has non-integer eos_token_id",
+                json_path.display()
+            )
+        }),
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn load_base_generation_config(
+    guard: &OpenVinoGenAiInner,
+) -> Result<OvOwned<OvGenAiGenerationConfig>, String> {
+    let staged_path = staged_generation_config_path(&guard.model_dir);
+    if staged_path.is_file() {
+        match create_generation_config_from_json(&guard.api, &staged_path) {
+            Ok(config) => {
+                let stop_token_ids = read_staged_generation_stop_token_ids(&staged_path)
+                    .unwrap_or_else(|error| {
+                        log::warn!("{error}");
+                        Vec::new()
+                    });
+                log::debug!(
+                    "Loaded OpenVINO generation config from {} ({}) with staged stop token ids {:?}",
+                    staged_path.display(),
+                    GenerationConfigBaseSource::StagedJson.as_str(),
+                    stop_token_ids
+                );
+                return Ok(config);
+            }
+            Err(error) => {
+                log::warn!(
+                    "Failed to load staged OpenVINO generation config from {}: {}; falling back to pipeline defaults",
+                    staged_path.display(),
+                    error
+                );
+            }
+        }
+    }
+
+    if let Some(config) = clone_pipeline_generation_config(guard)? {
+        log::debug!(
+            "Loaded OpenVINO generation config from pipeline defaults ({})",
+            GenerationConfigBaseSource::PipelineDefault.as_str()
+        );
+        return Ok(config);
+    }
+
+    log::warn!(
+        "Falling back to empty OpenVINO generation config initialization ({})",
+        GenerationConfigBaseSource::Empty.as_str()
+    );
+    create_empty_generation_config(&guard.api)
+}
+
+fn clone_pipeline_generation_config(
+    guard: &OpenVinoGenAiInner,
+) -> Result<Option<OvOwned<OvGenAiGenerationConfig>>, String> {
+    let api = &guard.api;
+    let mut config_ptr: *mut OvGenAiGenerationConfig = ptr::null_mut();
+    let inherited = unsafe {
+        (api.pipeline_get_generation_config)(
+            guard.pipeline as *const OvGenAiLlmPipeline,
+            &mut config_ptr,
+        )
+    };
+    if inherited != OV_STATUS_OK {
+        if let Err(error) = check_status(
+            api,
+            inherited,
+            "ov_genai_llm_pipeline_get_generation_config",
+        ) {
+            log::warn!("{error}");
+        }
+        return Ok(None);
+    }
+    if config_ptr.is_null() {
+        log::warn!("ov_genai_llm_pipeline_get_generation_config returned null config");
+        return Ok(None);
+    }
+
+    Ok(Some(OvOwned::new(
+        Arc::clone(api),
+        config_ptr,
+        api.destroy_generation_config,
+    )))
+}
+
+fn create_generation_config_from_json(
+    api: &Arc<OpenVinoGenAiApi>,
+    json_path: &Path,
+) -> Result<OvOwned<OvGenAiGenerationConfig>, String> {
+    let json_path = path_to_cstring(json_path, "generation_config.json path")?;
+    let mut config_ptr: *mut OvGenAiGenerationConfig = ptr::null_mut();
+    check_status(
+        api,
+        unsafe { (api.create_generation_config_from_json)(json_path.as_ptr(), &mut config_ptr) },
+        "ov_genai_generation_config_create_from_json",
+    )?;
+    if config_ptr.is_null() {
+        return Err("ov_genai_generation_config_create_from_json returned null config".to_string());
+    }
+
+    Ok(OvOwned::new(
+        Arc::clone(api),
+        config_ptr,
+        api.destroy_generation_config,
+    ))
+}
+
+fn create_empty_generation_config(
+    api: &Arc<OpenVinoGenAiApi>,
+) -> Result<OvOwned<OvGenAiGenerationConfig>, String> {
+    let mut config_ptr: *mut OvGenAiGenerationConfig = ptr::null_mut();
+    check_status(
+        api,
+        unsafe { (api.create_generation_config)(&mut config_ptr) },
+        "ov_genai_generation_config_create",
+    )?;
+    if config_ptr.is_null() {
+        return Err("ov_genai_generation_config_create returned null config".to_string());
+    }
+
+    Ok(OvOwned::new(
+        Arc::clone(api),
+        config_ptr,
+        api.destroy_generation_config,
+    ))
 }
 
 fn generate_once(
@@ -1161,8 +1339,6 @@ struct StreamCallbackState {
     sender: UnboundedSender<String>,
     cancelled: Arc<AtomicBool>,
     trailing_dot_run: usize,
-    accumulated: String,
-    stop_strings: Vec<String>,
 }
 
 unsafe extern "C" fn stream_callback(
@@ -1180,13 +1356,6 @@ unsafe extern "C" fn stream_callback(
 
     if !text.is_null() {
         let piece = c_string_to_string_verbatim(text);
-        state.accumulated.push_str(&piece);
-        for stop in &state.stop_strings {
-            if state.accumulated.contains(stop.as_str()) {
-                log::debug!("Stream callback detected stop string '{stop}' - halting");
-                return OvGenAiStreamingStatus::Stop;
-            }
-        }
         for ch in piece.chars() {
             if ch == '.' {
                 state.trailing_dot_run += 1;
@@ -1292,23 +1461,29 @@ fn openvino_genai_api_for_target(
         Err(poisoned) => poisoned.into_inner(),
     };
     guard.active_fingerprint = Some(fingerprint.clone());
-    guard.results.insert(
-        cache_key,
-        CachedOpenVinoGenAiApi::Success(Arc::clone(&api)),
-    );
+    guard
+        .results
+        .insert(cache_key, CachedOpenVinoGenAiApi::Success(Arc::clone(&api)));
     Ok(api)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{metric_ms_pair, OpenVinoGenAiGenerator};
+    use super::{
+        metric_ms_pair, read_staged_generation_stop_token_ids, staged_generation_config_path,
+        stream_callback, OpenVinoGenAiGenerator, OvGenAiStreamingStatus, StreamCallbackState,
+    };
     use crate::inference::runtime_loading::{
         BundleValidationFailureClass, OpenVinoRuntimeBundle, RequiredRuntimeFile,
         RuntimeBundleFingerprint, RuntimeFamily, RuntimeVersionMetadata,
     };
+    use std::ffi::CString;
     use std::fs;
     use std::path::Path;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
     use tempfile::tempdir;
+    use tokio::sync::mpsc::unbounded_channel;
 
     #[test]
     fn metric_ms_pair_rounds_float_values() {
@@ -1326,10 +1501,11 @@ mod tests {
 
         let temp = tempdir().expect("temp dir");
         let bundle = build_bundle(temp.path(), None);
-        let api = match super::openvino_genai_api_for_target(&bundle, super::OpenVinoDeviceTarget::Cpu) {
-            Ok(api) => api,
-            Err(_) => return,
-        };
+        let api =
+            match super::openvino_genai_api_for_target(&bundle, super::OpenVinoDeviceTarget::Cpu) {
+                Ok(api) => api,
+                Err(_) => return,
+            };
 
         let value =
             metric_ms_pair(&api, std::ptr::null(), getter, "metric").expect("metric rounding");
@@ -1347,6 +1523,45 @@ mod tests {
         let err = OpenVinoGenAiGenerator::runtime_available(&bundle)
             .expect_err("invalid bundle should fail");
         assert!(err.contains("openvino_genai_missing"));
+    }
+
+    #[test]
+    fn staged_generation_config_path_uses_model_directory() {
+        let temp = tempdir().expect("temp dir");
+        let path = staged_generation_config_path(temp.path());
+        assert_eq!(path, temp.path().join("generation_config.json"));
+    }
+
+    #[test]
+    fn staged_generation_config_reads_multi_eos_ids() {
+        let temp = tempdir().expect("temp dir");
+        let path = temp.path().join("generation_config.json");
+        fs::write(&path, r#"{"eos_token_id":[151645,151643]}"#).expect("write config");
+
+        let stop_ids =
+            read_staged_generation_stop_token_ids(&path).expect("read staged stop token ids");
+        assert_eq!(stop_ids, vec![151645, 151643]);
+    }
+
+    #[test]
+    fn stream_callback_does_not_treat_special_token_text_as_stop_signal() {
+        let (tx, mut rx) = unbounded_channel();
+        let mut state = StreamCallbackState {
+            sender: tx,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            trailing_dot_run: 0,
+        };
+        let piece = CString::new("<|im_end|>").expect("cstring");
+
+        let status = unsafe {
+            stream_callback(
+                piece.as_ptr(),
+                &mut state as *mut StreamCallbackState as *mut std::ffi::c_void,
+            )
+        };
+
+        assert_eq!(status, OvGenAiStreamingStatus::Running);
+        assert_eq!(rx.try_recv().expect("streamed piece"), "<|im_end|>");
     }
 
     fn build_bundle(

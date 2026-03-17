@@ -12,7 +12,7 @@ SmolPC Code Helper is an **offline AI coding assistant** for secondary school st
 
 **Backend selection priority:** `openvino_npu` > `directml` > `cpu`
 
-**Current runtime status:** DirectML model loading, switching, and recovery are the currently working Windows path on `main`. OpenVINO CPU/NPU still has known generation and compiler issues; keep OpenVINO work isolated to dedicated follow-up branches/PRs until those bugs are resolved.
+**Current runtime status:** DirectML model loading, switching, and recovery are the currently working Windows path on `main`. OpenVINO CPU/NPU still has known generation and compiler issues; keep OpenVINO work isolated to dedicated follow-up branches/PRs until those bugs are resolved. For OpenVINO CPU, treat each model's staged `generation_config.json` as the source of truth for EOS / stop behavior.
 
 ---
 
@@ -83,6 +83,7 @@ Corrections discovered during development. **When you correct a mistake, append 
 - Use `OnceLock<Result>` over `Once` for fallible init — `Once::call_once` can't return values
 - Use `AtomicBool` over `try_lock()` for state tracking — `try_lock()` creates TOCTOU races
 - Bundle fingerprint auto-invalidates on DLL change — mtime change forces fresh backend selection
+- OpenVINO C stream callbacks receive decoded text, not token IDs â€” do not use callback stop-string matching as a surrogate for EOS handling; load staged `generation_config.json` instead
 - Don't dismiss broken checks as "pre-existing" - if verification fails, fix it in the current session
 - Selection profile constant (`OPENVINO_SELECTION_PROFILE`) change forces re-evaluation of all cached decisions
 - NPU compilation is slow on first load but fast after - `CACHE_DIR` enables compiled blob reuse
