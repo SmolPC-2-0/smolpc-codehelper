@@ -1,6 +1,6 @@
 # SmolPC Unified Assistant -- Frontend Specification
 
-**Last Updated:** 2026-03-16
+**Last Updated:** 2026-03-17
 **Status:** Canonical frontend spec for the unified app
 
 ## 1. Frontend Direction
@@ -478,8 +478,10 @@ Before provider integrations land:
    `assistant_send` for `blender`.
 7. Land LibreOffice scaffolding into one shared provider with Writer/Calc/Slides
    frontend configs while keeping those modes disabled.
-8. Activate live LibreOffice behavior for Writer and Slides in a later
-   dedicated branch while keeping Calc scaffold-only.
+8. Activate live LibreOffice behavior for Writer and Slides in a dedicated
+   activation branch while keeping Calc scaffold-only.
+9. Start hardening and packaging work only after the LibreOffice activation
+   closeout docs are merged.
 
 The frontend should not import or embed standalone app code directly. It should
 consume new unified stores, mode configs, and Tauri command contracts.

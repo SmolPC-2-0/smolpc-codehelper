@@ -1,6 +1,6 @@
 # SmolPC Unified Assistant -- Architecture
 
-**Last Updated:** 2026-03-16
+**Last Updated:** 2026-03-17
 **Status:** Canonical architecture for the unified frontend
 
 ## 1. Product Shape
@@ -261,6 +261,11 @@ After Phase 6B:
     `origin/codex/libreoffice-port-track-a` commit
     `7acad1fa0eb31e32a5485069e85c021d14284455` and continues treating that
     branch as a read-only reference source.
+11. LibreOffice execution stays intentionally narrow in this phase:
+    - one tool call maximum per assistant turn
+    - one summary follow-up maximum after tool execution
+    - deterministic local summary fallback if the summary step fails, times out,
+      or is cancelled after the document tool already ran
 
 ## 9. Repository Boundaries
 

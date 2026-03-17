@@ -1,7 +1,7 @@
 # Unified Assistant Implementation Phases
 
 **Last Updated:** 2026-03-17
-**Status:** Phase 6A LibreOffice scaffolding is merged; Phase 6B LibreOffice activation is the current next implementation phase
+**Status:** Phase 6B LibreOffice activation is merged; Phase 7 hardening and packaging is the current next implementation phase
 
 ## Phase 0: Documentation Baseline
 
@@ -49,18 +49,14 @@
   - tracked OpenVINO placeholder directory
   - clean frontend audit lockfile
 
-## Branch Order After Phase 6A
+## Branch Order After Phase 6B
 
-1. `codex/unified-libreoffice-activation-docs`
+1. `codex/unified-hardening-docs`
 2. merge into `docs/unified-assistant-spec`
 3. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-4. `codex/unified-libreoffice-activation`
+4. `codex/unified-hardening`
 5. merge into `dev/unified-assistant`
-6. `codex/unified-libreoffice-activation-status-docs`
-7. merge into `docs/unified-assistant-spec`
-8. merge `docs/unified-assistant-spec` into `dev/unified-assistant`
-9. `codex/unified-hardening-docs`
-10. `codex/unified-hardening`
+6. hardening closeout docs as needed
 
 ## Phase 2: Unified Shell
 
@@ -400,6 +396,28 @@
 - `mode_status(writer|impress)` and `mode_refresh_tools(writer|impress)` are
   runtime-backed
 - hardening can begin from a real LibreOffice integration baseline
+
+**Current branch status**
+
+- preflight docs merged into `docs/unified-assistant-spec`, then into
+  `dev/unified-assistant`
+- implementation merged via PR `#78`
+- merged Phase 6B activation now present in `dev/unified-assistant`:
+  - imported Python runtime assets now live under
+    `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/`
+  - Writer and Slides are live runtime-backed modes through the shared
+    `LibreOfficeProvider`
+  - Calc remains scaffold-only with disabled composer and no live send path
+  - `assistant_send(writer)` and `assistant_send(impress)` are operational
+  - `mode_status(writer|impress)` and `mode_refresh_tools(writer|impress)` are
+    live and mode-filtered
+  - Writer and Slides enforce one tool call maximum per turn plus one summary
+    follow-up maximum
+  - deterministic local summary fallback is used if summary generation fails,
+    times out, or is cancelled after a successful tool call
+  - Writer and Slides do not expose Undo, Regenerate, Continue, or Branch Chat
+    in the unified shell
+  - no edits to `apps/libreoffice-assistant/`
 
 ## Phase 7: Hardening And Packaging
 
