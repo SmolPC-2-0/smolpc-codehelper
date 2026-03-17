@@ -710,6 +710,8 @@ fn generate_stream_blocking(
         sender: token_tx,
         cancelled,
         trailing_dot_run: 0,
+        accumulated: String::new(),
+        stop_strings: guard.generation_controls.stop_strings.clone().unwrap_or_default(),
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -736,6 +738,8 @@ fn generate_stream_with_history_blocking(
         sender: token_tx,
         cancelled,
         trailing_dot_run: 0,
+        accumulated: String::new(),
+        stop_strings: guard.generation_controls.stop_strings.clone().unwrap_or_default(),
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -796,7 +800,7 @@ fn create_generation_config(
         unsafe { (api.set_max_new_tokens)(config_handle.as_ptr(), config.max_length) },
         "ov_genai_generation_config_set_max_new_tokens",
     )?;
-    if let Some(eos_token_id) = controls.eos_token_id.filter(|_| !inherited_from_pipeline) {
+    if let Some(eos_token_id) = controls.eos_token_id {
         check_status(
             api,
             unsafe { (api.set_eos_token_id)(config_handle.as_ptr(), eos_token_id) },
@@ -1157,6 +1161,8 @@ struct StreamCallbackState {
     sender: UnboundedSender<String>,
     cancelled: Arc<AtomicBool>,
     trailing_dot_run: usize,
+    accumulated: String,
+    stop_strings: Vec<String>,
 }
 
 unsafe extern "C" fn stream_callback(
@@ -1174,6 +1180,13 @@ unsafe extern "C" fn stream_callback(
 
     if !text.is_null() {
         let piece = c_string_to_string_verbatim(text);
+        state.accumulated.push_str(&piece);
+        for stop in &state.stop_strings {
+            if state.accumulated.contains(stop.as_str()) {
+                log::debug!("Stream callback detected stop string '{stop}' - halting");
+                return OvGenAiStreamingStatus::Stop;
+            }
+        }
         for ch in piece.chars() {
             if ch == '.' {
                 state.trailing_dot_run += 1;
