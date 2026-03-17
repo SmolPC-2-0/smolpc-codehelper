@@ -1,6 +1,7 @@
 use smolpc_assistant_types::{
     AppMode, AssistantResponseDto, AssistantStreamEventDto, ModeCapabilitiesDto, ModeConfigDto,
-    ProviderKind, ToolExecutionResultDto,
+    ProviderKind, SetupItemDto, SetupItemStateDto, SetupOverallStateDto, SetupStatusDto,
+    ToolExecutionResultDto,
 };
 
 #[test]
@@ -67,4 +68,26 @@ fn assistant_response_uses_tool_results_key() {
     let value = serde_json::to_value(response).expect("serialize response");
     assert!(value.get("toolResults").is_some());
     assert!(value.get("tool_results").is_none());
+}
+
+#[test]
+fn setup_status_uses_expected_wire_keys_and_values() {
+    let dto = SetupStatusDto {
+        overall_state: SetupOverallStateDto::NeedsAttention,
+        items: vec![SetupItemDto {
+            id: "bundled_python".to_string(),
+            label: "Bundled Python".to_string(),
+            state: SetupItemStateDto::NotPrepared,
+            detail: Some("Packaged payload not staged".to_string()),
+            required: true,
+            can_prepare: true,
+        }],
+        last_error: None,
+    };
+
+    let value = serde_json::to_value(dto).expect("serialize setup status");
+    assert_eq!(value["overallState"], "needs_attention");
+    assert_eq!(value["items"][0]["id"], "bundled_python");
+    assert_eq!(value["items"][0]["state"], "not_prepared");
+    assert_eq!(value["items"][0]["canPrepare"], true);
 }

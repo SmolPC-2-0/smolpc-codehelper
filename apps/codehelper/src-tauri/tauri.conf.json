@@ -38,8 +38,11 @@
       "libs/*",
       "libs/openvino",
       "binaries/*",
+      "resources/gimp",
       "resources/blender",
-      "resources/libreoffice"
+      "resources/libreoffice",
+      "resources/python",
+      "resources/models"
     ]
   }
 }

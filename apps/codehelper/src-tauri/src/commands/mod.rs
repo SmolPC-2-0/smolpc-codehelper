@@ -6,3 +6,4 @@ pub mod errors;
 pub mod hardware;
 pub mod inference;
 pub mod modes;
+pub mod setup;

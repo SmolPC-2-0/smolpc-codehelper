@@ -7,6 +7,7 @@ import type {
 } from '$lib/types/assistant';
 import type { AppMode, ModeConfigDto } from '$lib/types/mode';
 import type { ModeStatusDto } from '$lib/types/provider';
+import type { SetupStatusDto } from '$lib/types/setup';
 
 export async function listModes(): Promise<ModeConfigDto[]> {
 	return invoke<ModeConfigDto[]>('list_modes');
@@ -39,4 +40,12 @@ export async function assistantCancel(): Promise<void> {
 
 export async function undoModeAction(mode: AppMode): Promise<void> {
 	return invoke<void>('mode_undo', { mode });
+}
+
+export async function getSetupStatus(): Promise<SetupStatusDto> {
+	return invoke<SetupStatusDto>('setup_status');
+}
+
+export async function prepareSetup(): Promise<SetupStatusDto> {
+	return invoke<SetupStatusDto>('setup_prepare');
 }

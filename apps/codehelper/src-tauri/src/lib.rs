@@ -4,6 +4,7 @@ mod commands;
 mod hardware;
 mod modes;
 mod security;
+mod setup;
 
 use assistant::state::AssistantState;
 use commands::assistant::{assistant_cancel, assistant_send, mode_undo};
@@ -18,7 +19,9 @@ use commands::inference::{
     set_inference_runtime_mode, unload_model, InferenceState,
 };
 use commands::modes::{list_modes, mode_refresh_tools, mode_status};
+use commands::setup::{setup_prepare, setup_status};
 use modes::registry::ModeProviderRegistry;
+use setup::SetupState;
 use tauri::Manager;
 #[allow(clippy::missing_panics_doc)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -48,6 +51,10 @@ pub fn run() {
                     None
                 }
             };
+            app.manage(SetupState::new(
+                resource_dir.clone(),
+                app_local_data_dir.clone(),
+            ));
             app.manage(ModeProviderRegistry::new(resource_dir, app_local_data_dir));
             Ok(())
         })
@@ -78,6 +85,8 @@ pub fn run() {
             set_inference_runtime_mode,
             engine_ensure_started,
             engine_status,
+            setup_status,
+            setup_prepare,
             list_modes,
             mode_status,
             mode_refresh_tools,
@@ -110,6 +119,9 @@ mod tests {
             .iter()
             .any(|entry| entry == "resources/libreoffice"));
         assert!(resources.iter().any(|entry| entry == "resources/blender"));
+        assert!(resources.iter().any(|entry| entry == "resources/gimp"));
+        assert!(resources.iter().any(|entry| entry == "resources/python"));
+        assert!(resources.iter().any(|entry| entry == "resources/models"));
         assert!(!resources.iter().any(|entry| {
             entry
                 .as_str()
