@@ -1,7 +1,7 @@
 # Self-Contained Delivery Phases
 
 **Last Updated:** 2026-03-17
-**Status:** Branch cut, cleanup, foundation, Phase 3, and Phase 4 complete; Phase 5 GIMP provisioning next
+**Status:** Branch cut, cleanup, foundation, Phase 4 complete; Phase 5 GIMP docs preflight next
 
 ## Phase 0: Demo Freeze And Branch Cut
 
@@ -182,9 +182,12 @@ The next official branch after Phase 3 closeout docs is:
 
 **Branches**
 
-1. `codex/unified-self-contained-blender-docs` — merged (PR #102)
-2. `codex/unified-self-contained-blender` — merged (PR #103)
-3. `codex/unified-self-contained-blender-status-docs` — this PR
+1. `codex/unified-self-contained-blender-docs`
+2. merge docs into `dev/unified-assistant-self-contained`
+3. `codex/unified-self-contained-blender`
+4. merge into `dev/unified-assistant-self-contained`
+5. `codex/unified-self-contained-blender-status-docs`
+6. merge docs into `dev/unified-assistant-self-contained`
 
 **Scope**
 
@@ -192,16 +195,6 @@ The next official branch after Phase 3 closeout docs is:
 - auto-install and auto-enable addon into user profile
 - auto-launch Blender when required
 - keep current bridge-first design intact
-
-**Deliverables landed**
-
-- Blender addon bundled under `apps/codehelper/src-tauri/resources/blender/addon/blender_helper_http.py`
-- addon provisioned and enabled through Blender CLI background execution
-- `blender_addon` setup item added to `setup_status` and `setup_prepare`
-- Blender auto-launch on first Blender-mode use when installed and not already running
-- provision marker at `setup/state/blender-addon.json`
-- addon target resolution via Blender CLI probing, not guessed profile paths
-- already running Blender sessions are never killed or restarted
 
 **Locked Phase 4 decisions**
 
@@ -224,6 +217,17 @@ The next official branch after Phase 3 closeout docs is:
 
 - Blender mode works on a machine with Blender installed but no addon manually installed
 - no manual addon installation or enable step remains
+
+**Closeout status**
+
+Complete on the self-contained implementation line:
+
+- Blender addon snapshot is now bundled at:
+  - `apps/codehelper/src-tauri/resources/blender/addon/blender_helper_http.py`
+- setup status now includes `blender_addon`
+- `setup_prepare()` now provisions and enables the addon through Blender CLI background execution
+- setup still does not launch the interactive Blender UI
+- Blender mode now provisions and enables the addon on demand, launches Blender only when needed, and preserves already-running Blender sessions
 
 The next official branch after Phase 4 closeout docs is:
 

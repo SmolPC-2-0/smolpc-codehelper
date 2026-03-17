@@ -1,7 +1,7 @@
 # Setup Subsystem Spec
 
 **Last Updated:** 2026-03-17
-**Status:** Phase 2 foundation contract merged; Phase 3 consumes prepared bundled Python; Phase 4 Blender addon provisioning landed
+**Status:** Phase 2 foundation contract merged; Phase 3 consumes prepared bundled Python; Phase 4 Blender provisioning has landed without changing setup command names
 
 ## 1. Purpose
 
@@ -40,11 +40,11 @@ Phase 3 follow-on status:
 - setup remains app-level and foundation-only
 - `setup_status` and `setup_prepare` remain wire-compatible with the Phase 2 contract
 
-Phase 4 landed:
+Phase 4 closeout status:
 
-- setup gained one additional status item for Blender addon readiness: `blender_addon`
-- `setup_prepare()` provisions and enables the Blender addon through Blender CLI background execution
-- `setup_prepare()` does not launch the interactive Blender UI
+- setup now includes one additional status item for Blender addon readiness
+- `setup_prepare()` now provisions and enables the Blender addon through Blender CLI background execution
+- `setup_prepare()` still does not launch the interactive Blender UI
 
 Phase 2 setup work does not include:
 
@@ -85,12 +85,12 @@ returns the updated app-level setup snapshot.
 - provision addons or plugins
 - replace existing mode-specific commands
 
-Phase 4 landed extension:
+Phase 4 live extension:
 
-- `setup_prepare()` provisions and enables the Blender addon
+- `setup_prepare()` may provision and enable the Blender addon
 - it does so through Blender CLI background execution
-- it updates app-local provision markers under `setup/state/`
-- it does not launch the interactive Blender UI
+- it may update app-local provision markers under `setup/state/`
+- it still must not launch the interactive Blender UI
 
 ## 4. Public DTOs
 
