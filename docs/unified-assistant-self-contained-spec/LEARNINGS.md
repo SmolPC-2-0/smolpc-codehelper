@@ -8,6 +8,20 @@
 
 ---
 
+## Self-Contained Line
+
+- **Freeze the demo line before productization work starts** (2026-03-17): `dev/unified-assistant` and `docs/unified-assistant-spec` are now the frozen demo baseline. Self-contained delivery work must continue only on `dev/unified-assistant-self-contained` and `docs/unified-assistant-self-contained-spec` so demo stability and productization risk stay separated.
+
+- **Host apps may remain external while integrations become app-owned** (2026-03-17): The self-contained finish line does not require bundling GIMP, Blender, or LibreOffice themselves. It does require the unified app to own everything else: model files, Python runtime, MCP servers, plugins, addons, provisioning, and launch orchestration.
+
+- **GIMP is the hardest self-contained gap** (2026-03-17): Blender already has an app-owned bridge and LibreOffice already has bundled runtime scripts, but GIMP still depends on an externally managed plugin/server arrangement. The self-contained roadmap must treat GIMP vendoring, provisioning, and launch ownership as the longest integration track.
+
+- **Bundled Python is the cross-mode enabler** (2026-03-17): Removing external Python is not only a LibreOffice requirement. The managed Python runtime is also the cleanest foundation for GIMP-side runtime ownership and future packaging consistency across provider-owned resources.
+
+- **Provenance must be documented before third-party imports land** (2026-03-17): Any vendored runtime, addon, plugin, or model payload needs a pinned source reference, license notes, and local modification tracking in `THIRD_PARTY_PROVENANCE.md` before implementation branches import it.
+
+---
+
 ## How to Use This Document
 
 1. Before working on a subsystem, read the relevant section
@@ -149,7 +163,7 @@
 
 - **No git worktrees** (2026-03): User preference — use separate clones instead. Worktrees have caused issues in this project.
 
-- **Context compaction is the biggest risk** (2026-03): Long AI sessions lose synthesized research when context compacts. Always persist findings to documentation files before they're lost. This entire docs/unified-assistant-spec directory was created specifically to prevent research loss.
+- **Context compaction is the biggest risk** (2026-03): Long AI sessions lose synthesized research when context compacts. Always persist findings to documentation files before they're lost. This entire `docs/unified-assistant-self-contained-spec` directory exists to prevent research loss on the self-contained line.
 
 - **Dirty clones need selective staging, not cleanup churn** (2026-03): The shared clone used for unified work can contain unrelated local diffs from other workstreams. For implementation branches, stage only the files that belong to the phase and leave unrelated dirt alone instead of widening the branch scope with cleanup commits.
 
