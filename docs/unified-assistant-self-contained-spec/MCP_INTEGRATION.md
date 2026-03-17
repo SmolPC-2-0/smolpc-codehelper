@@ -1,7 +1,7 @@
 # MCP And Provider Integration For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Integration ownership spec for self-contained delivery
+**Status:** Integration ownership spec with Phase 2 setup foundation landed
 
 ## 1. Scope
 
@@ -35,6 +35,15 @@ New app-level setup commands are added separately:
 
 Phase 2 keeps the existing live provider behavior intact while adding the
 shared setup/provisioning substrate those providers will later consume.
+
+That substrate is now merged into the implementation line. Current mode behavior
+remains unchanged:
+
+- Code stays live as-is
+- GIMP stays live as-is
+- Blender stays live as-is
+- Writer and Slides stay live as-is
+- Calc stays disabled
 
 ## 3. Stable Provider Interface
 
@@ -143,6 +152,8 @@ Phase 2 setup item ids are locked to:
 - `host_gimp`
 - `host_blender`
 - `host_libreoffice`
+
+Those item ids now define the live `setup_status` wire contract.
 
 `setup_prepare` should:
 

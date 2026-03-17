@@ -1,7 +1,7 @@
 # Self-Contained Delivery Phases
 
 **Last Updated:** 2026-03-17
-**Status:** Branch cut and baseline cleanup complete; Phase 2 foundation docs are current
+**Status:** Branch cut, cleanup, and Phase 2 foundation complete
 
 ## Phase 0: Demo Freeze And Branch Cut
 
@@ -107,7 +107,23 @@
 - existing Code, GIMP, Blender, Writer, and Slides behavior remains unchanged
 - Calc remains explicitly out of scope
 
+**Closeout status**
+
+Complete on the self-contained implementation line:
+
+- `setup_status` and `setup_prepare` landed
+- setup banner and setup panel landed
+- tracked resource manifests landed for Python, GIMP, Blender, LibreOffice, and models
+- model and Python staging scripts landed
+- packaged resource config now includes the new foundation roots
+
+The next official branch after Phase 2 closeout docs is:
+
+- `codex/unified-self-contained-libreoffice-docs`
+
 ## Phase 3: LibreOffice Self-Contained Runtime
+
+**Status:** next
 
 **Branches**
 

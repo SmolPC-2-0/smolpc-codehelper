@@ -1,7 +1,7 @@
 # SmolPC Unified Assistant Self-Contained Architecture
 
 **Last Updated:** 2026-03-17
-**Status:** Target architecture for the self-contained delivery line
+**Status:** Target architecture with Phase 2 foundation landed
 
 ## 1. Product Shape
 
@@ -102,6 +102,13 @@ Phase 2 foundation limits:
 - it does not launch host apps in Phase 2
 - it does not provision Blender or GIMP user-profile integrations in Phase 2
 
+Phase 2 implementation status:
+
+- setup subsystem now exists in the implementation line
+- app-level setup state and setup commands now exist
+- host-app detection now exists
+- packaged resource manifest validation now exists
+
 ### 4.4 Mode providers
 
 Responsibilities:
@@ -177,6 +184,9 @@ Phase 2 also establishes app-local-data setup roots under:
 - `setup/python/`
 - `setup/state/`
 - `setup/logs/`
+
+Those roots are now part of the implementation contract on
+`dev/unified-assistant-self-contained`.
 
 ## 8. Mode-Specific Architecture
 
