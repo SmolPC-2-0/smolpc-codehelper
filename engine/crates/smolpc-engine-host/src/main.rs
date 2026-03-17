@@ -3970,7 +3970,6 @@ mod tests {
             .expect("write detokenizer xml");
         fs::write(openvino_dir.join("openvino_detokenizer.bin"), [])
             .expect("write detokenizer bin");
-        fs::write(openvino_dir.join("openvino_config.json"), []).expect("write ov config");
         fs::write(openvino_dir.join("generation_config.json"), [])
             .expect("write generation config");
         fs::write(openvino_dir.join("config.json"), []).expect("write config");
@@ -3978,13 +3977,12 @@ mod tests {
         fs::write(openvino_dir.join("tokenizer_config.json"), []).expect("write tokenizer config");
         fs::write(openvino_dir.join("special_tokens_map.json"), [])
             .expect("write special tokens map");
-        fs::write(openvino_dir.join("chat_template.jinja"), []).expect("write chat template");
         fs::write(openvino_dir.join("added_tokens.json"), []).expect("write added tokens");
         fs::write(openvino_dir.join("merges.txt"), []).expect("write merges");
         fs::write(openvino_dir.join("vocab.json"), []).expect("write vocab");
         fs::write(
             openvino_dir.join("manifest.json"),
-            br#"{"entrypoint":"openvino_model.xml","required_files":["openvino_model.bin","openvino_tokenizer.xml","openvino_tokenizer.bin","openvino_detokenizer.xml","openvino_detokenizer.bin","openvino_config.json","generation_config.json","config.json","tokenizer.json","tokenizer_config.json","special_tokens_map.json","chat_template.jinja","added_tokens.json","merges.txt","vocab.json"]}"#,
+            br#"{"entrypoint":"openvino_model.xml","required_files":["openvino_model.bin","openvino_tokenizer.xml","openvino_tokenizer.bin","openvino_detokenizer.xml","openvino_detokenizer.bin","generation_config.json","config.json","tokenizer.json","tokenizer_config.json","special_tokens_map.json","added_tokens.json","merges.txt","vocab.json"]}"#,
         )
         .expect("write openvino manifest");
 

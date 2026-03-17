@@ -85,6 +85,7 @@ Corrections discovered during development. **When you correct a mistake, append 
 - Bundle fingerprint auto-invalidates on DLL change — mtime change forces fresh backend selection
 - OpenVINO C stream callbacks receive decoded text, not token IDs â€” do not use callback stop-string matching as a surrogate for EOS handling; load staged `generation_config.json` instead
 - Qwen2.5-Coder on OpenVINO CPU defaults to the official `int8` artifact for now; the official `int4` artifact still overruns one-sentence prompts instead of stopping cleanly
+- Official OpenVINO HF artifacts may omit `openvino_config.json` and `chat_template.jinja`; keep them optional in manifests because `tokenizer_config.json` can already embed `chat_template`
 - Don't dismiss broken checks as "pre-existing" - if verification fails, fix it in the current session
 - Selection profile constant (`OPENVINO_SELECTION_PROFILE`) change forces re-evaluation of all cached decisions
 - NPU compilation is slow on first load but fast after - `CACHE_DIR` enables compiled blob reuse

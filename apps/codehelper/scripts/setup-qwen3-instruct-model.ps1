@@ -82,13 +82,11 @@ if (-not $SkipOpenVino) {
         "openvino_tokenizer.bin",
         "openvino_detokenizer.xml",
         "openvino_detokenizer.bin",
-        "openvino_config.json",
         "generation_config.json",
         "config.json",
         "tokenizer.json",
         "tokenizer_config.json",
         "special_tokens_map.json",
-        "chat_template.jinja",
         "added_tokens.json",
         "merges.txt",
         "vocab.json"
