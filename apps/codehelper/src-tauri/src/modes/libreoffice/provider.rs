@@ -198,7 +198,6 @@ impl LibreOfficeProvider {
         let tools = Self::filtered_tools(mode, raw_tools);
 
         let mut state = self.state.lock().await;
-        state.scaffold_dir = Some(layout.mcp_server_dir);
         state.session = Some(Arc::clone(&session));
 
         if tools.is_empty() {

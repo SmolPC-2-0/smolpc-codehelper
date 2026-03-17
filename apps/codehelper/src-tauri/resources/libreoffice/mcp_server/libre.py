@@ -153,6 +153,7 @@ def queue_worker():
             request_id, command = request_queue.get(timeout=1)
 
             # Process the request
+            client_socket = None
             try:
                 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 client_socket.settimeout(30)  # 30 second timeout
@@ -162,7 +163,6 @@ def queue_worker():
                 request_payload["_smolpc_auth_token"] = HELPER_AUTH_TOKEN
                 _send_helper_frame(client_socket, request_payload)
                 response = _normalize_helper_response(_recv_helper_frame(client_socket))
-                client_socket.close()
             except socket.timeout:
                 response = {
                     "status": "error",
@@ -183,6 +183,12 @@ def queue_worker():
                     "status": "error",
                     "message": f"Error communicating with helper: {str(e)}",
                 }
+            finally:
+                if client_socket is not None:
+                    try:
+                        client_socket.close()
+                    except OSError:
+                        pass
 
             # Store the response
             with response_lock:
