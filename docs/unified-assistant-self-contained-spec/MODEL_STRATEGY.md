@@ -16,6 +16,11 @@ Why this is locked:
 - it gives a single offline baseline that works across the live unified modes
 - it avoids opening a second large productization track around multi-model packaging
 
+Locking this product decision does not mean every future packaged artifact
+variant is already validation-complete. Phase 2 must still verify the exact
+packaged `qwen3-4b-instruct-2507` artifact used on the self-contained line,
+including Windows packaging behavior and target hardware readiness.
+
 ## 2. Finish-Line Rule
 
 External users must not manually install or fetch models.

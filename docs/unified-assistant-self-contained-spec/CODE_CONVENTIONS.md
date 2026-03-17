@@ -136,13 +136,13 @@ let { name, onClose }: { name: string; onClose: () => void } = $props();
 
 // Side effects
 $effect(() => {
-    console.log('count changed:', count);
+	console.log('count changed:', count);
 });
 
 // ❌ WRONG — Svelte 4 stores (DO NOT USE)
-import { writable } from 'svelte/store';  // NEVER
-const count = writable(0);  // NEVER
-$: doubled = $count * 2;    // NEVER (Svelte 4 reactive declaration)
+import { writable } from 'svelte/store'; // NEVER
+const count = writable(0); // NEVER
+$: doubled = $count * 2; // NEVER (Svelte 4 reactive declaration)
 ```
 
 ### Store Pattern (Module-Level State)
@@ -155,33 +155,40 @@ let currentModel = $state<string | null>(null);
 let isGenerating = $state(false);
 
 export const engineStore = {
-    get status() { return status; },
-    get currentModel() { return currentModel; },
-    get isGenerating() { return isGenerating; },
+	get status() {
+		return status;
+	},
+	get currentModel() {
+		return currentModel;
+	},
+	get isGenerating() {
+		return isGenerating;
+	},
 
-    async checkHealth() {
-        try {
-            const healthy = await invoke<boolean>('engine_health');
-            status = healthy ? 'ready' : 'offline';
-        } catch {
-            status = 'offline';
-        }
-    },
+	async checkHealth() {
+		try {
+			const healthy = await invoke<boolean>('engine_health');
+			status = healthy ? 'ready' : 'offline';
+		} catch {
+			status = 'offline';
+		}
+	},
 
-    async generate(prompt: string, onToken: (token: string) => void): Promise<string> {
-        if (isGenerating) throw new Error('Already generating');
-        isGenerating = true;
-        try {
-            // ... generation logic
-            return result;
-        } finally {
-            isGenerating = false; // Always cleanup
-        }
-    }
+	async generate(prompt: string, onToken: (token: string) => void): Promise<string> {
+		if (isGenerating) throw new Error('Already generating');
+		isGenerating = true;
+		try {
+			// ... generation logic
+			return result;
+		} finally {
+			isGenerating = false; // Always cleanup
+		}
+	}
 };
 ```
 
 **Key rules:**
+
 - Single source of truth — component reads from store, doesn't maintain own copy
 - Use `finally` for cleanup (never forget to reset `isGenerating`)
 - Export as a plain object with getters, not a class
@@ -207,30 +214,31 @@ For reusable styles, use CSS variables or component extraction instead of `@appl
 ### Tauri Channel Streaming
 
 ```typescript
-import { invoke, Channel } from "@tauri-apps/api/core";
+import { invoke, Channel } from '@tauri-apps/api/core';
 
 async function streamChat(prompt: string): Promise<AssistantResponse> {
-    const channel = new Channel<string>();
-    let accumulated = "";
+	const channel = new Channel<string>();
+	let accumulated = '';
 
-    channel.onmessage = (token: string) => {
-        accumulated += token;
-        // Update reactive state
-        currentMessage = accumulated;
-    };
+	channel.onmessage = (token: string) => {
+		accumulated += token;
+		// Update reactive state
+		currentMessage = accumulated;
+	};
 
-    // invoke() resolves AFTER all channel messages are delivered
-    const result = await invoke<AssistantResponse>("assistant_chat_stream", {
-        prompt,
-        onToken: channel,
-    });
+	// invoke() resolves AFTER all channel messages are delivered
+	const result = await invoke<AssistantResponse>('assistant_chat_stream', {
+		prompt,
+		onToken: channel
+	});
 
-    // No manual cleanup needed — channels are command-scoped and auto-cleanup
-    return result;
+	// No manual cleanup needed — channels are command-scoped and auto-cleanup
+	return result;
 }
 ```
 
 **Why Channels, not Events?**
+
 - Events are global broadcast — no lifecycle tie to `invoke()`
 - Events can arrive before the listener is set up (race condition)
 - Channels are command-scoped — tied to one `invoke()` call
@@ -268,15 +276,15 @@ src/
 
 ### Mapping
 
-| Rust | TypeScript |
-|------|-----------|
-| `String` | `string` |
-| `bool` | `boolean` |
-| `i32`, `u32`, `f64` | `number` |
-| `Vec<T>` | `T[]` |
-| `Option<T>` | `T \| null` |
-| `HashMap<K, V>` | `Record<K, V>` |
-| `()` | `void` |
+| Rust                | TypeScript                           |
+| ------------------- | ------------------------------------ |
+| `String`            | `string`                             |
+| `bool`              | `boolean`                            |
+| `i32`, `u32`, `f64` | `number`                             |
+| `Vec<T>`            | `T[]`                                |
+| `Option<T>`         | `T \| null`                          |
+| `HashMap<K, V>`     | `Record<K, V>`                       |
+| `()`                | `void`                               |
 | `Result<T, String>` | `T` (error becomes rejected promise) |
 
 ### Example
@@ -295,10 +303,10 @@ pub struct AssistantResponse {
 ```typescript
 // TypeScript: src/lib/types/inference.ts
 type AssistantResponse = {
-    reply: string;
-    explain: string | null;
-    undoable: boolean | null;
-    streamed: boolean | null;
+	reply: string;
+	explain: string | null;
+	undoable: boolean | null;
+	streamed: boolean | null;
 };
 ```
 
@@ -367,17 +375,17 @@ async fn assistant_chat_stream(
 
 ```typescript
 // Always specify the return type generic
-const result = await invoke<AssistantResponse>("assistant_chat_stream", {
-    prompt: "Hello",
-    onToken: channel,
+const result = await invoke<AssistantResponse>('assistant_chat_stream', {
+	prompt: 'Hello',
+	onToken: channel
 });
 
 // Error handling
 try {
-    const healthy = await invoke<boolean>("engine_health");
+	const healthy = await invoke<boolean>('engine_health');
 } catch (e) {
-    // Rust Err(String) becomes a rejected promise with string message
-    console.error("Engine error:", String(e));
+	// Rust Err(String) becomes a rejected promise with string message
+	console.error('Engine error:', String(e));
 }
 ```
 
@@ -401,15 +409,18 @@ try {
 
 ```typescript
 try {
-    await invoke("some_command");
+	await invoke('some_command');
 } catch (e) {
-    // User-facing message
-    messages = [...messages, {
-        role: "assistant",
-        text: "Something went wrong. Please try again.",
-    }];
-    // Technical log
-    console.error("Command failed:", e);
+	// User-facing message
+	messages = [
+		...messages,
+		{
+			role: 'assistant',
+			text: 'Something went wrong. Please try again.'
+		}
+	];
+	// Technical log
+	console.error('Command failed:', e);
 }
 ```
 
@@ -433,13 +444,13 @@ trace!("Token generated: {}", token_id);
 
 ### Log Levels
 
-| Level | When to Use |
-|-------|------------|
-| `error` | Unrecoverable failures (engine crash, DLL load failure) |
-| `warn` | Recoverable issues (model not found in dev, connection timeout) |
-| `info` | Normal operations (startup, shutdown, model loaded, mode switched) |
-| `debug` | Detailed flow (request handling, token generation) |
-| `trace` | Very detailed (individual token IDs, tensor shapes) |
+| Level   | When to Use                                                        |
+| ------- | ------------------------------------------------------------------ |
+| `error` | Unrecoverable failures (engine crash, DLL load failure)            |
+| `warn`  | Recoverable issues (model not found in dev, connection timeout)    |
+| `info`  | Normal operations (startup, shutdown, model loaded, mode switched) |
+| `debug` | Detailed flow (request handling, token generation)                 |
+| `trace` | Very detailed (individual token IDs, tensor shapes)                |
 
 ### Frontend
 
@@ -474,13 +485,13 @@ npm run lint
 
 ### What to Test
 
-| Component | Test Type | What to Test |
-|-----------|----------|-------------|
-| Model registry | Unit | Model lookup, tier selection, artifact resolution |
-| MCP client | Unit | JSON-RPC serialization, message parsing |
-| Engine client | Integration | HTTP connection, SSE streaming |
-| Type sync | Build-time | `npm run check` + `cargo check` both pass |
-| DLL loading | Unit | Only `runtime_loading.rs` calls `Library::new` |
+| Component      | Test Type   | What to Test                                      |
+| -------------- | ----------- | ------------------------------------------------- |
+| Model registry | Unit        | Model lookup, tier selection, artifact resolution |
+| MCP client     | Unit        | JSON-RPC serialization, message parsing           |
+| Engine client  | Integration | HTTP connection, SSE streaming                    |
+| Type sync      | Build-time  | `npm run check` + `cargo check` both pass         |
+| DLL loading    | Unit        | Only `runtime_loading.rs` calls `Library::new`    |
 
 ### Test Conventions
 
@@ -494,17 +505,17 @@ npm run lint
 
 ### DO NOT
 
-| Anti-Pattern | Why | Instead |
-|-------------|-----|---------|
-| `import { writable } from 'svelte/store'` | Svelte 4 — not used | Use `$state`, `$derived`, `$props` |
-| `@apply` in CSS | Not supported in Tailwind 4 | Use utility classes directly |
-| `Library::new("dll_name.dll")` | System PATH search, DLL hijacking | Use absolute paths via `runtime_loading.rs` |
-| `unwrap()` in production code | Panics on error | Use `?` or explicit error handling |
-| Tauri Events for streaming | Global, unordered, race conditions | Use Tauri Channels |
-| Duplicating reactive state | Components and stores diverge | Single source of truth in store |
-| `try_lock()` for state tracking | TOCTOU race conditions | Use `AtomicBool` |
-| `Once::call_once` for fallible init | Can't return errors | Use `OnceLock::get_or_init` |
-| Amending commits after hook failure | Modifies PREVIOUS commit | Create new commit |
-| Git worktrees | Has caused issues | Use separate clones |
-| `add_special_tokens: true` with ChatML | Duplicates special tokens | `add_special_tokens: false` when prompt has ChatML tokens |
-| Only checking one Qwen stop token | Misses `<\|endoftext\|>` or `<\|im_end\|>` | Check both 151643 and 151645 |
+| Anti-Pattern                              | Why                                        | Instead                                                   |
+| ----------------------------------------- | ------------------------------------------ | --------------------------------------------------------- |
+| `import { writable } from 'svelte/store'` | Svelte 4 — not used                        | Use `$state`, `$derived`, `$props`                        |
+| `@apply` in CSS                           | Not supported in Tailwind 4                | Use utility classes directly                              |
+| `Library::new("dll_name.dll")`            | System PATH search, DLL hijacking          | Use absolute paths via `runtime_loading.rs`               |
+| `unwrap()` in production code             | Panics on error                            | Use `?` or explicit error handling                        |
+| Tauri Events for streaming                | Global, unordered, race conditions         | Use Tauri Channels                                        |
+| Duplicating reactive state                | Components and stores diverge              | Single source of truth in store                           |
+| `try_lock()` for state tracking           | TOCTOU race conditions                     | Use `AtomicBool`                                          |
+| `Once::call_once` for fallible init       | Can't return errors                        | Use `OnceLock::get_or_init`                               |
+| Amending commits after hook failure       | Modifies PREVIOUS commit                   | Create new commit                                         |
+| Git worktrees                             | Has caused issues                          | Use separate clones                                       |
+| `add_special_tokens: true` with ChatML    | Duplicates special tokens                  | `add_special_tokens: false` when prompt has ChatML tokens |
+| Only checking one Qwen stop token         | Misses `<\|endoftext\|>` or `<\|im_end\|>` | Check both 151643 and 151645                              |

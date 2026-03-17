@@ -174,6 +174,14 @@
 - only host-app installs remain external prerequisites
 - Calc remains visible but disabled
 
+## Calc Status
+
+Calc is explicitly out of scope for this self-contained finish line.
+
+This roadmap does not reserve a follow-on Calc activation phase before release.
+If Calc activation is pursued later, it should start as a separate post-finish-line
+docs-first workstream rather than quietly expanding Phase 6.
+
 ## Phase Order Rule
 
 Do not reorder the self-contained phases.
