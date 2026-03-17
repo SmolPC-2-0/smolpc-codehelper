@@ -3,12 +3,15 @@ use super::rag::{RagContext, RagIndex};
 use super::state::{shared_scene_cache, SceneCache, SceneSnapshot};
 use crate::assistant::MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION;
 use crate::modes::provider::{provider_state, ToolProvider};
+use crate::setup::blender::{ensure_blender_addon_prepared, BlenderAddonPrepareOutcome};
+use crate::setup::host_apps::{detect_blender, HostAppDetection};
+use crate::setup::launch::{launch_blender_if_needed, BlenderLaunchOutcome};
 use async_trait::async_trait;
 use serde_json::json;
 use smolpc_assistant_types::{
     AppMode, ProviderStateDto, ToolDefinitionDto, ToolExecutionResultDto,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex as AsyncMutex, RwLock};
 
@@ -19,6 +22,7 @@ struct RuntimeState {
     rag_index: RagIndex,
     last_error: Option<String>,
     bridge_attempted: bool,
+    detected_blender_path: Option<PathBuf>,
 }
 
 impl Default for RuntimeState {
@@ -29,6 +33,7 @@ impl Default for RuntimeState {
             rag_index: RagIndex::disabled("Retrieval not loaded yet".to_string()),
             last_error: None,
             bridge_attempted: false,
+            detected_blender_path: None,
         }
     }
 }
@@ -37,27 +42,55 @@ impl Default for RuntimeState {
 pub struct BlenderProvider {
     config: BridgeConfig,
     resource_dir: Option<PathBuf>,
+    app_local_data_dir: Option<PathBuf>,
     scene_cache: Arc<RwLock<SceneCache>>,
     state: AsyncMutex<RuntimeState>,
+    connect_lock: AsyncMutex<()>,
+    host_blender_override: Option<PathBuf>,
 }
 
 impl Default for BlenderProvider {
     fn default() -> Self {
-        Self::new(None)
+        Self::new(None, None)
     }
 }
 
 impl BlenderProvider {
-    pub fn new(resource_dir: Option<PathBuf>) -> Self {
-        Self::with_config(BridgeConfig::default(), resource_dir)
+    pub fn new(resource_dir: Option<PathBuf>, app_local_data_dir: Option<PathBuf>) -> Self {
+        Self::with_config(BridgeConfig::default(), resource_dir, app_local_data_dir)
     }
 
-    pub fn with_config(config: BridgeConfig, resource_dir: Option<PathBuf>) -> Self {
+    pub fn with_config(
+        config: BridgeConfig,
+        resource_dir: Option<PathBuf>,
+        app_local_data_dir: Option<PathBuf>,
+    ) -> Self {
         Self {
             config,
             resource_dir,
+            app_local_data_dir,
             scene_cache: shared_scene_cache(),
             state: AsyncMutex::new(RuntimeState::default()),
+            connect_lock: AsyncMutex::new(()),
+            host_blender_override: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_host_override(
+        config: BridgeConfig,
+        resource_dir: Option<PathBuf>,
+        app_local_data_dir: Option<PathBuf>,
+        host_blender_override: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            config,
+            resource_dir,
+            app_local_data_dir,
+            scene_cache: shared_scene_cache(),
+            state: AsyncMutex::new(RuntimeState::default()),
+            connect_lock: AsyncMutex::new(()),
+            host_blender_override,
         }
     }
 
@@ -104,17 +137,48 @@ impl BlenderProvider {
         provider_state(mode, status, state.last_error.as_deref(), true, false)
     }
 
+    fn host_detection(&self, cached: Option<&Path>) -> HostAppDetection {
+        if let Some(path) = self.host_blender_override.as_deref() {
+            let resolved = path.exists().then(|| path.to_path_buf());
+            let detail = resolved
+                .as_ref()
+                .map(|value| format!("Blender detected at {}", value.display()))
+                .or_else(|| {
+                    Some(format!(
+                        "Blender is not installed or could not be detected yet. Expected {}.",
+                        path.display()
+                    ))
+                });
+
+            return HostAppDetection {
+                id: "host_blender",
+                label: "Blender",
+                path: resolved,
+                detail,
+            };
+        }
+
+        detect_blender(cached)
+    }
+
     async fn current_snapshot(&self) -> SceneSnapshot {
         self.scene_cache.read().await.snapshot()
     }
 
-    async fn detail_for_connected_state(&self, rag_index: &RagIndex) -> Option<String> {
-        let snapshot = self.current_snapshot().await;
+    fn detail_for_snapshot(
+        snapshot: &SceneSnapshot,
+        rag_index: &RagIndex,
+        prefix: Option<String>,
+    ) -> Option<String> {
         let mut details = Vec::new();
 
-        if let Some(message) = snapshot.message {
-            details.push(message);
-        } else if let Some(scene_data) = snapshot.scene_data {
+        if let Some(prefix) = prefix {
+            details.push(prefix);
+        }
+
+        if let Some(message) = snapshot.message.as_ref() {
+            details.push(message.clone());
+        } else if let Some(scene_data) = snapshot.scene_data.as_ref() {
             details.push(format!(
                 "Live scene available with {} object(s); active object: {}.",
                 scene_data.object_count,
@@ -137,6 +201,70 @@ impl BlenderProvider {
             None
         } else {
             Some(details.join(" · "))
+        }
+    }
+
+    fn missing_blender_detail(detection: &HostAppDetection) -> String {
+        detection.detail.clone().unwrap_or_else(|| {
+            "Blender is not installed or could not be detected yet. Install Blender to use scene-aware Blender mode."
+                .to_string()
+        })
+    }
+
+    fn provision_error_detail(error: &str) -> String {
+        format!("Unable to provision the bundled Blender addon automatically. {error}")
+    }
+
+    fn launch_error_detail(blender_path: &Path, error: &str) -> String {
+        format!(
+            "The Blender addon is provisioned, but the app could not launch Blender at {}. {error}",
+            blender_path.display()
+        )
+    }
+
+    fn connection_note(
+        snapshot: &SceneSnapshot,
+        blender_path: &Path,
+        prepare_outcome: &BlenderAddonPrepareOutcome,
+        launch_outcome: BlenderLaunchOutcome,
+    ) -> Option<String> {
+        if snapshot.connected {
+            return match prepare_outcome {
+                BlenderAddonPrepareOutcome::Prepared(_) => Some(format!(
+                    "Bundled Blender addon was provisioned for {}.",
+                    blender_path.display()
+                )),
+                BlenderAddonPrepareOutcome::AlreadyReady(_) => None,
+            };
+        }
+
+        let mut notes = Vec::new();
+        match prepare_outcome {
+            BlenderAddonPrepareOutcome::Prepared(_) => notes.push(format!(
+                "Bundled Blender addon was provisioned and enabled for {}.",
+                blender_path.display()
+            )),
+            BlenderAddonPrepareOutcome::AlreadyReady(_) => notes.push(format!(
+                "Bundled Blender addon is provisioned for {}.",
+                blender_path.display()
+            )),
+        }
+
+        match launch_outcome {
+            BlenderLaunchOutcome::Launched => notes.push(
+                "Blender was launched automatically. Waiting for the addon to publish live scene data."
+                    .to_string(),
+            ),
+            BlenderLaunchOutcome::AlreadyRunning => notes.push(
+                "Blender is already running. If this session started before the addon was provisioned, reopen Blender once so the addon can load."
+                    .to_string(),
+            ),
+        }
+
+        if notes.is_empty() {
+            None
+        } else {
+            Some(notes.join(" "))
         }
     }
 
@@ -199,8 +327,68 @@ impl BlenderProvider {
 
         Ok(Self::bridge_connected_state(
             mode,
-            self.detail_for_connected_state(&state.rag_index).await,
+            Self::detail_for_snapshot(&self.current_snapshot().await, &state.rag_index, None),
         ))
+    }
+
+    async fn ensure_provider_ready(&self, mode: AppMode) -> ProviderStateDto {
+        let _connect_guard = self.connect_lock.lock().await;
+
+        let cached_blender_path = {
+            let mut state = self.state.lock().await;
+            if let Err(_) = self.ensure_bridge_started(mode, &mut state).await {
+                return Self::disconnected_state(mode, &state);
+            }
+            state.detected_blender_path.clone()
+        };
+
+        let detection = self.host_detection(cached_blender_path.as_deref());
+        let Some(blender_path) = detection.path.clone() else {
+            let detail = Self::missing_blender_detail(&detection);
+            let mut state = self.state.lock().await;
+            state.detected_blender_path = None;
+            state.last_error = Some(detail.clone());
+            return provider_state(mode, "disconnected", Some(detail.as_str()), true, false);
+        };
+
+        let prepare_outcome = match ensure_blender_addon_prepared(
+            self.resource_dir.as_deref(),
+            self.app_local_data_dir.as_deref(),
+            &blender_path,
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let detail = Self::provision_error_detail(&error);
+                let mut state = self.state.lock().await;
+                state.detected_blender_path = Some(blender_path);
+                state.last_error = Some(detail.clone());
+                return provider_state(mode, "error", Some(detail.as_str()), true, false);
+            }
+        };
+
+        let launch_outcome = match launch_blender_if_needed(&blender_path) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let detail = Self::launch_error_detail(&blender_path, &error);
+                let mut state = self.state.lock().await;
+                state.detected_blender_path = Some(blender_path);
+                state.last_error = Some(detail.clone());
+                return provider_state(mode, "error", Some(detail.as_str()), true, false);
+            }
+        };
+
+        let snapshot = self.current_snapshot().await;
+        let rag_index = {
+            let mut state = self.state.lock().await;
+            state.detected_blender_path = Some(blender_path.clone());
+            state.tools = Self::default_tools();
+            state.last_error = None;
+            state.rag_index.clone()
+        };
+
+        let note =
+            Self::connection_note(&snapshot, &blender_path, &prepare_outcome, launch_outcome);
+        Self::bridge_connected_state(mode, Self::detail_for_snapshot(&snapshot, &rag_index, note))
     }
 
     fn scene_tool_result(snapshot: SceneSnapshot) -> ToolExecutionResultDto {
@@ -254,16 +442,11 @@ impl BlenderProvider {
 #[async_trait]
 impl ToolProvider for BlenderProvider {
     async fn connect_if_needed(&self, mode: AppMode) -> Result<ProviderStateDto, String> {
-        let mut state = self.state.lock().await;
-        self.ensure_bridge_started(mode, &mut state).await
+        Ok(self.ensure_provider_ready(mode).await)
     }
 
     async fn status(&self, mode: AppMode) -> Result<ProviderStateDto, String> {
-        let mut state = self.state.lock().await;
-        match self.ensure_bridge_started(mode, &mut state).await {
-            Ok(provider_state) => Ok(provider_state),
-            Err(_) => Ok(Self::disconnected_state(mode, &state)),
-        }
+        Ok(self.ensure_provider_ready(mode).await)
     }
 
     async fn list_tools(&self, _mode: AppMode) -> Result<Vec<ToolDefinitionDto>, String> {
@@ -321,6 +504,7 @@ impl ToolProvider for BlenderProvider {
         }
         state.tools.clear();
         state.rag_index = self.load_rag_index();
+        state.last_error = None;
         Ok(())
     }
 }
@@ -333,20 +517,130 @@ mod tests {
     use crate::modes::provider::ToolProvider;
     use serde_json::json;
     use smolpc_assistant_types::AppMode;
-    use tempfile::tempdir;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex as StdMutex, OnceLock};
+    use tempfile::{tempdir, TempDir};
     use tokio::net::TcpListener;
+    use tokio::time::{sleep, Duration};
 
-    #[tokio::test]
-    async fn connected_state_includes_tool_definitions_when_bridge_starts() {
-        let provider = BlenderProvider::with_config(
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    fn write_blender_resources(root: &Path, metadata_contents: Option<&str>) {
+        let blender_root = root.join("blender");
+        std::fs::create_dir_all(blender_root.join("addon")).expect("addon dir");
+        std::fs::create_dir_all(blender_root.join("rag_system").join("simple_db"))
+            .expect("rag dir");
+        std::fs::write(blender_root.join("README.md"), "phase4 blender resources").expect("readme");
+        std::fs::write(
+            blender_root.join("addon").join("blender_helper_http.py"),
+            "# blender addon snapshot\n",
+        )
+        .expect("addon");
+        std::fs::write(
+            blender_root.join("manifest.json"),
+            r#"{
+              "version": "phase4-blender",
+              "source": "tests",
+              "expectedPaths": ["README.md", "rag_system", "addon/blender_helper_http.py"],
+              "status": "tracked"
+            }"#,
+        )
+        .expect("manifest");
+
+        if let Some(metadata_contents) = metadata_contents {
+            std::fs::write(
+                blender_root
+                    .join("rag_system")
+                    .join("simple_db")
+                    .join("metadata.json"),
+                metadata_contents,
+            )
+            .expect("metadata");
+        }
+    }
+
+    #[cfg(unix)]
+    fn write_fake_blender_script(root: &Path, addon_dir: &Path, log_path: &Path) -> PathBuf {
+        let blender_path = root.join("fake-blender");
+        let script = format!(
+            r#"#!/bin/sh
+ARGS="$*"
+TOKEN_PATH="${{LOCALAPPDATA}}/SmolPC/engine-runtime/bridge-token.txt"
+if printf '%s' "$ARGS" | grep -q "smolpc_blender_addon_dir_probe"; then
+  if [ -f "$TOKEN_PATH" ]; then printf 'token_present\n' >> "{log_path}"; else printf 'token_missing\n' >> "{log_path}"; fi
+  echo '{{"status":"ok","addonDir":"{addon_dir}"}}'
+  exit 0
+fi
+if printf '%s' "$ARGS" | grep -q "smolpc_blender_addon_enable"; then
+  if [ -f "$TOKEN_PATH" ]; then printf 'token_present\n' >> "{log_path}"; else printf 'token_missing\n' >> "{log_path}"; fi
+  printf 'enabled\n' >> "{log_path}"
+  echo '{{"status":"ok","loaded":true,"module":"blender_helper_http"}}'
+  exit 0
+fi
+printf 'launched\n' >> "{log_path}"
+exit 0
+"#,
+            addon_dir = addon_dir.display(),
+            log_path = log_path.display(),
+        );
+        std::fs::write(&blender_path, script).expect("script");
+        let mut permissions = std::fs::metadata(&blender_path)
+            .expect("metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&blender_path, permissions).expect("chmod");
+        blender_path
+    }
+
+    fn env_lock() -> &'static StdMutex<()> {
+        static LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| StdMutex::new(()))
+    }
+
+    #[cfg(unix)]
+    fn provider_with_fake_blender(
+        resource_temp: &TempDir,
+        app_temp: &TempDir,
+        blender_path: PathBuf,
+    ) -> BlenderProvider {
+        BlenderProvider::with_host_override(
             BridgeConfig {
                 host: "127.0.0.1".to_string(),
                 port: 0,
             },
-            None,
+            Some(resource_temp.path().to_path_buf()),
+            Some(app_temp.path().to_path_buf()),
+            Some(blender_path),
+        )
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn connected_state_includes_tool_definitions_when_bridge_starts() {
+        let _env_guard = env_lock().lock().unwrap_or_else(|error| error.into_inner());
+        let resource_temp = TempDir::new().expect("resource temp");
+        let app_temp = TempDir::new().expect("app temp");
+        let host_temp = TempDir::new().expect("host temp");
+        write_blender_resources(resource_temp.path(), None);
+        let log_path = host_temp.path().join("fake-blender.log");
+        let blender_path = write_fake_blender_script(
+            host_temp.path(),
+            &host_temp.path().join("addons"),
+            &log_path,
         );
+        let previous_local_app_data = std::env::var_os("LOCALAPPDATA");
+        std::env::set_var("LOCALAPPDATA", host_temp.path());
+
+        let provider = provider_with_fake_blender(&resource_temp, &app_temp, blender_path);
 
         let state = provider.status(AppMode::Blender).await.expect("status");
+        sleep(Duration::from_millis(75)).await;
+        match previous_local_app_data {
+            Some(value) => std::env::set_var("LOCALAPPDATA", value),
+            None => std::env::remove_var("LOCALAPPDATA"),
+        }
+
         assert_eq!(state.state, "connected");
 
         let tools = provider.list_tools(AppMode::Blender).await.expect("tools");
@@ -355,7 +649,7 @@ mod tests {
         assert!(state
             .detail
             .expect("detail")
-            .contains("No live Blender scene data"));
+            .contains("Bundled Blender addon"));
     }
 
     #[tokio::test]
@@ -369,6 +663,7 @@ mod tests {
                 host: "127.0.0.1".to_string(),
                 port,
             },
+            None,
             None,
         );
 
@@ -385,6 +680,7 @@ mod tests {
                 port: 0,
             },
             None,
+            None,
         );
 
         let result = provider
@@ -400,23 +696,17 @@ mod tests {
     #[tokio::test]
     async fn retrieve_rag_context_returns_results_when_metadata_is_loaded() {
         let temp_dir = tempdir().expect("temp dir");
-        let rag_dir = temp_dir
-            .path()
-            .join("resources")
-            .join("blender")
-            .join("rag_system")
-            .join("simple_db");
-        std::fs::create_dir_all(&rag_dir).expect("rag dir");
-        std::fs::write(
-            rag_dir.join("metadata.json"),
-            serde_json::to_string(&vec![json!({
-                "text": "Use the bevel modifier to soften edges",
-                "signature": "bpy.types.BevelModifier",
-                "url": "/bpy.types.BevelModifier.html"
-            })])
-            .expect("metadata json"),
-        )
-        .expect("write metadata");
+        write_blender_resources(
+            temp_dir.path(),
+            Some(
+                &serde_json::to_string(&vec![json!({
+                    "text": "Use the bevel modifier to soften edges",
+                    "signature": "bpy.types.BevelModifier",
+                    "url": "/bpy.types.BevelModifier.html"
+                })])
+                .expect("metadata json"),
+            ),
+        );
 
         let provider = BlenderProvider::with_config(
             BridgeConfig {
@@ -424,6 +714,7 @@ mod tests {
                 port: 0,
             },
             Some(temp_dir.path().to_path_buf()),
+            None,
         );
 
         let result = provider
@@ -439,27 +730,31 @@ mod tests {
         assert_eq!(result.payload["contexts"].as_array().map(Vec::len), Some(1));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn retrieval_load_failure_degrades_gracefully() {
-        let temp_dir = tempdir().expect("temp dir");
-        let rag_dir = temp_dir
-            .path()
-            .join("resources")
-            .join("blender")
-            .join("rag_system")
-            .join("simple_db");
-        std::fs::create_dir_all(&rag_dir).expect("rag dir");
-        std::fs::write(rag_dir.join("metadata.json"), "not valid json").expect("write metadata");
-
-        let provider = BlenderProvider::with_config(
-            BridgeConfig {
-                host: "127.0.0.1".to_string(),
-                port: 0,
-            },
-            Some(temp_dir.path().to_path_buf()),
+        let _env_guard = env_lock().lock().unwrap_or_else(|error| error.into_inner());
+        let resource_temp = TempDir::new().expect("resource temp");
+        let app_temp = TempDir::new().expect("app temp");
+        let host_temp = TempDir::new().expect("host temp");
+        write_blender_resources(resource_temp.path(), Some("not valid json"));
+        let log_path = host_temp.path().join("fake-blender.log");
+        let blender_path = write_fake_blender_script(
+            host_temp.path(),
+            &host_temp.path().join("addons"),
+            &log_path,
         );
+        let previous_local_app_data = std::env::var_os("LOCALAPPDATA");
+        std::env::set_var("LOCALAPPDATA", host_temp.path());
+
+        let provider = provider_with_fake_blender(&resource_temp, &app_temp, blender_path);
 
         let state = provider.status(AppMode::Blender).await.expect("status");
+        sleep(Duration::from_millis(75)).await;
+        match previous_local_app_data {
+            Some(value) => std::env::set_var("LOCALAPPDATA", value),
+            None => std::env::remove_var("LOCALAPPDATA"),
+        }
         assert_eq!(state.state, "connected");
         assert!(state
             .detail
@@ -467,15 +762,24 @@ mod tests {
             .contains("retrieval is unavailable"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn status_reports_live_scene_detail_when_scene_cache_has_data() {
-        let provider = BlenderProvider::with_config(
-            BridgeConfig {
-                host: "127.0.0.1".to_string(),
-                port: 0,
-            },
-            None,
+        let _env_guard = env_lock().lock().unwrap_or_else(|error| error.into_inner());
+        let resource_temp = TempDir::new().expect("resource temp");
+        let app_temp = TempDir::new().expect("app temp");
+        let host_temp = TempDir::new().expect("host temp");
+        write_blender_resources(resource_temp.path(), None);
+        let log_path = host_temp.path().join("fake-blender.log");
+        let blender_path = write_fake_blender_script(
+            host_temp.path(),
+            &host_temp.path().join("addons"),
+            &log_path,
         );
+        let previous_local_app_data = std::env::var_os("LOCALAPPDATA");
+        std::env::set_var("LOCALAPPDATA", host_temp.path());
+
+        let provider = provider_with_fake_blender(&resource_temp, &app_temp, blender_path);
 
         provider
             .status(AppMode::Blender)
@@ -493,22 +797,37 @@ mod tests {
         }
 
         let state = provider.status(AppMode::Blender).await.expect("status");
+        sleep(Duration::from_millis(75)).await;
+        match previous_local_app_data {
+            Some(value) => std::env::set_var("LOCALAPPDATA", value),
+            None => std::env::remove_var("LOCALAPPDATA"),
+        }
         let detail = state.detail.expect("detail");
         assert!(detail.contains("Live scene available"));
         assert!(detail.contains("active object: Cube"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn reconnect_restores_tool_definitions_after_disconnect() {
-        let provider = BlenderProvider::with_config(
-            BridgeConfig {
-                host: "127.0.0.1".to_string(),
-                port: 0,
-            },
-            None,
+        let _env_guard = env_lock().lock().unwrap_or_else(|error| error.into_inner());
+        let resource_temp = TempDir::new().expect("resource temp");
+        let app_temp = TempDir::new().expect("app temp");
+        let host_temp = TempDir::new().expect("host temp");
+        write_blender_resources(resource_temp.path(), None);
+        let log_path = host_temp.path().join("fake-blender.log");
+        let blender_path = write_fake_blender_script(
+            host_temp.path(),
+            &host_temp.path().join("addons"),
+            &log_path,
         );
+        let previous_local_app_data = std::env::var_os("LOCALAPPDATA");
+        std::env::set_var("LOCALAPPDATA", host_temp.path());
+
+        let provider = provider_with_fake_blender(&resource_temp, &app_temp, blender_path);
 
         provider.status(AppMode::Blender).await.expect("status");
+        sleep(Duration::from_millis(75)).await;
         assert_eq!(
             provider
                 .list_tools(AppMode::Blender)
@@ -540,5 +859,61 @@ mod tests {
                 .len(),
             2
         );
+        sleep(Duration::from_millis(75)).await;
+
+        match previous_local_app_data {
+            Some(value) => std::env::set_var("LOCALAPPDATA", value),
+            None => std::env::remove_var("LOCALAPPDATA"),
+        }
+    }
+
+    #[tokio::test]
+    async fn status_reports_missing_when_blender_host_is_unavailable() {
+        let provider = BlenderProvider::with_host_override(
+            BridgeConfig {
+                host: "127.0.0.1".to_string(),
+                port: 0,
+            },
+            None,
+            None,
+            Some(PathBuf::from("/definitely/missing/blender")),
+        );
+
+        let state = provider.status(AppMode::Blender).await.expect("status");
+        assert_eq!(state.state, "disconnected");
+        assert!(state
+            .detail
+            .expect("detail")
+            .contains("could not be detected"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn provider_starts_bridge_before_provisioning_the_addon() {
+        let _env_guard = env_lock().lock().unwrap_or_else(|error| error.into_inner());
+        let resource_temp = TempDir::new().expect("resource temp");
+        let app_temp = TempDir::new().expect("app temp");
+        let host_temp = TempDir::new().expect("host temp");
+        write_blender_resources(resource_temp.path(), None);
+        let log_path = host_temp.path().join("fake-blender.log");
+        let blender_path = write_fake_blender_script(
+            host_temp.path(),
+            &host_temp.path().join("addons"),
+            &log_path,
+        );
+        let previous_local_app_data = std::env::var_os("LOCALAPPDATA");
+        std::env::set_var("LOCALAPPDATA", host_temp.path());
+
+        let provider = provider_with_fake_blender(&resource_temp, &app_temp, blender_path);
+        let _ = provider.status(AppMode::Blender).await.expect("status");
+        sleep(Duration::from_millis(75)).await;
+
+        match previous_local_app_data {
+            Some(value) => std::env::set_var("LOCALAPPDATA", value),
+            None => std::env::remove_var("LOCALAPPDATA"),
+        }
+
+        let log = std::fs::read_to_string(&log_path).expect("log");
+        assert!(log.contains("token_present"));
     }
 }

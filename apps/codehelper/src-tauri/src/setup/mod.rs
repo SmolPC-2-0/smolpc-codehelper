@@ -1,3 +1,4 @@
+pub mod blender;
 pub mod host_apps;
 pub mod launch;
 pub mod manifests;

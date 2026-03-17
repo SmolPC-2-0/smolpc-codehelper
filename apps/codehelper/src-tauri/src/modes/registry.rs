@@ -33,7 +33,10 @@ impl ModeProviderRegistry {
         Self {
             code: Arc::new(CodeProvider),
             gimp: Arc::new(GimpProvider::default()),
-            blender: Arc::new(BlenderProvider::new(resource_dir.clone())),
+            blender: Arc::new(BlenderProvider::new(
+                resource_dir.clone(),
+                app_local_data_dir.clone(),
+            )),
             libreoffice: Arc::new(LibreOfficeProvider::new(resource_dir, app_local_data_dir)),
         }
     }

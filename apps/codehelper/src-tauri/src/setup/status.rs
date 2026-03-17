@@ -1,5 +1,6 @@
-use super::host_apps::{detect_all, HostAppDetection};
-use super::launch::phase2_launch_detail;
+use super::blender::blender_addon_item;
+use super::host_apps::{detect_all_with_policy, HostAppDetection};
+use super::launch::setup_launch_detail;
 use super::models::bundled_model_item;
 use super::python::bundled_python_item;
 use super::state::SetupState;
@@ -14,7 +15,10 @@ use smolpc_assistant_types::{
 pub async fn collect_setup_status(state: &SetupState) -> SetupStatusDto {
     let detections = {
         let mut cache = state.cache().await;
-        let detections = detect_all(&cache.resolved_host_apps);
+        let detections = detect_all_with_policy(
+            &cache.resolved_host_apps,
+            state.allow_system_host_detection(),
+        );
         cache.resolved_host_apps = detections
             .iter()
             .filter_map(|detection| {
@@ -34,7 +38,23 @@ pub async fn collect_setup_status(state: &SetupState) -> SetupStatusDto {
         state.resource_dir(),
         state.app_local_data_dir(),
     ));
-    items.extend(detections.into_iter().map(host_detection_item));
+    let blender_detection = detections
+        .iter()
+        .find(|detection| detection.id == SETUP_ITEM_HOST_BLENDER)
+        .cloned();
+    for detection in detections {
+        let is_blender = detection.id == SETUP_ITEM_HOST_BLENDER;
+        items.push(host_detection_item(detection));
+        if is_blender {
+            items.push(blender_addon_item(
+                state.resource_dir(),
+                state.app_local_data_dir(),
+                blender_detection
+                    .as_ref()
+                    .and_then(|value| value.path.as_deref()),
+            ));
+        }
+    }
 
     let last_error = {
         let cache = state.cache().await;
@@ -57,7 +77,7 @@ fn engine_runtime_item(state: &SetupState) -> SetupItemDto {
             detail: Some(format!(
                 "Shared engine runtime contract resolves through {}. {}",
                 setup_root.display(),
-                phase2_launch_detail()
+                setup_launch_detail()
             )),
             required: true,
             can_prepare: false,
@@ -66,7 +86,10 @@ fn engine_runtime_item(state: &SetupState) -> SetupItemDto {
             id: SETUP_ITEM_ENGINE_RUNTIME.to_string(),
             label: "Engine runtime".to_string(),
             state: SetupItemStateDto::Error,
-            detail: Some("Tauri app-local-data directory is unavailable, so setup roots cannot be created".to_string()),
+            detail: Some(
+                "Tauri app-local-data directory is unavailable, so setup roots cannot be created"
+                    .to_string(),
+            ),
             required: true,
             can_prepare: false,
         },
@@ -78,7 +101,7 @@ fn host_detection_item(detection: HostAppDetection) -> SetupItemDto {
     let detail = match detection.path.as_ref() {
         Some(path) => Some(format!("{} detected at {}", detection.label, path.display())),
         None => Some(format!(
-            "{} is not installed or could not be detected yet. Phase 2 only reports host-app presence; it does not launch or repair installs.",
+            "{} is not installed or could not be detected yet. Setup reports host-app presence and provider-owned repair state; interactive launch remains mode-driven.",
             detection.label
         )),
     };
@@ -125,6 +148,7 @@ fn overall_state_for_items(items: &[SetupItemDto], has_last_error: bool) -> Setu
 mod tests {
     use super::collect_setup_status;
     use crate::setup::state::SetupState;
+    use crate::setup::types::SETUP_ITEM_BLENDER_ADDON;
     use smolpc_assistant_types::{SetupItemStateDto, SetupOverallStateDto};
     use tempfile::TempDir;
 
@@ -135,16 +159,21 @@ mod tests {
         std::fs::create_dir_all(resource_temp.path().join("models")).expect("models root");
 
         let app_temp = TempDir::new().expect("app temp");
-        let state = SetupState::new(
+        let state = SetupState::with_host_detection(
             Some(resource_temp.path().to_path_buf()),
             Some(app_temp.path().to_path_buf()),
+            false,
         );
 
         let status = collect_setup_status(&state).await;
-        assert_eq!(status.items.len(), 6);
+        assert_eq!(status.items.len(), 7);
         assert!(status.items.iter().any(|item| item.id == "engine_runtime"));
         assert!(status.items.iter().any(|item| item.id == "bundled_model"));
         assert!(status.items.iter().any(|item| item.id == "bundled_python"));
+        assert!(status
+            .items
+            .iter()
+            .any(|item| item.id == SETUP_ITEM_BLENDER_ADDON));
     }
 
     #[tokio::test]
@@ -164,9 +193,10 @@ mod tests {
         .expect("manifest");
 
         let app_temp = TempDir::new().expect("app temp");
-        let state = SetupState::new(
+        let state = SetupState::with_host_detection(
             Some(resource_temp.path().to_path_buf()),
             Some(app_temp.path().to_path_buf()),
+            false,
         );
 
         let status = collect_setup_status(&state).await;
