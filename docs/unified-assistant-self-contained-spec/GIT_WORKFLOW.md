@@ -46,6 +46,11 @@ Every self-contained phase follows this exact sequence:
 
 Use separate clones, not worktrees.
 
+Rationale: this repository has repeatedly run into Tauri/Cargo artifact bleed,
+branch confusion, and AI-session context mistakes when multiple active
+workstreams share one checkout. Separate clones keep the frozen demo line and
+the self-contained line physically isolated.
+
 Recommended clone set:
 
 - one docs clone tracking `docs/unified-assistant-self-contained-spec`
