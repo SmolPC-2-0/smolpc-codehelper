@@ -29,6 +29,17 @@ Required fields:
 | Bundled `uv` tooling/runtime support           | packaging-side toolchain                                                                           | pending        | pending                                                           | not yet added                             | Phase 2 foundation import                                                                   |
 | Default bundled model `qwen3-4b-instruct-2507` | current engine-supported model artifact source                                                     | pending        | pending                                                           | not yet bundled                           | Phase 2 foundation import; exact packaged artifact validation is still required             |
 
+## Phase 2 Provenance Rule
+
+Phase 2 may add manifests and staging hooks for bundled Python and the default
+model, but it should not silently treat those artifacts as fully cleared for
+release packaging. The tracker must stay honest about:
+
+- exact pinned packaged artifact source
+- license review status
+- whether the payload is committed, staged at build time, or still pending
+- whether Windows packaged validation has actually been performed
+
 ## Per-Component Template
 
 ### Component Name

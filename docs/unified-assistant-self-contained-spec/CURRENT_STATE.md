@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-17
-**Status:** Demo line frozen; self-contained delivery line opened
+**Status:** Demo line frozen; self-contained Phase 2 foundation is the current phase
 
 ## 1. Branch State
 
@@ -98,34 +98,63 @@ The self-contained delivery line must ship:
 | Blender     | Bridge already owned by unified app; addon still external         | Bundle and provision addon from repo source                 |
 | GIMP        | Unified provider exists, but runtime/plugin ownership is external | Vendor pinned upstream `gimp-mcp` snapshot and provision it |
 
-## 6. Step 1 Status
+## 6. Phase Status
 
-Step 1 of the self-contained plan is this docs line:
+### Phase 1
+
+Complete:
 
 - branch cut and freeze policy documented
-- new mainlines established
+- new self-contained mainlines established
 - self-contained master plan documented
 - architecture, packaging, model, and provenance rules documented
 
-No implementation branch should open on the self-contained line until this
-docs baseline is merged into both new mainlines.
+### Phase 1A
 
-## 7. Next Official Branch
+Complete:
 
-After this docs baseline merges through the new mainlines, the next branch is:
+- baseline cleanup docs merged into `docs/unified-assistant-self-contained-spec`
+- baseline cleanup sync merged into `dev/unified-assistant-self-contained`
+- docs-sync and status-sync workflow now documented as required branch policy
 
-- `codex/unified-self-contained-foundation-docs`
+### Phase 2
 
-That phase establishes:
+Current phase:
+
+- foundation docs are the active workstream
+- no implementation branch should open until the Phase 2 docs preflight is
+  merged into both self-contained mainlines
+
+## 7. Phase 2 Scope
+
+Phase 2 establishes the self-contained foundation only:
 
 - setup/provisioning subsystem
-- host-app detection
-- resource manifests
-- bundled Python ownership
-- bundled default model ownership
-- startup orchestration
+- host-app detection for GIMP, Blender, and LibreOffice
+- resource manifests for bundled assets
+- bundled Python ownership scaffolding
+- bundled default model ownership scaffolding
+- setup status and repair surface
 
-## 8. Known Risks
+Phase 2 does not yet include:
+
+- Blender addon provisioning
+- GIMP plugin/server provisioning
+- LibreOffice runtime switchover to bundled Python
+- host-app launch orchestration
+- Calc activation
+
+## 8. Next Official Branches
+
+The next required branch sequence is:
+
+1. `codex/unified-self-contained-foundation-docs`
+2. `codex/unified-self-contained-foundation-docs-sync`
+3. `codex/unified-self-contained-foundation`
+4. `codex/unified-self-contained-foundation-status-docs`
+5. `codex/unified-self-contained-foundation-status-sync`
+
+## 9. Known Risks
 
 | Risk                   | Why it matters                                                                                                   |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
