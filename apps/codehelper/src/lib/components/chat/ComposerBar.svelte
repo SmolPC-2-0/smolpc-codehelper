@@ -27,7 +27,7 @@
 		isGenerating
 			? 'Generating response...'
 			: disabledReason
-				? 'Chat execution is not available in this mode yet.'
+				? placeholder
 				: !isLoaded
 					? 'Loading model...'
 					: placeholder

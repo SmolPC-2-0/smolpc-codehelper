@@ -43,10 +43,18 @@
 	let showShortcutsOverlay = $state(false);
 	const NON_CODE_DISABLED_REASON =
 		'This mode is visible in the unified shell, but chat execution is not wired yet.';
+	const LIBREOFFICE_DISABLED_REASON =
+		'LibreOffice integration is scaffolded in the unified app, but live document actions are not wired yet.';
 	const GIMP_COMPOSER_PLACEHOLDER =
 		'Describe the change you want to make to the image (Shift+Enter for new line)...';
 	const BLENDER_COMPOSER_PLACEHOLDER =
 		'Ask about your Blender scene or a Blender workflow (Shift+Enter for new line)...';
+	const WRITER_COMPOSER_PLACEHOLDER =
+		'LibreOffice Writer is scaffolded here, but live document chat is not active yet.';
+	const CALC_COMPOSER_PLACEHOLDER =
+		'LibreOffice Calc is scaffolded here, but live spreadsheet chat is not active yet.';
+	const SLIDES_COMPOSER_PLACEHOLDER =
+		'LibreOffice Slides is scaffolded here, but live presentation chat is not active yet.';
 
 	const activeMode = $derived(modeStore.activeMode);
 	const activeModeConfig = $derived(modeStore.activeConfig);
@@ -59,9 +67,7 @@
 	const canUseGimpPath = $derived(activeMode === 'gimp');
 	const canUseBlenderPath = $derived(activeMode === 'blender');
 	const isUnifiedRequestRunning = $derived(
-		currentUnifiedMode !== null &&
-			currentUnifiedChatId !== null &&
-			currentUnifiedMessageId !== null
+		currentUnifiedMode !== null && currentUnifiedChatId !== null && currentUnifiedMessageId !== null
 	);
 	const isGimpRequestRunning = $derived(currentUnifiedMode === 'gimp' && isUnifiedRequestRunning);
 	const isBlenderRequestRunning = $derived(
@@ -78,9 +84,50 @@
 	const canExport = $derived(
 		Boolean(activeModeConfig?.capabilities.showExport) && messages.length > 0
 	);
+	function isLibreOfficeMode(mode: AppMode): boolean {
+		return mode === 'writer' || mode === 'calc' || mode === 'impress';
+	}
+
+	function composerPlaceholderForMode(mode: AppMode): string {
+		switch (mode) {
+			case 'gimp':
+				return GIMP_COMPOSER_PLACEHOLDER;
+			case 'blender':
+				return BLENDER_COMPOSER_PLACEHOLDER;
+			case 'writer':
+				return WRITER_COMPOSER_PLACEHOLDER;
+			case 'calc':
+				return CALC_COMPOSER_PLACEHOLDER;
+			case 'impress':
+				return SLIDES_COMPOSER_PLACEHOLDER;
+			case 'code':
+			default:
+				return 'Ask a coding question (Shift+Enter for new line)...';
+		}
+	}
+
+	function defaultChatTitleForMode(mode: AppMode): string {
+		switch (mode) {
+			case 'code':
+				return 'New Code Chat';
+			case 'gimp':
+				return 'New GIMP Chat';
+			case 'blender':
+				return 'New Blender Chat';
+			case 'writer':
+				return 'New Writer Chat';
+			case 'calc':
+				return 'New Calc Chat';
+			case 'impress':
+				return 'New Slides Chat';
+			default:
+				return 'New Chat';
+		}
+	}
+
 	const composerDisabledReason = $derived.by(() => {
 		if (!hasLiveComposer) {
-			return NON_CODE_DISABLED_REASON;
+			return isLibreOfficeMode(activeMode) ? LIBREOFFICE_DISABLED_REASON : NON_CODE_DISABLED_REASON;
 		}
 
 		if (canUseCodePath && isUnifiedRequestRunning) {
@@ -111,23 +158,8 @@
 					? isBlenderRequestRunning
 					: false
 	);
-	const composerPlaceholder = $derived(
-		canUseGimpPath
-			? GIMP_COMPOSER_PLACEHOLDER
-			: canUseBlenderPath
-				? BLENDER_COMPOSER_PLACEHOLDER
-			: 'Ask a coding question (Shift+Enter for new line)...'
-	);
-	const pageTitle = $derived(
-		currentChat?.title ??
-			(activeMode === 'code'
-				? 'New Code Chat'
-				: activeMode === 'gimp'
-					? 'New GIMP Chat'
-					: activeMode === 'blender'
-						? 'New Blender Chat'
-					: 'New Chat')
-	);
+	const composerPlaceholder = $derived(composerPlaceholderForMode(activeMode));
+	const pageTitle = $derived(currentChat?.title ?? defaultChatTitleForMode(activeMode));
 	const showBenchmarkPanel = $derived(uiStore.activeOverlay === 'benchmark');
 	const showHardwarePanel = $derived(uiStore.activeOverlay === 'hardware');
 	const showModelInfoPanel = $derived(uiStore.activeOverlay === 'modelInfo');

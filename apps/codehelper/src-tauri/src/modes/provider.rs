@@ -3,7 +3,6 @@ use smolpc_assistant_types::{
     AppMode, ProviderStateDto, ToolDefinitionDto, ToolExecutionResultDto,
 };
 
-pub const FOUNDATION_NOT_INTEGRATED_DETAIL: &str = "Provider not integrated yet";
 pub const FOUNDATION_PROVIDER_EXECUTION_NOT_IMPLEMENTED: &str =
     "UNIFIED_PROVIDER_EXECUTION_NOT_IMPLEMENTED";
 
