@@ -318,8 +318,6 @@ Examples:
 - Writer: "Draft an introduction for this report", "Rewrite this paragraph for clarity", "Summarize these meeting notes"
 - Calc: "Explain what this formula should do", "Outline a grade tracker sheet", "Suggest a clean table layout"
 - Slides: "Turn these notes into slide bullets", "Suggest a three-slide deck outline", "Improve this presentation structure"
-- Calc: "Explain this formula", "Build a grade table", "Clean this data"
-- Slides: "Draft slide bullets", "Turn notes into slides", "Improve this outline"
 
 ## 11. Tauri Command Contracts
 
