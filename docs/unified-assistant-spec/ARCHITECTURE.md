@@ -242,9 +242,11 @@ After Phase 6A:
 1. `LibreOfficeProvider` is still shared by Writer / Calc / Slides.
 2. Writer / Calc / Slides remain disabled placeholder modes in the shell.
 3. `assistant_send` remains scaffold-only for LibreOffice modes.
-4. Shared stdio MCP transport support exists in `smolpc-mcp-client`, but the
-   LibreOffice provider does not activate the runtime yet.
-5. The tracked staged resource root for future LibreOffice MCP assets is:
+4. Shared stdio MCP transport support now exists in `smolpc-mcp-client`
+   through the same client layer used by future MCP-backed providers.
+5. The LibreOffice provider remains scaffold-only and validates resources
+   without launching a runtime.
+6. The tracked staged resource root for future LibreOffice MCP assets is:
    `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/`
 
 ## 9. Repository Boundaries

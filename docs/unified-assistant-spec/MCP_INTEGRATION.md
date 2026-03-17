@@ -319,9 +319,9 @@ The transport call is async from the start because stdio and TCP MCP flows are
 inherently asynchronous. The foundation branch must not ship a synchronous call
 signature that later mode branches would need to break.
 
-Phase 6A extends this crate with shared stdio transport support so the unified
-LibreOffice provider can later use the same client layer as the other provider
-families instead of importing a standalone-app-specific MCP client.
+Phase 6A now extends this crate with shared stdio transport support so the
+unified LibreOffice provider can later use the same client layer as the other
+provider families instead of importing a standalone-app-specific MCP client.
 
 ## 6. DTO Contracts
 
@@ -473,6 +473,8 @@ provider scaffold:
 - `mode_refresh_tools(writer|calc|impress)` validates the staged scaffold only
   and does not launch a LibreOffice runtime
 - `available_tools` remains empty for LibreOffice modes in this phase
+- the shared MCP layer now exposes `StdioJsonRpcClient` and
+  `McpSession::connect_stdio(...)` for the later activation phase
 - Calc is explicitly not required to be live in this phase because the current
   source branch does not yet provide parity-level spreadsheet tooling
 
