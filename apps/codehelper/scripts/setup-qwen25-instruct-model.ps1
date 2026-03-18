@@ -13,6 +13,8 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+. (Join-Path $PSScriptRoot "common-dml-builder.ps1")
+
 function Require-PythonModule {
     param([string]$ModuleName)
     $prev = $ErrorActionPreference
@@ -157,48 +159,26 @@ print(snapshot_download(**kwargs))
 
 if (-not $SkipDml) {
     Write-Host ""
-    Write-Host "Checking onnxruntime-genai-directml..."
-
-    $ErrorActionPreference = "Continue"
-    python -c "import onnxruntime_genai_directml" 2>$null
-    $ErrorActionPreference = "Stop"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Installing onnxruntime-genai-directml..."
-        pip install onnxruntime-genai-directml --quiet
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to install onnxruntime-genai-directml."
-        }
-    }
-
-    New-Item -ItemType Directory -Force -Path $dmlDir | Out-Null
-
     Write-Host "Exporting DirectML GenAI artifact from $DmlSourceModel ..."
 
     $tokenArg = if ([string]::IsNullOrWhiteSpace($resolvedToken)) { "hf_token=false" } else { "hf_token=$resolvedToken" }
+    $dmlLogPath = Get-DmlExportLogPath -ModelId $ModelId -SourceLabel "selfbuild"
 
-    python -m onnxruntime_genai.models.builder `
-        -m $DmlSourceModel `
-        -o $dmlDir `
-        -p $DmlPrecision `
-        -e dml `
-        --extra_options $tokenArg
+    $builderEnvironment = Invoke-DmlModelBuilder `
+        -ModelName $DmlSourceModel `
+        -OutputDir $dmlDir `
+        -Precision $DmlPrecision `
+        -ExecutionProvider "dml" `
+        -ExtraOptions @($tokenArg) `
+        -LogPath $dmlLogPath
 
-    if ($LASTEXITCODE -ne 0) {
-        throw "DirectML export failed with exit code $LASTEXITCODE."
+    $dmlValidation = Assert-DmlArtifactReady -ArtifactDir $dmlDir
+    Write-Host "DirectML builder env: $($builderEnvironment.Root)"
+    Write-Host "DirectML export log: $dmlLogPath"
+    if ((Get-DmlStringArray -Value $dmlValidation.external_refs).Count -gt 0) {
+        Write-Host "DirectML external data: $($dmlValidation.external_refs -join ', ')"
     }
-
-    $requiredDml = @("model.onnx", "genai_config.json", "tokenizer.json")
-    $missingDml = @(
-        foreach ($file in $requiredDml) {
-            if (-not (Test-Path (Join-Path $dmlDir $file) -PathType Leaf)) { $file }
-        }
-    )
-
-    if ($missingDml.Count -gt 0) {
-        Write-Warning "DirectML lane incomplete. Missing: $($missingDml -join ', ')"
-    } else {
-        Write-Host "DirectML lane staged successfully at: $dmlDir"
-    }
+    Write-Host "DirectML lane staged successfully at: $dmlDir"
 }
 
 # ---------------------------------------------------------------------------
