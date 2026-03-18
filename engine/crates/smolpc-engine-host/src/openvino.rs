@@ -15,6 +15,7 @@ const DEFAULT_OPENVINO_NPU_MAX_PROMPT_LEN: usize = 512;
 const DEFAULT_OPENVINO_NPU_MIN_RESPONSE_LEN: usize = 1024;
 const DEFAULT_QWEN_EOS_TOKEN_ID: i64 = 151645;
 const DEFAULT_QWEN_STOP_TOKEN_IDS: [i64; 2] = [151643, 151645];
+const QWEN25_OPENVINO_MODEL_ID: &str = "qwen2.5-1.5b-instruct";
 const QWEN3_OPENVINO_MODEL_ID: &str = "qwen3-4b";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -582,6 +583,19 @@ pub(crate) fn openvino_model_tuning_for_model(model_id: &str) -> OpenVinoModelTu
         };
     }
 
+    if model_id == QWEN25_OPENVINO_MODEL_ID {
+        return OpenVinoModelTuning {
+            request_defaults: Some(GenerationConfig {
+                temperature: 0.7,
+                top_p: Some(0.8),
+                top_k: Some(20),
+                ..GenerationConfig::default()
+            }),
+            disable_thinking: false,
+            presence_penalty: Some(1.5),
+        };
+    }
+
     OpenVinoModelTuning::default()
 }
 
@@ -607,7 +621,7 @@ pub(crate) fn openvino_generation_controls_for_model(
             .as_ref()
             .and_then(|config| config.eos_token_id)
             .or(Some(DEFAULT_QWEN_EOS_TOKEN_ID)),
-        min_new_tokens: Some(1),
+        min_new_tokens: None,
         stop_token_ids: Some(stop_token_ids),
         // stop_strings operates on accumulated decoded text (incl. special tokens) — catches
         // <|im_end|> even when the NPU StaticLLMPipeline doesn't honour stop_token_ids reliably.
@@ -771,6 +785,22 @@ mod tests {
             .expect("qwen3 should provide request defaults");
 
         assert!(tuning.disable_thinking);
+        assert_eq!(tuning.presence_penalty, Some(1.5));
+        assert_eq!(defaults.temperature, 0.7);
+        assert_eq!(defaults.top_p, Some(0.8));
+        assert_eq!(defaults.top_k, Some(20));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn qwen25_openvino_tuning_matches_cpu_defaults() {
+        let tuning = openvino_model_tuning_for_model("qwen2.5-1.5b-instruct");
+        let defaults = tuning
+            .request_defaults
+            .as_ref()
+            .expect("qwen2.5 should provide request defaults");
+
+        assert!(!tuning.disable_thinking);
         assert_eq!(tuning.presence_penalty, Some(1.5));
         assert_eq!(defaults.temperature, 0.7);
         assert_eq!(defaults.top_p, Some(0.8));

@@ -720,6 +720,7 @@ fn generate_stream_blocking(
         .lock()
         .map_err(|_| "OpenVINO GenAI state mutex poisoned".to_string())?;
     let gen_config = clamp_max_new_tokens(gen_config, guard.max_new_tokens_cap);
+    let max_callback_count = gen_config.max_length;
     let config = create_generation_config(&guard, gen_config, &guard.generation_controls)?;
     let start = Instant::now();
     let mut callback_state = StreamCallbackState {
@@ -732,6 +733,8 @@ fn generate_stream_blocking(
             .stop_strings
             .clone()
             .unwrap_or_default(),
+        callback_count: 0,
+        max_callback_count,
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -751,6 +754,7 @@ fn generate_stream_with_history_blocking(
         .lock()
         .map_err(|_| "OpenVINO GenAI state mutex poisoned".to_string())?;
     let gen_config = clamp_max_new_tokens(gen_config, guard.max_new_tokens_cap);
+    let max_callback_count = gen_config.max_length;
     let config = create_generation_config(&guard, gen_config, &guard.generation_controls)?;
     let history = create_chat_history(&guard.api, &messages, guard.disable_thinking)?;
     let start = Instant::now();
@@ -764,6 +768,8 @@ fn generate_stream_with_history_blocking(
             .stop_strings
             .clone()
             .unwrap_or_default(),
+        callback_count: 0,
+        max_callback_count,
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -1199,6 +1205,10 @@ struct StreamCallbackState {
     trailing_dot_run: usize,
     accumulated: String,
     stop_strings: Vec<String>,
+    /// Safety-net token counter — stops generation if the C-level max_new_tokens
+    /// is not honoured for any reason (e.g. pipeline bug or ABI mismatch).
+    callback_count: usize,
+    max_callback_count: usize,
 }
 
 unsafe extern "C" fn stream_callback(
@@ -1216,6 +1226,17 @@ unsafe extern "C" fn stream_callback(
 
     if !text.is_null() {
         let piece = c_string_to_string_verbatim(text);
+        if !piece.is_empty() {
+            state.callback_count += 1;
+            if state.callback_count > state.max_callback_count {
+                log::warn!(
+                    "Stopping OpenVINO stream: callback count ({}) exceeded safety limit ({})",
+                    state.callback_count,
+                    state.max_callback_count,
+                );
+                return OvGenAiStreamingStatus::Stop;
+            }
+        }
         state.accumulated.push_str(&piece);
         for stop in &state.stop_strings {
             if state.accumulated.contains(stop.as_str()) {
