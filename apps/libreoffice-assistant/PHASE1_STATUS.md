@@ -62,6 +62,17 @@ Primary planning doc for next phases:
    - app orchestration/state moved from `src/App.svelte` into `src/lib/stores/libreofficeController.svelte.ts`
    - UI panel sections modularized under `src/lib/components/*`
    - `src/App.svelte` reduced to composition/wiring layer
+13. Source-parity UX/store migration slice (chat/settings) (2026-03-19):
+   - added source-parity settings/chat stores:
+     - `src/lib/stores/libreofficeSettings.svelte.ts`
+     - `src/lib/stores/libreofficeChat.svelte.ts`
+   - added source-parity chat/settings UI:
+     - `src/lib/components/SourceParityPanel.svelte`
+     - `src/lib/components/SourceParitySettingsPage.svelte`
+   - wired settings into controller runtime behavior:
+     - selected model synchronization
+     - `python_path` passed to MCP startup calls
+     - workflow prompt/config overrides (`system_prompt`, `temperature`, `max_tokens`)
 
 ## Validation run (local)
 
@@ -127,3 +138,13 @@ Tracked in:
 6. Validation artifacts documented in:
    - `apps/libreoffice-assistant/WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md`
    - `apps/libreoffice-assistant/WINDOWS_PHASE3_TEAMMATE_RESULTS_2026-03-15.md`
+
+## Phase 5 source-parity chat/settings slice validation (2026-03-19)
+
+1. Source-parity stores and UI components added under `src/lib/stores` and `src/lib/components`.
+2. Local frontend and backend validations passed:
+   - `npm run check:libreoffice`
+   - `npm run build:libreoffice`
+   - `cargo test -p smolpc-libreoffice-assistant --lib`
+3. Active phase planning doc:
+   - `apps/libreoffice-assistant/PHASE5_SOURCE_PARITY_CHAT_SETTINGS_PLAN.md`
