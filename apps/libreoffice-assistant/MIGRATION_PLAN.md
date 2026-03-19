@@ -66,7 +66,7 @@ Every active LibreOffice phase must use this 3-step delivery workflow:
 
 Current active phase plan:
 
-1. `apps/libreoffice-assistant/PHASE4_FRONTEND_CONTROLLER_PLAN.md`
+1. `apps/libreoffice-assistant/PHASE5_SOURCE_PARITY_CHAT_SETTINGS_PLAN.md`
    - Status (2026-03-19): completed
 
 ## Deferred
@@ -102,10 +102,14 @@ Implemented:
    - `src/App.svelte` now acts as composition shell
    - orchestration/state moved to `src/lib/stores/libreofficeController.svelte.ts`
    - panel UI split into `src/lib/components/*`
+10. Source-parity UX/store migration (chat/settings slice) completed:
+    - source-parity settings/chat stores added
+    - source-parity chat/settings workspace added in app UI
+    - settings now drive workflow prompt/config and MCP python command selection
 
 Not implemented yet:
 
-1. Full source-parity UX/store migration from the external LibreOffice app.
+1. Remaining source-parity UX slices beyond chat/settings (for example dependency-loading UX parity and additional source screens if reactivated).
 2. Additional teammate machine matrix entries beyond the required Windows hard gate.
 
 ## Verification and quality gates
@@ -127,12 +131,13 @@ Runtime regression gates (no behavior changes expected):
 Use docs in this order:
 
 1. `MIGRATION_PLAN.md` for active implementation sequence and current scope.
-2. `UNIFIED_FRONTEND_HANDOFF.md` for teammate merge contract.
-3. `LIBREOFFICE_SOURCE_REPO_ANALYSIS.md` for source audit details and mapping rationale.
-4. `PHASE1_STATUS.md` for completed baseline and validation evidence.
-5. `WINDOWS_PHASE1_VERIFICATION.md` for runtime evidence capture steps.
-6. `WINDOWS_PHASE2_MCP_VERIFICATION.md` for MCP bridge validation on Windows.
-7. `WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md` for chat/tool workflow validation matrix.
-8. `WINDOWS_PHASE3_TEAMMATE_RESULTS_TEMPLATE.md` for teammate result capture format.
-9. `WINDOWS_PHASE3_TEAMMATE_RESULTS_2026-03-15.md` for completed Windows lane matrix evidence.
-10. `WINDOWS_INSTALLER_REGISTRATION.md` for legacy/deferred launcher registration contract reference.
+2. `PHASE5_SOURCE_PARITY_CHAT_SETTINGS_PLAN.md` for active phase scope and acceptance.
+3. `UNIFIED_FRONTEND_HANDOFF.md` for teammate merge contract.
+4. `LIBREOFFICE_SOURCE_REPO_ANALYSIS.md` for source audit details and mapping rationale.
+5. `PHASE1_STATUS.md` for completed baseline and validation evidence.
+6. `WINDOWS_PHASE1_VERIFICATION.md` for runtime evidence capture steps.
+7. `WINDOWS_PHASE2_MCP_VERIFICATION.md` for MCP bridge validation on Windows.
+8. `WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md` for chat/tool workflow validation matrix.
+9. `WINDOWS_PHASE3_TEAMMATE_RESULTS_TEMPLATE.md` for teammate result capture format.
+10. `WINDOWS_PHASE3_TEAMMATE_RESULTS_2026-03-15.md` for completed Windows lane matrix evidence.
+11. `WINDOWS_INSTALLER_REGISTRATION.md` for legacy/deferred launcher registration contract reference.
