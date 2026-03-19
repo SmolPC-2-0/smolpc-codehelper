@@ -67,6 +67,7 @@ Every active LibreOffice phase must use this 3-step delivery workflow:
 Current active phase plan:
 
 1. `apps/libreoffice-assistant/PHASE4_FRONTEND_CONTROLLER_PLAN.md`
+   - Status (2026-03-19): completed
 
 ## Deferred
 
@@ -97,6 +98,10 @@ Implemented:
    - cleanup-safe initialization failure handling
    - long-lived response pump with request/response ID correlation
 8. Phase 3 acceptance artifacts captured for DirectML and CPU fallback lanes.
+9. Unified frontend controller extraction completed:
+   - `src/App.svelte` now acts as composition shell
+   - orchestration/state moved to `src/lib/stores/libreofficeController.svelte.ts`
+   - panel UI split into `src/lib/components/*`
 
 Not implemented yet:
 
