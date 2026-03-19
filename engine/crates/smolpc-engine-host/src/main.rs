@@ -308,6 +308,7 @@ const STARTUP_PROBE_WAIT_MS: u64 = 1_500;
 /// Extended probe budget for DirectML startup.
 /// Worst-case total probe wait: STARTUP_PROBE_WAIT_MS + STARTUP_PROBE_RECOVERY_WAIT_MS.
 const STARTUP_PROBE_RECOVERY_WAIT_MS: u64 = 8_000;
+const STARTUP_PROBE_TOTAL_WAIT_MS: u64 = STARTUP_PROBE_WAIT_MS + STARTUP_PROBE_RECOVERY_WAIT_MS;
 const OPENVINO_STARTUP_PROBE_WAIT: Duration = Duration::from_secs(30);
 const OPENVINO_PREFLIGHT_BUDGET: Duration = Duration::from_secs(300);
 const OPENVINO_SELECTION_PROFILE: &str = "openvino_native_v1";
@@ -329,6 +330,8 @@ struct BackendProbeResult {
     available_backends: Vec<InferenceBackend>,
     directml_device_count: usize,
     directml_candidate: Option<DirectMlCandidate>,
+    directml_probe_failure_class: Option<String>,
+    directml_probe_failure_message: Option<String>,
     npu_hardware_detected: bool,
 }
 
@@ -338,7 +341,30 @@ impl Default for BackendProbeResult {
             available_backends: vec![InferenceBackend::Cpu],
             directml_device_count: 0,
             directml_candidate: None,
+            directml_probe_failure_class: None,
+            directml_probe_failure_message: None,
             npu_hardware_detected: false,
+        }
+    }
+}
+
+impl BackendProbeResult {
+    fn directml_probe_failure(class: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            directml_probe_failure_class: Some(class.into()),
+            directml_probe_failure_message: Some(message.into()),
+            ..Self::default()
+        }
+    }
+
+    fn directml_ready_gate_failure(&self) -> Option<String> {
+        if self.directml_candidate.is_some() {
+            return None;
+        }
+
+        match self.directml_probe_failure_class.as_deref() {
+            Some("directml_candidate_missing") => Some("directml_candidate_missing".to_string()),
+            _ => None,
         }
     }
 }
@@ -662,9 +688,14 @@ fn pick_best_dml_candidate(gpus: &[hardware_query::GPUInfo]) -> Option<DirectMlC
 
 #[cfg(target_os = "windows")]
 fn probe_backend_capabilities() -> BackendProbeResult {
-    let queried = hardware_query::HardwareInfo::query();
-    let Ok(info) = queried else {
-        return BackendProbeResult::default();
+    let info = match hardware_query::HardwareInfo::query() {
+        Ok(info) => info,
+        Err(error) => {
+            return BackendProbeResult::directml_probe_failure(
+                "directml_startup_probe_failed",
+                format!("DirectML hardware query failed: {error}"),
+            );
+        }
     };
     let directml_device_count = info
         .gpus()
@@ -679,6 +710,10 @@ fn probe_backend_capabilities() -> BackendProbeResult {
     if let Some(candidate) = pick_best_dml_candidate(info.gpus()) {
         result.available_backends.push(InferenceBackend::DirectML);
         result.directml_candidate = Some(candidate);
+    } else {
+        result.directml_probe_failure_class = Some("directml_candidate_missing".to_string());
+        result.directml_probe_failure_message =
+            Some("No DirectML-capable adapter detected".to_string());
     }
     result
 }
@@ -872,9 +907,14 @@ fn apply_directml_startup_probe_status(status: &mut BackendStatus, probe: &Backe
         );
     } else {
         status.lanes.directml.startup_probe_state = LaneStartupProbeState::Error;
-        status.lanes.directml.last_failure_class = Some("directml_candidate_missing".to_string());
-        status.lanes.directml.last_failure_message =
-            Some("No DirectML-capable adapter detected".to_string());
+        status.lanes.directml.last_failure_class = probe
+            .directml_probe_failure_class
+            .clone()
+            .or_else(|| Some("directml_candidate_missing".to_string()));
+        status.lanes.directml.last_failure_message = probe
+            .directml_probe_failure_message
+            .clone()
+            .or_else(|| Some("No DirectML-capable adapter detected".to_string()));
         apply_directml_device(status, None, None);
     }
     rebuild_available_backends(status);
@@ -1008,9 +1048,8 @@ fn build_check_model_response(
     let cpu_bundle_ready = runtime_bundles.openvino.cpu_validated();
     let directml_bundle_ready = runtime_bundles.ort.directml_validated();
     let openvino_bundle_ready = runtime_bundles.openvino.npu_validated();
-    let directml_detected = startup_probe
-        .and_then(|probe| probe.directml_candidate.as_ref())
-        .is_some();
+    let directml_ready_gate_failure =
+        startup_probe.and_then(BackendProbeResult::directml_ready_gate_failure);
     let openvino_probe_ready = openvino_probe.is_some_and(|probe| probe.startup_ready);
     let openvino_probe_failure = openvino_probe.and_then(|probe| {
         probe
@@ -1035,15 +1074,15 @@ fn build_check_model_response(
     let directml = ModelLaneReadiness {
         artifact_ready: artifacts.directml_ready,
         bundle_ready: directml_bundle_ready,
-        ready: artifacts.directml_ready && directml_bundle_ready && directml_detected,
+        ready: artifacts.directml_ready
+            && directml_bundle_ready
+            && directml_ready_gate_failure.is_none(),
         reason: if !artifacts.directml_ready {
             "artifact_missing".to_string()
         } else if !directml_bundle_ready {
             bundle_reason(runtime_bundles.ort.directml_failure_code())
-        } else if startup_probe.is_none() {
-            "startup_probe_pending".to_string()
-        } else if !directml_detected {
-            "directml_candidate_missing".to_string()
+        } else if let Some(failure) = directml_ready_gate_failure {
+            failure
         } else {
             "ready".to_string()
         },
@@ -1291,12 +1330,35 @@ impl EngineState {
     fn launch_startup_probe(self: &Arc<Self>) {
         let engine = Arc::clone(self);
         tokio::spawn(async move {
-            let probed = tokio::task::spawn_blocking(probe_backend_capabilities)
-                .await
-                .unwrap_or_else(|error| {
+            let probe_budget = Duration::from_millis(STARTUP_PROBE_TOTAL_WAIT_MS);
+            let probed = match timeout(
+                probe_budget,
+                tokio::task::spawn_blocking(probe_backend_capabilities),
+            )
+            .await
+            {
+                Ok(Ok(probed)) => probed,
+                Ok(Err(error)) => {
                     log::warn!("Backend startup probe task failed: {error}");
-                    BackendProbeResult::default()
-                });
+                    BackendProbeResult::directml_probe_failure(
+                        "directml_startup_probe_failed",
+                        format!("DirectML startup probe task failed: {error}"),
+                    )
+                }
+                Err(_) => {
+                    log::warn!(
+                        "Backend startup probe timed out after {} ms",
+                        probe_budget.as_millis()
+                    );
+                    BackendProbeResult::directml_probe_failure(
+                        "directml_startup_probe_timeout",
+                        format!(
+                            "DirectML hardware probe did not complete within {} ms",
+                            probe_budget.as_millis()
+                        ),
+                    )
+                }
+            };
 
             {
                 let mut probe_guard = engine.startup_probe.lock().await;
@@ -1311,6 +1373,8 @@ impl EngineState {
                     status.selection_state = Some(BackendSelectionState::Ready);
                     status.selection_reason = Some(if probed.directml_candidate.is_some() {
                         "startup_probe_ready".to_string()
+                    } else if let Some(class) = probed.directml_probe_failure_class.as_deref() {
+                        class.to_string()
                     } else {
                         "startup_probe_cpu_only".to_string()
                     });
@@ -3908,6 +3972,8 @@ mod tests {
                 adapter_identity: "intel:arc".to_string(),
                 driver_version: "31.0.101.5522".to_string(),
             }),
+            directml_probe_failure_class: None,
+            directml_probe_failure_message: None,
             npu_hardware_detected: false,
         };
 
@@ -3921,6 +3987,109 @@ mod tests {
         assert_eq!(response.lanes.directml.reason, "ready");
         assert!(!response.lanes.openvino_npu.ready);
         assert_eq!(response.lanes.openvino_npu.reason, "startup_probe_pending");
+    }
+
+    #[test]
+    fn check_model_response_keeps_directml_ready_while_probe_is_pending() {
+        let _guard = lock_env();
+        let temp = tempdir().expect("temp dir");
+        let resource_dir = temp.path().join("resources");
+        let libs = resource_dir.join("libs");
+        let models_dir = temp.path().join("models");
+        let model_dir = models_dir.join("qwen2.5-1.5b-instruct");
+        let dml_dir = model_dir.join("dml");
+        let openvino_dir = model_dir.join("openvino");
+
+        create_ort_files(
+            &libs,
+            &[
+                "onnxruntime.dll",
+                "onnxruntime_providers_shared.dll",
+                "onnxruntime-genai.dll",
+                "DirectML.dll",
+            ],
+        );
+        create_openvino_files(&libs.join("openvino"));
+        fs::create_dir_all(&dml_dir).expect("create dml dir");
+        fs::create_dir_all(&openvino_dir).expect("create openvino dir");
+        fs::write(dml_dir.join("model.onnx"), []).expect("write dml model");
+        fs::write(dml_dir.join("genai_config.json"), []).expect("write dml config");
+        fs::write(dml_dir.join("tokenizer.json"), []).expect("write dml tokenizer");
+        fs::write(openvino_dir.join("model.xml"), []).expect("write openvino model");
+        fs::write(
+            openvino_dir.join("manifest.json"),
+            br#"{"required_files":["model.xml"]}"#,
+        )
+        .expect("write openvino manifest");
+
+        let models_guard = EnvVarGuard::set("SMOLPC_MODELS_DIR", models_dir.as_os_str());
+        let bundles =
+            resolve_runtime_bundles_for_mode(Some(&resource_dir), RuntimeLoadMode::Production);
+
+        let response = build_check_model_response("qwen2.5-1.5b-instruct", &bundles, None, None);
+        drop(models_guard);
+
+        assert!(response.lanes.directml.artifact_ready);
+        assert!(response.lanes.directml.bundle_ready);
+        assert!(response.lanes.directml.ready);
+        assert_eq!(response.lanes.directml.reason, "ready");
+        assert!(!response.lanes.openvino_npu.ready);
+        assert_eq!(response.lanes.openvino_npu.reason, "startup_probe_pending");
+    }
+
+    #[test]
+    fn check_model_response_blocks_directml_when_probe_confirms_no_candidate() {
+        let _guard = lock_env();
+        let temp = tempdir().expect("temp dir");
+        let resource_dir = temp.path().join("resources");
+        let libs = resource_dir.join("libs");
+        let models_dir = temp.path().join("models");
+        let model_dir = models_dir.join("qwen2.5-1.5b-instruct");
+        let dml_dir = model_dir.join("dml");
+        let openvino_dir = model_dir.join("openvino");
+
+        create_ort_files(
+            &libs,
+            &[
+                "onnxruntime.dll",
+                "onnxruntime_providers_shared.dll",
+                "onnxruntime-genai.dll",
+                "DirectML.dll",
+            ],
+        );
+        create_openvino_files(&libs.join("openvino"));
+        fs::create_dir_all(&dml_dir).expect("create dml dir");
+        fs::create_dir_all(&openvino_dir).expect("create openvino dir");
+        fs::write(dml_dir.join("model.onnx"), []).expect("write dml model");
+        fs::write(dml_dir.join("genai_config.json"), []).expect("write dml config");
+        fs::write(dml_dir.join("tokenizer.json"), []).expect("write dml tokenizer");
+        fs::write(openvino_dir.join("model.xml"), []).expect("write openvino model");
+        fs::write(
+            openvino_dir.join("manifest.json"),
+            br#"{"required_files":["model.xml"]}"#,
+        )
+        .expect("write openvino manifest");
+
+        let models_guard = EnvVarGuard::set("SMOLPC_MODELS_DIR", models_dir.as_os_str());
+        let bundles =
+            resolve_runtime_bundles_for_mode(Some(&resource_dir), RuntimeLoadMode::Production);
+        let probe = BackendProbeResult {
+            available_backends: vec![InferenceBackend::Cpu],
+            directml_device_count: 0,
+            directml_candidate: None,
+            directml_probe_failure_class: Some("directml_candidate_missing".to_string()),
+            directml_probe_failure_message: Some(
+                "No DirectML-capable adapter detected".to_string(),
+            ),
+            npu_hardware_detected: false,
+        };
+
+        let response =
+            build_check_model_response("qwen2.5-1.5b-instruct", &bundles, Some(&probe), None);
+        drop(models_guard);
+
+        assert!(!response.lanes.directml.ready);
+        assert_eq!(response.lanes.directml.reason, "directml_candidate_missing");
     }
 
     #[test]
@@ -3968,6 +4137,8 @@ mod tests {
                 adapter_identity: "intel:arc".to_string(),
                 driver_version: "31.0.101.5522".to_string(),
             }),
+            directml_probe_failure_class: None,
+            directml_probe_failure_message: None,
             npu_hardware_detected: true,
         };
         let openvino_probe = OpenVinoStartupProbeResult {
@@ -4054,6 +4225,8 @@ mod tests {
                 adapter_identity: "intel:arc".to_string(),
                 driver_version: "31.0.101.5522".to_string(),
             }),
+            directml_probe_failure_class: None,
+            directml_probe_failure_message: None,
             npu_hardware_detected: true,
         };
         let openvino_probe = OpenVinoStartupProbeResult {
