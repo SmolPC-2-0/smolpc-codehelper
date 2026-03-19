@@ -37,7 +37,10 @@ Implemented baseline:
 3. Engine command surface for model lifecycle, generation, cancel, readiness/status.
 4. MCP bridge command surface (`start/check/stop/list/call`) with bundled Python assets.
 5. Workflow reliability hardening for DirectML and CPU fallback lanes.
-6. Diagnostics/evidence helpers:
+6. Unified frontend controller modularization:
+   - `src/App.svelte` is composition-first
+   - orchestration/state centralized in `src/lib/stores/libreofficeController.svelte.ts`
+7. Diagnostics/evidence helpers:
    - `create_integration_issue_report`
    - `run_runtime_verification_checklist`
    - `export_phase1_evidence_bundle`

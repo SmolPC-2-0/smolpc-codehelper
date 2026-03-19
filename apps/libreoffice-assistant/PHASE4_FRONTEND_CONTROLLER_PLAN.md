@@ -1,7 +1,7 @@
 # Phase 4 Plan: Unified Frontend Controller Extraction
 
 Date: 2026-03-19  
-Status: Planning document (Step 1 artifact)  
+Status: Completed (Step 3 docs update)  
 Owner: `apps/libreoffice-assistant`
 
 ## Goal
@@ -40,6 +40,26 @@ Out of scope:
    - `cpu_local_fallback`
    - `failed_with_error`
 4. Validation gates pass with no new warnings/errors.
+
+## Execution result (2026-03-19)
+
+Delivered in this phase:
+
+1. Added `src/lib/stores/libreofficeController.svelte.ts` and moved app orchestration/state into it.
+2. Reduced `src/App.svelte` to a composition shell that reads controller state and delegates actions.
+3. Split panel UI into dedicated components under `src/lib/components/*`.
+4. Kept runtime command behavior unchanged (same command surface and workflow outcomes).
+
+Validation run:
+
+1. `npm run check:libreoffice` passed.
+2. `npm run build:libreoffice` passed.
+
+GitHub delivery sequence completed:
+
+1. Step 1 docs push completed.
+2. Step 2 implementation push completed.
+3. Step 3 docs update push completed.
 
 ## Mandatory 3-step phase workflow
 
