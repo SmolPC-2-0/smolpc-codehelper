@@ -91,6 +91,11 @@ Corrections discovered during development. **When you correct a mistake, append 
 - PowerShell wrappers around native tools must coerce stderr records to plain strings before logging or `$ErrorActionPreference = 'Stop'` will treat normal tool output as a fatal error
 - After a long-running model export times out at the shell layer, check for orphaned builder `python` processes before retrying or the next validation pass starts from a dirty state
 - Do not hard-block DirectML mode selection on the background hardware probe; the probe can time out while DirectML runtime initialization still works with a valid staged artifact
+- NPU StaticLLMPipeline only supports greedy decoding — always force do_sample=false for NPU target
+- presence_penalty is incompatible with NPU greedy decoding — skip it on NPU
+- NPU StaticLLMPipeline does not support extra_context API for thinking control — inject /nothink into the system message content instead
+- Force-backend env var is `SMOLPC_FORCE_EP` (not `SMOLPC_FORCE_BACKEND`)
+- Use `starts_with` not `contains` for directive idempotency checks — `contains` matches user content substrings
 
 ---
 

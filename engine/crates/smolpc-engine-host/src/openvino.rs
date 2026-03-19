@@ -823,6 +823,22 @@ mod tests {
         assert_eq!(controls.presence_penalty, Some(1.5));
     }
 
+    /// Host tuning requests sampling (temperature > 0) for both CPU and NPU.
+    /// The NPU override to `do_sample=false` happens downstream in core
+    /// `create_generation_config()`, not at the tuning layer.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn npu_host_tuning_uses_sampling() {
+        let tuning = openvino_model_tuning_for_model("qwen3-4b");
+        let defaults = tuning
+            .request_defaults
+            .expect("qwen3 should provide request defaults");
+        assert!(
+            defaults.temperature > 0.0,
+            "Host tuning uses sampling; NPU override is in core create_generation_config()"
+        );
+    }
+
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
