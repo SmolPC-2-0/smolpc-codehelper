@@ -9,8 +9,10 @@
   import ModelControlPanel from './lib/components/ModelControlPanel.svelte';
   import ReadinessPanel from './lib/components/ReadinessPanel.svelte';
   import RuntimeVerificationPanel from './lib/components/RuntimeVerificationPanel.svelte';
+  import SourceParityPanel from './lib/components/SourceParityPanel.svelte';
   import WorkflowPanel from './lib/components/WorkflowPanel.svelte';
   import { libreofficeController } from './lib/stores/libreofficeController.svelte';
+  import { libreofficeSettingsStore } from './lib/stores/libreofficeSettings.svelte';
 
   const loadingBootstrap = $derived(libreofficeController.loadingBootstrap);
   const actionBusy = $derived(libreofficeController.actionBusy);
@@ -46,6 +48,23 @@
   const workflowOutcome = $derived(libreofficeController.workflowOutcome);
   const workflowErrorDetail = $derived(libreofficeController.workflowErrorDetail);
   const workflowLastEvidenceFile = $derived(libreofficeController.workflowLastEvidenceFile);
+
+  $effect(() => {
+    const settings = libreofficeSettingsStore.settings;
+    const preferredModelId = settings.selected_model.trim();
+    const hasPreferredModel = models.some((model) => model.id === preferredModelId);
+
+    if (preferredModelId && hasPreferredModel) {
+      libreofficeController.setSelectedModelId(preferredModelId);
+    } else if (models.length > 0 && settings.selected_model !== models[0].id) {
+      libreofficeSettingsStore.updateSetting('selected_model', models[0].id);
+    }
+
+    libreofficeController.setMcpPythonPath(settings.python_path);
+    libreofficeController.setWorkflowSystemPrompt(settings.system_prompt ?? '');
+    libreofficeController.setWorkflowTemperature(settings.temperature);
+    libreofficeController.setWorkflowMaxTokens(settings.max_tokens);
+  });
 
   function handleMcpToolSelection(toolName: string): void {
     libreofficeController.setMcpToolSelection(toolName);
@@ -109,13 +128,18 @@
   const copyIssueReport = (): Promise<void> => libreofficeController.copyIssueReport();
 
   onMount(() => {
-    void libreofficeController.initialize();
+    void (async () => {
+      await libreofficeSettingsStore.loadSettings();
+      await libreofficeController.initialize();
+    })();
   });
 </script>
 
 <main class="container">
   <h1>SmolPC LibreOffice Assistant</h1>
   <p class="subtitle">Production candidate shell with shared-engine and MCP workflow hardening</p>
+
+  <SourceParityPanel {models} {actionBusy} />
 
   <BootstrapControls
     {loadingBootstrap}

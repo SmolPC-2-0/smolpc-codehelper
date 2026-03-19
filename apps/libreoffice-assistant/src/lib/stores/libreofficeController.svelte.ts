@@ -32,12 +32,9 @@
   const PHASE3_MODEL_TURN_TIMEOUT_MS = 45000;
   const MODEL_LOAD_TIMEOUT_MS = 120000;
   const CPU_SAFE_MODEL_ID = 'qwen2.5-coder-1.5b';
-  const PHASE3_WORKFLOW_CONFIG: GenerationConfig = {
-    max_length: 64,
-    temperature: 0.0,
-    top_k: 1,
-    top_p: 1.0
-  };
+  const DEFAULT_WORKFLOW_TEMPERATURE = 0.0;
+  const DEFAULT_WORKFLOW_MAX_TOKENS = 64;
+  const DEFAULT_PYTHON_COMMAND = 'python';
   const PHASE3_SYSTEM_BASE_INSTRUCTION = `You are a LibreOffice assistant that can use MCP tools.
 When you need to call a tool, respond with JSON only in this exact shape:
 {"tool_call":{"name":"<tool_name>","arguments":{...}}}
@@ -46,10 +43,20 @@ Use \`list_documents\` for document listing requests (not \`list_files\`).
 If no tool call is needed, respond with the final user-facing answer in plain text.`;
 
   function buildPhase3SystemInstruction(): string {
-    return (
-      `${PHASE3_SYSTEM_BASE_INSTRUCTION}\n\n` +
-      `${buildWorkflowToolCatalogInstruction(mcpTools)}`
-    );
+    const customSystemPrompt = workflowSystemPrompt.trim();
+    const customPromptSection = customSystemPrompt
+      ? `\n\nAdditional operator instructions:\n${customSystemPrompt}`
+      : '';
+    return `${PHASE3_SYSTEM_BASE_INSTRUCTION}\n\n${buildWorkflowToolCatalogInstruction(mcpTools)}${customPromptSection}`;
+  }
+
+  function buildWorkflowGenerationConfig(): GenerationConfig {
+    return {
+      max_length: Math.max(16, Math.min(8192, Math.floor(workflowMaxTokens))),
+      temperature: Math.max(0, Math.min(2, workflowTemperature)),
+      top_k: 1,
+      top_p: 1.0
+    };
   }
 
   let loadingBootstrap = $state(true);
@@ -88,6 +95,10 @@ If no tool call is needed, respond with the final user-facing answer in plain te
   let workflowOutcome = $state<WorkflowOutcomeTag>('none');
   let workflowErrorDetail = $state<string | null>(null);
   let workflowLastEvidenceFile = $state<string | null>(null);
+  let workflowSystemPrompt = $state('');
+  let workflowTemperature = $state(DEFAULT_WORKFLOW_TEMPERATURE);
+  let workflowMaxTokens = $state(DEFAULT_WORKFLOW_MAX_TOKENS);
+  let mcpPythonPath = $state(DEFAULT_PYTHON_COMMAND);
 
   function formatError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -349,6 +360,39 @@ If no tool call is needed, respond with the final user-facing answer in plain te
     issueResponseBody = nextValue;
   }
 
+  function setWorkflowSystemPrompt(nextValue: string): void {
+    workflowSystemPrompt = nextValue;
+  }
+
+  function setWorkflowTemperature(nextValue: number): void {
+    if (!Number.isFinite(nextValue)) {
+      workflowTemperature = DEFAULT_WORKFLOW_TEMPERATURE;
+      return;
+    }
+    workflowTemperature = Math.max(0, Math.min(2, nextValue));
+  }
+
+  function setWorkflowMaxTokens(nextValue: number): void {
+    if (!Number.isFinite(nextValue)) {
+      workflowMaxTokens = DEFAULT_WORKFLOW_MAX_TOKENS;
+      return;
+    }
+    workflowMaxTokens = Math.max(16, Math.min(8192, Math.floor(nextValue)));
+  }
+
+  function setMcpPythonPath(nextValue: string): void {
+    const trimmed = nextValue.trim();
+    mcpPythonPath = trimmed || DEFAULT_PYTHON_COMMAND;
+  }
+
+  async function invokeStartMcpServer(): Promise<McpStatus> {
+    const trimmedPythonPath = mcpPythonPath.trim();
+    if (trimmedPythonPath) {
+      return await invoke<McpStatus>('start_mcp_server', { pythonPath: trimmedPythonPath });
+    }
+    return await invoke<McpStatus>('start_mcp_server');
+  }
+
   function pushWorkflowTrace(line: string): void {
     workflowTrace = [...workflowTrace, line];
   }
@@ -444,7 +488,7 @@ If no tool call is needed, respond with the final user-facing answer in plain te
       pushWorkflowTrace(`${traceLabel}: restarting MCP server...`);
     }
     await invoke<McpStatus>('stop_mcp_server');
-    mcpStatus = await invoke<McpStatus>('start_mcp_server');
+    mcpStatus = await invokeStartMcpServer();
     if (!mcpStatus.running) {
       throw new Error(mcpStatus.error_message ?? 'MCP restart failed.');
     }
@@ -833,7 +877,7 @@ If no tool call is needed, respond with the final user-facing answer in plain te
     actionBusy = true;
     clearFeedback();
     try {
-      mcpStatus = await invoke<McpStatus>('start_mcp_server');
+      mcpStatus = await invokeStartMcpServer();
       if (mcpStatus.running) {
         await loadMcpTools();
         actionMessage = `MCP server started (${mcpTools.length} tools loaded).`;
@@ -909,7 +953,7 @@ If no tool call is needed, respond with the final user-facing answer in plain te
     mcpStatus = await invoke<McpStatus>('check_mcp_status');
     if (!mcpStatus.running) {
       pushWorkflowTrace('MCP server is not running. Starting it now...');
-      mcpStatus = await invoke<McpStatus>('start_mcp_server');
+      mcpStatus = await invokeStartMcpServer();
     }
     if (!mcpStatus.running) {
       throw new Error(mcpStatus.error_message ?? 'MCP server failed to start.');
@@ -1010,7 +1054,7 @@ If no tool call is needed, respond with the final user-facing answer in plain te
             withTimeout(
               invoke<GenerationResult>('generate_text_with_config', {
                 prompt: buildChatMlPrompt(turns),
-                config: PHASE3_WORKFLOW_CONFIG
+                config: buildWorkflowGenerationConfig()
               }),
               PHASE3_MODEL_TURN_TIMEOUT_MS,
               `Turn ${depth} timed out after ${PHASE3_MODEL_TURN_TIMEOUT_MS / 1000}s.`,
@@ -1159,7 +1203,7 @@ If no tool call is needed, respond with the final user-facing answer in plain te
           withTimeout(
             invoke<GenerationResult>('generate_text_with_config', {
               prompt: summaryPrompt,
-              config: PHASE3_WORKFLOW_CONFIG
+              config: buildWorkflowGenerationConfig()
             }),
             30000,
             'Summary turn timed out after 30s.',
@@ -1307,6 +1351,18 @@ export const libreofficeController = {
   get workflowLastEvidenceFile() {
     return workflowLastEvidenceFile;
   },
+  get workflowSystemPrompt() {
+    return workflowSystemPrompt;
+  },
+  get workflowTemperature() {
+    return workflowTemperature;
+  },
+  get workflowMaxTokens() {
+    return workflowMaxTokens;
+  },
+  get mcpPythonPath() {
+    return mcpPythonPath;
+  },
 
   setSelectedModelId(nextValue: string): void {
     selectedModelId = nextValue;
@@ -1319,6 +1375,10 @@ export const libreofficeController = {
   setMcpToolSelection: handleMcpToolSelection,
   setMcpArguments: handleMcpArgumentsChange,
   setWorkflowPrompt: handleWorkflowPromptChange,
+  setWorkflowSystemPrompt,
+  setWorkflowTemperature,
+  setWorkflowMaxTokens,
+  setMcpPythonPath,
   setIssueRequestPayload: handleIssueRequestPayloadChange,
   setIssueHttpStatus: handleIssueHttpStatusChange,
   setIssueResponseBody: handleIssueResponseBodyChange,
