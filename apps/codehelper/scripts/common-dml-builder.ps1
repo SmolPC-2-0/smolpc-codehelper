@@ -423,7 +423,11 @@ function Invoke-DmlModelBuilder {
         $builderArgs += $ExtraOptions
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
         $logDir = Split-Path -Parent $LogPath
         if (-not [string]::IsNullOrWhiteSpace($logDir)) {
             New-Item -ItemType Directory -Force -Path $logDir | Out-Null
@@ -440,13 +444,34 @@ function Invoke-DmlModelBuilder {
             }
         }
 
-        & $builderPython @builderArgs 2>&1 | Tee-Object -FilePath $LogPath -Append | Out-Host
-    } else {
-        & $builderPython @builderArgs 2>&1 | Out-Host
+            & $builderPython @builderArgs 2>&1 `
+                | ForEach-Object {
+                    if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                        $_.ToString()
+                    } else {
+                        $_
+                    }
+                } `
+                | Tee-Object -FilePath $LogPath -Append `
+                | Out-Host
+        } else {
+            & $builderPython @builderArgs 2>&1 `
+                | ForEach-Object {
+                    if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                        $_.ToString()
+                    } else {
+                        $_
+                    }
+                } `
+                | Out-Host
+        }
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
     }
 
-    if ($LASTEXITCODE -ne 0) {
-        throw "DirectML model builder failed with exit code $LASTEXITCODE."
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw "DirectML model builder failed with exit code $exitCode."
     }
 
     return $environment
