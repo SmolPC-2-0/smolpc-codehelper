@@ -93,6 +93,8 @@ Corrections discovered during development. **When you correct a mistake, append 
 - Do not hard-block DirectML mode selection on the background hardware probe; the probe can time out while DirectML runtime initialization still works with a valid staged artifact
 - NPU StaticLLMPipeline only supports greedy decoding — always force do_sample=false for NPU target
 - presence_penalty is incompatible with NPU greedy decoding — skip it on NPU
+- NPU StaticLLMPipeline does not support extra_context API for thinking control — inject /nothink into the system message content instead
+- Force-backend env var is `SMOLPC_FORCE_EP` (not `SMOLPC_FORCE_BACKEND`)
 
 ---
 

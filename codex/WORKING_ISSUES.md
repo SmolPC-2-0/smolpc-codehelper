@@ -2,26 +2,32 @@
 
 Last updated: 2026-03-19
 Base branch: `main`
-Last known good commit: `1b3bbb4`
+Last known good commit: `19b592b` (pre-NPU-fix main)
 
 ---
 
 ## Current Risk Register
 
-### 1) OpenVINO NPU backend not yet finalized
+### 1) OpenVINO NPU — Qwen3-4B produces minimal output
 
-- Status: Open
-- Severity: High (core feature)
+- Status: Open (investigation needed)
+- Severity: High (core feature — Qwen2.5 NPU works, Qwen3 does not)
 - Context:
-  - OpenVINO CPU inference works (infinite loop bug fixed).
-  - OpenVINO NPU is the primary acceleration target but not yet validated end-to-end.
-  - NPU compilation is slow on first load; `CACHE_DIR` enables compiled blob reuse.
-  - INT4 quantization required for broad NPU compatibility (NF4 only works on Core Ultra Series 2+).
+  - **Qwen2.5-1.5B NPU: WORKING** — coherent output, clean EOS, validated 2026-03-19.
+  - **Qwen3-4B NPU: BROKEN** — generates 1-2 tokens then hits EOS under greedy decoding.
+  - Root causes fixed so far (branch `fix/npu-inference`):
+    - Forced `do_sample=false` on NPU (was enabling multinomial sampling on greedy-only hardware).
+    - Skipped `presence_penalty` on NPU (incompatible with greedy decoding).
+    - Injected `/nothink` into system message instead of using `extra_context` API (NPU does not support it; caused immediate EOS).
+  - Remaining Qwen3-4B issue: greedy decoding selects EOS after 1-2 tokens. Possible causes:
+    - `MAX_PROMPT_LEN=512` may be too small for Qwen3's templated prompt (needs investigation).
+    - Qwen3-4B INT4 quantization may interact differently with NPU greedy decoding.
+    - Model architecture differences vs Qwen2.5 (thinking mode, longer chat template).
 - Next steps:
-  - Validate NPU lane with qwen2.5-1.5b-instruct and qwen3-4b IR artifacts.
-  - Verify DLL load order for NPU plugin (`openvino_intel_npu_plugin`).
-  - Test structured chat history path on NPU.
-  - Confirm stop token detection (both Qwen2.5 and Qwen3).
+  - Research OpenVINO GenAI StaticLLMPipeline constraints for Qwen3 architecture.
+  - Test with increased `MAX_PROMPT_LEN` (env var override exists).
+  - Compare prompt token counts between Qwen2.5 and Qwen3 for the same input.
+  - Consider whether Qwen3-4B NPU is feasible or if it should be CPU/DirectML only.
 
 ### 2) Production model-path resolution for packaged app
 
@@ -61,6 +67,8 @@ Last known good commit: `1b3bbb4`
 
 ## Recently Resolved
 
+- **Qwen2.5-1.5B NPU inference — WORKING** (2026-03-19, `fix/npu-inference`): greedy decoding enforced, presence_penalty skipped, structured messages work correctly on NPU. Live-tested: 24 coherent tokens, proper EOS.
+- **NPU sampling fix** (2026-03-19, `fix/npu-inference`): `do_sample=false` forced for NPU; `presence_penalty` skipped; `extra_context` replaced with `/nothink` system message injection.
 - Qwen2.5 OpenVINO artifacts — complete: `openvino_config.json` and `chat_template.jinja` restored locally; manifest now resolves all 15 required files (`codex/qwen25-openvino-artifact`)
 - OpenVINO CPU infinite loop — fixed via structured chat history and stop token enforcement
 - DirectML qwen3-4b export — completed
