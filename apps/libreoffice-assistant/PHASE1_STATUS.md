@@ -73,6 +73,16 @@ Primary planning doc for next phases:
      - selected model synchronization
      - `python_path` passed to MCP startup calls
      - workflow prompt/config overrides (`system_prompt`, `temperature`, `max_tokens`)
+14. Source-parity dependency-loading startup slice (2026-03-19):
+   - added source-parity loading component:
+     - `src/lib/components/SourceParityLoadingScreen.svelte`
+   - added source-parity dependency state types:
+     - `src/lib/types/sourceParity.ts`
+   - gated source-parity chat behind dependency readiness:
+     - engine health
+     - model catalog availability
+     - selected model resolution
+     - MCP runtime status
 
 ## Validation run (local)
 
@@ -148,3 +158,13 @@ Tracked in:
    - `cargo test -p smolpc-libreoffice-assistant --lib`
 3. Active phase planning doc:
    - `apps/libreoffice-assistant/PHASE5_SOURCE_PARITY_CHAT_SETTINGS_PLAN.md`
+
+## Phase 6 source-parity dependency-loading slice validation (2026-03-19)
+
+1. Source-parity dependency-loading screen added and wired into `SourceParityPanel` + `App.svelte`.
+2. Local frontend and backend validations passed:
+   - `npm run check:libreoffice`
+   - `npm run build:libreoffice`
+   - `cargo test -p smolpc-libreoffice-assistant --lib`
+3. Active phase planning doc:
+   - `apps/libreoffice-assistant/PHASE6_SOURCE_PARITY_DEPENDENCY_LOADING_PLAN.md`

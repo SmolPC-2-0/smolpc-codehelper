@@ -10,16 +10,17 @@ Use these docs in order:
 
 1. `apps/libreoffice-assistant/MIGRATION_PLAN.md` (active source-of-truth plan)
 2. `apps/libreoffice-assistant/PHASE5_SOURCE_PARITY_CHAT_SETTINGS_PLAN.md` (active phase plan; follows mandatory 3-step delivery workflow)
-3. `apps/libreoffice-assistant/PHASE4_FRONTEND_CONTROLLER_PLAN.md` (completed previous phase)
-4. `apps/libreoffice-assistant/UNIFIED_FRONTEND_HANDOFF.md` (merge contract for unified frontend integration)
-5. `apps/libreoffice-assistant/LIBREOFFICE_SOURCE_REPO_ANALYSIS.md` (source audit and mapping rationale)
-6. `apps/libreoffice-assistant/PHASE1_STATUS.md` (implemented baseline + validations)
-7. `apps/libreoffice-assistant/WINDOWS_PHASE1_VERIFICATION.md` (verification runbook)
-8. `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md` (MCP bridge Windows test runbook)
-9. `apps/libreoffice-assistant/WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md` (chat/tool workflow Windows runbook)
-10. `apps/libreoffice-assistant/WINDOWS_PHASE3_TEAMMATE_RESULTS_TEMPLATE.md` (teammate matrix result template)
-11. `apps/libreoffice-assistant/WINDOWS_PHASE3_TEAMMATE_RESULTS_2026-03-15.md` (completed Windows lane matrix entry)
-12. `apps/libreoffice-assistant/WINDOWS_INSTALLER_REGISTRATION.md` (legacy/deferred launcher registration reference)
+3. `apps/libreoffice-assistant/PHASE6_SOURCE_PARITY_DEPENDENCY_LOADING_PLAN.md` (completed source-parity dependency-loading phase)
+4. `apps/libreoffice-assistant/PHASE4_FRONTEND_CONTROLLER_PLAN.md` (completed previous phase)
+5. `apps/libreoffice-assistant/UNIFIED_FRONTEND_HANDOFF.md` (merge contract for unified frontend integration)
+6. `apps/libreoffice-assistant/LIBREOFFICE_SOURCE_REPO_ANALYSIS.md` (source audit and mapping rationale)
+7. `apps/libreoffice-assistant/PHASE1_STATUS.md` (implemented baseline + validations)
+8. `apps/libreoffice-assistant/WINDOWS_PHASE1_VERIFICATION.md` (verification runbook)
+9. `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md` (MCP bridge Windows test runbook)
+10. `apps/libreoffice-assistant/WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md` (chat/tool workflow Windows runbook)
+11. `apps/libreoffice-assistant/WINDOWS_PHASE3_TEAMMATE_RESULTS_TEMPLATE.md` (teammate matrix result template)
+12. `apps/libreoffice-assistant/WINDOWS_PHASE3_TEAMMATE_RESULTS_2026-03-15.md` (completed Windows lane matrix entry)
+13. `apps/libreoffice-assistant/WINDOWS_INSTALLER_REGISTRATION.md` (legacy/deferred launcher registration reference)
 
 ## Mandatory phase workflow
 
@@ -45,7 +46,10 @@ Implemented baseline:
    - `src/lib/stores/libreofficeSettings.svelte.ts`
    - `src/lib/stores/libreofficeChat.svelte.ts`
    - `src/lib/components/SourceParityPanel.svelte`
-8. Diagnostics/evidence helpers:
+8. Source-parity dependency-loading startup slice:
+   - `src/lib/components/SourceParityLoadingScreen.svelte`
+   - readiness gate wiring in `src/App.svelte` + `src/lib/components/SourceParityPanel.svelte`
+9. Diagnostics/evidence helpers:
    - `create_integration_issue_report`
    - `run_runtime_verification_checklist`
    - `export_phase1_evidence_bundle`
