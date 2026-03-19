@@ -1,42 +1,72 @@
 <script lang="ts">
-  import type { ModelDefinition } from '../types/libreoffice';
+  import type { McpStatus, McpTool, ModelDefinition, ToolResult } from '../types/libreoffice';
   import type { SourceParityDependencyItem } from '../types/sourceParity';
   import { libreofficeChatStore } from '../stores/libreofficeChat.svelte';
+  import { libreofficeSettingsStore } from '../stores/libreofficeSettings.svelte';
   import SourceParityChatInput from './SourceParityChatInput.svelte';
   import SourceParityLoadingScreen from './SourceParityLoadingScreen.svelte';
   import SourceParityChatMessage from './SourceParityChatMessage.svelte';
   import SourceParitySettingsPage from './SourceParitySettingsPage.svelte';
+  import SourceParityToolsPage from './SourceParityToolsPage.svelte';
 
   interface Props {
     models: ModelDefinition[];
     actionBusy: boolean;
+    actionMessage: string | null;
+    commandError: string | null;
     dependencyLoading: boolean;
     dependencyReady: boolean;
     dependencies: SourceParityDependencyItem[];
+    mcpStatus: McpStatus | null;
+    mcpTools: McpTool[];
+    selectedMcpTool: string;
+    mcpArguments: string;
+    mcpToolResult: ToolResult | null;
     onRefreshDependencies: () => void;
     onEnsureEngineStarted: () => void;
     onStartMcpServer: () => void;
+    onRefreshMcpStatus: () => void;
+    onStopMcpServer: () => void;
+    onLoadMcpTools: () => void;
+    onCallSelectedMcpTool: () => void;
+    onSelectedMcpToolChange: (toolName: string) => void;
+    onMcpArgumentsChange: (nextValue: string) => void;
+    onApplyToolArgumentTemplate: (toolName: string) => void;
   }
 
   let {
     models,
     actionBusy,
+    actionMessage,
+    commandError,
     dependencyLoading,
     dependencyReady,
     dependencies,
+    mcpStatus,
+    mcpTools,
+    selectedMcpTool,
+    mcpArguments,
+    mcpToolResult,
     onRefreshDependencies,
     onEnsureEngineStarted,
-    onStartMcpServer
+    onStartMcpServer,
+    onRefreshMcpStatus,
+    onStopMcpServer,
+    onLoadMcpTools,
+    onCallSelectedMcpTool,
+    onSelectedMcpToolChange,
+    onMcpArgumentsChange,
+    onApplyToolArgumentTemplate
   }: Props = $props();
 
-  type View = 'chat' | 'settings';
+  type View = 'chat' | 'tools' | 'settings';
   let currentView = $state<View>('chat');
   let messagesContainer = $state<HTMLDivElement | undefined>(undefined);
 
   $effect(() => {
     const messageCount = libreofficeChatStore.messageCount;
     const streamingHint = libreofficeChatStore.currentStreamingMessage;
-    if (!messagesContainer || (messageCount === 0 && !streamingHint)) {
+    if (currentView !== 'chat' || !messagesContainer || (messageCount === 0 && !streamingHint)) {
       return;
     }
 
@@ -73,6 +103,13 @@
       >
         Settings
       </button>
+      <button
+        type="button"
+        class={currentView === 'tools' ? 'active' : ''}
+        onclick={() => (currentView = 'tools')}
+      >
+        Tools
+      </button>
     </div>
   </div>
 
@@ -86,6 +123,26 @@
       onRefreshChecks={onRefreshDependencies}
       {onEnsureEngineStarted}
       {onStartMcpServer}
+    />
+  {:else if currentView === 'tools'}
+    <SourceParityToolsPage
+      {actionBusy}
+      {actionMessage}
+      {commandError}
+      {mcpStatus}
+      {mcpTools}
+      {selectedMcpTool}
+      {mcpArguments}
+      {mcpToolResult}
+      workflowMode={libreofficeSettingsStore.settings.workflow_mode}
+      onRefreshMcpStatus={onRefreshMcpStatus}
+      onStartMcpServer={onStartMcpServer}
+      onStopMcpServer={onStopMcpServer}
+      onLoadMcpTools={onLoadMcpTools}
+      onCallSelectedMcpTool={onCallSelectedMcpTool}
+      onSelectedMcpToolChange={onSelectedMcpToolChange}
+      onMcpArgumentsChange={onMcpArgumentsChange}
+      onApplyToolArgumentTemplate={onApplyToolArgumentTemplate}
     />
   {:else}
     <div class="source-parity__chat">
@@ -123,6 +180,12 @@
           Clear Chat
         </button>
       </div>
+
+      {#if libreofficeSettingsStore.settings.workflow_mode === 'tool_first' && !selectedMcpTool.trim()}
+        <p class="tool-first-hint">
+          Tool-first mode is enabled. Select an MCP tool in the Tools tab before sending.
+        </p>
+      {/if}
 
       <SourceParityChatInput
         onSend={handleSend}
@@ -230,6 +293,15 @@
     margin-top: 0.4rem;
     color: #7dd3fc;
     font-weight: 700;
+  }
+
+  .tool-first-hint {
+    margin: 0;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid #334155;
+    background: #172554;
+    color: #bfdbfe;
+    font-size: 0.88rem;
   }
 
   @media (max-width: 640px) {

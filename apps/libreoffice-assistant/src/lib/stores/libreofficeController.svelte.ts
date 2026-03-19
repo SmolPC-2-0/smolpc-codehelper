@@ -1141,7 +1141,7 @@ If no tool call is needed, respond with the final user-facing answer in plain te
   async function runToolFirstWorkflow(): Promise<void> {
     const toolName = selectedMcpTool.trim();
     if (!toolName) {
-      commandError = 'Select an MCP tool in the MCP Bridge section first.';
+      commandError = 'Select an MCP tool in the Source-Parity Tools tab first.';
       return;
     }
 
