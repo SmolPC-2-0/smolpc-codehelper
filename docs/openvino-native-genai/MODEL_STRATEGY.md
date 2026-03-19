@@ -1,6 +1,6 @@
 # Model Strategy
 
-Checked on: 2026-03-12
+Checked on: 2026-03-19
 Primary KPI: best practical performance on weak Intel laptops.
 
 ## Selection Rules
@@ -37,6 +37,23 @@ Why:
 Source:
 
 - https://huggingface.co/OpenVINO/Qwen3-4B-int4-ov
+
+## DirectML Source Of Truth
+
+- keep the public large-model id unified as plain `qwen3-4b` across OpenVINO CPU, OpenVINO NPU, and DirectML
+- the supported DirectML source mode is `self_build` from `Qwen/Qwen3-4B`, not `qwen3-4b-instruct` or `qwen3-4b-instruct-2507`
+- the current validated builder tuple on this branch is:
+  - Python `3.14`
+  - `onnxruntime==1.24.2`
+  - `onnxruntime-directml==1.24.2`
+  - `onnxruntime-genai==0.12.2`
+  - `onnxruntime-genai-directml==0.12.2`
+- the DirectML staging script must validate `model.onnx`, `genai_config.json`, `tokenizer.json`, and all ONNX external-data references; the validated `qwen3-4b` self-build on this PC references `model.onnx.data`
+- DirectML export logs live under `%LOCALAPPDATA%/SmolPC/logs/dml-export/`
+- `fallback_snapshot` is available only as an explicit recovery mode using `onnx-community/Qwen3-4B-ONNX` plus `config_only=true`; it is not the default shipping path
+- Windows app-local runtime staging stays aligned to the official NuGet dependency pair:
+  - `Microsoft.ML.OnnxRuntimeGenAI.DirectML` `0.12.2`
+  - `Microsoft.ML.OnnxRuntime.DirectML` `1.23.0`
 
 ## Export Rules For Native OpenVINO NPU
 
@@ -99,3 +116,4 @@ Lead Phase 1 with the 1.5B Qwen model for this KPI; Qwen3-4B is the higher-capab
 Current repo note:
 
 - `qwen3-4b` is a supported shared model id backed by the official `OpenVINO/Qwen3-4B-int4-ov` artifact on the OpenVINO lanes
+- `qwen3-4b` is also validated on the DirectML lane through the `Qwen/Qwen3-4B` self-build path with forced `directml` load and streaming generation

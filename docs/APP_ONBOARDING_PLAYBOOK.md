@@ -24,6 +24,7 @@ Monorepo placement convention for new apps:
    - `npm run runtime:setup:openvino`
    - `npm run model:setup:qwen25-instruct`
    - `npm run model:setup:qwen3-4b`
+   - `qwen3-4b` now self-builds its DirectML artifact from `Qwen/Qwen3-4B` in an isolated Python `3.14` venv; export logs are written under `%LOCALAPPDATA%/SmolPC/logs/dml-export`
 5. Use this playbook as the implementation checklist.
 
 ## Shared Model Baseline
@@ -129,6 +130,9 @@ Treat these as expected operational states:
 4. The current Windows PyPI `openvino-genai` wheel is not a valid native runtime bundle for this repo's OpenVINO adapter.
    - Windows provisioning now uses the official archive path instead. The app-local bundle must include `openvino_genai_c.dll`, and the current working NPU defaults on this PC are `MAX_PROMPT_LEN=512` and `MIN_RESPONSE_LEN=1024`.
    - For targeted debugging, `SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN` and `SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN` can override those defaults. Invalid values block the OpenVINO lane before a false-ready status is reported.
+5. `qwen3-4b` DirectML stays unified on the same public model id.
+   - Do not introduce backend-specific large-model ids in app UX or app config.
+   - The setup script keeps `self_build` as the supported default DML source mode; `fallback_snapshot` is a manual recovery path only when the self-build path is broken on a developer machine.
 
 ## Definition of Done (Per App)
 
