@@ -213,12 +213,26 @@
   <SourceParityPanel
     {models}
     {actionBusy}
+    {actionMessage}
+    {commandError}
     dependencyLoading={sourceParityDependencyLoading}
     dependencyReady={sourceParityDependencyReady}
     dependencies={sourceParityDependencies}
+    {mcpStatus}
+    {mcpTools}
+    {selectedMcpTool}
+    {mcpArguments}
+    {mcpToolResult}
     onRefreshDependencies={() => void refreshSourceParityDependencies()}
     onEnsureEngineStarted={() => void ensureEngineStarted()}
     onStartMcpServer={() => void startMcpServer()}
+    onRefreshMcpStatus={() => void refreshMcpStatus()}
+    onStopMcpServer={() => void stopMcpServer()}
+    onLoadMcpTools={() => void loadMcpTools()}
+    onCallSelectedMcpTool={() => void callSelectedMcpTool()}
+    onSelectedMcpToolChange={handleMcpToolSelection}
+    onMcpArgumentsChange={handleMcpArgumentsChange}
+    onApplyToolArgumentTemplate={setToolArgumentTemplate}
   />
 
   <BootstrapControls

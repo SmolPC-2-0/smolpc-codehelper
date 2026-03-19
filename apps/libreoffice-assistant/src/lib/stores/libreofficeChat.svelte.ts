@@ -66,6 +66,18 @@ class LibreofficeChatStore {
       return;
     }
 
+    const workflowMode = libreofficeSettingsStore.settings.workflow_mode;
+    const useToolFirst = workflowMode === 'tool_first';
+    if (useToolFirst && !libreofficeController.selectedMcpTool.trim()) {
+      this.addMessage(
+        'assistant',
+        'Tool-first mode requires a selected MCP tool in the Source-Parity Tools tab.',
+        'failed_with_error',
+        true
+      );
+      return;
+    }
+
     this.addMessage('user', trimmed);
     this.isGenerating = true;
     this.currentStreamingMessage = 'Running MCP-assisted workflow...';
@@ -74,10 +86,7 @@ class LibreofficeChatStore {
       this.syncControllerFromSettings();
       libreofficeController.setWorkflowPrompt(trimmed);
 
-      if (
-        libreofficeSettingsStore.settings.workflow_mode === 'tool_first' &&
-        libreofficeController.selectedMcpTool.trim()
-      ) {
+      if (useToolFirst) {
         await libreofficeController.runToolFirstWorkflow();
       } else {
         await libreofficeController.runMcpAssistedWorkflow();
