@@ -1,16 +1,33 @@
 <script lang="ts">
   import type { ModelDefinition } from '../types/libreoffice';
+  import type { SourceParityDependencyItem } from '../types/sourceParity';
   import { libreofficeChatStore } from '../stores/libreofficeChat.svelte';
   import SourceParityChatInput from './SourceParityChatInput.svelte';
+  import SourceParityLoadingScreen from './SourceParityLoadingScreen.svelte';
   import SourceParityChatMessage from './SourceParityChatMessage.svelte';
   import SourceParitySettingsPage from './SourceParitySettingsPage.svelte';
 
   interface Props {
     models: ModelDefinition[];
     actionBusy: boolean;
+    dependencyLoading: boolean;
+    dependencyReady: boolean;
+    dependencies: SourceParityDependencyItem[];
+    onRefreshDependencies: () => void;
+    onEnsureEngineStarted: () => void;
+    onStartMcpServer: () => void;
   }
 
-  let { models, actionBusy }: Props = $props();
+  let {
+    models,
+    actionBusy,
+    dependencyLoading,
+    dependencyReady,
+    dependencies,
+    onRefreshDependencies,
+    onEnsureEngineStarted,
+    onStartMcpServer
+  }: Props = $props();
 
   type View = 'chat' | 'settings';
   let currentView = $state<View>('chat');
@@ -61,6 +78,15 @@
 
   {#if currentView === 'settings'}
     <SourceParitySettingsPage {models} onClose={() => (currentView = 'chat')} />
+  {:else if !dependencyReady}
+    <SourceParityLoadingScreen
+      loading={dependencyLoading}
+      {dependencies}
+      {actionBusy}
+      onRefreshChecks={onRefreshDependencies}
+      {onEnsureEngineStarted}
+      {onStartMcpServer}
+    />
   {:else}
     <div class="source-parity__chat">
       <div class="source-parity__messages" bind:this={messagesContainer}>
