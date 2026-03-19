@@ -95,6 +95,7 @@ Corrections discovered during development. **When you correct a mistake, append 
 - presence_penalty is incompatible with NPU greedy decoding — skip it on NPU
 - NPU StaticLLMPipeline does not support extra_context API for thinking control — inject /nothink into the system message content instead
 - Force-backend env var is `SMOLPC_FORCE_EP` (not `SMOLPC_FORCE_BACKEND`)
+- Use `starts_with` not `contains` for directive idempotency checks — `contains` matches user content substrings
 
 ---
 

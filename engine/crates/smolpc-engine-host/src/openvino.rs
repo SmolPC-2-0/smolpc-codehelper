@@ -823,12 +823,12 @@ mod tests {
         assert_eq!(controls.presence_penalty, Some(1.5));
     }
 
-    /// Documents the NPU greedy constraint: host tuning requests sampling
-    /// (temperature > 0), but core `create_generation_config()` overrides to
-    /// `do_sample=false` when the device target is NPU.
+    /// Host tuning requests sampling (temperature > 0) for both CPU and NPU.
+    /// The NPU override to `do_sample=false` happens downstream in core
+    /// `create_generation_config()`, not at the tuning layer.
     #[cfg(target_os = "windows")]
     #[test]
-    fn npu_greedy_constraint_documented() {
+    fn npu_host_tuning_uses_sampling() {
         let tuning = openvino_model_tuning_for_model("qwen3-4b");
         let defaults = tuning
             .request_defaults

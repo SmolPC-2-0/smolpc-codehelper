@@ -1017,7 +1017,7 @@ fn generate_once(
 fn inject_nothink_into_messages(messages: &[InferenceChatMessage]) -> Vec<InferenceChatMessage> {
     let mut result: Vec<InferenceChatMessage> = messages.to_vec();
     if let Some(sys) = result.iter_mut().find(|m| m.role == "system") {
-        if !sys.content.contains("/nothink") {
+        if !sys.content.starts_with("/nothink") {
             sys.content = format!("/nothink\n{}", sys.content);
         }
     } else {
@@ -1045,6 +1045,7 @@ fn create_chat_history(
     // NPU StaticLLMPipeline does not support extra_context for thinking control.
     // Inject /nothink into the system message content instead (same approach as
     // the legacy ChatML path).
+    // Declared here so its lifetime spans the rest of the function.
     let npu_thinking_messages;
     let messages = if disable_thinking && device_target == OpenVinoDeviceTarget::Npu {
         npu_thinking_messages = inject_nothink_into_messages(messages);
@@ -1560,5 +1561,43 @@ mod tests {
             npu_validation_failure: failure,
             fingerprint,
         }
+    }
+
+    #[test]
+    fn inject_nothink_prepends_to_existing_system_message() {
+        use crate::inference::types::InferenceChatMessage;
+        let messages = vec![
+            InferenceChatMessage { role: "system".into(), content: "You are helpful.".into() },
+            InferenceChatMessage { role: "user".into(), content: "Hi".into() },
+        ];
+        let result = super::inject_nothink_into_messages(&messages);
+        assert_eq!(result[0].role, "system");
+        assert_eq!(result[0].content, "/nothink\nYou are helpful.");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn inject_nothink_creates_system_message_if_absent() {
+        use crate::inference::types::InferenceChatMessage;
+        let messages = vec![
+            InferenceChatMessage { role: "user".into(), content: "Hi".into() },
+        ];
+        let result = super::inject_nothink_into_messages(&messages);
+        assert_eq!(result[0].role, "system");
+        assert_eq!(result[0].content, "/nothink");
+        assert_eq!(result[1].role, "user");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn inject_nothink_is_idempotent() {
+        use crate::inference::types::InferenceChatMessage;
+        let messages = vec![
+            InferenceChatMessage { role: "system".into(), content: "/nothink\nYou are helpful.".into() },
+            InferenceChatMessage { role: "user".into(), content: "Hi".into() },
+        ];
+        let result = super::inject_nothink_into_messages(&messages);
+        assert_eq!(result[0].content, "/nothink\nYou are helpful.");
+        assert_eq!(result.len(), 2);
     }
 }
