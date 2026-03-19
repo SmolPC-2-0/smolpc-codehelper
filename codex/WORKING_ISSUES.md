@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-19
 Base branch: `main`
-Last known good commit: `19b592b` (pre-NPU-fix main)
+Last known good commit: `b383a1a` (Qwen2.5 NPU working, PR #105 merged)
 
 ---
 
