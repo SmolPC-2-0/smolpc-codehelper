@@ -823,6 +823,22 @@ mod tests {
         assert_eq!(controls.presence_penalty, Some(1.5));
     }
 
+    /// Documents the NPU greedy constraint: host tuning requests sampling
+    /// (temperature > 0), but core `create_generation_config()` overrides to
+    /// `do_sample=false` when the device target is NPU.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn npu_greedy_constraint_documented() {
+        let tuning = openvino_model_tuning_for_model("qwen3-4b");
+        let defaults = tuning
+            .request_defaults
+            .expect("qwen3 should provide request defaults");
+        assert!(
+            defaults.temperature > 0.0,
+            "Host tuning uses sampling; NPU override is in core create_generation_config()"
+        );
+    }
+
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
