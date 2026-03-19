@@ -10,24 +10,19 @@ Last known good commit: `b383a1a` (Qwen2.5 NPU working, PR #105 merged)
 
 ### 1) OpenVINO NPU — Qwen3-4B produces minimal output
 
-- Status: Open (investigation needed)
-- Severity: High (core feature — Qwen2.5 NPU works, Qwen3 does not)
-- Context:
-  - **Qwen2.5-1.5B NPU: WORKING** — coherent output, clean EOS, validated 2026-03-19.
-  - **Qwen3-4B NPU: BROKEN** — generates 1-2 tokens then hits EOS under greedy decoding.
-  - Root causes fixed so far (branch `fix/npu-inference`):
-    - Forced `do_sample=false` on NPU (was enabling multinomial sampling on greedy-only hardware).
-    - Skipped `presence_penalty` on NPU (incompatible with greedy decoding).
-    - Injected `/nothink` into system message instead of using `extra_context` API (NPU does not support it; caused immediate EOS).
-  - Remaining Qwen3-4B issue: greedy decoding selects EOS after 1-2 tokens. Possible causes:
-    - `MAX_PROMPT_LEN=512` may be too small for Qwen3's templated prompt (needs investigation).
-    - Qwen3-4B INT4 quantization may interact differently with NPU greedy decoding.
-    - Model architecture differences vs Qwen2.5 (thinking mode, longer chat template).
+- Status: **Upstream limitation confirmed** — template patch necessary but not sufficient
+- Severity: Medium (Qwen3-4B NPU is not viable with current OpenVINO; Qwen2.5 NPU and Qwen3 CPU work)
+- Root cause (template): Qwen3 `chat_template.jinja` requires `enable_thinking` to be explicitly defined for non-thinking mode. Engine now auto-patches at load time (branch `fix/qwen3-npu`).
+- Root cause (accuracy): Even with template fix, Qwen3-4B INT4 on NPU produces 0-1 content tokens then EOS. This matches the OpenVINO 2025.3 release note: "reduced accuracy in chat scenarios" for Qwen3 architecture. The HuggingFace `Qwen3-4B-int4-ov` model card does NOT list NPU as a target device.
+- Live test results (2026-03-19):
+  - **Qwen3-4B NPU**: 2 tokens (" endeavour" + stop) — BROKEN (upstream limitation)
+  - **Qwen3-4B CPU**: 27 tokens, coherent — WORKING
+  - **Qwen2.5-1.5B NPU**: 24 tokens, coherent — WORKING (no regression)
+  - **Qwen2.5-1.5B CPU**: 29 tokens, coherent — WORKING (no regression)
+- Decision: Qwen3-4B should fall back to CPU or DirectML. The template patch is kept as a necessary correctness fix (self-healing for fresh downloads). NPU remains viable only for Qwen2.5.
 - Next steps:
-  - Research OpenVINO GenAI StaticLLMPipeline constraints for Qwen3 architecture.
-  - Test with increased `MAX_PROMPT_LEN` (env var override exists).
-  - Compare prompt token counts between Qwen2.5 and Qwen3 for the same input.
-  - Consider whether Qwen3-4B NPU is feasible or if it should be CPU/DirectML only.
+  - Ensure backend selection does not attempt NPU for Qwen3-4B (or accept graceful degradation).
+  - Monitor future OpenVINO releases for Qwen3 NPU accuracy improvements.
 
 ### 2) Production model-path resolution for packaged app
 
