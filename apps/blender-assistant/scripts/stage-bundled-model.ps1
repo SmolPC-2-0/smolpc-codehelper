@@ -1,5 +1,5 @@
 param(
-    [string]$ModelId = "qwen2.5-coder-1.5b",
+    [string]$ModelId = "qwen2.5-1.5b-instruct",
     [string]$SourceRoot = "",
     [string]$DestinationRoot = "src-tauri/resources/models",
     [switch]$CopyFiles,

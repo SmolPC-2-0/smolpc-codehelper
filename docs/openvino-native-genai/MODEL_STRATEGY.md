@@ -1,6 +1,6 @@
 # Model Strategy
 
-Checked on: 2026-03-12
+Checked on: 2026-03-19
 Primary KPI: best practical performance on weak Intel laptops.
 
 ## Selection Rules
@@ -25,47 +25,35 @@ Sources:
 - https://github.com/openvinotoolkit/openvino/releases/tag/2026.0.0
 - https://huggingface.co/OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov
 
-## Coding-Oriented Backup Model
-
-`OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int4-ov`
-
-Why:
-
-- stronger coding-assistant fit
-- still small enough to be realistic on weak laptops
-- keeps the same native OpenVINO artifact shape as the primary bring-up lane
-
-Sources:
-
-- https://huggingface.co/OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int4-ov
-- https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct
-
-## Fastest Small Sanity-Check Option
-
-`Qwen-2.5-coder-0.5B` exported for OpenVINO NPU
-
-Why:
-
-- OpenVINO `2026.0.0` explicitly calls it out as newly supported on NPU
-- it is the quickest way to determine whether native OpenVINO NPU is behaving well on low-end hardware
-
-Source:
-
-- https://github.com/openvinotoolkit/openvino/releases/tag/2026.0.0
-
-## Current Qwen3 Smoke-Test Target
+## Higher-Capability Supported Model
 
 `OpenVINO/Qwen3-4B-int4-ov`
 
 Why:
 
-- an official OpenVINO-hosted Qwen3 4B artifact exists today, so the team can validate the native NPU lane without building a custom export first
-- it is provisioned locally as `qwen3-4b-int4-ov` to stay truthful that it is not the same checkpoint as `qwen3-4b-instruct-2507`
-- it is suitable for OpenVINO smoke tests and review builds, but not for exact benchmark-parity claims against the existing `-2507` CPU and DML lanes
+- an official OpenVINO-hosted Qwen3 4B artifact exists and can back the shared `qwen3-4b` model id across OpenVINO CPU, OpenVINO NPU, and DirectML
+- the current supported OpenVINO pass runs it in non-thinking mode only so stopping and answer quality stay aligned with upstream guidance
 
 Source:
 
 - https://huggingface.co/OpenVINO/Qwen3-4B-int4-ov
+
+## DirectML Source Of Truth
+
+- keep the public large-model id unified as plain `qwen3-4b` across OpenVINO CPU, OpenVINO NPU, and DirectML
+- the supported DirectML source mode is `self_build` from `Qwen/Qwen3-4B`, not `qwen3-4b-instruct` or `qwen3-4b-instruct-2507`
+- the current validated builder tuple on this branch is:
+  - Python `3.14`
+  - `onnxruntime==1.24.2`
+  - `onnxruntime-directml==1.24.2`
+  - `onnxruntime-genai==0.12.2`
+  - `onnxruntime-genai-directml==0.12.2`
+- the DirectML staging script must validate `model.onnx`, `genai_config.json`, `tokenizer.json`, and all ONNX external-data references; the validated `qwen3-4b` self-build on this PC references `model.onnx.data`
+- DirectML export logs live under `%LOCALAPPDATA%/SmolPC/logs/dml-export/`
+- `fallback_snapshot` is available only as an explicit recovery mode using `onnx-community/Qwen3-4B-ONNX` plus `config_only=true`; it is not the default shipping path
+- Windows app-local runtime staging stays aligned to the official NuGet dependency pair:
+  - `Microsoft.ML.OnnxRuntimeGenAI.DirectML` `0.12.2`
+  - `Microsoft.ML.OnnxRuntime.DirectML` `1.23.0`
 
 ## Export Rules For Native OpenVINO NPU
 
@@ -111,10 +99,10 @@ Manifest requirements:
 
 ## Default Catalog Direction
 
-- the shared-engine default catalog must move off `qwen3-4b-instruct-2507`
-- do not ship the native OpenVINO path while the default shared-engine model still assumes a DirectML-required workflow
-- the default development target for this migration is the `1.5B` Qwen family
-- final user-facing default selection belongs to the model/catalog workstream, but it must be resolved before rollout, not deferred indefinitely
+- the supported shared catalog is now `qwen2.5-1.5b-instruct` first, `qwen3-4b` second
+- do not reintroduce `qwen2.5-coder-1.5b`, `qwen3-4b-instruct`, or `qwen3-4b-instruct-2507` into the normal product catalog
+- keep OpenVINO CPU on structured chat history; do not send normal OpenVINO chat requests through the legacy prompt-string path
+- keep `qwen3-4b` in OpenVINO non-thinking mode until a later pass re-validates thinking support
 
 ## Benchmark Order
 
@@ -127,4 +115,5 @@ Lead Phase 1 with the 1.5B Qwen model for this KPI; Qwen3-4B is the higher-capab
 
 Current repo note:
 
-- `qwen3-4b-int4-ov` is a smoke-test bring-up lane, not the final benchmark-parity answer
+- `qwen3-4b` is a supported shared model id backed by the official `OpenVINO/Qwen3-4B-int4-ov` artifact on the OpenVINO lanes
+- `qwen3-4b` is also validated on the DirectML lane through the `Qwen/Qwen3-4B` self-build path with forced `directml` load and streaming generation

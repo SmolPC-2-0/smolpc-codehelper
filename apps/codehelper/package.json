@@ -20,10 +20,8 @@
 		"tauri:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-tauri-dml.ps1",
 		"runtime:setup:openvino": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-openvino-runtime.ps1",
 		"model:export:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/export-dml-model.ps1",
-		"model:setup:qwen3": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-qwen3-shared-model.ps1",
-		"model:setup:qwen3:openvino": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-openvino-qwen3-model.ps1",
-		"model:setup:qwen25-coder": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-qwen25-coder-model.ps1",
-		"model:setup:qwen3-instruct": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-qwen3-instruct-model.ps1"
+		"model:setup:qwen25-instruct": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-qwen25-instruct-model.ps1",
+		"model:setup:qwen3-4b": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-qwen3-4b-model.ps1"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^1.2.9",

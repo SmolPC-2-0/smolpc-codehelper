@@ -8,13 +8,9 @@ use std::sync::Arc;
 
 pub enum InferenceRuntimeAdapter {
     #[cfg(target_os = "windows")]
-    GenAiDirectMl {
-        generator: GenAiDirectMlGenerator,
-    },
+    GenAiDirectMl { generator: GenAiDirectMlGenerator },
     #[cfg(target_os = "windows")]
-    OpenVinoGenAi {
-        generator: OpenVinoGenAiGenerator,
-    },
+    OpenVinoGenAi { generator: OpenVinoGenAiGenerator },
 }
 
 impl InferenceRuntimeAdapter {
@@ -26,6 +22,18 @@ impl InferenceRuntimeAdapter {
     #[cfg(target_os = "windows")]
     pub fn openvino_genai(generator: OpenVinoGenAiGenerator) -> Self {
         Self::OpenVinoGenAi { generator }
+    }
+
+    pub fn is_openvino_genai(&self) -> bool {
+        #[cfg(target_os = "windows")]
+        {
+            matches!(self, Self::OpenVinoGenAi { .. })
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            false
+        }
     }
 
     pub async fn generate_stream<F>(

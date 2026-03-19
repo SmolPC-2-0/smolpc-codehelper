@@ -368,7 +368,7 @@ mod tests {
         status.state = Some("loading_model".to_string());
         status.state_since = Some("2026-03-05T18:00:00Z".to_string());
         status.active_backend = Some("directml".to_string());
-        status.active_model_id = Some("qwen3-4b-instruct-2507".to_string());
+        status.active_model_id = Some("qwen2.5-1.5b-instruct".to_string());
         status.error_code = Some("E_TEST".to_string());
         status.error_message = Some("boom".to_string());
         status.retryable = Some(false);
@@ -384,7 +384,7 @@ mod tests {
         assert_eq!(readiness.active_backend.as_deref(), Some("directml"));
         assert_eq!(
             readiness.active_model_id.as_deref(),
-            Some("qwen3-4b-instruct-2507")
+            Some("qwen2.5-1.5b-instruct")
         );
         assert_eq!(readiness.error_code.as_deref(), Some("E_TEST"));
         assert_eq!(readiness.error_message.as_deref(), Some("boom"));
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn map_engine_status_falls_back_to_last_error_payload() {
         let mut status = sample_status();
-        status.current_model = Some("qwen2.5-coder-1.5b".to_string());
+        status.current_model = Some("qwen2.5-1.5b-instruct".to_string());
         status.backend_status.active_backend = Some(InferenceBackend::Cpu);
         status.ready = true;
         status.error_code = None;
@@ -413,7 +413,7 @@ mod tests {
         assert_eq!(readiness.active_backend.as_deref(), Some("cpu"));
         assert_eq!(
             readiness.active_model_id.as_deref(),
-            Some("qwen2.5-coder-1.5b")
+            Some("qwen2.5-1.5b-instruct")
         );
         assert_eq!(
             readiness.error_code.as_deref(),
@@ -449,7 +449,7 @@ mod tests {
         let request = EnsureStartedRequestDto {
             mode: StartupModeDto::DirectmlRequired,
             startup_policy: Some(StartupPolicyDto {
-                default_model_id: Some("qwen3-4b-instruct-2507".to_string()),
+                default_model_id: Some("qwen2.5-1.5b-instruct".to_string()),
             }),
         };
 
@@ -458,7 +458,7 @@ mod tests {
         assert_eq!(value["mode"], "directml_required");
         assert_eq!(
             value["startup_policy"]["default_model_id"],
-            "qwen3-4b-instruct-2507"
+            "qwen2.5-1.5b-instruct"
         );
     }
 
@@ -469,7 +469,7 @@ mod tests {
             "state": "ready",
             "state_since": "2026-03-05T18:00:00Z",
             "active_backend": "directml",
-            "active_model_id": "qwen3-4b-instruct-2507",
+            "active_model_id": "qwen2.5-1.5b-instruct",
             "error_code": null,
             "error_message": null,
             "retryable": false

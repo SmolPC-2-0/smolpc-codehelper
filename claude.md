@@ -12,7 +12,7 @@ SmolPC Code Helper is an **offline AI coding assistant** for secondary school st
 
 **Backend selection priority:** `openvino_npu` > `directml` > `cpu`
 
-**Current runtime status:** DirectML model loading, switching, and recovery are the currently working Windows path on `main`. OpenVINO CPU/NPU still has known generation and compiler issues; keep OpenVINO work isolated to dedicated follow-up branches/PRs until those bugs are resolved.
+**Current runtime status:** the supported shared model baseline is `qwen2.5-1.5b-instruct` (default) plus `qwen3-4b`. OpenVINO CPU and OpenVINO NPU now use structured chat history for normal chat requests; only explicit legacy ChatML payloads stay on the prompt-compatibility path.
 
 ---
 
@@ -79,14 +79,18 @@ Corrections discovered during development. **When you correct a mistake, append 
 - OpenVINO 2026.0.0 is the pinned tuple — `openvino`, `openvino_genai`, `openvino_tokenizers` must match; mixing breaks ABI
 - Use INT4, not NF4, for broad NPU compatibility — NF4 only works on Core Ultra Series 2+
 - Qwen2.5 has TWO stop tokens: `<|endoftext|>` (151643) + `<|im_end|>` (151645) — check both
-- ChatML formatting is mandatory — without `<|im_start|>` wrapping, Qwen outputs pretraining data
+- OpenVINO GenAI chat requests must use structured message history on CPU and NPU; keep the preformatted ChatML string path only for explicit legacy compatibility
 - Use `OnceLock<Result>` over `Once` for fallible init — `Once::call_once` can't return values
 - Use `AtomicBool` over `try_lock()` for state tracking — `try_lock()` creates TOCTOU races
 - Bundle fingerprint auto-invalidates on DLL change — mtime change forces fresh backend selection
 - Don't dismiss broken checks as "pre-existing" - if verification fails, fix it in the current session
 - Selection profile constant (`OPENVINO_SELECTION_PROFILE`) change forces re-evaluation of all cached decisions
 - NPU compilation is slow on first load but fast after - `CACHE_DIR` enables compiled blob reuse
-- Qwen2.5-Coder NPU compilation fails on OpenVINO 2026.0.0 (MLIR StopLocationVerifierPass); existing NPU->auto fallback handles this
+- Qwen3 OpenVINO support is currently non-thinking only; align temperature, top_p, top_k, and presence_penalty with the upstream non-thinking guidance
+- Do NOT set `min_new_tokens` on OpenVINO GenAI 2026.0.0 — any value >= 1 permanently suppresses EOS detection, causing runaway generation
+- PowerShell wrappers around native tools must coerce stderr records to plain strings before logging or `$ErrorActionPreference = 'Stop'` will treat normal tool output as a fatal error
+- After a long-running model export times out at the shell layer, check for orphaned builder `python` processes before retrying or the next validation pass starts from a dirty state
+- Do not hard-block DirectML mode selection on the background hardware probe; the probe can time out while DirectML runtime initialization still works with a valid staged artifact
 
 ---
 
@@ -99,4 +103,4 @@ Corrections discovered during development. **When you correct a mistake, append 
 - [Svelte 5 Runes](https://svelte.dev/docs/svelte/what-are-runes)
 - [Tailwind CSS 4](https://tailwindcss.com/docs)
 - [HuggingFace: Qwen2.5-1.5B-Instruct-int4-ov](https://huggingface.co/OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov)
-- [HuggingFace: Qwen2.5-Coder-1.5B-Instruct-int4-ov](https://huggingface.co/OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int4-ov)
+- [HuggingFace: Qwen3-4B-int4-ov](https://huggingface.co/OpenVINO/Qwen3-4B-int4-ov)

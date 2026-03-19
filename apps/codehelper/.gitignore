@@ -12,6 +12,9 @@ src-tauri/gen/schemas
 src-tauri/models/
 src-tauri/libs/*
 !src-tauri/libs/README.md
+!src-tauri/libs/openvino/
+src-tauri/libs/openvino/*
+!src-tauri/libs/openvino/.gitkeep
 src-tauri/*.dll
 
 # Local/generated artifacts

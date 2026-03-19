@@ -625,18 +625,15 @@ mod tests {
     #[test]
     fn desired_model_to_restore_requests_reload_after_host_restart() {
         assert_eq!(
-            desired_model_to_restore(Some("qwen3-4b-instruct-2507"), None),
-            Some("qwen3-4b-instruct-2507")
+            desired_model_to_restore(Some("qwen2.5-1.5b-instruct"), None),
+            Some("qwen2.5-1.5b-instruct")
         );
     }
 
     #[test]
     fn desired_model_to_restore_skips_reload_when_model_is_already_loaded() {
         assert_eq!(
-            desired_model_to_restore(
-                Some("qwen3-4b-instruct-2507"),
-                Some("qwen3-4b-instruct-2507")
-            ),
+            desired_model_to_restore(Some("qwen2.5-1.5b-instruct"), Some("qwen2.5-1.5b-instruct")),
             None
         );
     }

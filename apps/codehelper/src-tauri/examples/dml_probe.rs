@@ -31,12 +31,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = std::env::var("ORT_PROBE_BACKEND").unwrap_or_else(|_| "dml".to_string());
     let mut session = if backend.eq_ignore_ascii_case("cpu") {
         sb.with_execution_providers([ep::CPU::default().build().error_on_failure()])?
-            .commit_from_file("models/qwen2.5-coder-1.5b/dml/model.onnx")?
+            .commit_from_file("models/qwen2.5-1.5b-instruct/dml/model.onnx")?
     } else {
         let dml = ep::DirectML::default();
         sb.with_config_entry("ep.dml.disable_graph_fusion", "1")?
             .with_execution_providers([dml.build().error_on_failure()])?
-            .commit_from_file("models/qwen2.5-coder-1.5b/dml/model.onnx")?
+            .commit_from_file("models/qwen2.5-1.5b-instruct/dml/model.onnx")?
     };
 
     let mut ids: Vec<i64> = vec![

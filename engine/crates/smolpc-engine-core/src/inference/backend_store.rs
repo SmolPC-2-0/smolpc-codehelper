@@ -160,7 +160,7 @@ mod tests {
 
     fn decision_key(driver_version: &str) -> BackendDecisionKey {
         BackendDecisionKey {
-            model_id: "qwen2.5-coder-1.5b".to_string(),
+            model_id: "qwen2.5-1.5b-instruct".to_string(),
             model_artifact_fingerprint: Some("artifact-v1".to_string()),
             app_version: "2.2.0".to_string(),
             selector_engine_id: "engine_host".to_string(),

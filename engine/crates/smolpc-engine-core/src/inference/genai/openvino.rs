@@ -20,6 +20,7 @@ type OvGenAiJsonContainer = c_void;
 
 type OvStatus = i32;
 const OV_STATUS_OK: OvStatus = 0;
+static PRESENCE_PENALTY_SYMBOL_WARNING_EMITTED: AtomicBool = AtomicBool::new(false);
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -91,6 +92,8 @@ struct OpenVinoGenAiApi {
     set_top_p: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, f32) -> OvStatus,
     set_top_k: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, usize) -> OvStatus,
     set_repetition_penalty: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, f32) -> OvStatus,
+    set_presence_penalty:
+        Option<unsafe extern "C" fn(*mut OvGenAiGenerationConfig, f32) -> OvStatus>,
     validate_generation_config: unsafe extern "C" fn(*mut OvGenAiGenerationConfig) -> OvStatus,
     destroy_decoded_results: unsafe extern "C" fn(*mut OvGenAiDecodedResults),
     get_perf_metrics: unsafe extern "C" fn(
@@ -124,7 +127,10 @@ impl OpenVinoDeviceTarget {
 }
 
 impl OpenVinoGenAiApi {
-    fn load(bundle: &OpenVinoRuntimeBundle, target: OpenVinoDeviceTarget) -> Result<Arc<Self>, String> {
+    fn load(
+        bundle: &OpenVinoRuntimeBundle,
+        target: OpenVinoDeviceTarget,
+    ) -> Result<Arc<Self>, String> {
         match target {
             OpenVinoDeviceTarget::Cpu => OpenVinoRuntimeLoader::ensure_initialized_for_cpu(bundle)?,
             OpenVinoDeviceTarget::Npu => OpenVinoRuntimeLoader::ensure_initialized_for_npu(bundle)?,
@@ -223,6 +229,10 @@ impl OpenVinoGenAiApi {
                     &openvino_genai_c,
                     b"ov_genai_generation_config_set_repetition_penalty\0",
                 )?,
+                set_presence_penalty: try_load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_generation_config_set_presence_penalty\0",
+                ),
                 validate_generation_config: load_symbol(
                     &openvino_genai_c,
                     b"ov_genai_generation_config_validate\0",
@@ -257,6 +267,10 @@ impl OpenVinoGenAiApi {
 
 unsafe fn load_symbol<T: Copy>(lib: &RetainedLibrary, name: &[u8]) -> Result<T, String> {
     lib.get(name)
+}
+
+unsafe fn try_load_symbol<T: Copy>(lib: &RetainedLibrary, name: &[u8]) -> Option<T> {
+    lib.get(name).ok()
 }
 
 fn cstring(value: &str, field: &str) -> Result<CString, String> {
@@ -377,16 +391,17 @@ pub struct OpenVinoGenAiGenerator {
     inner: Arc<Mutex<OpenVinoGenAiInner>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct OpenVinoGenerationControls {
     pub eos_token_id: Option<i64>,
     pub min_new_tokens: Option<usize>,
     pub stop_token_ids: Option<Vec<i64>>,
     pub stop_strings: Option<Vec<String>>,
     pub ignore_eos: Option<bool>,
+    pub presence_penalty: Option<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum OpenVinoPipelineConfig {
     Cpu {
         generation_controls: OpenVinoGenerationControls,
@@ -486,7 +501,9 @@ impl OpenVinoGenAiGenerator {
                 generation_controls,
                 disable_thinking,
             } => (
-                unsafe { (api.create_pipeline)(model_dir.as_ptr(), device.as_ptr(), 0, &mut pipeline_ptr) },
+                unsafe {
+                    (api.create_pipeline)(model_dir.as_ptr(), device.as_ptr(), 0, &mut pipeline_ptr)
+                },
                 usize::MAX,
                 generation_controls.clone(),
                 *disable_thinking,
@@ -704,6 +721,7 @@ fn generate_stream_blocking(
         .lock()
         .map_err(|_| "OpenVINO GenAI state mutex poisoned".to_string())?;
     let gen_config = clamp_max_new_tokens(gen_config, guard.max_new_tokens_cap);
+    let max_callback_count = gen_config.max_length;
     let config = create_generation_config(&guard, gen_config, &guard.generation_controls)?;
     let start = Instant::now();
     let mut callback_state = StreamCallbackState {
@@ -711,7 +729,13 @@ fn generate_stream_blocking(
         cancelled,
         trailing_dot_run: 0,
         accumulated: String::new(),
-        stop_strings: guard.generation_controls.stop_strings.clone().unwrap_or_default(),
+        stop_strings: guard
+            .generation_controls
+            .stop_strings
+            .clone()
+            .unwrap_or_default(),
+        callback_count: 0,
+        max_callback_count,
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -731,6 +755,7 @@ fn generate_stream_with_history_blocking(
         .lock()
         .map_err(|_| "OpenVINO GenAI state mutex poisoned".to_string())?;
     let gen_config = clamp_max_new_tokens(gen_config, guard.max_new_tokens_cap);
+    let max_callback_count = gen_config.max_length;
     let config = create_generation_config(&guard, gen_config, &guard.generation_controls)?;
     let history = create_chat_history(&guard.api, &messages, guard.disable_thinking)?;
     let start = Instant::now();
@@ -739,7 +764,13 @@ fn generate_stream_with_history_blocking(
         cancelled,
         trailing_dot_run: 0,
         accumulated: String::new(),
-        stop_strings: guard.generation_controls.stop_strings.clone().unwrap_or_default(),
+        stop_strings: guard
+            .generation_controls
+            .stop_strings
+            .clone()
+            .unwrap_or_default(),
+        callback_count: 0,
+        max_callback_count,
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -897,6 +928,22 @@ fn create_generation_config(
             },
             "ov_genai_generation_config_set_repetition_penalty",
         )?;
+    }
+
+    if let Some(presence_penalty) = controls.presence_penalty {
+        if presence_penalty.is_finite() {
+            if let Some(set_presence_penalty) = api.set_presence_penalty {
+                check_status(
+                    api,
+                    unsafe { set_presence_penalty(config_handle.as_ptr(), presence_penalty) },
+                    "ov_genai_generation_config_set_presence_penalty",
+                )?;
+            } else if !PRESENCE_PENALTY_SYMBOL_WARNING_EMITTED.swap(true, Ordering::SeqCst) {
+                log::warn!(
+                    "OpenVINO runtime does not expose presence_penalty support; skipping requested presence_penalty={presence_penalty}"
+                );
+            }
+        }
     }
 
     check_status(
@@ -1163,6 +1210,10 @@ struct StreamCallbackState {
     trailing_dot_run: usize,
     accumulated: String,
     stop_strings: Vec<String>,
+    /// Safety-net token counter — stops generation if the C-level max_new_tokens
+    /// is not honoured for any reason (e.g. pipeline bug or ABI mismatch).
+    callback_count: usize,
+    max_callback_count: usize,
 }
 
 unsafe extern "C" fn stream_callback(
@@ -1180,6 +1231,17 @@ unsafe extern "C" fn stream_callback(
 
     if !text.is_null() {
         let piece = c_string_to_string_verbatim(text);
+        if !piece.is_empty() {
+            state.callback_count += 1;
+            if state.callback_count > state.max_callback_count {
+                log::warn!(
+                    "Stopping OpenVINO stream: callback count ({}) exceeded safety limit ({})",
+                    state.callback_count,
+                    state.max_callback_count,
+                );
+                return OvGenAiStreamingStatus::Stop;
+            }
+        }
         state.accumulated.push_str(&piece);
         for stop in &state.stop_strings {
             if state.accumulated.contains(stop.as_str()) {
@@ -1292,10 +1354,9 @@ fn openvino_genai_api_for_target(
         Err(poisoned) => poisoned.into_inner(),
     };
     guard.active_fingerprint = Some(fingerprint.clone());
-    guard.results.insert(
-        cache_key,
-        CachedOpenVinoGenAiApi::Success(Arc::clone(&api)),
-    );
+    guard
+        .results
+        .insert(cache_key, CachedOpenVinoGenAiApi::Success(Arc::clone(&api)));
     Ok(api)
 }
 
@@ -1326,10 +1387,11 @@ mod tests {
 
         let temp = tempdir().expect("temp dir");
         let bundle = build_bundle(temp.path(), None);
-        let api = match super::openvino_genai_api_for_target(&bundle, super::OpenVinoDeviceTarget::Cpu) {
-            Ok(api) => api,
-            Err(_) => return,
-        };
+        let api =
+            match super::openvino_genai_api_for_target(&bundle, super::OpenVinoDeviceTarget::Cpu) {
+                Ok(api) => api,
+                Err(_) => return,
+            };
 
         let value =
             metric_ms_pair(&api, std::ptr::null(), getter, "metric").expect("metric rounding");

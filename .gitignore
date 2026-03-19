@@ -31,6 +31,9 @@ dist-ssr
 /apps/codehelper/src-tauri/models/
 /apps/codehelper/src-tauri/libs/*
 !/apps/codehelper/src-tauri/libs/README.md
+!/apps/codehelper/src-tauri/libs/openvino/
+/apps/codehelper/src-tauri/libs/openvino/*
+!/apps/codehelper/src-tauri/libs/openvino/.gitkeep
 /apps/codehelper/src-tauri/*.dll
 nul
 

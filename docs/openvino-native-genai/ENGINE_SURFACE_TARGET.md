@@ -97,7 +97,7 @@ Implemented now:
 
 ```json
 {
-  "model_id": "qwen2.5-coder-1.5b",
+  "model_id": "qwen2.5-1.5b-instruct",
   "lanes": {
     "openvino_npu": {
       "artifact_ready": false,

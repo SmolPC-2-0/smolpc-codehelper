@@ -30,34 +30,25 @@ The app does not require a Python Flask server at runtime.
 - Rust stable toolchain
 - Tauri prerequisites for your platform
 
-### Run From Monorepo Root
-
-```bash
-npm install
-npm run runtime:setup:blender
-npm run model:setup:qwen2_5:blender
-npm run tauri:dev:blender
-```
-
-`runtime:setup` uses `scripts/setup-libs.ps1` on Windows. A shell-script alternative remains available via `runtime:setup:sh`.
-`npm run tauri:dev` and `npm run tauri dev` both route through Blender wrappers that set `CARGO_TARGET_DIR`.
-
-Other useful root commands:
-
-```bash
-npm run check:blender
-npm run model:setup:qwen2_5:blender
-npm run model:setup:qwen3:blender
-npm run tauri:dml:blender
-```
-
-### Run
+### Run From App Directory
 
 ```bash
 npm install
 npm run runtime:setup
 npm run model:setup:qwen2_5
 npm run tauri:dev
+```
+
+`runtime:setup` uses `scripts/setup-libs.ps1` on Windows. A shell-script alternative remains available via `runtime:setup:sh`.
+`npm run tauri:dev` and `npm run tauri dev` both route through Blender wrappers that set `CARGO_TARGET_DIR`.
+
+Other useful local commands:
+
+```bash
+npm run check
+npm run model:setup:qwen2_5
+npm run model:setup:qwen3
+npm run tauri:dml
 ```
 
 ### Build
@@ -87,16 +78,12 @@ For release packaging that includes engine/runtime/model assets:
 npm run model:setup:qwen2_5
 # or
 npm run model:setup:qwen3
-# or
-npm run model:setup:qwen3_5
 ```
 
 2. Stage model artifacts into `src-tauri/resources/models/`:
 
 ```powershell
 npm run bundle:stage:model
-# or (for qwen3.5)
-npm run bundle:stage:model:qwen3_5
 ```
 
 3. Build:

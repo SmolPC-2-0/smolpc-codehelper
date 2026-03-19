@@ -125,7 +125,7 @@ Default base URL: `http://127.0.0.1:19432`
     - request `startup_policy.default_model_id` > env/config (`SMOLPC_ENGINE_DEFAULT_MODEL_ID` or `SMOLPC_DEFAULT_MODEL_ID`) > built-in model default.
 
 - `POST /engine/load`
-  - Body: `{ "model_id": "qwen3-4b-instruct-2507" }`
+  - Body: `{ "model_id": "qwen2.5-1.5b-instruct" }`
 
 - `POST /engine/unload`
   - Body: `{ "force": false }`
@@ -134,7 +134,7 @@ Default base URL: `http://127.0.0.1:19432`
   - Cancels the currently active generation.
 
 - `POST /engine/check-model`
-  - Body: `{ "model_id": "qwen3-4b-instruct-2507" }`
+  - Body: `{ "model_id": "qwen2.5-1.5b-instruct" }`
   - Returns lane readiness, not a single boolean:
   - Primary programmatic readiness surfaces:
     - HTTP: `POST /engine/check-model`
@@ -149,7 +149,7 @@ Default base URL: `http://127.0.0.1:19432`
 
 ```json
 {
-  "model_id": "qwen2.5-coder-1.5b",
+  "model_id": "qwen2.5-1.5b-instruct",
   "lanes": {
     "openvino_npu": {
       "artifact_ready": false,

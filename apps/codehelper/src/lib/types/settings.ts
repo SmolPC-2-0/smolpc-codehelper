@@ -6,7 +6,7 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-	selectedModel: 'qwen3-4b-instruct-2507',
+	selectedModel: 'qwen2.5-1.5b-instruct',
 	contextEnabled: true,
 	temperature: 0.7,
 	theme: 'system'
