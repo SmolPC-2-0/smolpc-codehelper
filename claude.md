@@ -87,6 +87,9 @@ Corrections discovered during development. **When you correct a mistake, append 
 - Selection profile constant (`OPENVINO_SELECTION_PROFILE`) change forces re-evaluation of all cached decisions
 - NPU compilation is slow on first load but fast after - `CACHE_DIR` enables compiled blob reuse
 - Qwen3 OpenVINO support is currently non-thinking only; align temperature, top_p, top_k, and presence_penalty with the upstream non-thinking guidance
+- Do NOT set `min_new_tokens` on OpenVINO GenAI 2026.0.0 — any value >= 1 permanently suppresses EOS detection, causing runaway generation
+- PowerShell wrappers around native tools must coerce stderr records to plain strings before logging or `$ErrorActionPreference = 'Stop'` will treat normal tool output as a fatal error
+- After a long-running model export times out at the shell layer, check for orphaned builder `python` processes before retrying or the next validation pass starts from a dirty state
 
 ---
 
