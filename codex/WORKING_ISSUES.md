@@ -61,6 +61,7 @@ Last known good commit: `1b3bbb4`
 
 ## Recently Resolved
 
+- Qwen2.5 OpenVINO artifacts — complete: `openvino_config.json` and `chat_template.jinja` restored locally; manifest now resolves all 15 required files (`codex/qwen25-openvino-artifact`)
 - OpenVINO CPU infinite loop — fixed via structured chat history and stop token enforcement
 - DirectML qwen3-4b export — completed
 - OpenVINO acceleration path — decided: GenAI C-FFI (not ORT EP)
