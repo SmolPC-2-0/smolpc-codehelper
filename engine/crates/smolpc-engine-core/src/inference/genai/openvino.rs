@@ -374,6 +374,7 @@ struct OpenVinoGenAiInner {
     max_new_tokens_cap: usize,
     generation_controls: OpenVinoGenerationControls,
     disable_thinking: bool,
+    device_target: OpenVinoDeviceTarget,
 }
 
 unsafe impl Send for OpenVinoGenAiInner {}
@@ -552,6 +553,7 @@ impl OpenVinoGenAiGenerator {
                 max_new_tokens_cap,
                 generation_controls,
                 disable_thinking,
+                device_target: target,
             })),
         })
     }
@@ -891,7 +893,19 @@ fn create_generation_config(
         )?;
     }
 
-    let do_sample = config.temperature > 0.0;
+    let is_npu = guard.device_target == OpenVinoDeviceTarget::Npu;
+    let do_sample = if is_npu {
+        if config.temperature > 0.0 {
+            log::info!(
+                "NPU StaticLLMPipeline requires greedy decoding; \
+                 overriding do_sample=false (requested temperature={})",
+                config.temperature
+            );
+        }
+        false
+    } else {
+        config.temperature > 0.0
+    };
     check_status(
         api,
         unsafe { (api.set_do_sample)(config_handle.as_ptr(), do_sample) },
@@ -932,7 +946,11 @@ fn create_generation_config(
 
     if let Some(presence_penalty) = controls.presence_penalty {
         if presence_penalty.is_finite() {
-            if let Some(set_presence_penalty) = api.set_presence_penalty {
+            if is_npu {
+                log::info!(
+                    "Skipping presence_penalty={presence_penalty} on NPU (incompatible with greedy decoding)"
+                );
+            } else if let Some(set_presence_penalty) = api.set_presence_penalty {
                 check_status(
                     api,
                     unsafe { set_presence_penalty(config_handle.as_ptr(), presence_penalty) },
