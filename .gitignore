@@ -22,8 +22,8 @@ dist-ssr
 /apps/codehelper/src-tauri/target/
 /apps/codehelper/src-tauri/gen/schemas
 /docs/.local_docs/
-.claude
 .claude/settings.local.json
+.claude/scripts/
 
 # ONNX Runtime and models
 /ort-extracted/

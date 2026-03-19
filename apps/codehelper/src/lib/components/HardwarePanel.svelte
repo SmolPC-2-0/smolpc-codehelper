@@ -152,7 +152,7 @@
 									} else {
 										return x86Features.includes(feature.toUpperCase());
 									}
-								}) as feature}
+								}) as feature (feature)}
 									<span
 										class="rounded-md border border-green-200 bg-green-100 px-2 py-0.5 text-xs text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-400"
 									>
@@ -226,7 +226,7 @@
 						<p class="text-muted-foreground text-sm">No GPUs detected</p>
 					{:else}
 						<div class="space-y-3">
-							{#each hardwareStore.info.gpus as gpu, i}
+							{#each hardwareStore.info.gpus as gpu, i (gpu.name)}
 								<div class={`space-y-2 text-sm ${i > 0 ? 'border-border border-t pt-3' : ''}`}>
 									<div class="grid grid-cols-3 gap-2">
 										<span class="text-muted-foreground">Name:</span>

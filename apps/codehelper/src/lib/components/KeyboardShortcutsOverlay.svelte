@@ -43,10 +43,10 @@
 				</Button>
 			</header>
 			<div class="shortcuts-overlay__list">
-				{#each shortcuts as shortcut}
+				{#each shortcuts as shortcut (shortcut.description)}
 					<div class="shortcuts-overlay__item">
 						<div class="shortcuts-overlay__keys">
-							{#each shortcut.keys as key}
+							{#each shortcut.keys as key (key)}
 								<kbd>{key}</kbd>
 							{/each}
 						</div>

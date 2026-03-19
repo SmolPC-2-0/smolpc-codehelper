@@ -93,6 +93,7 @@
 		</header>
 
 		<div class="chat-message__content prose prose-sm max-w-none break-words">
+			<!-- eslint-disable-next-line svelte/no-at-html-tags -- Markdown rendering requires raw HTML; content is AI-generated in an offline app -->
 			{@html renderedContent}
 		</div>
 
