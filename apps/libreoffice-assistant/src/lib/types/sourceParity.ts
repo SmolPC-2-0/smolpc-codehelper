@@ -4,6 +4,15 @@ export type SourceParityTheme = 'dark' | 'light';
 
 export type SourceParityWorkflowMode = 'mcp_assisted' | 'tool_first';
 
+export type SourceParityDependencyStatus = 'checking' | 'ready' | 'blocked' | 'warning';
+
+export interface SourceParityDependencyItem {
+  key: string;
+  label: string;
+  status: SourceParityDependencyStatus;
+  detail?: string;
+}
+
 export interface SourceParityChatMessage {
   id: string;
   role: SourceParityChatRole;

@@ -13,6 +13,7 @@
   import WorkflowPanel from './lib/components/WorkflowPanel.svelte';
   import { libreofficeController } from './lib/stores/libreofficeController.svelte';
   import { libreofficeSettingsStore } from './lib/stores/libreofficeSettings.svelte';
+  import type { SourceParityDependencyItem } from './lib/types/sourceParity';
 
   const loadingBootstrap = $derived(libreofficeController.loadingBootstrap);
   const actionBusy = $derived(libreofficeController.actionBusy);
@@ -49,6 +50,20 @@
   const workflowErrorDetail = $derived(libreofficeController.workflowErrorDetail);
   const workflowLastEvidenceFile = $derived(libreofficeController.workflowLastEvidenceFile);
 
+  let sourceParityDependencyReady = $state(false);
+  let sourceParityDependencyLoading = $state(true);
+  let sourceParityDependencies = $state<SourceParityDependencyItem[]>([]);
+
+  function formatSelectedModelDetail(selectedModel: string, available: boolean): string {
+    if (!selectedModel) {
+      return 'No preferred model set in source-parity settings.';
+    }
+    if (available) {
+      return selectedModel;
+    }
+    return `${selectedModel} is not in the current model catalog.`;
+  }
+
   $effect(() => {
     const settings = libreofficeSettingsStore.settings;
     const preferredModelId = settings.selected_model.trim();
@@ -64,6 +79,57 @@
     libreofficeController.setWorkflowSystemPrompt(settings.system_prompt ?? '');
     libreofficeController.setWorkflowTemperature(settings.temperature);
     libreofficeController.setWorkflowMaxTokens(settings.max_tokens);
+
+    const engineHealthy = Boolean(bootstrap?.engine?.healthy);
+    const backendName =
+      backendStatus?.active_backend?.trim() || bootstrap?.engine?.active_backend?.trim() || null;
+    const modelCount = models.length;
+    const selectedModelAvailable = preferredModelId ? models.some((model) => model.id === preferredModelId) : false;
+    const mcpRunning = Boolean(mcpStatus?.running);
+    const dependencyLoading = loadingBootstrap || mcpStatus === null;
+    const mcpErrorDetail = mcpStatus?.error_message?.trim() || 'MCP server is not running.';
+
+    sourceParityDependencies = [
+      {
+        key: 'engine',
+        label: 'Engine Runtime',
+        status: dependencyLoading ? 'checking' : engineHealthy ? 'ready' : 'blocked',
+        detail: dependencyLoading
+          ? 'Checking engine health...'
+          : engineHealthy
+            ? `Healthy${backendName ? ` (${backendName})` : ''}`
+            : (bootstrap?.engine?.error ?? 'Engine health check failed.')
+      },
+      {
+        key: 'models',
+        label: 'Model Catalog',
+        status: dependencyLoading ? 'checking' : modelCount > 0 ? 'ready' : 'blocked',
+        detail: dependencyLoading
+          ? 'Loading available models...'
+          : modelCount > 0
+            ? `${modelCount} model${modelCount === 1 ? '' : 's'} available`
+            : 'No models were returned by the engine.'
+      },
+      {
+        key: 'selected-model',
+        label: 'Selected Model',
+        status: dependencyLoading ? 'checking' : selectedModelAvailable ? 'ready' : 'warning',
+        detail: formatSelectedModelDetail(preferredModelId, selectedModelAvailable)
+      },
+      {
+        key: 'mcp',
+        label: 'MCP Bridge',
+        status: dependencyLoading ? 'checking' : mcpRunning ? 'ready' : 'blocked',
+        detail: dependencyLoading
+          ? 'Checking MCP runtime...'
+          : mcpRunning
+            ? 'Running'
+            : mcpErrorDetail
+      }
+    ];
+
+    sourceParityDependencyLoading = dependencyLoading;
+    sourceParityDependencyReady = !dependencyLoading && engineHealthy && modelCount > 0 && mcpRunning;
   });
 
   function handleMcpToolSelection(toolName: string): void {
@@ -127,6 +193,11 @@
   const exportEvidenceBundle = (): Promise<void> => libreofficeController.exportEvidenceBundle();
   const copyIssueReport = (): Promise<void> => libreofficeController.copyIssueReport();
 
+  const refreshSourceParityDependencies = async (): Promise<void> => {
+    await refreshBootstrapStatus();
+    await Promise.all([refreshModels(), refreshReadiness(), refreshMcpStatus()]);
+  };
+
   onMount(() => {
     void (async () => {
       await libreofficeSettingsStore.loadSettings();
@@ -139,7 +210,16 @@
   <h1>SmolPC LibreOffice Assistant</h1>
   <p class="subtitle">Production candidate shell with shared-engine and MCP workflow hardening</p>
 
-  <SourceParityPanel {models} {actionBusy} />
+  <SourceParityPanel
+    {models}
+    {actionBusy}
+    dependencyLoading={sourceParityDependencyLoading}
+    dependencyReady={sourceParityDependencyReady}
+    dependencies={sourceParityDependencies}
+    onRefreshDependencies={() => void refreshSourceParityDependencies()}
+    onEnsureEngineStarted={() => void ensureEngineStarted()}
+    onStartMcpServer={() => void startMcpServer()}
+  />
 
   <BootstrapControls
     {loadingBootstrap}
