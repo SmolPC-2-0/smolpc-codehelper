@@ -1,6 +1,6 @@
 # LibreOffice Assistant Phase 1 Status
 
-Historical note (2026-03-16): this file records Phase 1-4 implementation evidence from the earlier launcher-era baseline.  
+Historical note (2026-03-16): this file records implementation evidence across Phases 1-7 from the earlier launcher-era baseline to current source-parity slices.  
 Use current planning docs for active scope:
 
 1. `apps/libreoffice-assistant/MIGRATION_PLAN.md`
@@ -83,6 +83,16 @@ Primary planning doc for next phases:
      - model catalog availability
      - selected model resolution
      - MCP runtime status
+15. Source-parity MCP tooling workspace slice (2026-03-19):
+   - added source-parity tools workspace component:
+     - `src/lib/components/SourceParityToolsPage.svelte`
+   - wired source-parity tools tab in `src/lib/components/SourceParityPanel.svelte`:
+     - MCP status/start/stop/refresh controls
+     - tool catalog selection + template application
+     - JSON argument validation + invocation result rendering
+   - tightened tool-first workflow behavior in chat/controller:
+     - tool-first send now requires a selected MCP tool
+     - error messaging points operators to Source-Parity Tools tab
 
 ## Validation run (local)
 
@@ -168,3 +178,14 @@ Tracked in:
    - `cargo test -p smolpc-libreoffice-assistant --lib`
 3. Active phase planning doc:
    - `apps/libreoffice-assistant/PHASE6_SOURCE_PARITY_DEPENDENCY_LOADING_PLAN.md`
+
+## Phase 7 source-parity MCP tooling workspace validation (2026-03-19)
+
+1. Source-parity tools workspace shipped in UI with MCP controls, tool selection, JSON argument editing, and tool result inspection.
+2. Tool-first workflow guard now enforces MCP tool selection in source-parity chat mode.
+3. Local frontend and backend validations passed:
+   - `npm run check:libreoffice` (`svelte-check found 0 errors and 0 warnings`)
+   - `npm run build:libreoffice` (`vite build` completed successfully)
+   - `cargo test -p smolpc-libreoffice-assistant --lib` (`12 passed; 0 failed`)
+4. Active phase planning doc:
+   - `apps/libreoffice-assistant/PHASE7_SOURCE_PARITY_MCP_TOOLING_PLAN.md`

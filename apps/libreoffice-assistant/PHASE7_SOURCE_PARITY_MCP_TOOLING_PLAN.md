@@ -1,7 +1,7 @@
-# Phase 7 Plan: Source-Parity MCP Tooling Workspace
+# Phase 7: Source-Parity MCP Tooling Workspace
 
 Date: 2026-03-19  
-Status: Planned (Step 1 docs push)  
+Status: Completed (Step 3 docs push)  
 Owner: `apps/libreoffice-assistant`
 
 ## Goal
@@ -51,24 +51,49 @@ Out of scope:
 
 ## Acceptance Criteria
 
-1. Source-parity workspace includes MCP tooling UX that covers status, tool catalog, argument editing, and invocation result viewing.
-2. MCP tooling interactions in source-parity workspace run through the current engine+MCP command contract with no new provider branches.
-3. `tool_first` workflow mode in source-parity chat uses the same selected MCP tool/arguments from workspace tooling state.
-4. Engine-only constraints remain intact (no provider toggle, no Ollama command path).
-5. Validation gates pass with no regressions:
+1. [x] Source-parity workspace includes MCP tooling UX that covers status, tool catalog, argument editing, and invocation result viewing.
+2. [x] MCP tooling interactions in source-parity workspace run through the current engine+MCP command contract with no new provider branches.
+3. [x] `tool_first` workflow mode in source-parity chat uses the same selected MCP tool/arguments from workspace tooling state.
+4. [x] Engine-only constraints remain intact (no provider toggle, no Ollama command path).
+5. [x] Validation gates pass with no regressions:
    - `npm run check:libreoffice`
    - `npm run build:libreoffice`
    - `cargo test -p smolpc-libreoffice-assistant --lib`
 
-## Phase 7 implementation slices
+## Shipped implementation slices
 
-1. Add source-parity MCP tooling component(s) under `src/lib/components/`.
-2. Wire source-parity tooling view into `SourceParityPanel` navigation/state.
-3. Unify tooling selection/argument template behavior with existing controller state.
-4. Keep dependency and readiness signaling consistent between loading gate, chat view, and tooling view.
-5. Run validation gates and capture Phase 7 evidence notes for post-implementation docs.
+1. Added source-parity MCP tooling component:
+   - `src/lib/components/SourceParityToolsPage.svelte`
+2. Wired source-parity tooling view into panel navigation/state:
+   - `src/lib/components/SourceParityPanel.svelte` now includes a `Tools` tab and pass-through handlers/props.
+3. Unified tooling selection/argument template behavior with existing controller state:
+   - `src/App.svelte` now passes MCP tool state/actions into source-parity panel.
+4. Preserved chat/tooling state alignment for `tool_first` mode:
+   - `src/lib/stores/libreofficeChat.svelte.ts` blocks tool-first send when no tool is selected.
+   - `src/lib/stores/libreofficeController.svelte.ts` error guidance now points to Source-Parity Tools tab.
+5. Validation gates executed successfully during post-implementation docs finalization.
 
-## Risks and mitigations
+## Execution result (2026-03-19)
+
+1. `npm run check:libreoffice`
+   - Result: pass (`svelte-check found 0 errors and 0 warnings`)
+2. `npm run build:libreoffice`
+   - Result: pass (`vite build` completed successfully)
+3. `cargo test -p smolpc-libreoffice-assistant --lib`
+   - Result: pass (`12 passed; 0 failed`)
+
+## Delivery workflow record
+
+1. Step 1 docs push completed:
+   - commit: `9f126d7`
+   - message: `docs(libreoffice): add phase 7 source parity MCP tooling plan`
+2. Step 2 implementation push completed:
+   - commit: `d33c865`
+   - message: `feat(libreoffice): add source-parity MCP tools workspace`
+3. Step 3 post-implementation docs push:
+   - completed in current docs finalization commit.
+
+## Risks and mitigations (as planned)
 
 1. Risk: duplicate MCP UI paths can diverge in behavior.
    - Mitigation: keep command invocations and state authority centralized in `libreofficeController`.
