@@ -759,7 +759,7 @@ fn generate_stream_with_history_blocking(
     let gen_config = clamp_max_new_tokens(gen_config, guard.max_new_tokens_cap);
     let max_callback_count = gen_config.max_length;
     let config = create_generation_config(&guard, gen_config, &guard.generation_controls)?;
-    let history = create_chat_history(&guard.api, &messages, guard.disable_thinking)?;
+    let history = create_chat_history(&guard.api, &messages, guard.disable_thinking, guard.device_target)?;
     let start = Instant::now();
     let mut callback_state = StreamCallbackState {
         sender: token_tx,
@@ -1011,14 +1011,50 @@ fn generate_once(
     read_generation_metrics(&guard.api, results.as_ptr(), start)
 }
 
+/// Inject `/nothink` into the system message for NPU, which does not support
+/// the `extra_context` API for thinking control.  If no system message exists,
+/// one is prepended.
+fn inject_nothink_into_messages(messages: &[InferenceChatMessage]) -> Vec<InferenceChatMessage> {
+    let mut result: Vec<InferenceChatMessage> = messages.to_vec();
+    if let Some(sys) = result.iter_mut().find(|m| m.role == "system") {
+        if !sys.content.contains("/nothink") {
+            sys.content = format!("/nothink\n{}", sys.content);
+        }
+    } else {
+        result.insert(
+            0,
+            InferenceChatMessage {
+                role: "system".to_string(),
+                content: "/nothink".to_string(),
+            },
+        );
+    }
+    result
+}
+
 fn create_chat_history(
     api: &Arc<OpenVinoGenAiApi>,
     messages: &[InferenceChatMessage],
     disable_thinking: bool,
+    device_target: OpenVinoDeviceTarget,
 ) -> Result<OvOwned<OvGenAiChatHistory>, String> {
     if messages.is_empty() {
         return Err("messages cannot be empty for OpenVINO structured generation".to_string());
     }
+
+    // NPU StaticLLMPipeline does not support extra_context for thinking control.
+    // Inject /nothink into the system message content instead (same approach as
+    // the legacy ChatML path).
+    let npu_thinking_messages;
+    let messages = if disable_thinking && device_target == OpenVinoDeviceTarget::Npu {
+        npu_thinking_messages = inject_nothink_into_messages(messages);
+        log::info!(
+            "NPU: injected /nothink into system message (extra_context not supported)"
+        );
+        &npu_thinking_messages
+    } else {
+        messages
+    };
 
     let messages_json = serde_json::to_string(messages)
         .map_err(|error| format!("Failed to encode messages JSON: {error}"))?;
@@ -1052,7 +1088,7 @@ fn create_chat_history(
     )?;
     let history = OvOwned::new(Arc::clone(api), history_ptr, api.destroy_chat_history);
 
-    if disable_thinking {
+    if disable_thinking && device_target != OpenVinoDeviceTarget::Npu {
         let extra_context = serde_json::json!({ "enable_thinking": false }).to_string();
         let extra_context = cstring(&extra_context, "chat extra context JSON")?;
         let mut extra_context_ptr: *mut OvGenAiJsonContainer = ptr::null_mut();
