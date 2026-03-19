@@ -20,6 +20,7 @@ type OvGenAiJsonContainer = c_void;
 
 type OvStatus = i32;
 const OV_STATUS_OK: OvStatus = 0;
+static PRESENCE_PENALTY_SYMBOL_WARNING_EMITTED: AtomicBool = AtomicBool::new(false);
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -937,6 +938,10 @@ fn create_generation_config(
                     unsafe { set_presence_penalty(config_handle.as_ptr(), presence_penalty) },
                     "ov_genai_generation_config_set_presence_penalty",
                 )?;
+            } else if !PRESENCE_PENALTY_SYMBOL_WARNING_EMITTED.swap(true, Ordering::SeqCst) {
+                log::warn!(
+                    "OpenVINO runtime does not expose presence_penalty support; skipping requested presence_penalty={presence_penalty}"
+                );
             }
         }
     }
