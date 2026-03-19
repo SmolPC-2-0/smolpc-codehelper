@@ -17,6 +17,47 @@
 					? 'status-indicator--failed'
 					: 'status-indicator--starting'
 	);
+	const backendLabelText = $derived(backendLabel());
+
+	function readinessLabel(): string {
+		if (status.isGenerating) {
+			return 'Generating';
+		}
+		if (status.readinessState === 'ready') {
+			return status.currentModel ?? 'Model loaded';
+		}
+		if (status.readinessState === 'loading_model') {
+			return 'Loading model...';
+		}
+		if (status.readinessState === 'probing') {
+			return 'Detecting hardware...';
+		}
+		if (status.readinessState === 'resolving_assets') {
+			return 'Resolving model files...';
+		}
+		if (status.readinessState === 'failed') {
+			return 'Startup failed';
+		}
+		return 'Starting engine...';
+	}
+
+	function backendLabel(): string | null {
+		let label: string | null = null;
+
+		if (status.activeBackend === 'directml') {
+			label = 'DirectML GPU';
+		} else if (status.activeBackend === 'cpu') {
+			label = 'CPU';
+		} else if (status.activeBackend === 'openvino_npu') {
+			label = 'OpenVINO NPU';
+		}
+
+		if (label && status.selectionState === 'fallback') {
+			return `${label} (fallback)`;
+		}
+
+		return label;
+	}
 
 	function handleClick() {
 		onToggle?.();
@@ -32,22 +73,12 @@
 >
 	<div class="status-indicator__dot"></div>
 	<div class="status-indicator__content">
-		<span class="status-indicator__text">
-			{#if status.isGenerating}
-				Generating
-			{:else if status.readinessState === 'ready'}
-				{status.currentModel ?? 'Model loaded'}
-			{:else if status.readinessState === 'failed'}
-				Startup failed
-			{:else}
-				Starting engine...
-			{/if}
-		</span>
+		<span class="status-indicator__text">{readinessLabel()}</span>
 		{#if status.readinessState === 'failed' && status.startupErrorCode}
 			<span class="status-indicator__runtime">{status.startupErrorCode}</span>
-		{:else if status.isLoaded}
+		{:else}
 			<span class="status-indicator__runtime">
-				Open model and runtime settings
+				{backendLabelText ? `${backendLabelText} · Click for settings` : 'Click for settings'}
 			</span>
 		{/if}
 	</div>

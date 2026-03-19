@@ -51,11 +51,15 @@
 	}
 
 	const activeChats = $derived(
-		chatsStore.sortedChats.filter((chat) => !chat.archived && chatMatchesQuery(chat, normalizedQuery))
+		chatsStore.sortedChats.filter(
+			(chat) => !chat.archived && chatMatchesQuery(chat, normalizedQuery)
+		)
 	);
 
 	const archivedChats = $derived(
-		chatsStore.sortedChats.filter((chat) => chat.archived && chatMatchesQuery(chat, normalizedQuery))
+		chatsStore.sortedChats.filter(
+			(chat) => chat.archived && chatMatchesQuery(chat, normalizedQuery)
+		)
 	);
 
 	const pinnedChats = $derived(activeChats.filter((chat) => chat.pinned));
@@ -202,9 +206,7 @@
 	</div>
 
 	<div class="sidebar__action">
-		<Button onclick={handleNewChat} class="sidebar__new-chat">
-			New Chat
-		</Button>
+		<Button onclick={handleNewChat} class="sidebar__new-chat">New Chat</Button>
 
 		<div class="sidebar__search-wrap">
 			<span class="sidebar__search-icon" aria-hidden="true">
@@ -244,7 +246,11 @@
 								}}
 							/>
 						{:else}
-							<button type="button" onclick={() => handleSelectChat(chat.id)} class="sidebar__chat-button">
+							<button
+								type="button"
+								onclick={() => handleSelectChat(chat.id)}
+								class="sidebar__chat-button"
+							>
 								<span class="sidebar__chat-title">{chat.title}</span>
 								<span class="sidebar__chat-meta">{formatTimestamp(chat.updatedAt)}</span>
 							</button>
@@ -271,10 +277,20 @@
 							</button>
 							{#if actionsMenuChatId === chat.id}
 								<div class="sidebar__menu">
-									<button type="button" onclick={() => startRename(chat)}><Pencil class="h-3.5 w-3.5" /> Rename</button>
-									<button type="button" onclick={() => duplicateChat(chat.id)}><Copy class="h-3.5 w-3.5" /> Duplicate</button>
-									<button type="button" onclick={() => toggleArchived(chat.id)}><Archive class="h-3.5 w-3.5" /> Archive</button>
-									<button type="button" class="sidebar__menu-danger" onclick={() => requestDelete(chat.id)}>
+									<button type="button" onclick={() => startRename(chat)}
+										><Pencil class="h-3.5 w-3.5" /> Rename</button
+									>
+									<button type="button" onclick={() => duplicateChat(chat.id)}
+										><Copy class="h-3.5 w-3.5" /> Duplicate</button
+									>
+									<button type="button" onclick={() => toggleArchived(chat.id)}
+										><Archive class="h-3.5 w-3.5" /> Archive</button
+									>
+									<button
+										type="button"
+										class="sidebar__menu-danger"
+										onclick={() => requestDelete(chat.id)}
+									>
 										<Trash2 class="h-3.5 w-3.5" /> Delete
 									</button>
 								</div>
@@ -308,7 +324,11 @@
 								}}
 							/>
 						{:else}
-							<button type="button" onclick={() => handleSelectChat(chat.id)} class="sidebar__chat-button">
+							<button
+								type="button"
+								onclick={() => handleSelectChat(chat.id)}
+								class="sidebar__chat-button"
+							>
 								<span class="sidebar__chat-title">{chat.title}</span>
 								<span class="sidebar__chat-meta">{formatTimestamp(chat.updatedAt)}</span>
 							</button>
@@ -335,10 +355,20 @@
 							</button>
 							{#if actionsMenuChatId === chat.id}
 								<div class="sidebar__menu">
-									<button type="button" onclick={() => startRename(chat)}><Pencil class="h-3.5 w-3.5" /> Rename</button>
-									<button type="button" onclick={() => duplicateChat(chat.id)}><Copy class="h-3.5 w-3.5" /> Duplicate</button>
-									<button type="button" onclick={() => toggleArchived(chat.id)}><Archive class="h-3.5 w-3.5" /> Archive</button>
-									<button type="button" class="sidebar__menu-danger" onclick={() => requestDelete(chat.id)}>
+									<button type="button" onclick={() => startRename(chat)}
+										><Pencil class="h-3.5 w-3.5" /> Rename</button
+									>
+									<button type="button" onclick={() => duplicateChat(chat.id)}
+										><Copy class="h-3.5 w-3.5" /> Duplicate</button
+									>
+									<button type="button" onclick={() => toggleArchived(chat.id)}
+										><Archive class="h-3.5 w-3.5" /> Archive</button
+									>
+									<button
+										type="button"
+										class="sidebar__menu-danger"
+										onclick={() => requestDelete(chat.id)}
+									>
 										<Trash2 class="h-3.5 w-3.5" /> Delete
 									</button>
 								</div>
@@ -472,12 +502,11 @@
 		position: absolute;
 		inset: 0;
 		pointer-events: none;
-		background:
-			radial-gradient(
-				38rem 20rem at -20% -10%,
-				color-mix(in srgb, var(--color-primary) 8%, transparent),
-				transparent 72%
-			);
+		background: radial-gradient(
+			38rem 20rem at -20% -10%,
+			color-mix(in srgb, var(--color-primary) 8%, transparent),
+			transparent 72%
+		);
 	}
 
 	.sidebar__header {

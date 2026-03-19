@@ -9,7 +9,7 @@ use commands::default::{read, save_code, write};
 use commands::engine_client_adapter::{engine_ensure_started, engine_status};
 use commands::hardware::{detect_hardware, get_cached_hardware, HardwareCache};
 use commands::inference::{
-    check_model_exists, check_model_readiness, generate_text, get_current_model,
+    check_model_exists, check_model_readiness, get_current_model,
     get_inference_backend_status, inference_cancel, inference_generate,
     inference_generate_messages, is_generating, list_models, load_model,
     set_inference_runtime_mode, unload_model, InferenceState,
@@ -46,7 +46,6 @@ pub fn run() {
             get_cached_hardware,
             load_model,
             unload_model,
-            generate_text,
             inference_generate,
             inference_generate_messages,
             inference_cancel,

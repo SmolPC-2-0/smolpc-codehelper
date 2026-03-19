@@ -28,8 +28,6 @@ Choose one model setup path:
 npm run model:setup:qwen2_5
 # or
 npm run model:setup:qwen3
-# or
-npm run model:setup:qwen3_5
 ```
 
 By default, scripts populate `%LOCALAPPDATA%\SmolPC\models\<model-id>\...`.
@@ -38,8 +36,6 @@ By default, scripts populate `%LOCALAPPDATA%\SmolPC\models\<model-id>\...`.
 
 ```powershell
 npm run bundle:stage:model
-# or (for qwen3.5)
-npm run bundle:stage:model:qwen3_5
 ```
 
 This copies/hard-links from local model storage into:

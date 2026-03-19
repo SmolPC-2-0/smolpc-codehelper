@@ -24,11 +24,7 @@
 			</div>
 		</div>
 		{#if onClose}
-			<button
-				onclick={onClose}
-				class="quick-examples__close"
-				aria-label="Close examples"
-			>
+			<button onclick={onClose} class="quick-examples__close" aria-label="Close examples">
 				<X class="h-4 w-4" />
 			</button>
 		{/if}
@@ -36,15 +32,12 @@
 
 	<div class="quick-examples__grid">
 		{#each QUICK_EXAMPLES as example (example.id)}
-				<button
-					onclick={() => handleSelect(example.prompt)}
-					class="quick-examples__item"
-				>
-					<div class="quick-examples__item-head">
-						<span>{example.title}</span>
-					</div>
-					<p>{example.prompt}</p>
-				</button>
+			<button onclick={() => handleSelect(example.prompt)} class="quick-examples__item">
+				<div class="quick-examples__item-head">
+					<span>{example.title}</span>
+				</div>
+				<p>{example.prompt}</p>
+			</button>
 		{/each}
 	</div>
 </div>

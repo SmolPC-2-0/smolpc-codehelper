@@ -61,7 +61,6 @@ Model/bootstrap scripts:
 
 - `npm run model:setup:qwen2_5`
 - `npm run model:setup:qwen3`
-- `npm run model:setup:qwen3_5`
 - `npm run bundle:stage:model`
 
 ## Environment Variables

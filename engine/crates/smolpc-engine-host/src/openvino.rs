@@ -1,9 +1,11 @@
 #[cfg(target_os = "windows")]
 use smolpc_engine_core::inference::{
-    OpenVinoGenAiGenerator, OpenVinoGenerationControls, OpenVinoNpuPipelineConfig,
+    OpenVinoGenAiGenerator, OpenVinoGenerationControls, OpenVinoPipelineConfig,
 };
 use smolpc_engine_core::inference::{OpenVinoRuntimeBundle, OpenVinoRuntimeLoader};
+use smolpc_engine_core::GenerationConfig;
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const OPENVINO_NPU_DRIVER_RECOMMENDED_FLOOR: &str = "32.0.100.3104";
@@ -11,6 +13,10 @@ const OPENVINO_NPU_MAX_PROMPT_LEN_ENV: &str = "SMOLPC_OPENVINO_NPU_MAX_PROMPT_LE
 const OPENVINO_NPU_MIN_RESPONSE_LEN_ENV: &str = "SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN";
 const DEFAULT_OPENVINO_NPU_MAX_PROMPT_LEN: usize = 512;
 const DEFAULT_OPENVINO_NPU_MIN_RESPONSE_LEN: usize = 1024;
+const DEFAULT_QWEN_EOS_TOKEN_ID: i64 = 151645;
+const DEFAULT_QWEN_STOP_TOKEN_IDS: [i64; 2] = [151643, 151645];
+const QWEN25_OPENVINO_MODEL_ID: &str = "qwen2.5-1.5b-instruct";
+const QWEN3_OPENVINO_MODEL_ID: &str = "qwen3-4b";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenVinoNpuTuning {
@@ -33,11 +39,26 @@ impl OpenVinoNpuTuning {
         self,
         cache_dir: &Path,
         generation_controls: OpenVinoGenerationControls,
-    ) -> OpenVinoNpuPipelineConfig {
-        OpenVinoNpuPipelineConfig::new(cache_dir, self.max_prompt_len, self.min_response_len)
+        disable_thinking: bool,
+    ) -> OpenVinoPipelineConfig {
+        OpenVinoPipelineConfig::npu(cache_dir, self.max_prompt_len, self.min_response_len)
             .with_generation_controls(generation_controls)
-            .with_disable_thinking(true)
+            .with_disable_thinking(disable_thinking)
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OpenVinoModelTuning {
+    pub request_defaults: Option<GenerationConfig>,
+    pub disable_thinking: bool,
+    pub presence_penalty: Option<f32>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[serde(default)]
+struct OpenVinoStagedGenerationConfig {
+    eos_token_id: Option<i64>,
+    stop_token_ids: Option<Vec<i64>>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
@@ -280,7 +301,7 @@ pub fn probe_openvino_startup(
         };
     }
 
-    if let Some(code) = bundle.failure_code() {
+    if let Some(code) = bundle.npu_failure_code() {
         return OpenVinoStartupProbeResult {
             hardware_detected,
             failure_class: Some(code.to_string()),
@@ -431,17 +452,23 @@ pub fn run_openvino_preflight(
             };
         };
 
-        let generation_controls = openvino_generation_controls_for_model(model_id);
+        let model_tuning = openvino_model_tuning_for_model(model_id);
+        let generation_controls = openvino_generation_controls_for_model(model_id, model_dir);
         log::info!(
-            "OpenVINO generation controls for {}: eos_token_id={:?}, min_new_tokens={:?}, stop_token_ids={:?}, stop_strings={:?}, ignore_eos={:?}",
+            "OpenVINO generation controls for {}: eos_token_id={:?}, min_new_tokens={:?}, stop_token_ids={:?}, stop_strings={:?}, ignore_eos={:?}, presence_penalty={:?}",
             model_id,
             generation_controls.eos_token_id,
             generation_controls.min_new_tokens,
             generation_controls.stop_token_ids,
             generation_controls.stop_strings,
-            generation_controls.ignore_eos
+            generation_controls.ignore_eos,
+            generation_controls.presence_penalty
         );
-        let pipeline_config = tuning.pipeline_config(cache_dir, generation_controls);
+        let pipeline_config = tuning.pipeline_config(
+            cache_dir,
+            generation_controls,
+            model_tuning.disable_thinking,
+        );
         let generator = match OpenVinoGenAiGenerator::new(bundle, model_dir, &pipeline_config) {
             Ok(generator) => generator,
             Err(message) => {
@@ -478,8 +505,7 @@ fn classify_driver_diagnostic(driver_version: Option<&str>) -> Option<(String, S
                 Some((
                     "openvino_npu_driver_recommended_update".to_string(),
                     format!(
-                        "Intel NPU driver {version} is below the troubleshooting floor {}",
-                        OPENVINO_NPU_DRIVER_RECOMMENDED_FLOOR
+                        "Intel NPU driver {version} is below the troubleshooting floor {OPENVINO_NPU_DRIVER_RECOMMENDED_FLOOR}"
                     ),
                 ))
             } else {
@@ -543,21 +569,95 @@ fn parse_positive_env_usize(name: &str, default: usize) -> Result<usize, String>
 }
 
 #[cfg(target_os = "windows")]
-fn openvino_generation_controls_for_model(model_id: &str) -> OpenVinoGenerationControls {
-    let qwen3_eos_only = matches!(model_id, "qwen3-4b-int4-ov" | "qwen3-4b-int4-ov-npu");
+pub(crate) fn openvino_model_tuning_for_model(model_id: &str) -> OpenVinoModelTuning {
+    if model_id == QWEN3_OPENVINO_MODEL_ID {
+        return OpenVinoModelTuning {
+            request_defaults: Some(GenerationConfig {
+                temperature: 0.7,
+                top_p: Some(0.8),
+                top_k: Some(20),
+                ..GenerationConfig::default()
+            }),
+            disable_thinking: true,
+            presence_penalty: Some(1.5),
+        };
+    }
+
+    if model_id == QWEN25_OPENVINO_MODEL_ID {
+        return OpenVinoModelTuning {
+            request_defaults: Some(GenerationConfig {
+                temperature: 0.7,
+                top_p: Some(0.8),
+                top_k: Some(20),
+                ..GenerationConfig::default()
+            }),
+            disable_thinking: false,
+            presence_penalty: Some(1.5),
+        };
+    }
+
+    OpenVinoModelTuning::default()
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn openvino_generation_controls_for_model(
+    model_id: &str,
+    model_dir: &Path,
+) -> OpenVinoGenerationControls {
+    let staged = read_openvino_staged_generation_config(model_dir);
+    let model_tuning = openvino_model_tuning_for_model(model_id);
+    let stop_token_ids = staged
+        .as_ref()
+        .and_then(|config| config.stop_token_ids.clone())
+        .filter(|ids| !ids.is_empty())
+        .unwrap_or_else(|| DEFAULT_QWEN_STOP_TOKEN_IDS.to_vec());
+
+    // The supported Qwen baseline uses ChatML with identical
+    // special token IDs: <|im_end|>=151645, <|endoftext|>=151643.
+    // Explicit controls are required because the OpenVINO C config is built manually and does
+    // not inherit generation_config.json defaults.
     OpenVinoGenerationControls {
-        // Qwen chat template EOS token (<|im_end|>) is 151645.
-        // Set explicit EOS because OpenVINO C config is built manually and does not
-        // implicitly inherit generation_config.json defaults.
-        eos_token_id: qwen3_eos_only.then_some(151645),
-        min_new_tokens: Some(1),
-        // Both token IDs for belt-and-suspenders: <|im_end|>=151645, <|endoftext|>=151643
-        stop_token_ids: qwen3_eos_only.then_some(vec![151643, 151645]),
+        eos_token_id: staged
+            .as_ref()
+            .and_then(|config| config.eos_token_id)
+            .or(Some(DEFAULT_QWEN_EOS_TOKEN_ID)),
+        min_new_tokens: None,
+        stop_token_ids: Some(stop_token_ids),
         // stop_strings operates on accumulated decoded text (incl. special tokens) — catches
         // <|im_end|> even when the NPU StaticLLMPipeline doesn't honour stop_token_ids reliably.
-        stop_strings: qwen3_eos_only
-            .then_some(vec!["<|im_end|>".to_string(), "<|endoftext|>".to_string()]),
+        stop_strings: Some(vec!["<|im_end|>".to_string(), "<|endoftext|>".to_string()]),
         ignore_eos: Some(false),
+        presence_penalty: model_tuning.presence_penalty,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn read_openvino_staged_generation_config(
+    model_dir: &Path,
+) -> Option<OpenVinoStagedGenerationConfig> {
+    let path = model_dir.join("generation_config.json");
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) => {
+            log::warn!(
+                "Failed to read OpenVINO generation config at {}: {}",
+                path.display(),
+                error
+            );
+            return None;
+        }
+    };
+    let raw = raw.strip_prefix('\u{feff}').unwrap_or(&raw);
+    match serde_json::from_str::<OpenVinoStagedGenerationConfig>(raw) {
+        Ok(config) => Some(config),
+        Err(error) => {
+            log::warn!(
+                "Failed to parse OpenVINO generation config at {}: {}",
+                path.display(),
+                error
+            );
+            None
+        }
     }
 }
 
@@ -580,6 +680,7 @@ fn parse_version(raw: &str) -> Option<Vec<u32>> {
 mod tests {
     use super::{
         classify_openvino_runtime_activation_error, inspect_openvino_artifact,
+        openvino_generation_controls_for_model, openvino_model_tuning_for_model,
         resolve_openvino_npu_tuning, version_is_older_than,
     };
     use std::fs;
@@ -672,6 +773,70 @@ mod tests {
         assert!(err.contains("greater than zero"));
 
         std::env::remove_var("SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn qwen3_openvino_tuning_matches_non_thinking_defaults() {
+        let tuning = openvino_model_tuning_for_model("qwen3-4b");
+        let defaults = tuning
+            .request_defaults
+            .as_ref()
+            .expect("qwen3 should provide request defaults");
+
+        assert!(tuning.disable_thinking);
+        assert_eq!(tuning.presence_penalty, Some(1.5));
+        assert_eq!(defaults.temperature, 0.7);
+        assert_eq!(defaults.top_p, Some(0.8));
+        assert_eq!(defaults.top_k, Some(20));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn qwen25_openvino_tuning_matches_cpu_defaults() {
+        let tuning = openvino_model_tuning_for_model("qwen2.5-1.5b-instruct");
+        let defaults = tuning
+            .request_defaults
+            .as_ref()
+            .expect("qwen2.5 should provide request defaults");
+
+        assert!(!tuning.disable_thinking);
+        assert_eq!(tuning.presence_penalty, Some(1.5));
+        assert_eq!(defaults.temperature, 0.7);
+        assert_eq!(defaults.top_p, Some(0.8));
+        assert_eq!(defaults.top_k, Some(20));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn openvino_generation_controls_prefer_staged_stop_token_ids() {
+        let temp = tempdir().expect("tempdir");
+        fs::write(
+            temp.path().join("generation_config.json"),
+            r#"{"eos_token_id":7,"stop_token_ids":[7,9,11]}"#,
+        )
+        .expect("write generation config");
+
+        let controls = openvino_generation_controls_for_model("qwen3-4b", temp.path());
+        assert_eq!(controls.eos_token_id, Some(7));
+        assert_eq!(controls.stop_token_ids, Some(vec![7, 9, 11]));
+        assert_eq!(controls.presence_penalty, Some(1.5));
+    }
+
+    /// Host tuning requests sampling (temperature > 0) for both CPU and NPU.
+    /// The NPU override to `do_sample=false` happens downstream in core
+    /// `create_generation_config()`, not at the tuning layer.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn npu_host_tuning_uses_sampling() {
+        let tuning = openvino_model_tuning_for_model("qwen3-4b");
+        let defaults = tuning
+            .request_defaults
+            .expect("qwen3 should provide request defaults");
+        assert!(
+            defaults.temperature > 0.0,
+            "Host tuning uses sampling; NPU override is in core create_generation_config()"
+        );
     }
 
     fn env_lock() -> &'static Mutex<()> {

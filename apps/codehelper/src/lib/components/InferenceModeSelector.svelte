@@ -2,10 +2,160 @@
 	import { Gauge, Loader2 } from '@lucide/svelte';
 	import { inferenceStore } from '$lib/stores/inference.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
-	import type { InferenceRuntimeMode } from '$lib/types/inference';
+	import type { CheckModelResponse, InferenceRuntimeMode } from '$lib/types/inference';
 
+	interface Props {
+		busy?: boolean;
+	}
+
+	interface ModeOption {
+		value: InferenceRuntimeMode;
+		label: string;
+		disabled: boolean;
+		title: string;
+	}
+
+	let { busy = false }: Props = $props();
 	let isSwitching = $state(false);
-	const diagnosticsOnly = $derived(!inferenceStore.runtimeModeControlsEnabled);
+	let isCheckingReadiness = $state(false);
+	let laneReadiness = $state<CheckModelResponse | null>(null);
+	// Not reactive; used only to discard stale async readiness responses.
+	let readinessRequestNonce = 0;
+
+	const effectiveModelId = $derived(
+		inferenceStore.currentModel ?? settingsStore.selectedModel ?? null
+	);
+
+	function humanizeReason(reason: string | null | undefined): string {
+		if (!reason) return 'unavailable';
+		return reason.replaceAll('_', ' ');
+	}
+
+	function normalizeLaneReason(kind: 'dml' | 'npu', reason: string | null | undefined): string {
+		const humanized = humanizeReason(reason);
+		const normalized = humanized.toLowerCase();
+
+		if (
+			kind === 'npu' &&
+			(normalized.includes('bundle') ||
+				normalized.includes('dll') ||
+				(normalized.includes('runtime') &&
+					(normalized.includes('missing') || normalized.includes('not installed'))))
+		) {
+			return 'Intel NPU runtime not installed';
+		}
+
+		return humanized;
+	}
+
+	function fallbackLaneReason(kind: 'dml' | 'npu'): string | null {
+		const lane =
+			kind === 'dml'
+				? inferenceStore.backendStatus?.lanes.directml
+				: inferenceStore.backendStatus?.lanes.openvino_npu;
+		const reason =
+			lane?.last_failure_message ?? lane?.last_failure_class ?? lane?.preflight_state ?? null;
+
+		if (!reason || reason === 'not_started' || reason === 'ready') {
+			return null;
+		}
+
+		return normalizeLaneReason(kind, reason);
+	}
+
+	function laneAvailability(kind: 'dml' | 'npu'): boolean | null {
+		if (!laneReadiness) {
+			return null;
+		}
+
+		return kind === 'dml'
+			? laneReadiness.lanes.directml.ready
+			: laneReadiness.lanes.openvino_npu.ready;
+	}
+
+	function laneStatusReason(kind: 'dml' | 'npu'): string | null {
+		if (!laneReadiness) {
+			return fallbackLaneReason(kind);
+		}
+
+		const lane = kind === 'dml' ? laneReadiness.lanes.directml : laneReadiness.lanes.openvino_npu;
+		if (lane.ready) {
+			return null;
+		}
+
+		return normalizeLaneReason(kind, lane.reason);
+	}
+
+	const dmlDisabled = $derived(laneAvailability('dml') === false);
+	const npuDisabled = $derived(laneAvailability('npu') === false);
+	const dmlStatusReason = $derived(laneStatusReason('dml'));
+	const npuStatusReason = $derived(laneStatusReason('npu'));
+
+	const modeOptions = $derived.by<ModeOption[]>(() => [
+		{
+			value: 'auto',
+			label: 'Mode: Auto',
+			disabled: false,
+			title: 'Automatic backend selection'
+		},
+		{
+			value: 'dml',
+			label: `Mode: DirectML${dmlDisabled ? ' (unavailable)' : ''}`,
+			disabled: dmlDisabled,
+			title: dmlDisabled
+				? `DirectML unavailable: ${dmlStatusReason ?? 'unavailable'}`
+				: 'Force DirectML GPU acceleration'
+		},
+		{
+			value: 'cpu',
+			label: 'Mode: CPU',
+			disabled: false,
+			title: 'Force CPU inference'
+		},
+		{
+			value: 'npu',
+			label: `Mode: NPU${npuDisabled ? ' (unavailable)' : ''}`,
+			disabled: npuDisabled,
+			title: npuDisabled
+				? `NPU unavailable: ${npuStatusReason ?? 'unavailable'}`
+				: 'Force Intel NPU via OpenVINO'
+		}
+	]);
+
+	$effect(() => {
+		const modelId = effectiveModelId;
+		const requestNonce = ++readinessRequestNonce;
+
+		if (!modelId) {
+			laneReadiness = null;
+			isCheckingReadiness = false;
+			return;
+		}
+
+		laneReadiness = null;
+		isCheckingReadiness = true;
+
+		void inferenceStore
+			.checkModelReadiness(modelId)
+			.then((readiness) => {
+				if (requestNonce !== readinessRequestNonce) {
+					return;
+				}
+				laneReadiness = readiness;
+			})
+			.catch((error) => {
+				if (requestNonce !== readinessRequestNonce) {
+					return;
+				}
+				console.error('Failed to check model readiness:', error);
+				laneReadiness = null;
+			})
+			.finally(() => {
+				if (requestNonce === readinessRequestNonce) {
+					isCheckingReadiness = false;
+				}
+			});
+	});
 
 	async function handleModeChange(event: Event) {
 		const target = event.target as HTMLSelectElement;
@@ -26,7 +176,7 @@
 </script>
 
 <div class="mode-selector">
-	{#if isSwitching}
+	{#if isSwitching || isCheckingReadiness}
 		<Loader2 class="mode-selector__icon mode-selector__icon--loading" />
 	{:else}
 		<Gauge class="mode-selector__icon" />
@@ -34,20 +184,29 @@
 	<select
 		value={inferenceStore.runtimeMode}
 		onchange={handleModeChange}
-		disabled={diagnosticsOnly || isSwitching || inferenceStore.isGenerating}
+		disabled={isSwitching || busy}
 		class="mode-selector__control"
 		aria-label="Select inference runtime mode"
-		title={
-			diagnosticsOnly
-				? 'Runtime mode override is diagnostics-only'
-				: 'Switch runtime mode and restart shared engine host'
-		}
+		title="Switch runtime mode and restart the shared engine host"
 	>
-		<option value="auto">Mode: Auto</option>
-		<option value="dml">Mode: DirectML</option>
-		<option value="cpu">Mode: CPU</option>
+		{#each modeOptions as option (option.value)}
+			<option value={option.value} disabled={option.disabled} title={option.title}>
+				{option.label}
+			</option>
+		{/each}
 	</select>
 </div>
+
+{#if dmlStatusReason || npuStatusReason}
+	<div class="mode-selector__status">
+		{#if dmlStatusReason}
+			<span>DirectML: {dmlStatusReason}</span>
+		{/if}
+		{#if npuStatusReason}
+			<span>NPU: {npuStatusReason}</span>
+		{/if}
+	</div>
+{/if}
 
 <style>
 	.mode-selector {
@@ -94,6 +253,13 @@
 	.mode-selector__control:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+
+	.mode-selector__status {
+		display: grid;
+		gap: 0.25rem;
+		font-size: 0.68rem;
+		color: var(--color-muted-foreground);
 	}
 
 	@keyframes spin {

@@ -8,7 +8,16 @@
 		setupCodeCopyHandlers
 	} from '$lib/utils/markdown';
 	import { invoke } from '@tauri-apps/api/core';
-	import { Bot, Check, Copy, Download, GitBranchPlus, RefreshCw, User, Waypoints } from '@lucide/svelte';
+	import {
+		Bot,
+		Check,
+		Copy,
+		Download,
+		GitBranchPlus,
+		RefreshCw,
+		User,
+		Waypoints
+	} from '@lucide/svelte';
 
 	// src/lib/components/ChatMessage.svelte 9-30
 	interface Props {
@@ -61,7 +70,9 @@
 	});
 </script>
 
-<article class={`chat-message ${message.role === 'user' ? 'chat-message--user' : 'chat-message--assistant'}`}>
+<article
+	class={`chat-message ${message.role === 'user' ? 'chat-message--user' : 'chat-message--assistant'}`}
+>
 	<div class="chat-message__avatar">
 		{#if message.role === 'user'}
 			<User class="h-4 w-4" />
@@ -73,13 +84,16 @@
 	<div class="chat-message__body" bind:this={contentContainer}>
 		<header class="chat-message__meta">
 			<span class="chat-message__role">{message.role === 'user' ? 'You' : 'Assistant'}</span>
-			<span class="chat-message__time">{new Date(message.timestamp).toLocaleTimeString([], {
-				hour: '2-digit',
-				minute: '2-digit'
-			})}</span>
+			<span class="chat-message__time"
+				>{new Date(message.timestamp).toLocaleTimeString([], {
+					hour: '2-digit',
+					minute: '2-digit'
+				})}</span
+			>
 		</header>
 
 		<div class="chat-message__content prose prose-sm max-w-none break-words">
+			<!-- eslint-disable-next-line svelte/no-at-html-tags -- Markdown rendering requires raw HTML; content is AI-generated in an offline app -->
 			{@html renderedContent}
 		</div>
 
@@ -125,29 +139,29 @@
 				</button>
 
 				{#if codeBlocks.length > 0}
-				<button
-					type="button"
-					onclick={handleCopyAllCode}
-					class="chat-message__action"
-					title="Copy all code from this message"
-				>
-					{#if copied}
-						<Check class="h-3 w-3 chat-message__action-icon--success" />
-						<span class="chat-message__action-text--success">Copied!</span>
-					{:else}
-						<Copy class="h-3 w-3" />
-						<span>Copy All Code</span>
-					{/if}
-				</button>
-				<button
-					type="button"
-					onclick={handleSaveAllCode}
-					class="chat-message__action"
-					title="Save all code from this message to file"
-				>
-					<Download class="h-3 w-3" />
-					<span>Save All Code</span>
-				</button>
+					<button
+						type="button"
+						onclick={handleCopyAllCode}
+						class="chat-message__action"
+						title="Copy all code from this message"
+					>
+						{#if copied}
+							<Check class="chat-message__action-icon--success h-3 w-3" />
+							<span class="chat-message__action-text--success">Copied!</span>
+						{:else}
+							<Copy class="h-3 w-3" />
+							<span>Copy All Code</span>
+						{/if}
+					</button>
+					<button
+						type="button"
+						onclick={handleSaveAllCode}
+						class="chat-message__action"
+						title="Save all code from this message to file"
+					>
+						<Download class="h-3 w-3" />
+						<span>Save All Code</span>
+					</button>
 				{/if}
 			</div>
 		{/if}

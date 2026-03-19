@@ -76,11 +76,7 @@
 >
 	<div class="conversation-view__inner">
 		{#if messages.length === 0}
-			<WelcomeState
-				{showQuickExamples}
-				{onSelectExample}
-				{onToggleExamples}
-			/>
+			<WelcomeState {showQuickExamples} {onSelectExample} {onToggleExamples} />
 		{:else}
 			<div class="conversation-view__messages">
 				{#each messages as message (message.id)}
@@ -111,14 +107,13 @@
 		padding: 1rem 1rem 0.9rem;
 		scroll-padding-bottom: 2rem;
 		position: relative;
-		background:
-			linear-gradient(
-				90deg,
-				rgb(255 255 255 / 1.2%) 0,
-				transparent 24%,
-				transparent 76%,
-				rgb(255 255 255 / 1.2%) 100%
-			);
+		background: linear-gradient(
+			90deg,
+			rgb(255 255 255 / 1.2%) 0,
+			transparent 24%,
+			transparent 76%,
+			rgb(255 255 255 / 1.2%) 100%
+		);
 	}
 
 	.conversation-view__inner {

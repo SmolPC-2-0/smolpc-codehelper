@@ -20,7 +20,7 @@
 	import type { GenerationConfig, InferenceChatMessage } from '$lib/types/inference';
 
 	let messagesContainer: HTMLDivElement | undefined = $state();
-	let cancelRequested = $state(false);
+	let activeStreamSessionId = $state<string | null>(null);
 	let currentStreamingChatId = $state<string | null>(null);
 	let currentStreamingMessageId = $state<string | null>(null);
 	let bottomOffset = $state(0);
@@ -34,6 +34,9 @@
 	const showHardwarePanel = $derived(uiStore.activeOverlay === 'hardware');
 	const showModelInfoPanel = $derived(uiStore.activeOverlay === 'modelInfo');
 	const showScrollToLatest = $derived(uiStore.userHasScrolledUp && messages.length > 0);
+	const hasActiveStream = $derived(currentStreamingMessageId !== null);
+	const isCancelling = $derived(inferenceStore.cancelState === 'pending');
+	const isInferenceBusy = $derived(inferenceStore.isGenerating || isCancelling || hasActiveStream);
 	const latestAssistantMessageId = $derived(
 		[...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null
 	);
@@ -133,7 +136,7 @@ Teaching rules:
 	}
 
 	async function handleSendMessage(content: string) {
-		if (!inferenceStore.isLoaded || inferenceStore.isGenerating) return;
+		if (!inferenceStore.isLoaded || isInferenceBusy) return;
 
 		const activeChat =
 			currentChat ?? chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
@@ -162,7 +165,8 @@ Teaching rules:
 		chatsStore.addMessage(activeChat.id, assistantMessage);
 		scrollToBottom();
 
-		cancelRequested = false;
+		const streamSessionId = crypto.randomUUID();
+		activeStreamSessionId = streamSessionId;
 		currentStreamingChatId = activeChat.id;
 		currentStreamingMessageId = assistantMessage.id;
 
@@ -186,7 +190,7 @@ Teaching rules:
 			await inferenceStore.generateStreamMessages(
 				messagesPayload,
 				(token: string) => {
-					if (cancelRequested) return;
+					if (activeStreamSessionId !== streamSessionId) return;
 
 					const streamingChat = chatsStore.chats.find((chat) => chat.id === chatId);
 					if (!streamingChat) return;
@@ -204,10 +208,6 @@ Teaching rules:
 				},
 				config
 			);
-
-			chatsStore.updateMessage(chatId, messageId, {
-				isStreaming: false
-			});
 		} catch (error) {
 			console.error('Generation error:', error);
 			chatsStore.updateMessage(chatId, messageId, {
@@ -215,8 +215,18 @@ Teaching rules:
 				isStreaming: false
 			});
 		} finally {
-			currentStreamingChatId = null;
-			currentStreamingMessageId = null;
+			chatsStore.updateMessage(chatId, messageId, {
+				isStreaming: false
+			});
+
+			if (currentStreamingChatId === chatId && currentStreamingMessageId === messageId) {
+				currentStreamingChatId = null;
+				currentStreamingMessageId = null;
+			}
+
+			if (activeStreamSessionId === streamSessionId) {
+				activeStreamSessionId = null;
+			}
 		}
 	}
 
@@ -236,14 +246,14 @@ Teaching rules:
 	}
 
 	function handleRegenerateMessage(messageId: string) {
-		if (inferenceStore.isGenerating) return;
+		if (isInferenceBusy) return;
 		const sourcePrompt = findNearestUserPrompt(messageId);
 		if (!sourcePrompt) return;
 		handleSendMessage(sourcePrompt);
 	}
 
 	function handleContinueMessage(messageId: string) {
-		if (inferenceStore.isGenerating) return;
+		if (isInferenceBusy) return;
 		const basePrompt = findNearestUserPrompt(messageId);
 		const continuationPrompt = basePrompt
 			? `Continue your previous response to: "${basePrompt}". Expand with more details and an example.`
@@ -304,22 +314,13 @@ Teaching rules:
 	}
 
 	async function handleCancelGeneration() {
-		cancelRequested = true;
+		activeStreamSessionId = null;
 
 		try {
 			await inferenceStore.cancel();
 		} catch (error) {
 			console.error('Failed to cancel generation:', error);
 		}
-
-		if (currentStreamingChatId && currentStreamingMessageId) {
-			chatsStore.updateMessage(currentStreamingChatId, currentStreamingMessageId, {
-				isStreaming: false
-			});
-		}
-
-		currentStreamingChatId = null;
-		currentStreamingMessageId = null;
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
@@ -383,7 +384,7 @@ Teaching rules:
 			const availableModelIds = new Set(inferenceStore.availableModels.map((model) => model.id));
 			const selectedModelId = availableModelIds.has(settingsStore.selectedModel)
 				? settingsStore.selectedModel
-				: inferenceStore.availableModels[0]?.id ?? null;
+				: (inferenceStore.availableModels[0]?.id ?? null);
 
 			await inferenceStore.ensureStarted({
 				mode: 'auto',
@@ -423,6 +424,22 @@ Teaching rules:
 	$effect(() => {
 		if (messages.length > 0) {
 			scrollToBottom();
+		}
+	});
+
+	$effect(() => {
+		if (inferenceStore.cancelState !== 'timed_out') {
+			return;
+		}
+
+		activeStreamSessionId = null;
+
+		if (currentStreamingChatId && currentStreamingMessageId) {
+			chatsStore.updateMessage(currentStreamingChatId, currentStreamingMessageId, {
+				isStreaming: false
+			});
+			currentStreamingChatId = null;
+			currentStreamingMessageId = null;
 		}
 	});
 
@@ -482,6 +499,8 @@ Teaching rules:
 		<ComposerBar
 			isLoaded={inferenceStore.isLoaded}
 			isGenerating={inferenceStore.isGenerating}
+			{hasActiveStream}
+			{isCancelling}
 			{bottomOffset}
 			onSend={handleSendMessage}
 			onCancel={handleCancelGeneration}
@@ -490,7 +509,11 @@ Teaching rules:
 
 	<BenchmarkPanel visible={showBenchmarkPanel} onClose={() => uiStore.closeOverlay()} />
 	<HardwarePanel visible={showHardwarePanel} onClose={() => uiStore.closeOverlay()} />
-	<ModelInfoPanel visible={showModelInfoPanel} onClose={() => uiStore.closeOverlay()} />
+	<ModelInfoPanel
+		visible={showModelInfoPanel}
+		busy={isInferenceBusy}
+		onClose={() => uiStore.closeOverlay()}
+	/>
 	<KeyboardShortcutsOverlay
 		open={showShortcutsOverlay}
 		onClose={() => (showShortcutsOverlay = false)}

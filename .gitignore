@@ -26,8 +26,8 @@ dist-ssr
 /apps/codehelper/src-tauri/target/
 /apps/codehelper/src-tauri/gen/schemas
 /docs/.local_docs/
-.claude
 .claude/settings.local.json
+.claude/scripts/
 
 # ONNX Runtime and models
 /ort-extracted/
@@ -35,11 +35,14 @@ dist-ssr
 /apps/codehelper/src-tauri/models/
 /apps/codehelper/src-tauri/libs/*
 !/apps/codehelper/src-tauri/libs/README.md
+!/apps/codehelper/src-tauri/libs/openvino/
+/apps/codehelper/src-tauri/libs/openvino/*
+!/apps/codehelper/src-tauri/libs/openvino/.gitkeep
 /apps/codehelper/src-tauri/*.dll
 nul
 
 # Local/generated artifacts
-/cache_dir/
+cache_dir/
 /apps/codehelper/scripts/src-tauri/
 /launcher/src-tauri/resources/launcher/apps.manifest.json
 /tmp/

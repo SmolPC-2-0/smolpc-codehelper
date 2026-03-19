@@ -11,7 +11,7 @@ import type {
 	EnsureStartedRequestDto,
 	GenerationConfig,
 	GenerationMetrics,
-	GenerationResult,
+	InferenceCancelState,
 	InferenceChatMessage,
 	InferenceBackend,
 	InferenceRuntimeMode,
@@ -29,18 +29,47 @@ const READINESS_STATES: ReadonlySet<string> = new Set([
 	'failed'
 ]);
 
-const DIAGNOSTICS_RUNTIME_MODE_CONTROLS =
-	import.meta.env.DEV && import.meta.env.VITE_ENABLE_RUNTIME_MODE_CONTROLS === '1';
-
 // State
 let readiness = $state<EngineReadinessDto | null>(null);
 let isGenerating = $state(false);
+let cancelState = $state<InferenceCancelState>('idle');
 let error = $state<string | null>(null);
 let availableModels = $state<AvailableModel[]>([]);
-let lastResult = $state<GenerationResult | null>(null);
 let lastMetrics = $state<GenerationMetrics | null>(null);
 let backendStatus = $state<BackendStatus | null>(null);
 let runtimeMode = $state<InferenceRuntimeMode>('auto');
+let cancelTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let cancelTimeoutSessionId: number | null = null;
+let generationSessionCounter = 0;
+let activeGenerationSessionId = 0;
+
+function clearCancelTimeout(sessionId?: number): void {
+	if (sessionId !== undefined && cancelTimeoutSessionId !== sessionId) {
+		return;
+	}
+
+	if (cancelTimeoutId) {
+		clearTimeout(cancelTimeoutId);
+	}
+
+	cancelTimeoutId = null;
+	cancelTimeoutSessionId = null;
+}
+
+function beginGenerationSession(): number {
+	clearCancelTimeout();
+	const sessionId = ++generationSessionCounter;
+	activeGenerationSessionId = sessionId;
+	isGenerating = true;
+	cancelState = 'idle';
+	error = null;
+	lastMetrics = null;
+	return sessionId;
+}
+
+function isActiveGenerationSession(sessionId: number): boolean {
+	return activeGenerationSessionId === sessionId;
+}
 
 function normalizeBackendName(raw: string | null | undefined): InferenceBackend | null {
 	if (!raw) {
@@ -69,6 +98,9 @@ function normalizeRuntimeMode(raw: string | null | undefined): InferenceRuntimeM
 	}
 	if (normalized === 'cpu') {
 		return 'cpu';
+	}
+	if (normalized === 'openvinonpu' || normalized === 'openvino' || normalized === 'npu') {
+		return 'npu';
 	}
 	return 'auto';
 }
@@ -130,14 +162,14 @@ export const inferenceStore = {
 	get isGenerating() {
 		return isGenerating;
 	},
+	get cancelState() {
+		return cancelState;
+	},
 	get error() {
 		return error;
 	},
 	get availableModels() {
 		return availableModels;
-	},
-	get lastResult() {
-		return lastResult;
 	},
 	get lastMetrics() {
 		return lastMetrics;
@@ -145,8 +177,8 @@ export const inferenceStore = {
 	get runtimeMode() {
 		return runtimeMode;
 	},
-	get runtimeModeControlsEnabled() {
-		return DIAGNOSTICS_RUNTIME_MODE_CONTROLS;
+	get backendStatus() {
+		return backendStatus;
 	},
 
 	// Get status object for display
@@ -162,7 +194,9 @@ export const inferenceStore = {
 			startupErrorCode: readiness?.error_code ?? null,
 			startupErrorMessage: readiness?.error_message ?? null,
 			startupRetryable: readiness?.retryable ?? false,
-			activeBackend: normalizeBackendName(readiness?.active_backend) ?? normalizeBackendName(backendStatus?.active_backend),
+			activeBackend:
+				normalizeBackendName(readiness?.active_backend) ??
+				normalizeBackendName(backendStatus?.active_backend),
 			activeArtifactBackend: normalizeBackendName(backendStatus?.active_artifact_backend),
 			runtimeEngine: backendStatus?.runtime_engine ?? null,
 			activeModelPath: backendStatus?.active_model_path ?? null,
@@ -197,6 +231,15 @@ export const inferenceStore = {
 	async ensureStarted(
 		request: EnsureStartedRequestDto = defaultStartupRequest()
 	): Promise<EngineReadinessDto | null> {
+		// If we're reconnecting after the engine became unhealthy (e.g. it crashed
+		// during generation and was auto-restarted), force-clear stale generation state.
+		if (isGenerating || cancelState !== 'idle') {
+			console.warn('ensureStarted: clearing stale generation state from prior session');
+			clearCancelTimeout();
+			isGenerating = false;
+			cancelState = 'idle';
+			activeGenerationSessionId = 0;
+		}
 		error = null;
 		try {
 			const payload = await invoke<EngineReadinessDto>('engine_ensure_started', { request });
@@ -267,37 +310,6 @@ export const inferenceStore = {
 	},
 
 	/**
-	 * Generate text from a prompt (blocking, returns full result).
-	 */
-	async generate(prompt: string): Promise<GenerationResult | null> {
-		if (!this.isReady) {
-			error = 'Engine is not ready';
-			return null;
-		}
-
-		if (isGenerating) {
-			error = 'Generation already in progress';
-			return null;
-		}
-
-		isGenerating = true;
-		error = null;
-
-		try {
-			const result = await invoke<GenerationResult>('generate_text', { prompt });
-			lastResult = result;
-			return result;
-		} catch (e) {
-			error = String(e);
-			console.error('Generation failed:', e);
-			return null;
-		} finally {
-			await this.syncStatus();
-			isGenerating = false;
-		}
-	},
-
-	/**
 	 * Generate text with streaming output via Tauri Channel.
 	 */
 	async generateStream(
@@ -315,9 +327,7 @@ export const inferenceStore = {
 			return null;
 		}
 
-		isGenerating = true;
-		error = null;
-		lastMetrics = null;
+		const sessionId = beginGenerationSession();
 
 		try {
 			const onTokenChannel = new Channel<string>();
@@ -355,8 +365,12 @@ export const inferenceStore = {
 			console.error('Streaming generation failed:', e);
 			return null;
 		} finally {
-			await this.syncStatus();
-			isGenerating = false;
+			clearCancelTimeout(sessionId);
+			if (isActiveGenerationSession(sessionId)) {
+				isGenerating = false;
+				cancelState = 'idle';
+				void this.syncStatus();
+			}
 		}
 	},
 
@@ -375,9 +389,7 @@ export const inferenceStore = {
 			return null;
 		}
 
-		isGenerating = true;
-		error = null;
-		lastMetrics = null;
+		const sessionId = beginGenerationSession();
 
 		try {
 			const onTokenChannel = new Channel<string>();
@@ -415,24 +427,63 @@ export const inferenceStore = {
 			console.error('Streaming generation failed:', e);
 			return null;
 		} finally {
-			await this.syncStatus();
-			isGenerating = false;
+			clearCancelTimeout(sessionId);
+			if (isActiveGenerationSession(sessionId)) {
+				isGenerating = false;
+				cancelState = 'idle';
+				void this.syncStatus();
+			}
 		}
 	},
 
 	/**
 	 * Cancel the current generation.
+	 *
+	 * If the engine is hung in an FFI call that can't be interrupted,
+	 * force-reset the UI state after 15 seconds so the user is not stuck behind
+	 * the informational syncStatus() calls that still run during normal teardown.
 	 */
 	async cancel(): Promise<void> {
-		if (!isGenerating) {
+		if (!isGenerating && cancelState !== 'pending') {
 			return;
 		}
+
+		const sessionId = activeGenerationSessionId;
+		cancelState = 'pending';
+		clearCancelTimeout();
 
 		try {
 			await invoke('inference_cancel');
 		} catch (e) {
 			console.error('Failed to cancel generation:', e);
 		}
+
+		cancelTimeoutSessionId = sessionId;
+		cancelTimeoutId = setTimeout(async () => {
+			if (!isActiveGenerationSession(sessionId) || (!isGenerating && cancelState !== 'pending')) {
+				clearCancelTimeout(sessionId);
+				return;
+			}
+
+			// Reconcile with engine host before force-clearing
+			try {
+				const hostGenerating = await invoke<boolean>('is_generating');
+				if (hostGenerating) {
+					// Host is stuck — force-clear UI anyway so the user isn't trapped
+					console.warn('Host still generating after cancel timeout — forcing UI reset');
+				}
+			} catch {
+				// Can't reach host — fall through to force-clear so UI isn't stuck
+			}
+
+			if (isActiveGenerationSession(sessionId)) {
+				console.warn('Generation cancel timed out — force-resetting UI state');
+				cancelState = 'timed_out';
+				isGenerating = false;
+				error = 'Generation did not respond to cancel. Try reloading the model.';
+			}
+			clearCancelTimeout(sessionId);
+		}, 15000);
 	},
 
 	/**
@@ -483,19 +534,10 @@ export const inferenceStore = {
 		return this.ensureStarted(defaultStartupRequest(defaultModelId));
 	},
 
-	/**
-	 * Diagnostics-only runtime mode switch.
-	 */
 	async setRuntimeMode(
 		mode: InferenceRuntimeMode,
 		modelId: string | null = null
 	): Promise<boolean> {
-		if (!DIAGNOSTICS_RUNTIME_MODE_CONTROLS) {
-			error =
-				'Runtime mode override is diagnostics-only. Enable VITE_ENABLE_RUNTIME_MODE_CONTROLS=1 for local diagnostics.';
-			return false;
-		}
-
 		if (isGenerating) {
 			error = 'Cannot switch runtime mode while generation is in progress';
 			return false;

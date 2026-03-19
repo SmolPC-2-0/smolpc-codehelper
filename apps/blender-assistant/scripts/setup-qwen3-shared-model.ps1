@@ -1,7 +1,7 @@
 param(
-    [string]$ModelId = "qwen3-4b-instruct-2507",
-    [string]$CpuRepoId = "onnx-community/Qwen3-4B-Instruct-2507-ONNX",
-    [string]$DmlSourceModel = "Qwen/Qwen3-4B-Instruct-2507",
+    [string]$ModelId = "qwen3-4b",
+    [string]$CpuRepoId = "onnx-community/Qwen3-4B-ONNX",
+    [string]$DmlSourceModel = "Qwen/Qwen3-4B",
     [ValidateSet("int4", "fp16", "fp32", "bf16")]
     [string]$DmlPrecision = "int4",
     [string]$ModelsRoot = "",

@@ -5,6 +5,7 @@ This directory contains benchmark test results for SmolPC Code Helper.
 ## File Naming Convention
 
 Files are named: `{prefix}-{timestamp}.csv`
+
 - `baseline`: Initial performance before optimizations
 - `phase1`: After Phase 1 optimizations
 - `phase2`: After Phase 2 optimizations
@@ -13,6 +14,7 @@ Files are named: `{prefix}-{timestamp}.csv`
 ## CSV Format
 
 ### Main Data Section
+
 - **timestamp**: ISO 8601 timestamp of test execution
 - **iteration**: Test iteration number (1-3 typically)
 - **category**: Prompt category (short, medium, long, follow-up)
@@ -28,7 +30,9 @@ Files are named: `{prefix}-{timestamp}.csv`
 - **prompt**: The test prompt text
 
 ### Summary Section
+
 Aggregated statistics by category:
+
 - **avg_first_token_ms**: Average first token latency
 - **avg_tokens_per_sec**: Average throughput
 - **avg_total_time_ms**: Average total time
@@ -37,6 +41,7 @@ Aggregated statistics by category:
 - **test_count**: Number of tests in category
 
 ### Metadata Section
+
 - **Total Duration**: Total benchmark execution time
 - **Benchmark Timestamp**: When benchmark was run
 - **Total Tests**: Number of individual tests
@@ -44,10 +49,13 @@ Aggregated statistics by category:
 ## Measurement Methodology
 
 ### Token Counting
+
 Token counts use Ollama's **native token metadata** (`eval_count`) for maximum accuracy. No estimation or approximation is used. Tests fail immediately if Ollama does not provide accurate token counts.
 
 ### Timing Metrics
+
 All timing measurements use **Ollama's native nanosecond-precision timing data**:
+
 - `first_token_ms`: From `prompt_eval_duration` (time to process prompt before generation)
 - `total_time_ms`: From `total_duration` (full request duration)
 - `tokens_per_sec`: Calculated from `eval_count` / `eval_duration`
@@ -62,6 +70,7 @@ All timing measurements use **Ollama's native nanosecond-precision timing data**
 **Process-Specific Monitoring:** CPU and memory measurements track the Ollama inference process specifically, not system-wide resources. All measurements are process-specific with **no fallback to system-wide monitoring** (tests fail if Ollama process cannot be found).
 
 **Sampling methodology:**
+
 - Pre-identifies Ollama process during warmup (fails immediately if not found)
 - Establishes CPU baseline with 200ms delay (required by sysinfo crate)
 - Samples CPU and memory every 50ms during inference (rigorous monitoring)
@@ -69,18 +78,21 @@ All timing measurements use **Ollama's native nanosecond-precision timing data**
 - Tracks peak memory by comparing all samples (not initialized to system memory)
 
 **Memory metrics:**
+
 - `memory_before_mb`: Process-specific memory before inference request
 - `memory_peak_mb`: Maximum process memory observed during all samples
 - `memory_during_mb`: **Median** of all memory samples (outlier-resistant)
 - `memory_after_mb`: Process-specific memory after inference completes
 
 **Known Limitations:**
+
 - CPU measurements show lower values (~4-16%) than total system load due to HTTP API architecture
 - The benchmark client (code helper) runs in a separate process, adding HTTP overhead
 - GPU-accelerated inference legitimately shows low CPU usage (GPU does heavy lifting)
 - This will be resolved in future versions using in-process llama.cpp integration
 
 **Benefits:**
+
 - Production-grade accuracy suitable for academic research reports
 - Measurements isolated from background system noise
 - Consistent methodology across all tests

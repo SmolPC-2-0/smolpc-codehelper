@@ -54,11 +54,7 @@ If you are packaging self-contained builds:
 npm run model:setup:qwen2_5
 # or
 npm run model:setup:qwen3
-# or
-npm run model:setup:qwen3_5
 npm run bundle:stage:model
-# if you prepared qwen3.5 and want to stage that model id:
-npm run bundle:stage:model:qwen3_5
 ```
 
 ## 6) Common Issues

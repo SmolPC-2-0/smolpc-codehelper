@@ -46,16 +46,12 @@ If you want packaged model artifacts:
 npm run model:setup:qwen2_5
 # or
 npm run model:setup:qwen3
-# or
-npm run model:setup:qwen3_5
 ```
 
 2. Stage model files:
 
 ```powershell
 npm run bundle:stage:model
-# or (for qwen3.5)
-npm run bundle:stage:model:qwen3_5
 ```
 
 3. Build:

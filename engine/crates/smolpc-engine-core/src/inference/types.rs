@@ -1,16 +1,6 @@
 /// Shared types for inference engine
 use serde::{Deserialize, Serialize};
 
-/// Result of text generation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenerationResult {
-    /// Generated text
-    pub text: String,
-
-    /// Performance metrics
-    pub metrics: GenerationMetrics,
-}
-
 /// Performance metrics for generation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationMetrics {

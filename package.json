@@ -19,6 +19,8 @@
     "runtime:setup:openvino": "npm run runtime:setup:openvino --workspace apps/codehelper",
     "model:export:dml": "npm run model:export:dml --workspace apps/codehelper",
     "model:setup:qwen3": "npm run model:setup:qwen3 --workspace apps/codehelper",
+    "model:setup:qwen25-instruct": "npm run model:setup:qwen25-instruct --workspace apps/codehelper",
+    "model:setup:qwen3-4b": "npm run model:setup:qwen3-4b --workspace apps/codehelper",
     "launcher:dev": "npm run tauri:dev --workspace launcher",
     "model:setup:qwen3:openvino": "npm run model:setup:qwen3:openvino --workspace apps/codehelper",
     "boundary:check": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-boundaries.ps1"

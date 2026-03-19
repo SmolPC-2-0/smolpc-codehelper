@@ -7,7 +7,7 @@ use std::path::Path;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 type OgaResult = c_void;
@@ -296,6 +296,7 @@ impl Drop for GenAiDirectMlInner {
 
 pub struct GenAiDirectMlGenerator {
     inner: Arc<Mutex<GenAiDirectMlInner>>,
+    hung: Arc<AtomicBool>,
 }
 
 impl GenAiDirectMlGenerator {
@@ -373,10 +374,15 @@ impl GenAiDirectMlGenerator {
                 tokenizer: tokenizer_ptr,
                 eos_token_ids,
             })),
+            hung: Arc::new(AtomicBool::new(false)),
         })
     }
 
     pub fn run_preflight(&self, prompt: &str) -> Result<(), String> {
+        if self.hung.load(Ordering::SeqCst) {
+            return Err("DirectML adapter is unrecoverable after a hung generation".to_string());
+        }
+
         let guard = self
             .inner
             .lock()
@@ -433,17 +439,52 @@ impl GenAiDirectMlGenerator {
     where
         F: FnMut(String),
     {
+        if self.hung.load(Ordering::SeqCst) {
+            return Err(
+                "DirectML adapter is unrecoverable: a previous generation is stuck. \
+                 Reload the model to recover."
+                    .to_string(),
+            );
+        }
+
         let gen_config = config.unwrap_or_default();
         let prompt_owned = prompt.to_string();
         let inner = Arc::clone(&self.inner);
+        let hung_flag = Arc::clone(&self.hung);
         let cancelled_worker = Arc::clone(&cancelled);
         let (token_tx, mut token_rx) = unbounded_channel();
         let worker = tokio::task::spawn_blocking(move || {
             generate_stream_blocking(inner, prompt_owned, gen_config, cancelled_worker, token_tx)
         });
 
-        while let Some(piece) = token_rx.recv().await {
-            on_token(piece);
+        // Per-token watchdog: if no token arrives within this window, treat as hung.
+        // TTFT for large models on DirectML can be 10-20s on budget hardware; 45s gives headroom.
+        const TOKEN_WATCHDOG_SECS: u64 = 45;
+        let deadline = tokio::time::sleep(Duration::from_secs(TOKEN_WATCHDOG_SECS));
+        tokio::pin!(deadline);
+
+        loop {
+            tokio::select! {
+                piece = token_rx.recv() => {
+                    match piece {
+                        Some(t) => {
+                            on_token(t);
+                            deadline.as_mut().reset(
+                                tokio::time::Instant::now() + Duration::from_secs(TOKEN_WATCHDOG_SECS)
+                            );
+                        }
+                        None => break,
+                    }
+                }
+                _ = &mut deadline => {
+                    cancelled.store(true, Ordering::SeqCst);
+                    hung_flag.store(true, Ordering::SeqCst);
+                    return Err(
+                        "DirectML generation timed out: no tokens received within 45 seconds. \
+                         This may indicate a model compatibility issue with DirectML.".to_string()
+                    );
+                }
+            }
         }
 
         worker
@@ -902,8 +943,7 @@ fn genai_api(bundle: &OrtRuntimeBundle) -> Result<Arc<GenAiApi>, String> {
         if let Some(active) = guard.active_fingerprint.as_ref() {
             if active != &fingerprint {
                 let error = format!(
-                    "DirectML GenAI already initialized from bundle fingerprint '{active}'; restart the process to use '{}'",
-                    fingerprint
+                    "DirectML GenAI already initialized from bundle fingerprint '{active}'; restart the process to use '{fingerprint}'"
                 );
                 drop(guard);
                 let mut guard = match state.lock() {
@@ -1044,7 +1084,7 @@ mod tests {
             RequiredRuntimeFile::new("onnxruntime-genai.dll", genai_dll.clone()),
             RequiredRuntimeFile::new("DirectML.dll", directml_dll.clone()),
         ];
-        let version_metadata = vec![RuntimeVersionMetadata::new("ort-crate", "2.0.0-rc.11")];
+        let version_metadata = vec![RuntimeVersionMetadata::new("onnxruntime", "bundled")];
         let fingerprint = RuntimeBundleFingerprint::new(
             RuntimeFamily::Ort,
             Some(root.clone()),

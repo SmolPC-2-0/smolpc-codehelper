@@ -170,10 +170,6 @@ impl OrtRuntimeBundle {
         self.ort_validation_failure.is_none()
     }
 
-    pub fn cpu_validated(&self) -> bool {
-        self.ort_validated()
-    }
-
     pub fn genai_validated(&self) -> bool {
         self.genai_validation_failure.is_none()
     }
@@ -214,6 +210,7 @@ pub struct OpenVinoRuntimeBundle {
     pub icuuc_dll: PathBuf,
     pub required_files: Vec<RequiredRuntimeFile>,
     pub version_metadata: Vec<RuntimeVersionMetadata>,
+    pub cpu_validation_failure: Option<BundleValidationFailureClass>,
     pub npu_validation_failure: Option<BundleValidationFailureClass>,
     pub fingerprint: RuntimeBundleFingerprint,
 }
@@ -225,13 +222,26 @@ impl OpenVinoRuntimeBundle {
             .unwrap_or(self.bundle_root.as_path())
     }
 
+    pub fn cpu_validated(&self) -> bool {
+        self.cpu_validation_failure.is_none()
+    }
+
     pub fn npu_validated(&self) -> bool {
         self.npu_validation_failure.is_none()
     }
 
-    pub fn failure_code(&self) -> Option<&'static str> {
+    pub fn cpu_failure_code(&self) -> Option<&'static str> {
+        self.cpu_validation_failure
+            .map(BundleValidationFailureClass::code)
+    }
+
+    pub fn npu_failure_code(&self) -> Option<&'static str> {
         self.npu_validation_failure
             .map(BundleValidationFailureClass::code)
+    }
+
+    pub fn failure_code(&self) -> Option<&'static str> {
+        self.cpu_failure_code()
     }
 }
 
@@ -258,6 +268,9 @@ impl RetainedLibrary {
         })
     }
 
+    /// # Safety
+    ///
+    /// The caller must ensure `T` matches the symbol's actual function or value type.
     pub unsafe fn get<T: Copy>(&self, name: &[u8]) -> Result<T, String> {
         let symbol: Symbol<'_, T> = self
             ._lib
@@ -322,8 +335,7 @@ impl OrtRuntimeLoader {
             if let Some(active) = guard.active_fingerprint.as_ref() {
                 if active != &fingerprint {
                     let error = format!(
-                        "ONNX Runtime already initialized from bundle fingerprint '{active}'; restart the process to use '{}'",
-                        fingerprint
+                        "ONNX Runtime already initialized from bundle fingerprint '{active}'; restart the process to use '{fingerprint}'"
                     );
                     drop(guard);
                     let mut guard = lock_mutex(state);
@@ -350,44 +362,18 @@ impl OrtRuntimeLoader {
 
         let runtime_core = RetainedLibrary::load(&bundle.onnxruntime_dll)?;
         let providers_shared = RetainedLibrary::load(&bundle.onnxruntime_providers_shared_dll)?;
-        let init_result = ort::init_from(bundle.onnxruntime_dll.to_string_lossy().to_string())
-            .map_err(|e| format!("Failed to initialize ONNX Runtime: {e}"))
-            .and_then(|builder| {
-                if builder.commit() {
-                    log::info!(
-                        "Initialized ONNX Runtime from {}",
-                        bundle.onnxruntime_dll.display()
-                    );
-                } else {
-                    log::info!(
-                        "Reused existing ONNX Runtime initialization for {}",
-                        bundle.onnxruntime_dll.display()
-                    );
-                }
-                Ok(())
-            });
 
         let mut guard = lock_mutex(state);
-        match init_result {
-            Ok(()) => {
-                guard.active_fingerprint = Some(fingerprint.clone());
-                let handle = OrtRuntimeHandle {
-                    fingerprint: bundle.fingerprint.clone(),
-                    bundle_root: bundle.display_root().to_path_buf(),
-                    _support_libs: vec![runtime_core, providers_shared],
-                };
-                guard
-                    .results
-                    .insert(fingerprint, CachedOrtInit::Success(handle.clone()));
-                Ok(handle)
-            }
-            Err(error) => {
-                guard
-                    .results
-                    .insert(fingerprint, CachedOrtInit::Failure(error.clone()));
-                Err(error)
-            }
-        }
+        guard.active_fingerprint = Some(fingerprint.clone());
+        let handle = OrtRuntimeHandle {
+            fingerprint: bundle.fingerprint.clone(),
+            bundle_root: bundle.display_root().to_path_buf(),
+            _support_libs: vec![runtime_core, providers_shared],
+        };
+        guard
+            .results
+            .insert(fingerprint, CachedOrtInit::Success(handle.clone()));
+        Ok(handle)
     }
 }
 
@@ -411,13 +397,33 @@ impl OpenVinoRuntimeLoader {
     pub fn ensure_initialized(
         bundle: &OpenVinoRuntimeBundle,
     ) -> Result<OpenVinoRuntimeHandle, String> {
+        Self::ensure_initialized_for_cpu(bundle)
+    }
+
+    pub fn ensure_initialized_for_cpu(
+        bundle: &OpenVinoRuntimeBundle,
+    ) -> Result<OpenVinoRuntimeHandle, String> {
+        Self::ensure_initialized_internal(bundle, false)
+    }
+
+    pub fn ensure_initialized_for_npu(
+        bundle: &OpenVinoRuntimeBundle,
+    ) -> Result<OpenVinoRuntimeHandle, String> {
+        Self::ensure_initialized_internal(bundle, true)
+    }
+
+    fn ensure_initialized_internal(
+        bundle: &OpenVinoRuntimeBundle,
+        requires_npu: bool,
+    ) -> Result<OpenVinoRuntimeHandle, String> {
         let state = OPENVINO_RUNTIME_STATE
             .get_or_init(|| Mutex::new(OpenVinoRuntimeLoaderState::default()));
         let fingerprint = bundle.fingerprint.value.clone();
+        let cache_key = openvino_runtime_cache_key(&fingerprint, requires_npu);
 
         {
             let guard = lock_mutex(state);
-            if let Some(cached) = guard.results.get(&fingerprint) {
+            if let Some(cached) = guard.results.get(&cache_key) {
                 return match cached {
                     CachedOpenVinoInit::Success(handle) => Ok(handle.clone()),
                     CachedOpenVinoInit::Failure(error) => Err(error.clone()),
@@ -427,20 +433,24 @@ impl OpenVinoRuntimeLoader {
             if let Some(active) = guard.active_fingerprint.as_ref() {
                 if active != &fingerprint {
                     let error = format!(
-                        "OpenVINO already initialized from bundle fingerprint '{active}'; restart the process to use '{}'",
-                        fingerprint
+                        "OpenVINO already initialized from bundle fingerprint '{active}'; restart the process to use '{fingerprint}'"
                     );
                     drop(guard);
                     let mut guard = lock_mutex(state);
                     guard
                         .results
-                        .insert(fingerprint, CachedOpenVinoInit::Failure(error.clone()));
+                        .insert(cache_key, CachedOpenVinoInit::Failure(error.clone()));
                     return Err(error);
                 }
             }
         }
 
-        if let Some(failure) = bundle.npu_validation_failure {
+        let validation_failure = if requires_npu {
+            bundle.npu_validation_failure
+        } else {
+            bundle.cpu_validation_failure
+        };
+        if let Some(failure) = validation_failure {
             let error = format!(
                 "OpenVINO bundle is not validated ({}) at {}",
                 failure.code(),
@@ -449,11 +459,11 @@ impl OpenVinoRuntimeLoader {
             let mut guard = lock_mutex(state);
             guard
                 .results
-                .insert(fingerprint, CachedOpenVinoInit::Failure(error.clone()));
+                .insert(cache_key, CachedOpenVinoInit::Failure(error.clone()));
             return Err(error);
         }
 
-        let libs = [
+        let mut libs = vec![
             &bundle.tbb_dll,
             &bundle.tbbbind_dll,
             &bundle.tbbmalloc_dll,
@@ -462,17 +472,22 @@ impl OpenVinoRuntimeLoader {
             &bundle.openvino_c_dll,
             &bundle.openvino_ir_frontend_dll,
             &bundle.openvino_intel_cpu_plugin_dll,
-            &bundle.openvino_intel_npu_compiler_dll,
-            &bundle.openvino_intel_npu_plugin_dll,
+        ];
+        if requires_npu {
+            libs.push(&bundle.openvino_intel_npu_compiler_dll);
+            libs.push(&bundle.openvino_intel_npu_plugin_dll);
+        }
+        libs.extend([
             &bundle.icudt_dll,
             &bundle.icuuc_dll,
             &bundle.openvino_tokenizers_dll,
             &bundle.openvino_genai_dll,
             &bundle.openvino_genai_c_dll,
-        ]
-        .into_iter()
-        .map(|path| RetainedLibrary::load(path))
-        .collect::<Result<Vec<_>, _>>()?;
+        ]);
+        let libs = libs
+            .into_iter()
+            .map(|path| RetainedLibrary::load(path))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut guard = lock_mutex(state);
         guard.active_fingerprint = Some(fingerprint.clone());
@@ -483,15 +498,19 @@ impl OpenVinoRuntimeLoader {
         };
         guard
             .results
-            .insert(fingerprint, CachedOpenVinoInit::Success(handle.clone()));
+            .insert(cache_key, CachedOpenVinoInit::Success(handle.clone()));
         Ok(handle)
     }
 
     pub fn probe_npu_device(bundle: &OpenVinoRuntimeBundle) -> Result<OpenVinoDeviceProbe, String> {
-        Self::ensure_initialized(bundle)?;
+        Self::ensure_initialized_for_npu(bundle)?;
         let capi = OpenVinoCapi::load(&bundle.openvino_c_dll)?;
         unsafe { capi.probe_npu_device() }
     }
+}
+
+fn openvino_runtime_cache_key(fingerprint: &str, requires_npu: bool) -> String {
+    format!("{fingerprint}:{}", if requires_npu { "npu" } else { "cpu" })
 }
 
 #[repr(C)]

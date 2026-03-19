@@ -2,42 +2,38 @@
 use super::genai::GenAiDirectMlGenerator;
 #[cfg(target_os = "windows")]
 use super::genai::OpenVinoGenAiGenerator;
-use super::generator::Generator;
 use super::types::{GenerationConfig, GenerationMetrics, InferenceChatMessage};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-/// Runtime adapter abstraction for inference backends.
-///
-/// CPU inference currently uses the ORT generator path. DirectML uses
-/// ONNX Runtime GenAI via native C FFI to align with exported DML artifacts.
 pub enum InferenceRuntimeAdapter {
-    Ort {
-        generator: Generator,
-    },
     #[cfg(target_os = "windows")]
-    GenAiDirectMl {
-        generator: GenAiDirectMlGenerator,
-    },
+    GenAiDirectMl { generator: GenAiDirectMlGenerator },
     #[cfg(target_os = "windows")]
-    OpenVinoGenAiNpu {
-        generator: OpenVinoGenAiGenerator,
-    },
+    OpenVinoGenAi { generator: OpenVinoGenAiGenerator },
 }
 
 impl InferenceRuntimeAdapter {
-    pub fn ort(generator: Generator) -> Self {
-        Self::Ort { generator }
-    }
-
     #[cfg(target_os = "windows")]
     pub fn genai_directml(generator: GenAiDirectMlGenerator) -> Self {
         Self::GenAiDirectMl { generator }
     }
 
     #[cfg(target_os = "windows")]
-    pub fn openvino_genai_npu(generator: OpenVinoGenAiGenerator) -> Self {
-        Self::OpenVinoGenAiNpu { generator }
+    pub fn openvino_genai(generator: OpenVinoGenAiGenerator) -> Self {
+        Self::OpenVinoGenAi { generator }
+    }
+
+    pub fn is_openvino_genai(&self) -> bool {
+        #[cfg(target_os = "windows")]
+        {
+            matches!(self, Self::OpenVinoGenAi { .. })
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            false
+        }
     }
 
     pub async fn generate_stream<F>(
@@ -51,11 +47,6 @@ impl InferenceRuntimeAdapter {
         F: FnMut(String),
     {
         match self {
-            Self::Ort { generator } => {
-                generator
-                    .generate_stream(prompt, config, cancelled, on_token)
-                    .await
-            }
             #[cfg(target_os = "windows")]
             Self::GenAiDirectMl { generator } => {
                 generator
@@ -63,7 +54,7 @@ impl InferenceRuntimeAdapter {
                     .await
             }
             #[cfg(target_os = "windows")]
-            Self::OpenVinoGenAiNpu { generator } => {
+            Self::OpenVinoGenAi { generator } => {
                 generator
                     .generate_stream(prompt, config, cancelled, on_token)
                     .await
@@ -83,7 +74,7 @@ impl InferenceRuntimeAdapter {
     {
         match self {
             #[cfg(target_os = "windows")]
-            Self::OpenVinoGenAiNpu { generator } => {
+            Self::OpenVinoGenAi { generator } => {
                 generator
                     .generate_stream_messages(messages, config, cancelled, on_token)
                     .await

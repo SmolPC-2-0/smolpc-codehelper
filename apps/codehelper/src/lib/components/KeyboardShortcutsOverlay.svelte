@@ -27,7 +27,12 @@
 {#if open}
 	<div class="shortcuts-overlay">
 		<div class="shortcuts-overlay__backdrop" onclick={onClose} aria-hidden="true"></div>
-		<div class="shortcuts-overlay__panel" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+		<div
+			class="shortcuts-overlay__panel"
+			role="dialog"
+			aria-modal="true"
+			aria-label="Keyboard shortcuts"
+		>
 			<header class="shortcuts-overlay__header">
 				<div class="shortcuts-overlay__title">
 					<Keyboard class="h-4.5 w-4.5" />
@@ -38,10 +43,10 @@
 				</Button>
 			</header>
 			<div class="shortcuts-overlay__list">
-				{#each shortcuts as shortcut}
+				{#each shortcuts as shortcut (shortcut.description)}
 					<div class="shortcuts-overlay__item">
 						<div class="shortcuts-overlay__keys">
-							{#each shortcut.keys as key}
+							{#each shortcut.keys as key (key)}
 								<kbd>{key}</kbd>
 							{/each}
 						</div>

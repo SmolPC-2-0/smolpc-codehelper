@@ -1,11 +1,13 @@
 param(
-    [string]$ModelId = "qwen2.5-coder-1.5b",
-    [string]$HuggingFaceModel = "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+    [string]$ModelId = "qwen2.5-1.5b-instruct",
+    [string]$HuggingFaceModel = "Qwen/Qwen2.5-1.5B-Instruct",
     [ValidateSet("int4", "fp16", "fp32", "bf16")]
     [string]$Precision = "int4"
 )
 
 $ErrorActionPreference = "Stop"
+
+. (Join-Path $PSScriptRoot "common-dml-builder.ps1")
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $outputDir = Join-Path $repoRoot "src-tauri/models/$ModelId/dml"
@@ -16,18 +18,21 @@ Write-Host "  HF model:  $HuggingFaceModel"
 Write-Host "  Precision: $Precision"
 Write-Host "  Output:    $outputDir"
 
-New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+$dmlLogPath = Get-DmlExportLogPath -ModelId $ModelId -SourceLabel "manual-export"
+$builderEnvironment = Invoke-DmlModelBuilder `
+    -ModelName $HuggingFaceModel `
+    -OutputDir $outputDir `
+    -Precision $Precision `
+    -ExecutionProvider "dml" `
+    -LogPath $dmlLogPath
 
-python -m onnxruntime_genai.models.builder `
-  -m $HuggingFaceModel `
-  -o $outputDir `
-  -p $Precision `
-  -e dml
-
-if ($LASTEXITCODE -ne 0) {
-    throw "onnxruntime_genai.models.builder failed with exit code $LASTEXITCODE"
-}
+$dmlValidation = Assert-DmlArtifactReady -ArtifactDir $outputDir
 
 Write-Host ""
 Write-Host "DirectML artifact export complete."
 Write-Host "Expected model file: $outputDir/model.onnx"
+Write-Host "DirectML builder env: $($builderEnvironment.Root)"
+Write-Host "DirectML export log: $dmlLogPath"
+if ((Get-DmlStringArray -Value $dmlValidation.external_refs).Count -gt 0) {
+    Write-Host "DirectML external data: $($dmlValidation.external_refs -join ', ')"
+}

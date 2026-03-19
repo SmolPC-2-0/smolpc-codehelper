@@ -76,7 +76,7 @@
 			<Keyboard class="h-4 w-4" />
 		</Button>
 		<HardwareIndicator onclick={onToggleHardware} active={hardwareActive} />
-		<StatusIndicator status={status} active={modelInfoActive} onToggle={onToggleModelInfo} />
+		<StatusIndicator {status} active={modelInfoActive} onToggle={onToggleModelInfo} />
 	</div>
 </header>
 

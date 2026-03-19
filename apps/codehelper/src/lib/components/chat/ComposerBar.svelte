@@ -6,25 +6,37 @@
 	interface Props {
 		isLoaded: boolean;
 		isGenerating: boolean;
+		hasActiveStream: boolean;
+		isCancelling: boolean;
 		bottomOffset: number;
 		onSend: (content: string) => void;
 		onCancel: () => void;
 	}
 
-	let { isLoaded, isGenerating, bottomOffset, onSend, onCancel }: Props = $props();
+	let {
+		isLoaded,
+		isGenerating,
+		hasActiveStream,
+		isCancelling,
+		bottomOffset,
+		onSend,
+		onCancel
+	}: Props = $props();
 
 	const inputPlaceholder = $derived(
-		isGenerating
-			? 'Generating response...'
-			: !isLoaded
-				? 'Loading model...'
-				: 'Ask a coding question (Shift+Enter for new line)...'
+		isCancelling
+			? 'Cancelling generation...'
+			: isGenerating || hasActiveStream
+				? 'Generating response...'
+				: !isLoaded
+					? 'Loading model...'
+					: 'Ask a coding question (Shift+Enter for new line)...'
 	);
 </script>
 
 <section class="composer-shell" style="bottom: {bottomOffset}px">
 	<div class="composer-shell__inner">
-		{#if isGenerating}
+		{#if isGenerating || hasActiveStream || isCancelling}
 			<div class="composer-shell__actions">
 				<Button type="button" variant="outline" class="composer-shell__cancel" onclick={onCancel}>
 					<Square class="mr-2 h-3.5 w-3.5" />
@@ -35,7 +47,7 @@
 
 		<ChatInput
 			{onSend}
-			disabled={!isLoaded || isGenerating}
+			disabled={!isLoaded || isGenerating || hasActiveStream || isCancelling}
 			placeholder={inputPlaceholder}
 		/>
 	</div>

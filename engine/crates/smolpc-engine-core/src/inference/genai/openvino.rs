@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 type OvGenAiLlmPipeline = c_void;
@@ -20,6 +20,7 @@ type OvGenAiJsonContainer = c_void;
 
 type OvStatus = i32;
 const OV_STATUS_OK: OvStatus = 0;
+static PRESENCE_PENALTY_SYMBOL_WARNING_EMITTED: AtomicBool = AtomicBool::new(false);
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -91,6 +92,8 @@ struct OpenVinoGenAiApi {
     set_top_p: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, f32) -> OvStatus,
     set_top_k: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, usize) -> OvStatus,
     set_repetition_penalty: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, f32) -> OvStatus,
+    set_presence_penalty:
+        Option<unsafe extern "C" fn(*mut OvGenAiGenerationConfig, f32) -> OvStatus>,
     validate_generation_config: unsafe extern "C" fn(*mut OvGenAiGenerationConfig) -> OvStatus,
     destroy_decoded_results: unsafe extern "C" fn(*mut OvGenAiDecodedResults),
     get_perf_metrics: unsafe extern "C" fn(
@@ -108,9 +111,30 @@ struct OpenVinoGenAiApi {
 unsafe impl Send for OpenVinoGenAiApi {}
 unsafe impl Sync for OpenVinoGenAiApi {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OpenVinoDeviceTarget {
+    Cpu,
+    Npu,
+}
+
+impl OpenVinoDeviceTarget {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Cpu => "CPU",
+            Self::Npu => "NPU",
+        }
+    }
+}
+
 impl OpenVinoGenAiApi {
-    fn load(bundle: &OpenVinoRuntimeBundle) -> Result<Arc<Self>, String> {
-        OpenVinoRuntimeLoader::ensure_initialized(bundle)?;
+    fn load(
+        bundle: &OpenVinoRuntimeBundle,
+        target: OpenVinoDeviceTarget,
+    ) -> Result<Arc<Self>, String> {
+        match target {
+            OpenVinoDeviceTarget::Cpu => OpenVinoRuntimeLoader::ensure_initialized_for_cpu(bundle)?,
+            OpenVinoDeviceTarget::Npu => OpenVinoRuntimeLoader::ensure_initialized_for_npu(bundle)?,
+        };
         let openvino_c = RetainedLibrary::load(&bundle.openvino_c_dll)?;
         let openvino_genai_c = RetainedLibrary::load(&bundle.openvino_genai_c_dll)?;
 
@@ -205,6 +229,10 @@ impl OpenVinoGenAiApi {
                     &openvino_genai_c,
                     b"ov_genai_generation_config_set_repetition_penalty\0",
                 )?,
+                set_presence_penalty: try_load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_generation_config_set_presence_penalty\0",
+                ),
                 validate_generation_config: load_symbol(
                     &openvino_genai_c,
                     b"ov_genai_generation_config_validate\0",
@@ -239,6 +267,10 @@ impl OpenVinoGenAiApi {
 
 unsafe fn load_symbol<T: Copy>(lib: &RetainedLibrary, name: &[u8]) -> Result<T, String> {
     lib.get(name)
+}
+
+unsafe fn try_load_symbol<T: Copy>(lib: &RetainedLibrary, name: &[u8]) -> Option<T> {
+    lib.get(name).ok()
 }
 
 fn cstring(value: &str, field: &str) -> Result<CString, String> {
@@ -342,6 +374,7 @@ struct OpenVinoGenAiInner {
     max_new_tokens_cap: usize,
     generation_controls: OpenVinoGenerationControls,
     disable_thinking: bool,
+    device_target: OpenVinoDeviceTarget,
 }
 
 unsafe impl Send for OpenVinoGenAiInner {}
@@ -359,31 +392,45 @@ pub struct OpenVinoGenAiGenerator {
     inner: Arc<Mutex<OpenVinoGenAiInner>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct OpenVinoGenerationControls {
     pub eos_token_id: Option<i64>,
     pub min_new_tokens: Option<usize>,
     pub stop_token_ids: Option<Vec<i64>>,
     pub stop_strings: Option<Vec<String>>,
     pub ignore_eos: Option<bool>,
+    pub presence_penalty: Option<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpenVinoNpuPipelineConfig {
-    pub cache_dir: PathBuf,
-    pub max_prompt_len: usize,
-    pub min_response_len: usize,
-    pub generation_controls: OpenVinoGenerationControls,
-    pub disable_thinking: bool,
+#[derive(Debug, Clone, PartialEq)]
+pub enum OpenVinoPipelineConfig {
+    Cpu {
+        generation_controls: OpenVinoGenerationControls,
+        disable_thinking: bool,
+    },
+    Npu {
+        cache_dir: PathBuf,
+        max_prompt_len: usize,
+        min_response_len: usize,
+        generation_controls: OpenVinoGenerationControls,
+        disable_thinking: bool,
+    },
 }
 
-impl OpenVinoNpuPipelineConfig {
-    pub fn new(
+impl OpenVinoPipelineConfig {
+    pub fn cpu() -> Self {
+        Self::Cpu {
+            generation_controls: OpenVinoGenerationControls::default(),
+            disable_thinking: true,
+        }
+    }
+
+    pub fn npu(
         cache_dir: impl Into<PathBuf>,
         max_prompt_len: usize,
         min_response_len: usize,
     ) -> Self {
-        Self {
+        Self::Npu {
             cache_dir: cache_dir.into(),
             max_prompt_len,
             min_response_len,
@@ -393,55 +440,109 @@ impl OpenVinoNpuPipelineConfig {
     }
 
     pub fn with_generation_controls(mut self, controls: OpenVinoGenerationControls) -> Self {
-        self.generation_controls = controls;
+        match &mut self {
+            Self::Cpu {
+                generation_controls,
+                ..
+            }
+            | Self::Npu {
+                generation_controls,
+                ..
+            } => *generation_controls = controls,
+        }
         self
     }
 
     pub fn with_disable_thinking(mut self, disable_thinking: bool) -> Self {
-        self.disable_thinking = disable_thinking;
+        match &mut self {
+            Self::Cpu {
+                disable_thinking: thinking,
+                ..
+            }
+            | Self::Npu {
+                disable_thinking: thinking,
+                ..
+            } => *thinking = disable_thinking,
+        }
         self
+    }
+
+    fn target(&self) -> OpenVinoDeviceTarget {
+        match self {
+            Self::Cpu { .. } => OpenVinoDeviceTarget::Cpu,
+            Self::Npu { .. } => OpenVinoDeviceTarget::Npu,
+        }
     }
 }
 
 impl OpenVinoGenAiGenerator {
     pub fn runtime_available(bundle: &OpenVinoRuntimeBundle) -> Result<(), String> {
-        let _ = openvino_genai_api(bundle)?;
+        let _ = openvino_genai_api_for_target(bundle, OpenVinoDeviceTarget::Npu)?;
         Ok(())
     }
 
     pub fn new(
         bundle: &OpenVinoRuntimeBundle,
         model_dir: &Path,
-        config: &OpenVinoNpuPipelineConfig,
+        config: &OpenVinoPipelineConfig,
     ) -> Result<Self, String> {
-        let api = openvino_genai_api(bundle)?;
-        std::fs::create_dir_all(&config.cache_dir)
-            .map_err(|error| format!("Failed to create OpenVINO cache dir: {error}"))?;
+        let target = config.target();
+        let api = openvino_genai_api_for_target(bundle, target)?;
+        if let OpenVinoPipelineConfig::Npu { cache_dir, .. } = config {
+            std::fs::create_dir_all(cache_dir)
+                .map_err(|error| format!("Failed to create OpenVINO cache dir: {error}"))?;
+        }
 
         let model_dir = path_to_cstring(model_dir, "models_path")?;
-        let device = cstring("NPU", "device")?;
-        let cache_key = cstring("CACHE_DIR", "property key")?;
-        let cache_value = path_to_cstring(&config.cache_dir, "CACHE_DIR")?;
-        let max_prompt_len_key = cstring("MAX_PROMPT_LEN", "property key")?;
-        let max_prompt_len_value = cstring(&config.max_prompt_len.to_string(), "MAX_PROMPT_LEN")?;
-        let min_response_len_key = cstring("MIN_RESPONSE_LEN", "property key")?;
-        let min_response_len_value =
-            cstring(&config.min_response_len.to_string(), "MIN_RESPONSE_LEN")?;
+        let device = cstring(target.as_str(), "device")?;
 
         let mut pipeline_ptr: *mut OvGenAiLlmPipeline = ptr::null_mut();
-        let status = unsafe {
-            (api.create_pipeline)(
-                model_dir.as_ptr(),
-                device.as_ptr(),
-                6,
-                &mut pipeline_ptr,
-                cache_key.as_ptr(),
-                cache_value.as_ptr(),
-                max_prompt_len_key.as_ptr(),
-                max_prompt_len_value.as_ptr(),
-                min_response_len_key.as_ptr(),
-                min_response_len_value.as_ptr(),
-            )
+        let (status, max_new_tokens_cap, generation_controls, disable_thinking) = match config {
+            OpenVinoPipelineConfig::Cpu {
+                generation_controls,
+                disable_thinking,
+            } => (
+                unsafe {
+                    (api.create_pipeline)(model_dir.as_ptr(), device.as_ptr(), 0, &mut pipeline_ptr)
+                },
+                usize::MAX,
+                generation_controls.clone(),
+                *disable_thinking,
+            ),
+            OpenVinoPipelineConfig::Npu {
+                cache_dir,
+                max_prompt_len,
+                min_response_len,
+                generation_controls,
+                disable_thinking,
+            } => {
+                let cache_key = cstring("CACHE_DIR", "property key")?;
+                let cache_value = path_to_cstring(cache_dir, "CACHE_DIR")?;
+                let max_prompt_len_key = cstring("MAX_PROMPT_LEN", "property key")?;
+                let max_prompt_len_value = cstring(&max_prompt_len.to_string(), "MAX_PROMPT_LEN")?;
+                let min_response_len_key = cstring("MIN_RESPONSE_LEN", "property key")?;
+                let min_response_len_value =
+                    cstring(&min_response_len.to_string(), "MIN_RESPONSE_LEN")?;
+                (
+                    unsafe {
+                        (api.create_pipeline)(
+                            model_dir.as_ptr(),
+                            device.as_ptr(),
+                            6,
+                            &mut pipeline_ptr,
+                            cache_key.as_ptr(),
+                            cache_value.as_ptr(),
+                            max_prompt_len_key.as_ptr(),
+                            max_prompt_len_value.as_ptr(),
+                            min_response_len_key.as_ptr(),
+                            min_response_len_value.as_ptr(),
+                        )
+                    },
+                    *min_response_len,
+                    generation_controls.clone(),
+                    *disable_thinking,
+                )
+            }
         };
         check_status(&api, status, "ov_genai_llm_pipeline_create")?;
 
@@ -449,9 +550,10 @@ impl OpenVinoGenAiGenerator {
             inner: Arc::new(Mutex::new(OpenVinoGenAiInner {
                 api: Arc::clone(&api),
                 pipeline: pipeline_ptr,
-                max_new_tokens_cap: config.min_response_len,
-                generation_controls: config.generation_controls.clone(),
-                disable_thinking: config.disable_thinking,
+                max_new_tokens_cap,
+                generation_controls,
+                disable_thinking,
+                device_target: target,
             })),
         })
     }
@@ -499,8 +601,33 @@ impl OpenVinoGenAiGenerator {
             generate_stream_blocking(inner, prompt_owned, gen_config, cancelled_worker, token_tx)
         });
 
-        while let Some(piece) = token_rx.recv().await {
-            on_token(piece);
+        // Per-token watchdog: NPU compilation can cause a long TTFT on first run,
+        // so use a generous 90s window to avoid false positives.
+        const TOKEN_WATCHDOG_SECS: u64 = 90;
+        let deadline = tokio::time::sleep(Duration::from_secs(TOKEN_WATCHDOG_SECS));
+        tokio::pin!(deadline);
+
+        loop {
+            tokio::select! {
+                piece = token_rx.recv() => {
+                    match piece {
+                        Some(t) => {
+                            on_token(t);
+                            deadline.as_mut().reset(
+                                tokio::time::Instant::now() + Duration::from_secs(TOKEN_WATCHDOG_SECS)
+                            );
+                        }
+                        None => break,
+                    }
+                }
+                _ = &mut deadline => {
+                    cancelled.store(true, Ordering::SeqCst);
+                    return Err(
+                        "OpenVINO generation timed out: no tokens received within 90 seconds. \
+                         This may indicate a model compatibility issue with OpenVINO.".to_string()
+                    );
+                }
+            }
         }
 
         worker
@@ -533,8 +660,31 @@ impl OpenVinoGenAiGenerator {
             )
         });
 
-        while let Some(piece) = token_rx.recv().await {
-            on_token(piece);
+        const TOKEN_WATCHDOG_SECS: u64 = 90;
+        let deadline = tokio::time::sleep(Duration::from_secs(TOKEN_WATCHDOG_SECS));
+        tokio::pin!(deadline);
+
+        loop {
+            tokio::select! {
+                piece = token_rx.recv() => {
+                    match piece {
+                        Some(t) => {
+                            on_token(t);
+                            deadline.as_mut().reset(
+                                tokio::time::Instant::now() + Duration::from_secs(TOKEN_WATCHDOG_SECS)
+                            );
+                        }
+                        None => break,
+                    }
+                }
+                _ = &mut deadline => {
+                    cancelled.store(true, Ordering::SeqCst);
+                    return Err(
+                        "OpenVINO generation timed out: no tokens received within 90 seconds. \
+                         This may indicate a model compatibility issue with OpenVINO.".to_string()
+                    );
+                }
+            }
         }
 
         worker
@@ -573,12 +723,21 @@ fn generate_stream_blocking(
         .lock()
         .map_err(|_| "OpenVINO GenAI state mutex poisoned".to_string())?;
     let gen_config = clamp_max_new_tokens(gen_config, guard.max_new_tokens_cap);
+    let max_callback_count = gen_config.max_length;
     let config = create_generation_config(&guard, gen_config, &guard.generation_controls)?;
     let start = Instant::now();
     let mut callback_state = StreamCallbackState {
         sender: token_tx,
         cancelled,
         trailing_dot_run: 0,
+        accumulated: String::new(),
+        stop_strings: guard
+            .generation_controls
+            .stop_strings
+            .clone()
+            .unwrap_or_default(),
+        callback_count: 0,
+        max_callback_count,
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -598,13 +757,22 @@ fn generate_stream_with_history_blocking(
         .lock()
         .map_err(|_| "OpenVINO GenAI state mutex poisoned".to_string())?;
     let gen_config = clamp_max_new_tokens(gen_config, guard.max_new_tokens_cap);
+    let max_callback_count = gen_config.max_length;
     let config = create_generation_config(&guard, gen_config, &guard.generation_controls)?;
-    let history = create_chat_history(&guard.api, &messages, guard.disable_thinking)?;
+    let history = create_chat_history(&guard.api, &messages, guard.disable_thinking, guard.device_target)?;
     let start = Instant::now();
     let mut callback_state = StreamCallbackState {
         sender: token_tx,
         cancelled,
         trailing_dot_run: 0,
+        accumulated: String::new(),
+        stop_strings: guard
+            .generation_controls
+            .stop_strings
+            .clone()
+            .unwrap_or_default(),
+        callback_count: 0,
+        max_callback_count,
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
@@ -640,10 +808,7 @@ fn create_generation_config(
                 inherited,
                 "ov_genai_llm_pipeline_get_generation_config",
             ) {
-                log::warn!(
-                    "{}; falling back to empty generation config initialization",
-                    error
-                );
+                log::warn!("{error}; falling back to empty generation config initialization");
             }
         } else {
             log::warn!(
@@ -668,7 +833,7 @@ fn create_generation_config(
         unsafe { (api.set_max_new_tokens)(config_handle.as_ptr(), config.max_length) },
         "ov_genai_generation_config_set_max_new_tokens",
     )?;
-    if let Some(eos_token_id) = controls.eos_token_id.filter(|_| !inherited_from_pipeline) {
+    if let Some(eos_token_id) = controls.eos_token_id {
         check_status(
             api,
             unsafe { (api.set_eos_token_id)(config_handle.as_ptr(), eos_token_id) },
@@ -728,7 +893,19 @@ fn create_generation_config(
         )?;
     }
 
-    let do_sample = config.temperature > 0.0;
+    let is_npu = guard.device_target == OpenVinoDeviceTarget::Npu;
+    let do_sample = if is_npu {
+        if config.temperature > 0.0 {
+            log::info!(
+                "NPU StaticLLMPipeline requires greedy decoding; \
+                 overriding do_sample=false (requested temperature={})",
+                config.temperature
+            );
+        }
+        false
+    } else {
+        config.temperature > 0.0
+    };
     check_status(
         api,
         unsafe { (api.set_do_sample)(config_handle.as_ptr(), do_sample) },
@@ -765,6 +942,26 @@ fn create_generation_config(
             },
             "ov_genai_generation_config_set_repetition_penalty",
         )?;
+    }
+
+    if let Some(presence_penalty) = controls.presence_penalty {
+        if presence_penalty.is_finite() {
+            if is_npu {
+                log::info!(
+                    "Skipping presence_penalty={presence_penalty} on NPU (incompatible with greedy decoding)"
+                );
+            } else if let Some(set_presence_penalty) = api.set_presence_penalty {
+                check_status(
+                    api,
+                    unsafe { set_presence_penalty(config_handle.as_ptr(), presence_penalty) },
+                    "ov_genai_generation_config_set_presence_penalty",
+                )?;
+            } else if !PRESENCE_PENALTY_SYMBOL_WARNING_EMITTED.swap(true, Ordering::SeqCst) {
+                log::warn!(
+                    "OpenVINO runtime does not expose presence_penalty support; skipping requested presence_penalty={presence_penalty}"
+                );
+            }
+        }
     }
 
     check_status(
@@ -814,14 +1011,51 @@ fn generate_once(
     read_generation_metrics(&guard.api, results.as_ptr(), start)
 }
 
+/// Inject `/nothink` into the system message for NPU, which does not support
+/// the `extra_context` API for thinking control.  If no system message exists,
+/// one is prepended.
+fn inject_nothink_into_messages(messages: &[InferenceChatMessage]) -> Vec<InferenceChatMessage> {
+    let mut result: Vec<InferenceChatMessage> = messages.to_vec();
+    if let Some(sys) = result.iter_mut().find(|m| m.role == "system") {
+        if !sys.content.starts_with("/nothink") {
+            sys.content = format!("/nothink\n{}", sys.content);
+        }
+    } else {
+        result.insert(
+            0,
+            InferenceChatMessage {
+                role: "system".to_string(),
+                content: "/nothink".to_string(),
+            },
+        );
+    }
+    result
+}
+
 fn create_chat_history(
     api: &Arc<OpenVinoGenAiApi>,
     messages: &[InferenceChatMessage],
     disable_thinking: bool,
+    device_target: OpenVinoDeviceTarget,
 ) -> Result<OvOwned<OvGenAiChatHistory>, String> {
     if messages.is_empty() {
         return Err("messages cannot be empty for OpenVINO structured generation".to_string());
     }
+
+    // NPU StaticLLMPipeline does not support extra_context for thinking control.
+    // Inject /nothink into the system message content instead (same approach as
+    // the legacy ChatML path).
+    // Declared here so its lifetime spans the rest of the function.
+    let npu_thinking_messages;
+    let messages = if disable_thinking && device_target == OpenVinoDeviceTarget::Npu {
+        npu_thinking_messages = inject_nothink_into_messages(messages);
+        log::info!(
+            "NPU: injected /nothink into system message (extra_context not supported)"
+        );
+        &npu_thinking_messages
+    } else {
+        messages
+    };
 
     let messages_json = serde_json::to_string(messages)
         .map_err(|error| format!("Failed to encode messages JSON: {error}"))?;
@@ -855,7 +1089,7 @@ fn create_chat_history(
     )?;
     let history = OvOwned::new(Arc::clone(api), history_ptr, api.destroy_chat_history);
 
-    if disable_thinking {
+    if disable_thinking && device_target != OpenVinoDeviceTarget::Npu {
         let extra_context = serde_json::json!({ "enable_thinking": false }).to_string();
         let extra_context = cstring(&extra_context, "chat extra context JSON")?;
         let mut extra_context_ptr: *mut OvGenAiJsonContainer = ptr::null_mut();
@@ -1029,6 +1263,12 @@ struct StreamCallbackState {
     sender: UnboundedSender<String>,
     cancelled: Arc<AtomicBool>,
     trailing_dot_run: usize,
+    accumulated: String,
+    stop_strings: Vec<String>,
+    /// Safety-net token counter — stops generation if the C-level max_new_tokens
+    /// is not honoured for any reason (e.g. pipeline bug or ABI mismatch).
+    callback_count: usize,
+    max_callback_count: usize,
 }
 
 unsafe extern "C" fn stream_callback(
@@ -1046,6 +1286,24 @@ unsafe extern "C" fn stream_callback(
 
     if !text.is_null() {
         let piece = c_string_to_string_verbatim(text);
+        if !piece.is_empty() {
+            state.callback_count += 1;
+            if state.callback_count > state.max_callback_count {
+                log::warn!(
+                    "Stopping OpenVINO stream: callback count ({}) exceeded safety limit ({})",
+                    state.callback_count,
+                    state.max_callback_count,
+                );
+                return OvGenAiStreamingStatus::Stop;
+            }
+        }
+        state.accumulated.push_str(&piece);
+        for stop in &state.stop_strings {
+            if state.accumulated.contains(stop.as_str()) {
+                log::debug!("Stream callback detected stop string '{stop}' - halting");
+                return OvGenAiStreamingStatus::Stop;
+            }
+        }
         for ch in piece.chars() {
             if ch == '.' {
                 state.trailing_dot_run += 1;
@@ -1083,9 +1341,13 @@ struct OpenVinoGenAiApiState {
 static OPENVINO_GENAI_API: std::sync::OnceLock<Mutex<OpenVinoGenAiApiState>> =
     std::sync::OnceLock::new();
 
-fn openvino_genai_api(bundle: &OpenVinoRuntimeBundle) -> Result<Arc<OpenVinoGenAiApi>, String> {
+fn openvino_genai_api_for_target(
+    bundle: &OpenVinoRuntimeBundle,
+    target: OpenVinoDeviceTarget,
+) -> Result<Arc<OpenVinoGenAiApi>, String> {
     let state = OPENVINO_GENAI_API.get_or_init(|| Mutex::new(OpenVinoGenAiApiState::default()));
     let fingerprint = bundle.fingerprint.value.clone();
+    let cache_key = format!("{fingerprint}:{}", target.as_str().to_ascii_lowercase());
 
     {
         let guard = match state.lock() {
@@ -1096,7 +1358,7 @@ fn openvino_genai_api(bundle: &OpenVinoRuntimeBundle) -> Result<Arc<OpenVinoGenA
             }
         };
 
-        if let Some(cached) = guard.results.get(&fingerprint) {
+        if let Some(cached) = guard.results.get(&cache_key) {
             return match cached {
                 CachedOpenVinoGenAiApi::Success(api) => Ok(Arc::clone(api)),
                 CachedOpenVinoGenAiApi::Failure(error) => Err(error.clone()),
@@ -1106,8 +1368,7 @@ fn openvino_genai_api(bundle: &OpenVinoRuntimeBundle) -> Result<Arc<OpenVinoGenA
         if let Some(active) = guard.active_fingerprint.as_ref() {
             if active != &fingerprint {
                 let error = format!(
-                    "OpenVINO GenAI already initialized from bundle fingerprint '{active}'; restart the process to use '{}'",
-                    fingerprint
+                    "OpenVINO GenAI already initialized from bundle fingerprint '{active}'; restart the process to use '{fingerprint}'"
                 );
                 drop(guard);
                 let mut guard = match state.lock() {
@@ -1116,13 +1377,17 @@ fn openvino_genai_api(bundle: &OpenVinoRuntimeBundle) -> Result<Arc<OpenVinoGenA
                 };
                 guard
                     .results
-                    .insert(fingerprint, CachedOpenVinoGenAiApi::Failure(error.clone()));
+                    .insert(cache_key, CachedOpenVinoGenAiApi::Failure(error.clone()));
                 return Err(error);
             }
         }
     }
 
-    if let Some(failure) = bundle.npu_validation_failure {
+    let validation_failure = match target {
+        OpenVinoDeviceTarget::Cpu => bundle.cpu_validation_failure,
+        OpenVinoDeviceTarget::Npu => bundle.npu_validation_failure,
+    };
+    if let Some(failure) = validation_failure {
         let error = format!(
             "OpenVINO runtime bundle is not validated ({}) at {}",
             failure.code(),
@@ -1134,20 +1399,19 @@ fn openvino_genai_api(bundle: &OpenVinoRuntimeBundle) -> Result<Arc<OpenVinoGenA
         };
         guard
             .results
-            .insert(fingerprint, CachedOpenVinoGenAiApi::Failure(error.clone()));
+            .insert(cache_key, CachedOpenVinoGenAiApi::Failure(error.clone()));
         return Err(error);
     }
 
-    let api = OpenVinoGenAiApi::load(bundle)?;
+    let api = OpenVinoGenAiApi::load(bundle, target)?;
     let mut guard = match state.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     };
     guard.active_fingerprint = Some(fingerprint.clone());
-    guard.results.insert(
-        fingerprint,
-        CachedOpenVinoGenAiApi::Success(Arc::clone(&api)),
-    );
+    guard
+        .results
+        .insert(cache_key, CachedOpenVinoGenAiApi::Success(Arc::clone(&api)));
     Ok(api)
 }
 
@@ -1178,10 +1442,11 @@ mod tests {
 
         let temp = tempdir().expect("temp dir");
         let bundle = build_bundle(temp.path(), None);
-        let api = match super::openvino_genai_api(&bundle) {
-            Ok(api) => api,
-            Err(_) => return,
-        };
+        let api =
+            match super::openvino_genai_api_for_target(&bundle, super::OpenVinoDeviceTarget::Cpu) {
+                Ok(api) => api,
+                Err(_) => return,
+            };
 
         let value =
             metric_ms_pair(&api, std::ptr::null(), getter, "metric").expect("metric rounding");
@@ -1292,8 +1557,47 @@ mod tests {
             icuuc_dll,
             required_files,
             version_metadata,
+            cpu_validation_failure: failure,
             npu_validation_failure: failure,
             fingerprint,
         }
+    }
+
+    #[test]
+    fn inject_nothink_prepends_to_existing_system_message() {
+        use crate::inference::types::InferenceChatMessage;
+        let messages = vec![
+            InferenceChatMessage { role: "system".into(), content: "You are helpful.".into() },
+            InferenceChatMessage { role: "user".into(), content: "Hi".into() },
+        ];
+        let result = super::inject_nothink_into_messages(&messages);
+        assert_eq!(result[0].role, "system");
+        assert_eq!(result[0].content, "/nothink\nYou are helpful.");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn inject_nothink_creates_system_message_if_absent() {
+        use crate::inference::types::InferenceChatMessage;
+        let messages = vec![
+            InferenceChatMessage { role: "user".into(), content: "Hi".into() },
+        ];
+        let result = super::inject_nothink_into_messages(&messages);
+        assert_eq!(result[0].role, "system");
+        assert_eq!(result[0].content, "/nothink");
+        assert_eq!(result[1].role, "user");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn inject_nothink_is_idempotent() {
+        use crate::inference::types::InferenceChatMessage;
+        let messages = vec![
+            InferenceChatMessage { role: "system".into(), content: "/nothink\nYou are helpful.".into() },
+            InferenceChatMessage { role: "user".into(), content: "Hi".into() },
+        ];
+        let result = super::inject_nothink_into_messages(&messages);
+        assert_eq!(result[0].content, "/nothink\nYou are helpful.");
+        assert_eq!(result.len(), 2);
     }
 }

@@ -1,7 +1,8 @@
 param(
-    [ValidateSet("none", "cpu", "dml")]
+    [ValidateSet("none", "cpu", "dml", "npu")]
     [string]$ForceEp = "none",
-    [int]$DeviceId = -1
+    [int]$DeviceId = -1,
+    [switch]$DisableGpu = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,7 +50,19 @@ function Request-EngineShutdown {
     }
 }
 
+function Stop-StaleCodeHelperApp {
+    $existing = Get-Process -Name "smolpc-code-helper" -ErrorAction SilentlyContinue
+    if ($null -eq $existing) {
+        return
+    }
+
+    Write-Host "Force-stopping stale smolpc-code-helper process(es) before dev launch..."
+    $existing | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+}
+
 Request-EngineShutdown
+Stop-StaleCodeHelperApp
 
 Write-Host "Building smolpc-engine-host (debug) for deterministic dev runtime..."
 cargo build -p smolpc-engine-host
@@ -58,6 +71,16 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $env:SMOLPC_ENGINE_DEV_FORCE_RESPAWN = "1"
+
+if ($DisableGpu) {
+    $existingArgs = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+    if ([string]::IsNullOrWhiteSpace($existingArgs)) {
+        $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--disable-gpu"
+    } elseif ($existingArgs -notmatch "(?<!\S)--disable-gpu(?!\S)") {
+        $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "$existingArgs --disable-gpu"
+    }
+    Write-Host "WebView2 GPU acceleration disabled for this dev launch."
+}
 
 switch ($ForceEp) {
     "cpu" {
@@ -74,6 +97,11 @@ switch ($ForceEp) {
             Clear-EnvVar -Name "SMOLPC_DML_DEVICE_ID"
             Write-Host "Starting Tauri dev with forced DirectML backend (auto device)..."
         }
+    }
+    "npu" {
+        $env:SMOLPC_FORCE_EP = "openvino_npu"
+        Clear-EnvVar -Name "SMOLPC_DML_DEVICE_ID"
+        Write-Host "Starting Tauri dev with forced OpenVINO NPU backend..."
     }
     default {
         Clear-EnvVar -Name "SMOLPC_FORCE_EP"

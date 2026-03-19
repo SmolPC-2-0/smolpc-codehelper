@@ -1,12 +1,12 @@
 {
-  "apps": [
-    {
-      "app_id": "codehelper",
-      "display_name": "SmolPC Code Helper",
-      "exe_path": "C:\\Program Files\\SmolPC\\Code Helper\\SmolPC Code Helper.exe",
-      "args": [],
-      "focus_command": null,
-      "min_engine_api_major": 1
-    }
-  ]
+	"apps": [
+		{
+			"app_id": "codehelper",
+			"display_name": "SmolPC Code Helper",
+			"exe_path": "C:\\Program Files\\SmolPC\\Code Helper\\SmolPC Code Helper.exe",
+			"args": [],
+			"focus_command": null,
+			"min_engine_api_major": 1
+		}
+	]
 }

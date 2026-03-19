@@ -4,7 +4,7 @@ use smolpc_engine_client::{
 };
 use smolpc_engine_core::inference::backend::{BackendStatus, CheckModelResponse};
 use smolpc_engine_core::models::registry::ModelDefinition;
-use smolpc_engine_core::{GenerationConfig, GenerationMetrics, GenerationResult};
+use smolpc_engine_core::{GenerationConfig, GenerationMetrics};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
@@ -61,8 +61,9 @@ fn parse_runtime_mode(mode: &str) -> Result<RuntimeModePreference, String> {
         "auto" => Ok(RuntimeModePreference::Auto),
         "cpu" => Ok(RuntimeModePreference::Cpu),
         "dml" | "directml" => Ok(RuntimeModePreference::Dml),
+        "npu" | "openvino" | "openvino_npu" => Ok(RuntimeModePreference::Npu),
         _ => Err(format!(
-            "Unsupported runtime mode '{mode}'. Use one of: auto, cpu, dml"
+            "Unsupported runtime mode '{mode}'. Use one of: auto, cpu, dml, npu"
         )),
     }
 }
@@ -72,6 +73,7 @@ pub(super) fn runtime_mode_label(mode: RuntimeModePreference) -> &'static str {
         RuntimeModePreference::Auto => "auto",
         RuntimeModePreference::Cpu => "cpu",
         RuntimeModePreference::Dml => "dml",
+        RuntimeModePreference::Npu => "npu",
     }
 }
 
@@ -285,10 +287,7 @@ async fn ensure_desired_model_loaded(
         return Ok(());
     };
 
-    log::info!(
-        "Restoring desired model '{}' into shared engine before generation",
-        model_to_restore
-    );
+    log::info!("Restoring desired model '{model_to_restore}' into shared engine before generation");
     client
         .load_model(model_to_restore)
         .await
@@ -332,10 +331,10 @@ pub async fn load_model(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<String, String> {
-    log::info!("Loading model via shared engine: {}", model_id);
+    log::info!("Loading model via shared engine: {model_id}");
     let client = resolve_client(&app_handle, &state, false).await?;
     client.load_model(&model_id).await.map_err(|e| {
-        log::error!("Model load failed for {}: {}", model_id, e);
+        log::error!("Model load failed for {model_id}: {e}");
         format!("Failed to load model: {e}")
     })?;
     *state.desired_model.lock().await = Some(model_id.clone());
@@ -363,20 +362,6 @@ pub async fn unload_model(
         .map_err(|e| format!("Failed to unload model: {e}"))?;
     *state.desired_model.lock().await = None;
     Ok("Model unloaded successfully".to_string())
-}
-
-#[tauri::command]
-pub async fn generate_text(
-    prompt: String,
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
-) -> Result<GenerationResult, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
-    ensure_desired_model_loaded(&client, &state).await?;
-    client
-        .generate_text(&prompt, None)
-        .await
-        .map_err(|e| format!("Generation failed: {e}"))
 }
 
 #[tauri::command]
@@ -640,18 +625,15 @@ mod tests {
     #[test]
     fn desired_model_to_restore_requests_reload_after_host_restart() {
         assert_eq!(
-            desired_model_to_restore(Some("qwen3-4b-instruct-2507"), None),
-            Some("qwen3-4b-instruct-2507")
+            desired_model_to_restore(Some("qwen2.5-1.5b-instruct"), None),
+            Some("qwen2.5-1.5b-instruct")
         );
     }
 
     #[test]
     fn desired_model_to_restore_skips_reload_when_model_is_already_loaded() {
         assert_eq!(
-            desired_model_to_restore(
-                Some("qwen3-4b-instruct-2507"),
-                Some("qwen3-4b-instruct-2507")
-            ),
+            desired_model_to_restore(Some("qwen2.5-1.5b-instruct"), Some("qwen2.5-1.5b-instruct")),
             None
         );
     }

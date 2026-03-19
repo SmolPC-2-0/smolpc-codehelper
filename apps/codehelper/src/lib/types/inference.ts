@@ -21,17 +21,6 @@ export interface GenerationMetrics {
 }
 
 /**
- * Result of text generation
- */
-export interface GenerationResult {
-	/** Generated text */
-	text: string;
-
-	/** Performance metrics */
-	metrics: GenerationMetrics;
-}
-
-/**
  * Model metadata
  */
 export interface ModelInfo {
@@ -65,7 +54,8 @@ export interface AvailableModel {
 /**
  * Active inference backend state exposed by the shared engine host.
  */
-export type InferenceRuntimeMode = 'auto' | 'cpu' | 'dml';
+export type InferenceRuntimeMode = 'auto' | 'cpu' | 'dml' | 'npu';
+export type InferenceCancelState = 'idle' | 'pending' | 'timed_out';
 export type StartupModeDto = 'auto' | 'directml_required';
 export type EngineReadinessState =
 	| 'idle'
@@ -193,7 +183,7 @@ export interface BackendStatus {
 	/** Active artifact backend identifier */
 	active_artifact_backend: InferenceBackend | null;
 
-	/** Runtime implementation in use (e.g. "ort_cpu", "genai_dml") */
+	/** Runtime implementation in use (e.g. "ov_genai_cpu", "genai_dml") */
 	runtime_engine: string | null;
 
 	/** Available backend identifiers on current machine */
@@ -324,7 +314,7 @@ export interface InferenceStatus {
 	/** Active artifact backend identifier */
 	activeArtifactBackend: InferenceBackend | null;
 
-	/** Runtime implementation in use (e.g. "ort_cpu", "genai_dml") */
+	/** Runtime implementation in use (e.g. "ov_genai_cpu", "genai_dml") */
 	runtimeEngine: string | null;
 
 	/** Resolved active model path on disk */

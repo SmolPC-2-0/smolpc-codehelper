@@ -10,7 +10,8 @@ export const QUICK_EXAMPLES: QuickExample[] = [
 	{
 		id: 'calculator',
 		title: 'Calculator Program',
-		prompt: 'Create a simple calculator program that can add, subtract, multiply, and divide two numbers',
+		prompt:
+			'Create a simple calculator program that can add, subtract, multiply, and divide two numbers',
 		category: 'basics'
 	},
 	{
