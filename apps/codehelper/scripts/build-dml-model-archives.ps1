@@ -120,9 +120,6 @@ foreach ($model in $ModelsToArchive) {
     Assert-DmlArtifactReady -ModelRoot $sourceModelRoot -ModelId $model.Id -SetupHint $model.SetupHint
 }
 
-if (Test-Path $outputDir) {
-    Remove-Item -LiteralPath $outputDir -Recurse -Force
-}
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 
 $tempRoot = Join-Path $env:TEMP ("smolpc-model-archive-" + [Guid]::NewGuid().ToString("N"))
@@ -155,7 +152,8 @@ try {
             Remove-Item -LiteralPath $archivePath -Force
         }
 
-        & tar -a -cf $archivePath -C $stageRoot "dml"
+        $tarExe = Join-Path $env:SystemRoot "System32\tar.exe"
+        & $tarExe -a -cf $archivePath -C $stageRoot "dml"
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to create archive for '$($model.Id)'."
         }

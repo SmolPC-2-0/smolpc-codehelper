@@ -97,14 +97,14 @@ function Assert-OpenVinoArtifactReady {
 
     $templatePath = Join-Path $ovinoRoot "chat_template.jinja"
     if (-not (Test-Path $templatePath -PathType Leaf)) {
-        Write-Host "  WARNING: chat_template.jinja not found for '$ModelId' — template may be embedded in tokenizer_config.json"
+        Write-Host "  WARNING: chat_template.jinja not found for '$ModelId' - template may be embedded in tokenizer_config.json"
     }
 
     if ($ModelId -like "qwen3*") {
         if (Test-Path $templatePath -PathType Leaf) {
             $templateContent = Get-Content -LiteralPath $templatePath -Raw
             if ($templateContent -match "enable_thinking.*true") {
-                Write-Host "  WARNING: Qwen3 template may default to thinking mode — verify non-thinking patch is applied"
+                Write-Host "  WARNING: Qwen3 template may default to thinking mode - verify non-thinking patch is applied"
             }
         }
     }
@@ -168,7 +168,8 @@ try {
             Remove-Item -LiteralPath $archivePath -Force
         }
 
-        & tar -a -cf $archivePath -C $stageRoot "openvino"
+        $tarExe = Join-Path $env:SystemRoot "System32\tar.exe"
+        & $tarExe -a -cf $archivePath -C $stageRoot "openvino"
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to create archive for '$($model.Id)'."
         }
