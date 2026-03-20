@@ -62,6 +62,15 @@
   type View = 'chat' | 'tools' | 'settings';
   let currentView = $state<View>('chat');
   let messagesContainer = $state<HTMLDivElement | undefined>(undefined);
+  let restoredSavedAtLabel = $derived.by(() => {
+    const restoredSavedAtIso = libreofficeChatStore.sessionRestoreMetadata.restoredSavedAtIso;
+    if (!restoredSavedAtIso) {
+      return null;
+    }
+
+    const parsed = new Date(restoredSavedAtIso);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toLocaleString();
+  });
 
   $effect(() => {
     const messageCount = libreofficeChatStore.messageCount;
@@ -81,10 +90,10 @@
     void libreofficeChatStore.sendMessage(message);
   }
 
-  function handleClearSession(): void {
+  function handleStartNewSession(): void {
     if (typeof window !== 'undefined') {
       const confirmed = window.confirm(
-        'Clear this local source-parity chat session? This removes the saved history for this browser profile.'
+        'Start a new source-parity session? This clears the saved chat history for this browser profile.'
       );
       if (!confirmed) {
         return;
@@ -159,6 +168,25 @@
     />
   {:else}
     <div class="source-parity__chat">
+      {#if libreofficeChatStore.sessionRestoreMetadata.resetDueToCorruptPayload}
+        <div class="session-banner session-banner--warning" role="status">
+          Prior saved session data was malformed and has been reset for safety.
+        </div>
+      {/if}
+
+      {#if libreofficeChatStore.sessionRestoreMetadata.restoreHappened}
+        <div class="session-banner session-banner--info" role="status">
+          <strong>Resumed previous session.</strong>
+          Restored {libreofficeChatStore.sessionRestoreMetadata.restoredCount} message{libreofficeChatStore.sessionRestoreMetadata
+            .restoredCount === 1
+            ? ''
+            : 's'}
+          {#if restoredSavedAtLabel}
+            (saved {restoredSavedAtLabel}).
+          {/if}
+        </div>
+      {/if}
+
       <div class="source-parity__messages" bind:this={messagesContainer}>
         {#if libreofficeChatStore.messages.length === 0}
           <div class="welcome">
@@ -186,11 +214,11 @@
       <div class="source-parity__actions">
         <button
           type="button"
-          class="secondary"
-          onclick={handleClearSession}
+          class="danger"
+          onclick={handleStartNewSession}
           disabled={libreofficeChatStore.isGenerating}
         >
-          Clear Session
+          Start New Session
         </button>
       </div>
 
@@ -255,6 +283,26 @@
     background: #020617;
   }
 
+  .session-banner {
+    margin: 0.75rem 0.75rem 0;
+    border-radius: 8px;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.88rem;
+    line-height: 1.4;
+  }
+
+  .session-banner--info {
+    border: 1px solid #075985;
+    background: #082f49;
+    color: #bae6fd;
+  }
+
+  .session-banner--warning {
+    border: 1px solid #f59e0b;
+    background: #451a03;
+    color: #fde68a;
+  }
+
   .source-parity__actions {
     display: flex;
     justify-content: flex-end;
@@ -265,11 +313,11 @@
     background: #111827;
   }
 
-  .secondary {
-    border: 1px solid #334155;
+  .danger {
+    border: 1px solid #ef4444;
     border-radius: 8px;
-    background: #0f172a;
-    color: #e2e8f0;
+    background: #7f1d1d;
+    color: #fee2e2;
     padding: 0.5rem 0.8rem;
     font-weight: 700;
   }

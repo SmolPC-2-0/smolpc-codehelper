@@ -22,6 +22,20 @@ export interface SourceParityChatMessage {
   isError?: boolean;
 }
 
+export interface SourceParitySessionRestoreMetadata {
+  restoreHappened: boolean;
+  restoredCount: number;
+  restoredSavedAtIso: string | null;
+  resetDueToCorruptPayload: boolean;
+}
+
+export const DEFAULT_SOURCE_PARITY_SESSION_RESTORE_METADATA: SourceParitySessionRestoreMetadata = {
+  restoreHappened: false,
+  restoredCount: 0,
+  restoredSavedAtIso: null,
+  resetDueToCorruptPayload: false
+};
+
 export const SOURCE_PARITY_CHAT_SESSION_SCHEMA_VERSION = 1 as const;
 
 export interface SourceParityPersistedChatMessageV1 {

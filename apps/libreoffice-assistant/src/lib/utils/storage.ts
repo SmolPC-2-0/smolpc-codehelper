@@ -2,6 +2,13 @@ function hasLocalStorage(): boolean {
   return typeof window !== 'undefined' && typeof localStorage !== 'undefined';
 }
 
+export type StorageLoadStatus = 'ok' | 'missing' | 'unavailable' | 'parse_error';
+
+export interface StorageLoadResult<T> {
+  status: StorageLoadStatus;
+  value?: T;
+}
+
 export function saveToStorage<T>(key: string, data: T): boolean {
   try {
     if (!hasLocalStorage()) {
@@ -17,16 +24,28 @@ export function saveToStorage<T>(key: string, data: T): boolean {
 }
 
 export function loadFromStorage<T>(key: string, defaultValue: T): T {
+  const result = loadFromStorageWithStatus<T>(key);
+  return result.status === 'ok' ? (result.value as T) : defaultValue;
+}
+
+export function loadFromStorageWithStatus<T>(key: string): StorageLoadResult<T> {
   try {
     if (!hasLocalStorage()) {
-      return defaultValue;
+      return { status: 'unavailable' };
     }
 
     const item = localStorage.getItem(key);
-    return item ? (JSON.parse(item) as T) : defaultValue;
+    if (item === null) {
+      return { status: 'missing' };
+    }
+
+    return {
+      status: 'ok',
+      value: JSON.parse(item) as T
+    };
   } catch (error) {
     console.error(`Failed to load from localStorage (${key}):`, error);
-    return defaultValue;
+    return { status: 'parse_error' };
   }
 }
 

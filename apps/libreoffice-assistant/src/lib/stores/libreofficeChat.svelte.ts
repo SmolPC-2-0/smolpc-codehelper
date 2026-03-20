@@ -1,15 +1,18 @@
 import {
+  DEFAULT_SOURCE_PARITY_SESSION_RESTORE_METADATA,
   SOURCE_PARITY_CHAT_SESSION_SCHEMA_VERSION,
   type SourceParityChatMessage,
   type SourceParityChatRole,
   type SourceParityChatSessionPayloadV1,
-  type SourceParityPersistedChatMessageV1
+  type SourceParityPersistedChatMessageV1,
+  type SourceParitySessionRestoreMetadata
 } from '../types/sourceParity';
-import { loadFromStorage, removeFromStorage, saveToStorage } from '../utils/storage';
+import { loadFromStorageWithStatus, removeFromStorage, saveToStorage } from '../utils/storage';
 import { libreofficeController } from './libreofficeController.svelte';
 import { libreofficeSettingsStore } from './libreofficeSettings.svelte';
 
 const CHAT_SESSION_STORAGE_KEY = 'libreoffice_assistant_source_parity_chat_session_v1';
+const MAX_PERSISTED_CHAT_MESSAGES = 200;
 
 function newChatMessage(
   role: SourceParityChatRole,
@@ -46,6 +49,15 @@ function normalizeTimestamp(isoValue: unknown): Date {
 
   const parsed = new Date(isoValue);
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+function normalizeSavedAtIso(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function normalizePersistedMessage(value: unknown): SourceParityChatMessage | null {
@@ -87,15 +99,18 @@ function toPersistedMessage(message: SourceParityChatMessage): SourceParityPersi
 function buildPersistedSession(
   messages: SourceParityChatMessage[]
 ): SourceParityChatSessionPayloadV1 {
+  const boundedMessages = messages.slice(-MAX_PERSISTED_CHAT_MESSAGES);
+
   return {
     schema_version: SOURCE_PARITY_CHAT_SESSION_SCHEMA_VERSION,
     saved_at_iso: new Date().toISOString(),
-    messages: messages.map(toPersistedMessage)
+    messages: boundedMessages.map(toPersistedMessage)
   };
 }
 
 type RestoredSession = {
   messages: SourceParityChatMessage[];
+  restoredSavedAtIso: string | null;
   shouldRewriteStorage: boolean;
   shouldClearStorage: boolean;
 };
@@ -104,14 +119,16 @@ function restoreMessagesFromPayload(raw: unknown): RestoredSession {
   if (raw === null) {
     return {
       messages: [],
+      restoredSavedAtIso: null,
       shouldRewriteStorage: false,
-      shouldClearStorage: false
+      shouldClearStorage: true
     };
   }
 
   if (!isObject(raw)) {
     return {
       messages: [],
+      restoredSavedAtIso: null,
       shouldRewriteStorage: false,
       shouldClearStorage: true
     };
@@ -120,11 +137,13 @@ function restoreMessagesFromPayload(raw: unknown): RestoredSession {
   if (raw.schema_version !== SOURCE_PARITY_CHAT_SESSION_SCHEMA_VERSION || !Array.isArray(raw.messages)) {
     return {
       messages: [],
+      restoredSavedAtIso: null,
       shouldRewriteStorage: false,
       shouldClearStorage: true
     };
   }
 
+  const normalizedSavedAtIso = normalizeSavedAtIso(raw.saved_at_iso);
   const restoredMessages: SourceParityChatMessage[] = [];
   let droppedMalformedMessage = false;
   for (const rawMessage of raw.messages) {
@@ -140,14 +159,21 @@ function restoreMessagesFromPayload(raw: unknown): RestoredSession {
   if (restoredMessages.length === 0 && raw.messages.length > 0) {
     return {
       messages: [],
+      restoredSavedAtIso: null,
       shouldRewriteStorage: false,
       shouldClearStorage: true
     };
   }
 
+  const shouldTrimPersistedHistory = restoredMessages.length > MAX_PERSISTED_CHAT_MESSAGES;
+  const boundedMessages = shouldTrimPersistedHistory
+    ? restoredMessages.slice(-MAX_PERSISTED_CHAT_MESSAGES)
+    : restoredMessages;
+
   return {
-    messages: restoredMessages,
-    shouldRewriteStorage: droppedMalformedMessage,
+    messages: boundedMessages,
+    restoredSavedAtIso: normalizedSavedAtIso,
+    shouldRewriteStorage: droppedMalformedMessage || shouldTrimPersistedHistory,
     shouldClearStorage: false
   };
 }
@@ -160,6 +186,9 @@ class LibreofficeChatStore {
   messages = $state<SourceParityChatMessage[]>([]);
   isGenerating = $state(false);
   currentStreamingMessage = $state('');
+  sessionRestoreMetadata = $state<SourceParitySessionRestoreMetadata>({
+    ...DEFAULT_SOURCE_PARITY_SESSION_RESTORE_METADATA
+  });
 
   constructor() {
     this.restoreSession();
@@ -180,6 +209,7 @@ class LibreofficeChatStore {
   }
 
   clearMessages(): void {
+    this.sessionRestoreMetadata = { ...DEFAULT_SOURCE_PARITY_SESSION_RESTORE_METADATA };
     this.messages = [];
     removeFromStorage(CHAT_SESSION_STORAGE_KEY);
   }
@@ -201,15 +231,42 @@ class LibreofficeChatStore {
   }
 
   private restoreSession(): void {
-    const rawPayload = loadFromStorage<unknown>(CHAT_SESSION_STORAGE_KEY, null);
-    const restored = restoreMessagesFromPayload(rawPayload);
+    const loadResult = loadFromStorageWithStatus<unknown>(CHAT_SESSION_STORAGE_KEY);
+    if (loadResult.status === 'parse_error') {
+      this.messages = [];
+      this.sessionRestoreMetadata = {
+        ...DEFAULT_SOURCE_PARITY_SESSION_RESTORE_METADATA,
+        resetDueToCorruptPayload: true
+      };
+      removeFromStorage(CHAT_SESSION_STORAGE_KEY);
+      return;
+    }
+
+    if (loadResult.status !== 'ok') {
+      this.messages = [];
+      this.sessionRestoreMetadata = { ...DEFAULT_SOURCE_PARITY_SESSION_RESTORE_METADATA };
+      return;
+    }
+
+    const restored = restoreMessagesFromPayload(loadResult.value);
 
     this.messages = restored.messages;
 
     if (restored.shouldClearStorage) {
+      this.sessionRestoreMetadata = {
+        ...DEFAULT_SOURCE_PARITY_SESSION_RESTORE_METADATA,
+        resetDueToCorruptPayload: true
+      };
       removeFromStorage(CHAT_SESSION_STORAGE_KEY);
       return;
     }
+
+    this.sessionRestoreMetadata = {
+      restoreHappened: restored.messages.length > 0,
+      restoredCount: restored.messages.length,
+      restoredSavedAtIso: restored.restoredSavedAtIso,
+      resetDueToCorruptPayload: false
+    };
 
     if (restored.shouldRewriteStorage) {
       this.persistSession();
