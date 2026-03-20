@@ -453,10 +453,23 @@ fn extract_chat_template_from_tokenizer_config(model_dir: &Path) -> Option<Strin
     let config_path = model_dir.join("tokenizer_config.json");
     let raw = fs::read_to_string(&config_path).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    parsed
-        .get("chat_template")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+    let tmpl = parsed.get("chat_template")?;
+    // String case: simple template
+    if let Some(s) = tmpl.as_str() {
+        return Some(s.to_string());
+    }
+    // Array case: find entry with name "default", fall back to first
+    if let Some(arr) = tmpl.as_array() {
+        let default_entry = arr
+            .iter()
+            .find(|entry| entry.get("name").and_then(|n| n.as_str()) == Some("default"))
+            .or_else(|| arr.first());
+        return default_entry
+            .and_then(|entry| entry.get("template"))
+            .and_then(|t| t.as_str())
+            .map(|s| s.to_string());
+    }
+    None
 }
 
 pub fn run_openvino_preflight(
@@ -511,7 +524,14 @@ pub fn run_openvino_preflight(
                     log::info!("Patched Qwen3 chat template for NPU non-thinking default")
                 }
                 Ok(false) => {}
-                Err(e) => log::warn!("Failed to patch Qwen3 chat template: {e}"),
+                Err(e) => {
+                    return OpenVinoPreflightResult::Failed {
+                        class: "openvino_npu_template_patch_failed".to_string(),
+                        message: format!(
+                            "Qwen3 NPU requires non-thinking template but patch failed: {e}"
+                        ),
+                    };
+                }
             }
         }
 

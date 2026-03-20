@@ -312,6 +312,8 @@ const STARTUP_PROBE_RECOVERY_WAIT_MS: u64 = 8_000;
 const STARTUP_PROBE_TOTAL_WAIT_MS: u64 = STARTUP_PROBE_WAIT_MS + STARTUP_PROBE_RECOVERY_WAIT_MS;
 const OPENVINO_STARTUP_PROBE_WAIT: Duration = Duration::from_secs(30);
 const OPENVINO_PREFLIGHT_BUDGET: Duration = Duration::from_secs(300);
+const CPU_PREFLIGHT_BUDGET: Duration = Duration::from_secs(30);
+const DIRECTML_PREFLIGHT_BUDGET: Duration = Duration::from_secs(60);
 const OPENVINO_SELECTION_PROFILE: &str = "openvino_native_v1";
 const OPENVINO_CHAT_MODE_STRUCTURED: &str = "structured_messages";
 const OPENVINO_CHAT_MODE_LEGACY_PROMPT: &str = "legacy_prompt";
@@ -1131,6 +1133,7 @@ struct EngineState {
     data_dir: PathBuf,
     active_cancel: Arc<StdMutex<Option<Arc<AtomicBool>>>>,
     generating: Arc<AtomicBool>,
+    model_transition_in_progress: Arc<AtomicBool>,
     app_version: String,
     store_path: Option<PathBuf>,
     backend_store: Arc<Mutex<Option<BackendStore>>>,
@@ -1199,6 +1202,7 @@ impl EngineState {
             data_dir: args.data_dir.clone(),
             active_cancel: Arc::new(StdMutex::new(None)),
             generating: Arc::new(AtomicBool::new(false)),
+            model_transition_in_progress: Arc::new(AtomicBool::new(false)),
             app_version: args.app_version.clone(),
             store_path,
             backend_store: Arc::new(Mutex::new(backend_store)),
@@ -1756,6 +1760,10 @@ impl EngineState {
         if self.generating.load(Ordering::SeqCst) {
             return Err("Cannot load or unload model while generation is in progress".to_string());
         }
+        self.model_transition_in_progress
+            .store(true, Ordering::SeqCst);
+        let _transition_guard =
+            TransitionGuard(Arc::clone(&self.model_transition_in_progress));
         let current_backend = self.active_backend().await;
         let has_loaded_model = self.current_model.lock().await.is_some();
         let directml_required =
@@ -1956,10 +1964,7 @@ impl EngineState {
                     .as_ref()
                     .and_then(|probe| probe.failure_message.clone());
                 openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
-            } else {
-                let probe = openvino_probe
-                    .as_ref()
-                    .expect("OpenVINO startup probe should exist when artifact is ready");
+            } else if let Some(probe) = openvino_probe.as_ref() {
                 match self
                     .run_openvino_preflight_with_timeout(&model_id, &artifacts, probe)
                     .await
@@ -1988,6 +1993,13 @@ impl EngineState {
                         openvino_reason_override = Some(DecisionReason::OpenVinoPreflightFailed);
                     }
                 }
+            } else {
+                log::error!("OpenVINO startup probe missing unexpectedly after readiness checks");
+                openvino_failure_class =
+                    Some("openvino_startup_probe_missing".to_string());
+                openvino_failure_message =
+                    Some("OpenVINO startup probe was not available".to_string());
+                openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
             }
         }
 
@@ -2091,11 +2103,29 @@ impl EngineState {
         } else if preferred_backend == InferenceBackend::DirectML {
             match dml_model_path.as_deref() {
                 Some(dml_path) => {
-                    match build_directml_runtime_adapter(
-                        &self.runtime_bundles().ort,
-                        dml_path,
-                        selected_device_id,
-                    ) {
+                    let ort_bundle = self.runtime_bundles().ort.clone();
+                    let dml_path_owned = dml_path.to_path_buf();
+                    let device_id = selected_device_id;
+                    let dml_build_result = match timeout(
+                        DIRECTML_PREFLIGHT_BUDGET,
+                        tokio::task::spawn_blocking(move || {
+                            build_directml_runtime_adapter(
+                                &ort_bundle,
+                                &dml_path_owned,
+                                device_id,
+                            )
+                        }),
+                    )
+                    .await
+                    {
+                        Ok(Ok(result)) => result,
+                        Ok(Err(e)) => Err(format!("DirectML preflight task panicked: {e}")),
+                        Err(_) => Err(format!(
+                            "DirectML preflight timed out after {}s",
+                            DIRECTML_PREFLIGHT_BUDGET.as_secs()
+                        )),
+                    };
+                    match dml_build_result {
                         Ok(adapter) => {
                             failure_counters.record_directml_success();
                             if !suppress_store_update
@@ -2171,11 +2201,28 @@ impl EngineState {
                                 ));
                             }
 
-                            let adapter = build_openvino_cpu_runtime_adapter(
-                                &self.runtime_bundles().openvino,
-                                &model_id,
-                                &cpu_model_dir,
-                            )?;
+                            let adapter = {
+                                let ov_bundle = self.runtime_bundles().openvino.clone();
+                                let mid = model_id.clone();
+                                let mdir = cpu_model_dir.clone();
+                                match timeout(
+                                    CPU_PREFLIGHT_BUDGET,
+                                    tokio::task::spawn_blocking(move || {
+                                        build_openvino_cpu_runtime_adapter(&ov_bundle, &mid, &mdir)
+                                    }),
+                                )
+                                .await
+                                {
+                                    Ok(Ok(result)) => result,
+                                    Ok(Err(e)) => {
+                                        Err(format!("CPU preflight task panicked: {e}"))
+                                    }
+                                    Err(_) => Err(format!(
+                                        "CPU preflight timed out after {}s",
+                                        CPU_PREFLIGHT_BUDGET.as_secs()
+                                    )),
+                                }
+                            }?;
                             active_model_path = cpu_model_dir.display().to_string();
                             adapter
                         }
@@ -2203,11 +2250,26 @@ impl EngineState {
                         *self.backend_status.lock().await = status;
                         return Err(error);
                     }
-                    let adapter = build_openvino_cpu_runtime_adapter(
-                        &self.runtime_bundles().openvino,
-                        &model_id,
-                        &cpu_model_dir,
-                    )?;
+                    let adapter = {
+                        let ov_bundle = self.runtime_bundles().openvino.clone();
+                        let mid = model_id.clone();
+                        let mdir = cpu_model_dir.clone();
+                        match timeout(
+                            CPU_PREFLIGHT_BUDGET,
+                            tokio::task::spawn_blocking(move || {
+                                build_openvino_cpu_runtime_adapter(&ov_bundle, &mid, &mdir)
+                            }),
+                        )
+                        .await
+                        {
+                            Ok(Ok(result)) => result,
+                            Ok(Err(e)) => Err(format!("CPU preflight task panicked: {e}")),
+                            Err(_) => Err(format!(
+                                "CPU preflight timed out after {}s",
+                                CPU_PREFLIGHT_BUDGET.as_secs()
+                            )),
+                        }
+                    }?;
                     active_backend = InferenceBackend::Cpu;
                     if !matches!(
                         active_reason,
@@ -2248,11 +2310,26 @@ impl EngineState {
                 );
                 return Err(directml_required_error(&model_id, &reason));
             }
-            let adapter = build_openvino_cpu_runtime_adapter(
-                &self.runtime_bundles().openvino,
-                &model_id,
-                &cpu_model_dir,
-            )?;
+            let adapter = {
+                let ov_bundle = self.runtime_bundles().openvino.clone();
+                let mid = model_id.clone();
+                let mdir = cpu_model_dir.clone();
+                match timeout(
+                    CPU_PREFLIGHT_BUDGET,
+                    tokio::task::spawn_blocking(move || {
+                        build_openvino_cpu_runtime_adapter(&ov_bundle, &mid, &mdir)
+                    }),
+                )
+                .await
+                {
+                    Ok(Ok(result)) => result,
+                    Ok(Err(e)) => Err(format!("CPU preflight task panicked: {e}")),
+                    Err(_) => Err(format!(
+                        "CPU preflight timed out after {}s",
+                        CPU_PREFLIGHT_BUDGET.as_secs()
+                    )),
+                }
+            }?;
             if !suppress_store_update
                 && force_override.is_none()
                 && active_reason != DecisionReason::PersistedDecision
@@ -2593,6 +2670,13 @@ impl Drop for GenerationPermit {
     fn drop(&mut self) {
         self.generating.store(false, Ordering::SeqCst);
         *lock_cancel(&self.active_cancel) = None;
+    }
+}
+
+struct TransitionGuard(Arc<AtomicBool>);
+impl Drop for TransitionGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
     }
 }
 
@@ -3184,9 +3268,15 @@ async fn check_model(
         startup_probe.as_ref(),
         openvino_probe.as_ref(),
     );
-    Ok(Json(
-        serde_json::to_value(readiness).expect("check-model response should serialize"),
-    ))
+    match serde_json::to_value(readiness) {
+        Ok(value) => Ok(Json(value)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Failed to serialize check-model response: {e}"),
+            }),
+        )),
+    }
 }
 
 async fn v1_models(
@@ -3459,6 +3549,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(model_idle_unload) = args.model_idle_unload {
                 if idle_ms >= model_idle_unload.as_millis() as u64
                     && !idle_state.engine.generating.load(Ordering::SeqCst)
+                    && !idle_state
+                        .engine
+                        .model_transition_in_progress
+                        .load(Ordering::SeqCst)
                     && idle_state.engine.current_model.lock().await.is_some()
                 {
                     let _ = idle_state.engine.unload_model(false).await;
@@ -3500,6 +3594,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ = tokio::signal::ctrl_c() => {},
             _ = state.shutdown.notified() => {},
         }
+        log::info!("Shutdown signal received, cancelling active generation");
+        state.engine.cancel();
+        sleep(Duration::from_secs(2)).await;
     };
 
     axum::serve(listener, app)
