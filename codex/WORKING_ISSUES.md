@@ -8,54 +8,20 @@ Last known good commit: `3d7460e` (Engine production readiness — 20 fixes, PR 
 
 ## Current Risk Register
 
-### 1) OpenVINO NPU — Qwen3-4B INT8 quantization resolves NPU accuracy
+### 1) Packaging — model-path resolution and installer validation
 
-- Status: **RESOLVED** — INT8_SYM per-channel quantization fixes NPU output quality
-- Severity: ~~Medium~~ → Resolved
-- Root cause (template): Qwen3 `chat_template.jinja` requires `enable_thinking` to be explicitly defined for non-thinking mode. Engine now auto-patches at load time (branch `fix/qwen3-npu`).
-- Root cause (accuracy): Qwen3-4B INT4 on NPU produces 0-1 content tokens then EOS — upstream INT4 quantization is too aggressive for NPU inference. INT8_SYM per-channel (3.75 GB, 50% of FP16) restores full accuracy.
-- Live test results (2026-03-20, INT8_SYM on NPU):
-  - **Qwen3-4B NPU (INT8)**: 34 tokens, coherent, proper EOS — **WORKING** (8.1 tok/s, TTFT 1.4s)
-  - **Qwen3-4B CPU (INT4)**: 27 tokens, coherent — WORKING
-  - **Qwen2.5-1.5B NPU (INT4)**: 24 tokens, coherent — WORKING (no regression)
-- Previous INT4 results (2026-03-19): 2 tokens (" endeavour" + stop) — BROKEN
-- Resolution: Requantized FP16 → INT8_SYM using `nncf.compress_weights()`. FP16 (7.49 GB) too large for StaticLLMPipeline; INT4 (2.2 GB) had garbage output; INT8 (3.75 GB) is the sweet spot.
-- Quantization method: `nncf.compress_weights(model, mode=nncf.CompressWeightsMode.INT8_SYM)` — symmetric, per-channel, all 253 layers.
-- Artifact layout:
-  - `openvino/` — INT8_SYM (active, 3.75 GB)
-  - `openvino-fp16/` — FP16 (backup, 7.49 GB)
-  - `openvino-int4/` — INT4 (backup, 2.2 GB)
-
-### 2) Production model-path resolution for packaged app
-
-- Status: **Partially resolved** (release-mode path fixed, packaging deferred)
+- Status: Open (next up — Roadmap Step 2)
 - Severity: High (shipping readiness)
 - Context:
-  - `ModelLoader` default path now gated: debug uses `CARGO_MANIFEST_DIR/models`, release uses `current_exe().parent()/models`.
-  - Full packaging path (`%LOCALAPPDATA%\SmolPC\models`) still preferred via env override.
-  - Packaging approach established on `feat/windows-dml-packaging` branch.
-- Next steps:
-  - Validate model load/generation on clean installed build.
-
-### 3) Windows installer/runtime validation matrix incomplete
-
-- Status: Open (deferred to packaging phase)
-- Severity: High (release confidence)
-- Context:
-  - DirectML and OpenVINO CPU paths are locally validated in dev.
+  - `ModelLoader` release-mode path fixed: uses `current_exe().parent()/models`. `%LOCALAPPDATA%\SmolPC\models` preferred via env override.
+  - Prior work on `feat/windows-dml-packaging` branch (7 commits, 2 working paths).
   - Need clean-machine verification for bundled DLLs and runtime behavior.
 - Next steps:
-  - Test matrix: Windows 10 20H1+, Windows 11, iGPU-only and hybrid GPU systems.
+  - Extend packaging to include OpenVINO DLLs alongside DirectML.
+  - Test matrix: Windows 10 20H1+, Windows 11 across 3 hardware targets.
   - Verify all three backends (OpenVINO NPU, DirectML, CPU) in packaged form.
 
-### 4) Engine health check reports "unhealthy" after idle, client reconnect never recovers
-
-- Status: **RESOLVED** (2026-03-20, `fix/engine-prod-readiness`)
-- Severity: ~~Low-Medium~~ → Resolved
-- Root cause: `model_idle_unload` defaulted to `Some(0)` which clamped to 30s. After 30s idle, the timer fired `unload_model`, setting state to `Idle`, causing `/engine/status` to report `ready: false`.
-- Fix: Changed default to `None` (disabled). Also added `model_transition_in_progress` race guard, health endpoint now returns actual state with 503 on failure.
-
-### 5) Backend diagnostics not fully surfaced in frontend
+### 2) Backend diagnostics not fully surfaced in frontend
 
 - Status: Open
 - Severity: Medium
@@ -70,14 +36,10 @@ Last known good commit: `3d7460e` (Engine production readiness — 20 fixes, PR 
 
 ## Recently Resolved
 
-- **Qwen3-4B NPU inference — WORKING via INT8** (2026-03-20, `fix/qwen3-npu-int8`): INT4 produced garbage on NPU; FP16 too large for StaticLLMPipeline. Requantized FP16→INT8_SYM per-channel (3.75 GB) using `nncf.compress_weights()`. Live-tested: 34 coherent tokens, 8.1 tok/s, proper EOS. Template patch from `fix/qwen3-npu` is a prerequisite.
-- **Qwen2.5-1.5B NPU inference — WORKING** (2026-03-19, `fix/npu-inference`): greedy decoding enforced, presence_penalty skipped, structured messages work correctly on NPU. Live-tested: 24 coherent tokens, proper EOS.
-- **NPU sampling fix** (2026-03-19, `fix/npu-inference`): `do_sample=false` forced for NPU; `presence_penalty` skipped; `extra_context` replaced with `/nothink` system message injection.
-- Qwen2.5 OpenVINO artifacts — complete: `openvino_config.json` and `chat_template.jinja` restored locally; manifest now resolves all 15 required files (`codex/qwen25-openvino-artifact`)
-- OpenVINO CPU infinite loop — fixed via structured chat history and stop token enforcement
-- DirectML qwen3-4b export — completed
-- OpenVINO acceleration path — decided: GenAI C-FFI (not ORT EP)
-- Auto-selection false-negative from startup probe — fixed: probe timeout no longer hard-blocks backend selection
-- Frontend Prettier drift — fixed: repo-wide formatting pass applied (2026-03-19)
-- Tauri bundle staging — hardened (commit 1b3bbb4)
-- DML background probe non-blocking — fixed (commit 89f3146)
+- **Engine production readiness — 20 fixes** (2026-03-20, PR #107): Logger init, idle unload bug, DirectML>NPU>CPU priority, health endpoint, probe timeouts, preflight timeouts, panic removal, template patch errors, SSE dedup, crash detection, race guards, shutdown cancellation. Live-tested: idle stability confirmed at 90s, DirectML auto-selection working.
+- **Qwen3-4B NPU inference — INT8** (2026-03-20, PR #106): INT4 garbage on NPU. Requantized FP16→INT8_SYM (3.75 GB). 34 coherent tokens, 8.1 tok/s.
+- **Qwen2.5-1.5B NPU inference** (2026-03-19): greedy decoding enforced, presence_penalty skipped, structured messages on NPU.
+- **OpenVINO CPU infinite loop** — fixed via structured chat history and stop token enforcement.
+- **DirectML qwen3-4b export** — completed.
+- **Auto-selection false-negative** — fixed: probe timeout no longer hard-blocks backend selection.
+- **Frontend Prettier drift** — fixed: repo-wide formatting pass (2026-03-19).

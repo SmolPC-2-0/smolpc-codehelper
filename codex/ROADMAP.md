@@ -1,26 +1,24 @@
 # Finalization Roadmap
 
 Last updated: 2026-03-20
-Status: Step 1 in planning
+Status: Step 1 complete, Step 2 next
 
 ---
 
-## Step 1 — Engine Fixes & Robustness (CURRENT)
+## Step 1 — Engine Fixes & Robustness ✅ COMPLETE
 
-Make the engine production-ready: flip backend priority, fix known bugs, stress test, ensure auto-selection works without env vars. Detailed plan in `codex/ENGINE_FIXES_PLAN.md`.
+20 production fixes merged as PR #107 (`3d7460e`). Backend priority flipped, idle bug fixed, timeouts added, logger initialized, health endpoint returns real state. Live-tested on hardware.
 
-**Owner:** Engine team (us)
-**Depends on:** Nothing — we own this
-**Blocks:** Steps 2, 3
+**Remaining deferred items:** See `codex/ENGINE_FIXES_PLAN.md` (3.1 token ACL, 3.5 structured errors, Tier 4 polish).
 
 ---
 
-## Step 2 — Packaging Proof-of-Concept
+## Step 2 — Packaging Proof-of-Concept (NEXT)
 
 Build on `feat/windows-dml-packaging` (our prior work). Extend local-bundle path to include OpenVINO DLLs alongside DirectML. Start with one model (Qwen2.5), prove the package installs and runs.
 
 **Owner:** Engine team (us)
-**Depends on:** Step 1 complete
+**Depends on:** Step 1 complete ✅
 **Blocks:** Step 3
 **Starting point:** `feat/windows-dml-packaging` branch (7 commits, 2 working paths)
 
@@ -40,7 +38,7 @@ Test the package on all three hardware targets:
 
 ## Step 4 — Engine Codebase Cleanup
 
-Break up monolithic files (main.rs at 4,431 LOC), remove dead code, remove legacy paths. User will define exact scope when this begins.
+Break up monolithic files (main.rs at 4,431 LOC), remove dead code, remove legacy paths. User will define exact scope when this begins. Moved after packaging — cleanup once build is confirmed.
 
 **Owner:** Engine team (us)
 **Depends on:** Steps 1-3 stable
@@ -58,7 +56,7 @@ siddh-m rebases PR #59 (launcher + blender + libreoffice) onto clean main. GIMP 
 
 ## Step 6 — Full Bundle
 
-All apps + launcher + engine in one package. Phase 2 delivery (single .exe with model download). Requires model hosting decision.
+All apps + launcher + engine in one package. Phase 2 delivery (single .exe with model download). Requires model hosting decision. Engine lifecycle (shutdown) owned by launcher — see `project_engine_lifecycle.md`.
 
 **Owner:** Full team
 **Depends on:** Steps 2-5
