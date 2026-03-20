@@ -10,7 +10,7 @@ SmolPC Code Helper is an **offline AI coding assistant** for secondary school st
 
 **Architecture:** `engine/` contains the shared inference server (`smolpc-engine-host` + `smolpc-engine-core`). `apps/` contains product apps (Code Helper is the first). `launcher/` is the suite shell. The engine runs as a local HTTP server; Tauri apps connect via `smolpc-engine-client` over HTTP + SSE.
 
-**Backend selection priority:** `openvino_npu` > `directml` > `cpu`
+**Backend selection priority:** `directml` > `openvino_npu` > `cpu`
 
 **Current runtime status:** the supported shared model baseline is `qwen2.5-1.5b-instruct` (default) plus `qwen3-4b`. OpenVINO CPU and OpenVINO NPU now use structured chat history for normal chat requests; only explicit legacy ChatML payloads stay on the prompt-compatibility path.
 
@@ -98,6 +98,12 @@ Corrections discovered during development. **When you correct a mistake, append 
 - Use `starts_with` not `contains` for directive idempotency checks — `contains` matches user content substrings
 - Qwen3 chat_template.jinja defaults to thinking mode when enable_thinking is undefined — NPU requires the template condition to be patched to default to non-thinking
 - Qwen3-4B INT4 produces garbage on NPU but INT8_SYM per-channel (via `nncf.compress_weights`) works — INT8 is the NPU variant, INT4 stays for CPU
+- Model idle unload must default to disabled (None) — a 30s timeout causes the "unhealthy after idle" bug
+- HuggingFace `tokenizer_config.json` `chat_template` can be a string OR an array of `{name, template}` objects — handle both
+- Use `env_logger::init()` in the engine host main() — without it, all log::info!/warn! calls are silently discarded
+- Qwen3 NPU template patch failure must be a hard error, not a warning — un-patched template defaults to thinking mode causing runaway generation
+- CPU and DirectML preflights need timeouts (30s/60s) via spawn_blocking — a hung GPU driver or malformed model can block the load path forever
+- Use a drop guard (TransitionGuard) for model_transition_in_progress — load_model has many early return paths
 
 ---
 
