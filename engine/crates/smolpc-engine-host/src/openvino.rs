@@ -406,6 +406,59 @@ pub fn is_blocking_openvino_probe_failure(class: &str) -> bool {
     )
 }
 
+/// Patch the Qwen3 chat template so it defaults to non-thinking mode when
+/// `enable_thinking` is not provided via extra_context (NPU does not support it).
+/// Returns `Ok(true)` if patched, `Ok(false)` if already correct.
+///
+/// Checks `chat_template.jinja` first; if missing, extracts the template from
+/// `tokenizer_config.json` into a standalone file so OpenVINO GenAI picks it up.
+pub(crate) fn ensure_qwen3_nothink_template(model_dir: &Path) -> Result<bool, String> {
+    const BROKEN_CONDITION: &str = "enable_thinking is defined and enable_thinking is false";
+    const FIXED_CONDITION: &str = "not enable_thinking is defined or enable_thinking is false";
+
+    let template_path = model_dir.join("chat_template.jinja");
+
+    // If no standalone template exists, try to extract from tokenizer_config.json.
+    if !template_path.exists() {
+        if let Some(extracted) = extract_chat_template_from_tokenizer_config(model_dir) {
+            fs::write(&template_path, &extracted).map_err(|e| {
+                format!(
+                    "Failed to write extracted chat template to {}: {e}",
+                    template_path.display()
+                )
+            })?;
+            log::info!(
+                "Extracted chat_template.jinja from tokenizer_config.json ({})",
+                template_path.display()
+            );
+        }
+    }
+
+    let content = fs::read_to_string(&template_path)
+        .map_err(|e| format!("Failed to read {}: {e}", template_path.display()))?;
+
+    if !content.contains(BROKEN_CONDITION) {
+        return Ok(false);
+    }
+
+    let patched = content.replace(BROKEN_CONDITION, FIXED_CONDITION);
+    fs::write(&template_path, &patched)
+        .map_err(|e| format!("Failed to write {}: {e}", template_path.display()))?;
+
+    Ok(true)
+}
+
+/// Try to read `chat_template` from `tokenizer_config.json`.
+fn extract_chat_template_from_tokenizer_config(model_dir: &Path) -> Option<String> {
+    let config_path = model_dir.join("tokenizer_config.json");
+    let raw = fs::read_to_string(&config_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    parsed
+        .get("chat_template")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
 pub fn run_openvino_preflight(
     bundle: &OpenVinoRuntimeBundle,
     model_id: &str,
@@ -451,6 +504,16 @@ pub fn run_openvino_preflight(
                 ),
             };
         };
+
+        if model_id.starts_with("qwen3") {
+            match ensure_qwen3_nothink_template(model_dir) {
+                Ok(true) => {
+                    log::info!("Patched Qwen3 chat template for NPU non-thinking default")
+                }
+                Ok(false) => {}
+                Err(e) => log::warn!("Failed to patch Qwen3 chat template: {e}"),
+            }
+        }
 
         let model_tuning = openvino_model_tuning_for_model(model_id);
         let generation_controls = openvino_generation_controls_for_model(model_id, model_dir);
@@ -679,9 +742,9 @@ fn parse_version(raw: &str) -> Option<Vec<u32>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_openvino_runtime_activation_error, inspect_openvino_artifact,
-        openvino_generation_controls_for_model, openvino_model_tuning_for_model,
-        resolve_openvino_npu_tuning, version_is_older_than,
+        classify_openvino_runtime_activation_error, ensure_qwen3_nothink_template,
+        inspect_openvino_artifact, openvino_generation_controls_for_model,
+        openvino_model_tuning_for_model, resolve_openvino_npu_tuning, version_is_older_than,
     };
     use std::fs;
     use std::sync::{Mutex, OnceLock};
@@ -837,6 +900,67 @@ mod tests {
             defaults.temperature > 0.0,
             "Host tuning uses sampling; NPU override is in core create_generation_config()"
         );
+    }
+
+    #[test]
+    fn qwen3_chat_template_patch_fixes_nothink_condition() {
+        let temp = tempdir().expect("tempdir");
+        let template = concat!(
+            "{%- if add_generation_prompt %}\n",
+            "    {{- '<|im_start|>assistant\\n' }}\n",
+            "    {%- if enable_thinking is defined and enable_thinking is false %}\n",
+            "        {{- '<think>\\n\\n</think>\\n\\n' }}\n",
+            "    {%- endif %}\n",
+            "{%- endif %}",
+        );
+        fs::write(temp.path().join("chat_template.jinja"), template).expect("write template");
+
+        assert_eq!(ensure_qwen3_nothink_template(temp.path()), Ok(true));
+
+        let patched =
+            fs::read_to_string(temp.path().join("chat_template.jinja")).expect("read patched");
+        assert!(patched.contains("not enable_thinking is defined or enable_thinking is false"));
+        assert!(!patched.contains("enable_thinking is defined and enable_thinking is false"));
+
+        // Idempotent — second call should be a no-op
+        assert_eq!(ensure_qwen3_nothink_template(temp.path()), Ok(false));
+    }
+
+    #[test]
+    fn qwen3_chat_template_patch_leaves_correct_template_alone() {
+        let temp = tempdir().expect("tempdir");
+        let template = concat!(
+            "{%- if add_generation_prompt %}\n",
+            "    {{- '<|im_start|>assistant\\n' }}\n",
+            "    {%- if not enable_thinking is defined or enable_thinking is false %}\n",
+            "        {{- '<think>\\n\\n</think>\\n\\n' }}\n",
+            "    {%- endif %}\n",
+            "{%- endif %}",
+        );
+        fs::write(temp.path().join("chat_template.jinja"), template).expect("write template");
+
+        assert_eq!(ensure_qwen3_nothink_template(temp.path()), Ok(false));
+    }
+
+    #[test]
+    fn qwen3_chat_template_patch_extracts_from_tokenizer_config() {
+        let temp = tempdir().expect("tempdir");
+        // No chat_template.jinja — only tokenizer_config.json with embedded template
+        let tokenizer_config = serde_json::json!({
+            "chat_template": "{%- if add_generation_prompt %}\n    {%- if enable_thinking is defined and enable_thinking is false %}\n        {{- 'nothink' }}\n    {%- endif %}\n{%- endif %}"
+        });
+        fs::write(
+            temp.path().join("tokenizer_config.json"),
+            tokenizer_config.to_string(),
+        )
+        .expect("write tokenizer config");
+
+        assert_eq!(ensure_qwen3_nothink_template(temp.path()), Ok(true));
+
+        // Verify standalone file was created and patched
+        let extracted =
+            fs::read_to_string(temp.path().join("chat_template.jinja")).expect("read extracted");
+        assert!(extracted.contains("not enable_thinking is defined or enable_thinking is false"));
     }
 
     fn env_lock() -> &'static Mutex<()> {

@@ -1,6 +1,6 @@
 # Model Strategy
 
-Checked on: 2026-03-19
+Checked on: 2026-03-20
 Primary KPI: best practical performance on weak Intel laptops.
 
 ## Selection Rules
@@ -27,16 +27,19 @@ Sources:
 
 ## Higher-Capability Supported Model
 
-`OpenVINO/Qwen3-4B-int4-ov`
+`OpenVINO/Qwen3-4B-int4-ov` (CPU) / locally-quantized INT8_SYM (NPU)
 
 Why:
 
 - an official OpenVINO-hosted Qwen3 4B artifact exists and can back the shared `qwen3-4b` model id across OpenVINO CPU, OpenVINO NPU, and DirectML
 - the current supported OpenVINO pass runs it in non-thinking mode only so stopping and answer quality stay aligned with upstream guidance
+- **NPU variant**: the upstream INT4 artifact produces garbage on NPU. The FP16 model is requantized locally to INT8_SYM per-channel (3.75 GB, 50% of FP16) using `nncf.compress_weights()`. INT8 delivers coherent output on NPU at 8.1 tok/s.
+- **CPU variant**: the upstream INT4 artifact works correctly on OpenVINO CPU
 
-Source:
+Sources:
 
 - https://huggingface.co/OpenVINO/Qwen3-4B-int4-ov
+- Quantization script: `scripts/quantize_int8.py`
 
 ## DirectML Source Of Truth
 
@@ -57,12 +60,29 @@ Source:
 
 ## Export Rules For Native OpenVINO NPU
 
+### Qwen2.5-1.5B (INT4 works on NPU)
+
 Use Optimum Intel / OpenVINO NPU guidance:
 
 - `--sym`
-- `--weight-format int4` or `--weight-format nf4`
+- `--weight-format int4`
 - `--ratio 1.0`
 - `--group-size -1` or `128` depending on model size
+
+### Qwen3-4B (INT4 broken on NPU — use INT8)
+
+INT4 produces garbage on NPU for Qwen3 architecture. Use `nncf.compress_weights()` to requantize the FP16 IR to INT8_SYM:
+
+```python
+import openvino as ov, nncf
+model = ov.Core().read_model("openvino_model.xml")
+compressed = nncf.compress_weights(model, mode=nncf.CompressWeightsMode.INT8_SYM)
+ov.save_model(compressed, "openvino_model.xml")
+```
+
+- INT8_SYM per-channel: 3.75 GB (50% of FP16), coherent NPU output at 8.1 tok/s
+- INT4: 2.2 GB but produces 0-1 content tokens on NPU
+- FP16: 7.49 GB, too large for StaticLLMPipeline
 
 Notes:
 
@@ -115,5 +135,5 @@ Lead Phase 1 with the 1.5B Qwen model for this KPI; Qwen3-4B is the higher-capab
 
 Current repo note:
 
-- `qwen3-4b` is a supported shared model id backed by the official `OpenVINO/Qwen3-4B-int4-ov` artifact on the OpenVINO lanes
+- `qwen3-4b` is a supported shared model id: INT4 artifact on CPU, locally-quantized INT8_SYM on NPU
 - `qwen3-4b` is also validated on the DirectML lane through the `Qwen/Qwen3-4B` self-build path with forced `directml` load and streaming generation

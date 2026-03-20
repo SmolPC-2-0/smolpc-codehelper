@@ -41,7 +41,8 @@ use tokio::time::{sleep, timeout};
 
 use crate::openvino::{
     inspect_openvino_artifact, is_blocking_openvino_probe_failure,
-    openvino_generation_controls_for_model, openvino_model_tuning_for_model,
+    ensure_qwen3_nothink_template, openvino_generation_controls_for_model,
+    openvino_model_tuning_for_model,
     probe_openvino_startup, resolve_openvino_npu_tuning, run_openvino_preflight,
     OpenVinoPreflightResult, OpenVinoStartupProbeResult,
 };
@@ -2579,6 +2580,14 @@ fn build_openvino_cpu_runtime_adapter(
     model_id: &str,
     model_dir: &Path,
 ) -> Result<InferenceRuntimeAdapter, String> {
+    if model_id.starts_with("qwen3") {
+        match ensure_qwen3_nothink_template(model_dir) {
+            Ok(true) => log::info!("Patched Qwen3 chat template for CPU non-thinking default"),
+            Ok(false) => {}
+            Err(e) => log::warn!("Failed to patch Qwen3 chat template: {e}"),
+        }
+    }
+
     let model_tuning = openvino_model_tuning_for_model(model_id);
     let pipeline_config = OpenVinoPipelineConfig::cpu()
         .with_generation_controls(openvino_generation_controls_for_model(model_id, model_dir))

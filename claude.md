@@ -96,6 +96,8 @@ Corrections discovered during development. **When you correct a mistake, append 
 - NPU StaticLLMPipeline does not support extra_context API for thinking control — inject /nothink into the system message content instead
 - Force-backend env var is `SMOLPC_FORCE_EP` (not `SMOLPC_FORCE_BACKEND`)
 - Use `starts_with` not `contains` for directive idempotency checks — `contains` matches user content substrings
+- Qwen3 chat_template.jinja defaults to thinking mode when enable_thinking is undefined — NPU requires the template condition to be patched to default to non-thinking
+- Qwen3-4B INT4 produces garbage on NPU but INT8_SYM per-channel (via `nncf.compress_weights`) works — INT8 is the NPU variant, INT4 stays for CPU
 
 ---
 
