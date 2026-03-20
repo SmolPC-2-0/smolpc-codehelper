@@ -28,6 +28,7 @@ const SHARED_MODELS_DIR: &str = "models";
 const DEFAULT_WAIT_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_WAIT_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const NON_STREAMING_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const LOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RuntimeModePreference {
@@ -478,7 +479,7 @@ impl EngineClient {
             .header(AUTHORIZATION, self.auth_header())
             .header(CONTENT_TYPE, "application/json")
             .body(serde_json::json!({"model_id": model_id}).to_string())
-            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
+            .timeout(LOAD_REQUEST_TIMEOUT)
             .send()
             .await?;
         let _ = ensure_success(response, "/engine/load").await?;
@@ -492,7 +493,7 @@ impl EngineClient {
             .header(AUTHORIZATION, self.auth_header())
             .header(CONTENT_TYPE, "application/json")
             .body(serde_json::json!({"force": force}).to_string())
-            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
+            .timeout(LOAD_REQUEST_TIMEOUT)
             .send()
             .await?;
         let _ = ensure_success(response, "/engine/unload").await?;

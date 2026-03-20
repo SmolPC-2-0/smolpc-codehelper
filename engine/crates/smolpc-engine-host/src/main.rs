@@ -1278,6 +1278,31 @@ impl EngineState {
         }
     }
 
+    async fn run_cpu_preflight_with_timeout(
+        &self,
+        model_id: &str,
+        model_dir: &Path,
+    ) -> Result<InferenceRuntimeAdapter, String> {
+        let ov_bundle = self.runtime_bundles().openvino.clone();
+        let mid = model_id.to_string();
+        let mdir = model_dir.to_path_buf();
+        match timeout(
+            CPU_PREFLIGHT_BUDGET,
+            tokio::task::spawn_blocking(move || {
+                build_openvino_cpu_runtime_adapter(&ov_bundle, &mid, &mdir)
+            }),
+        )
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => Err(format!("CPU preflight task panicked: {e}")),
+            Err(_) => Err(format!(
+                "CPU preflight timed out after {}s",
+                CPU_PREFLIGHT_BUDGET.as_secs()
+            )),
+        }
+    }
+
     fn build_decision_key(
         &self,
         model_id: &str,
@@ -2201,28 +2226,9 @@ impl EngineState {
                                 ));
                             }
 
-                            let adapter = {
-                                let ov_bundle = self.runtime_bundles().openvino.clone();
-                                let mid = model_id.clone();
-                                let mdir = cpu_model_dir.clone();
-                                match timeout(
-                                    CPU_PREFLIGHT_BUDGET,
-                                    tokio::task::spawn_blocking(move || {
-                                        build_openvino_cpu_runtime_adapter(&ov_bundle, &mid, &mdir)
-                                    }),
-                                )
-                                .await
-                                {
-                                    Ok(Ok(result)) => result,
-                                    Ok(Err(e)) => {
-                                        Err(format!("CPU preflight task panicked: {e}"))
-                                    }
-                                    Err(_) => Err(format!(
-                                        "CPU preflight timed out after {}s",
-                                        CPU_PREFLIGHT_BUDGET.as_secs()
-                                    )),
-                                }
-                            }?;
+                            let adapter = self
+                                .run_cpu_preflight_with_timeout(&model_id, &cpu_model_dir)
+                                .await?;
                             active_model_path = cpu_model_dir.display().to_string();
                             adapter
                         }
@@ -2250,26 +2256,9 @@ impl EngineState {
                         *self.backend_status.lock().await = status;
                         return Err(error);
                     }
-                    let adapter = {
-                        let ov_bundle = self.runtime_bundles().openvino.clone();
-                        let mid = model_id.clone();
-                        let mdir = cpu_model_dir.clone();
-                        match timeout(
-                            CPU_PREFLIGHT_BUDGET,
-                            tokio::task::spawn_blocking(move || {
-                                build_openvino_cpu_runtime_adapter(&ov_bundle, &mid, &mdir)
-                            }),
-                        )
-                        .await
-                        {
-                            Ok(Ok(result)) => result,
-                            Ok(Err(e)) => Err(format!("CPU preflight task panicked: {e}")),
-                            Err(_) => Err(format!(
-                                "CPU preflight timed out after {}s",
-                                CPU_PREFLIGHT_BUDGET.as_secs()
-                            )),
-                        }
-                    }?;
+                    let adapter = self
+                        .run_cpu_preflight_with_timeout(&model_id, &cpu_model_dir)
+                        .await?;
                     active_backend = InferenceBackend::Cpu;
                     if !matches!(
                         active_reason,
@@ -2310,26 +2299,9 @@ impl EngineState {
                 );
                 return Err(directml_required_error(&model_id, &reason));
             }
-            let adapter = {
-                let ov_bundle = self.runtime_bundles().openvino.clone();
-                let mid = model_id.clone();
-                let mdir = cpu_model_dir.clone();
-                match timeout(
-                    CPU_PREFLIGHT_BUDGET,
-                    tokio::task::spawn_blocking(move || {
-                        build_openvino_cpu_runtime_adapter(&ov_bundle, &mid, &mdir)
-                    }),
-                )
-                .await
-                {
-                    Ok(Ok(result)) => result,
-                    Ok(Err(e)) => Err(format!("CPU preflight task panicked: {e}")),
-                    Err(_) => Err(format!(
-                        "CPU preflight timed out after {}s",
-                        CPU_PREFLIGHT_BUDGET.as_secs()
-                    )),
-                }
-            }?;
+            let adapter = self
+                .run_cpu_preflight_with_timeout(&model_id, &cpu_model_dir)
+                .await?;
             if !suppress_store_update
                 && force_override.is_none()
                 && active_reason != DecisionReason::PersistedDecision
@@ -3522,7 +3494,7 @@ async fn v1_chat_completions(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+    let _ = env_logger::try_init();
     let args = parse_args();
     std::fs::create_dir_all(&args.data_dir)?;
 
