@@ -522,7 +522,7 @@ fn parse_args() -> ParsedArgs {
             .max(1),
     );
     let model_idle_unload =
-        parse_idle_timeout_secs("SMOLPC_ENGINE_MODEL_IDLE_UNLOAD_SECS", Some(0), 30);
+        parse_idle_timeout_secs("SMOLPC_ENGINE_MODEL_IDLE_UNLOAD_SECS", None, 30);
     let process_idle_exit =
         parse_idle_timeout_secs("SMOLPC_ENGINE_PROCESS_IDLE_EXIT_SECS", None, 60);
 
@@ -1386,19 +1386,43 @@ impl EngineState {
 
             let openvino_bundle = engine.runtime_bundles().openvino.clone();
             let hardware_detected = probed.npu_hardware_detected;
-            let openvino_probe = tokio::task::spawn_blocking(move || {
+            let openvino_probe_task = tokio::task::spawn_blocking(move || {
                 probe_openvino_startup(&openvino_bundle, hardware_detected)
-            })
-            .await
-            .unwrap_or_else(|error| {
-                log::warn!("OpenVINO startup probe task failed: {error}");
-                OpenVinoStartupProbeResult {
-                    hardware_detected,
-                    failure_class: Some("openvino_npu_plugin_unavailable".to_string()),
-                    failure_message: Some(format!("OpenVINO startup probe task failed: {error}")),
-                    ..Default::default()
-                }
             });
+            let openvino_probe =
+                match timeout(OPENVINO_STARTUP_PROBE_WAIT, openvino_probe_task).await {
+                    Ok(Ok(result)) => result,
+                    Ok(Err(error)) => {
+                        log::warn!("OpenVINO startup probe task failed: {error}");
+                        OpenVinoStartupProbeResult {
+                            hardware_detected,
+                            failure_class: Some(
+                                "openvino_npu_plugin_unavailable".to_string(),
+                            ),
+                            failure_message: Some(format!(
+                                "OpenVINO startup probe task failed: {error}"
+                            )),
+                            ..Default::default()
+                        }
+                    }
+                    Err(_) => {
+                        log::warn!(
+                            "OpenVINO startup probe timed out after {} ms",
+                            OPENVINO_STARTUP_PROBE_WAIT.as_millis()
+                        );
+                        OpenVinoStartupProbeResult {
+                            hardware_detected,
+                            failure_class: Some(
+                                "openvino_startup_probe_timeout".to_string(),
+                            ),
+                            failure_message: Some(format!(
+                                "OpenVINO startup probe did not complete within {} ms",
+                                OPENVINO_STARTUP_PROBE_WAIT.as_millis()
+                            )),
+                            ..Default::default()
+                        }
+                    }
+                };
 
             {
                 let mut probe_guard = engine.openvino_startup_probe.lock().await;
@@ -2526,19 +2550,25 @@ fn choose_preferred_backend(
             }
         }
     }
-    if has_openvino_candidate {
-        return (
-            InferenceBackend::OpenVinoNpu,
-            DecisionReason::DefaultOpenVinoCandidate,
-        );
-    }
     if failure_counters.should_demote_directml() {
+        if has_openvino_candidate {
+            return (
+                InferenceBackend::OpenVinoNpu,
+                DecisionReason::DefaultOpenVinoCandidate,
+            );
+        }
         return (InferenceBackend::Cpu, DecisionReason::DemotedAfterFailures);
     }
     if has_dml_candidate {
         return (
             InferenceBackend::DirectML,
             DecisionReason::DefaultDirectMLCandidate,
+        );
+    }
+    if has_openvino_candidate {
+        return (
+            InferenceBackend::OpenVinoNpu,
+            DecisionReason::DefaultOpenVinoCandidate,
         );
     }
     (InferenceBackend::Cpu, DecisionReason::NoDirectMLCandidate)
@@ -2998,10 +3028,22 @@ fn stream_error_code(error: &str) -> &'static str {
 async fn health(
     headers: HeaderMap,
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<impl IntoResponse, ApiError> {
     auth(&headers, &state.token)?;
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
-    Ok(Json(serde_json::json!({"ok": true})))
+    let readiness = state.engine.readiness.lock().await;
+    let state_name = format!("{:?}", readiness.state).to_ascii_lowercase();
+    if matches!(readiness.state, ReadinessState::Failed) {
+        Ok((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"ok": false, "state": state_name})),
+        ))
+    } else {
+        Ok((
+            StatusCode::OK,
+            Json(serde_json::json!({"ok": true, "state": state_name})),
+        ))
+    }
 }
 
 async fn meta(
@@ -3390,6 +3432,7 @@ async fn v1_chat_completions(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     let args = parse_args();
     std::fs::create_dir_all(&args.data_dir)?;
 
@@ -3765,12 +3808,12 @@ mod tests {
     }
 
     #[test]
-    fn backend_selection_prefers_openvino_when_candidate_is_ready() {
+    fn backend_selection_prefers_directml_when_both_candidates_ready() {
         let (backend, reason) =
             choose_preferred_backend(None, &FailureCounters::default(), None, true, true);
 
-        assert_eq!(backend, InferenceBackend::OpenVinoNpu);
-        assert_eq!(reason, DecisionReason::DefaultOpenVinoCandidate);
+        assert_eq!(backend, InferenceBackend::DirectML);
+        assert_eq!(reason, DecisionReason::DefaultDirectMLCandidate);
     }
 
     #[test]
