@@ -69,31 +69,23 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Set-StrictMode -Version Latest
 
-function Resolve-ManifestPath {
-    param([string]$Path)
+$scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "model-archives.json"
-    }
-
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return $Path
-    }
-
-    return Join-Path (Get-Location).Path $Path
+if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
+    $ManifestPath = Join-Path $scriptDir "model-archives.json"
+} elseif (-not [System.IO.Path]::IsPathRooted($ManifestPath)) {
+    $ManifestPath = Join-Path (Get-Location).Path $ManifestPath
 }
 
-$manifestPath = Resolve-ManifestPath -Path $ManifestPath
-$manifestDirectory = Split-Path -Parent $manifestPath
+$manifestDirectory = Split-Path -Parent $ManifestPath
 $modelsRoot = Join-Path $env:LOCALAPPDATA "SmolPC\models"
 
-if (-not (Test-Path $manifestPath -PathType Leaf)) {
-    throw "Missing model manifest at '$manifestPath'."
+if (-not (Test-Path $ManifestPath -PathType Leaf)) {
+    throw "Missing model manifest at '$ManifestPath'."
 }
 
-$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+$manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
 if ($null -eq $manifest.models -or $manifest.models.Count -eq 0) {
     throw "Model manifest is empty."
 }
@@ -118,15 +110,14 @@ try {
 
         $targetDir = Join-Path $modelsRoot "$modelId\$backend"
         if (-not $Force -and (Test-Path $targetDir -PathType Container)) {
-            $fileCount = (Get-ChildItem -LiteralPath $targetDir -File).Count
+            $fileCount = @(Get-ChildItem -LiteralPath $targetDir -File -ErrorAction SilentlyContinue).Count
             if ($fileCount -gt 0) {
-                Write-Host "Skipping $modelId/$backend (already installed, $fileCount files)."
+                Write-Host "  Skipping $modelId/$backend (already installed, $fileCount files)."
                 continue
             }
         }
 
-        Write-Host ""
-        Write-Host "Installing $modelId ($backend)..."
+        Write-Host "  Installing $modelId ($backend)..."
 
         $localArchive = Join-Path $manifestDirectory $archivePath
         if (-not (Test-Path $localArchive -PathType Leaf)) {
@@ -134,12 +125,14 @@ try {
         }
 
         if (-not [string]::IsNullOrWhiteSpace($expectedSha256)) {
+            Write-Host "    Verifying checksum..."
             $actualSha256 = (Get-FileHash -Path $localArchive -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($actualSha256 -ne $expectedSha256.ToLowerInvariant()) {
                 throw "Checksum mismatch for '$archiveName'. Expected $expectedSha256, got $actualSha256."
             }
         }
 
+        Write-Host "    Extracting (this may take a minute for large models)..."
         $extractRoot = Join-Path $tempRoot ("extract-$modelId-$backend")
         if (Test-Path $extractRoot) {
             Remove-Item -LiteralPath $extractRoot -Recurse -Force
@@ -159,11 +152,11 @@ try {
         }
         Copy-Item -LiteralPath $extractedBackendDir -Destination $targetDir -Recurse -Force
 
-        Write-Host "  Installed to $targetDir"
+        Write-Host "    Done."
     }
 
     Write-Host ""
-    Write-Host "Model installation complete."
+    Write-Host "All models installed."
 } finally {
     if (Test-Path $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force
@@ -184,84 +177,86 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Set-StrictMode -Version Latest
+
+$packageRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 
 function Find-Installer {
     param([string]$Root)
-
-    return Get-ChildItem -LiteralPath $Root -File -Filter "*-setup.exe" |
+    return Get-ChildItem -LiteralPath $Root -File -Filter "*-setup.exe" -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
 }
 
-function Resolve-AppExecutable {
-    $candidates = @(
-        (Join-Path $env:LOCALAPPDATA "Programs\SmolPC Code Helper\SmolPC Code Helper.exe"),
-        (Join-Path $env:LOCALAPPDATA "SmolPC Code Helper\SmolPC Code Helper.exe")
+function Find-InstalledApp {
+    $searchDirs = @(
+        (Join-Path $env:LOCALAPPDATA "SmolPC Code Helper"),
+        (Join-Path $env:LOCALAPPDATA "Programs\SmolPC Code Helper")
     )
-
-    foreach ($candidate in $candidates) {
-        if (Test-Path $candidate -PathType Leaf) {
-            return $candidate
+    $exeNames = @("smolpc-code-helper.exe", "SmolPC Code Helper.exe")
+    foreach ($dir in $searchDirs) {
+        foreach ($name in $exeNames) {
+            $exe = Join-Path $dir $name
+            if (Test-Path $exe -PathType Leaf) {
+                return $exe
+            }
         }
     }
-
     return $null
 }
 
-$packageRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $installer = Find-Installer -Root $packageRoot
 $modelsDir = Join-Path $packageRoot "models"
 $modelInstallScript = Join-Path $modelsDir "Install-Models.ps1"
 $manifestPath = Join-Path $modelsDir "model-archives.json"
 
 if ($null -eq $installer) {
-    throw "Could not find the packaged installer in '$packageRoot'. Expected a *-setup.exe file."
+    Write-Host "ERROR: No *-setup.exe found in '$packageRoot'." -ForegroundColor Red
+    Write-Host "Make sure you are running this from the offline bundle folder."
+    exit 1
 }
 
-Write-Host "=========================================="
-Write-Host "  SmolPC Code Helper Offline Installer"
-Write-Host "=========================================="
+Write-Host ""
+Write-Host "  SmolPC Code Helper - Offline Installer" -ForegroundColor Cyan
 Write-Host ""
 
-Write-Host "Step 1: Installing application..."
-$installerProcess = Start-Process -FilePath $installer.FullName -PassThru -Wait
-if ($installerProcess.ExitCode -ne 0) {
-    throw "Installer exited with code $($installerProcess.ExitCode)."
+Write-Host "[1/3] Installing application (silent)..."
+$proc = Start-Process -FilePath $installer.FullName -ArgumentList "/S" -PassThru -Wait
+if ($proc.ExitCode -ne 0) {
+    Write-Host "ERROR: Installer failed with exit code $($proc.ExitCode)." -ForegroundColor Red
+    exit 1
 }
-Write-Host "  Application installed successfully."
+$appExe = Find-InstalledApp
+if ($null -eq $appExe) {
+    Write-Host "ERROR: App installed but executable not found. Check install path." -ForegroundColor Red
+    exit 1
+}
+Write-Host "  Installed to: $(Split-Path -Parent $appExe)"
 
 if (Test-Path $modelInstallScript -PathType Leaf) {
     Write-Host ""
-    Write-Host "Step 2: Installing model files..."
-    if ($ForceModels) {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File $modelInstallScript -ManifestPath $manifestPath -Force
-    } else {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File $modelInstallScript -ManifestPath $manifestPath
+    Write-Host "[2/3] Installing AI models (this takes several minutes)..."
+    $modelArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $modelInstallScript, "-ManifestPath", $manifestPath)
+    if ($ForceModels) { $modelArgs += "-Force" }
+    & powershell @modelArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "WARNING: Model installation had errors. App may not work until models are installed." -ForegroundColor Yellow
     }
-    Write-Host "  Models installed successfully."
 } else {
     Write-Host ""
-    Write-Host "Step 2: No model installer found. Models may need manual setup."
+    Write-Host "[2/3] Skipped - no model installer found."
 }
 
 Write-Host ""
-$appExecutable = Resolve-AppExecutable
-if (-not $NoLaunchApp -and $appExecutable) {
-    Write-Host "Step 3: Launching SmolPC Code Helper..."
-    Start-Process -FilePath $appExecutable | Out-Null
-} elseif (-not $NoLaunchApp) {
-    Write-Host "Install complete. Launch SmolPC Code Helper from the Start menu."
+if (-not $NoLaunchApp) {
+    Write-Host "[3/3] Launching SmolPC Code Helper..."
+    Start-Process -FilePath $appExe | Out-Null
+} else {
+    Write-Host "[3/3] Skipped launch (-NoLaunchApp)."
 }
 
 Write-Host ""
-Write-Host "=========================================="
-Write-Host "  Installation complete!"
+Write-Host "  Done! The engine auto-detects your best backend on first launch." -ForegroundColor Green
 Write-Host ""
-Write-Host "  The engine will auto-detect your best"
-Write-Host "  available backend (DirectML > NPU > CPU)"
-Write-Host "  on first launch."
-Write-Host "=========================================="
 '@
 
     Set-Content -LiteralPath $Path -Value $content -Encoding UTF8
