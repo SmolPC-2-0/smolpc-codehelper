@@ -19,11 +19,14 @@ $workspaceRoot = Resolve-WorkspaceRoot
 $binariesDir = Join-Path $repoRoot "src-tauri\binaries"
 
 $profile = if ($Debug) { "debug" } else { "release" }
-$cargoFlags = if ($Debug) { @() } else { @("--release") }
 
 Write-Host "Building smolpc-engine-host ($profile) for $Target..."
 Set-Location $workspaceRoot
-cargo build -p smolpc-engine-host --target $Target @cargoFlags
+if ($Debug) {
+    cargo build -p smolpc-engine-host --target $Target
+} else {
+    cargo build -p smolpc-engine-host --release --target $Target
+}
 if ($LASTEXITCODE -ne 0) {
     throw "smolpc-engine-host build failed with exit code $LASTEXITCODE."
 }
