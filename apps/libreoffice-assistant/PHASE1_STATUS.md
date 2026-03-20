@@ -1,6 +1,6 @@
 # LibreOffice Assistant Phase 1 Status
 
-Historical note (2026-03-16): this file records implementation evidence across Phases 1-7 from the earlier launcher-era baseline to current source-parity slices.  
+Historical note (2026-03-16): this file records implementation evidence across Phases 1-8 from the earlier launcher-era baseline to current source-parity slices.  
 Use current planning docs for active scope:
 
 1. `apps/libreoffice-assistant/MIGRATION_PLAN.md`
@@ -84,15 +84,20 @@ Primary planning doc for next phases:
      - selected model resolution
      - MCP runtime status
 15. Source-parity MCP tooling workspace slice (2026-03-19):
-   - added source-parity tools workspace component:
-     - `src/lib/components/SourceParityToolsPage.svelte`
-   - wired source-parity tools tab in `src/lib/components/SourceParityPanel.svelte`:
+    - added source-parity tools workspace component:
+      - `src/lib/components/SourceParityToolsPage.svelte`
+    - wired source-parity tools tab in `src/lib/components/SourceParityPanel.svelte`:
      - MCP status/start/stop/refresh controls
      - tool catalog selection + template application
      - JSON argument validation + invocation result rendering
-   - tightened tool-first workflow behavior in chat/controller:
-     - tool-first send now requires a selected MCP tool
-     - error messaging points operators to Source-Parity Tools tab
+    - tightened tool-first workflow behavior in chat/controller:
+      - tool-first send now requires a selected MCP tool
+      - error messaging points operators to Source-Parity Tools tab
+16. Source-parity chat session persistence + resume UX slice (2026-03-19):
+    - added schema-versioned chat-session persistence types in `src/lib/types/sourceParity.ts`
+    - added robust localStorage helpers (including key removal) in `src/lib/utils/storage.ts`
+    - added startup restore + malformed-payload fallback handling in `src/lib/stores/libreofficeChat.svelte.ts`
+    - added explicit confirmation gate for session clear in `src/lib/components/SourceParityPanel.svelte`
 
 ## Validation run (local)
 
@@ -189,3 +194,15 @@ Tracked in:
    - `cargo test -p smolpc-libreoffice-assistant --lib` (`12 passed; 0 failed`)
 4. Active phase planning doc:
    - `apps/libreoffice-assistant/PHASE7_SOURCE_PARITY_MCP_TOOLING_PLAN.md`
+
+## Phase 8 source-parity chat session persistence validation (2026-03-19)
+
+1. Source-parity chat messages now persist as a schema-versioned localStorage session payload.
+2. Startup restore now hydrates persisted chat messages and safely falls back when payload shape/version is invalid.
+3. Source-parity clear-session action now requires explicit operator confirmation before deleting session history.
+4. Local frontend and backend validations passed:
+   - `npm run check:libreoffice` (`svelte-check found 0 errors and 0 warnings`)
+   - `npm run build:libreoffice` (`vite build` completed successfully)
+   - `cargo test -p smolpc-libreoffice-assistant --lib` (`12 passed; 0 failed`)
+5. Active phase planning doc:
+   - `apps/libreoffice-assistant/PHASE8_SOURCE_PARITY_CHAT_PERSISTENCE_PLAN.md`
