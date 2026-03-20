@@ -27,6 +27,7 @@ const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
 const SHARED_MODELS_DIR: &str = "models";
 const DEFAULT_WAIT_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_WAIT_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const NON_STREAMING_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RuntimeModePreference {
@@ -153,6 +154,8 @@ impl Drop for SpawnLockGuard {
 pub enum EngineClientError {
     #[error("{0}")]
     Message(String),
+    #[error("Engine process crashed or is unreachable: {0}")]
+    EngineCrashed(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -294,7 +297,6 @@ impl EngineClient {
             token,
             http: Client::builder()
                 .connect_timeout(Duration::from_secs(2))
-                .timeout(Duration::from_secs(120))
                 .build()
                 .unwrap_or_else(|_| Client::new()),
         }
@@ -313,6 +315,7 @@ impl EngineClient {
             .http
             .get(self.url("/engine/health"))
             .header(AUTHORIZATION, self.auth_header())
+            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
             .send()
             .await;
 
@@ -328,6 +331,7 @@ impl EngineClient {
             .http
             .get(self.url("/engine/meta"))
             .header(AUTHORIZATION, self.auth_header())
+            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
             .send()
             .await?;
         let response = ensure_success(response, "/engine/meta").await?;
@@ -339,6 +343,7 @@ impl EngineClient {
             .http
             .get(self.url("/engine/status"))
             .header(AUTHORIZATION, self.auth_header())
+            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
             .send()
             .await?;
         let response = ensure_success(response, "/engine/status").await?;
@@ -362,6 +367,7 @@ impl EngineClient {
                 })
                 .to_string(),
             )
+            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
             .send()
             .await?;
 
@@ -472,6 +478,7 @@ impl EngineClient {
             .header(AUTHORIZATION, self.auth_header())
             .header(CONTENT_TYPE, "application/json")
             .body(serde_json::json!({"model_id": model_id}).to_string())
+            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
             .send()
             .await?;
         let _ = ensure_success(response, "/engine/load").await?;
@@ -485,6 +492,7 @@ impl EngineClient {
             .header(AUTHORIZATION, self.auth_header())
             .header(CONTENT_TYPE, "application/json")
             .body(serde_json::json!({"force": force}).to_string())
+            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
             .send()
             .await?;
         let _ = ensure_success(response, "/engine/unload").await?;
@@ -496,6 +504,7 @@ impl EngineClient {
             .http
             .post(self.url("/engine/cancel"))
             .header(AUTHORIZATION, self.auth_header())
+            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
             .send()
             .await?;
         let _ = ensure_success(response, "/engine/cancel").await?;
@@ -513,6 +522,7 @@ impl EngineClient {
             .header(AUTHORIZATION, self.auth_header())
             .header(CONTENT_TYPE, "application/json")
             .body(serde_json::json!({"model_id": model_id}).to_string())
+            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
             .send()
             .await?;
         let response = ensure_success(response, "/engine/check-model").await?;
@@ -531,6 +541,7 @@ impl EngineClient {
             .http
             .get(self.url("/v1/models"))
             .header(AUTHORIZATION, self.auth_header())
+            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
             .send()
             .await?;
         let response = ensure_success(response, "/v1/models").await?;
@@ -542,16 +553,11 @@ impl EngineClient {
         &self,
         prompt: &str,
         config: Option<GenerationConfig>,
-        mut on_token: F,
+        on_token: F,
     ) -> Result<GenerationMetrics, EngineClientError>
     where
         F: FnMut(String),
     {
-        let started = Instant::now();
-        let mut emitted_chunks = 0usize;
-        let mut first_chunk_at = None;
-        let mut host_metrics: Option<GenerationMetrics> = None;
-
         let body = completion_body(&prompt_as_messages(prompt), true, config);
         let response = self
             .http
@@ -560,93 +566,21 @@ impl EngineClient {
             .header(CONTENT_TYPE, "application/json")
             .body(body.to_string())
             .send()
-            .await?;
+            .await
+            .map_err(classify_connection_error)?;
         let response = ensure_success(response, "/v1/chat/completions").await?;
-
-        let mut stream = response.bytes_stream();
-        let mut buffer = String::new();
-
-        while let Some(chunk) = stream.next().await {
-            let bytes = chunk?;
-            let text = String::from_utf8_lossy(&bytes);
-            buffer.push_str(&text);
-
-            let mut consumed_until = 0usize;
-            while let Some(rel_newline) = buffer[consumed_until..].find('\n') {
-                let newline = consumed_until + rel_newline;
-                let line = buffer[consumed_until..newline].trim();
-                consumed_until = newline + 1;
-                if !line.starts_with("data:") {
-                    continue;
-                }
-                let data = line[5..].trim();
-                if data == "[DONE]" {
-                    return Ok(host_metrics.unwrap_or_else(|| {
-                        fallback_stream_metrics(started, emitted_chunks, first_chunk_at)
-                    }));
-                }
-                if data.is_empty() {
-                    continue;
-                }
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
-                    if let Some(error_message) = parse_error_message(&value) {
-                        return Err(EngineClientError::Message(error_message));
-                    }
-
-                    if let Some(metrics_value) = value.get("smolpc_metrics") {
-                        host_metrics = Some(serde_json::from_value(metrics_value.clone())?);
-                        continue;
-                    }
-
-                    if value.get("object").and_then(|object| object.as_str())
-                        == Some("chat.completion.metrics")
-                    {
-                        return Err(EngineClientError::Message(
-                            "Engine stream metrics event is missing required smolpc_metrics payload"
-                                .to_string(),
-                        ));
-                    }
-
-                    if let Some(content) = value
-                        .get("choices")
-                        .and_then(|c| c.as_array())
-                        .and_then(|arr| arr.first())
-                        .and_then(|first| first.get("delta"))
-                        .and_then(|d| d.get("content"))
-                        .and_then(|c| c.as_str())
-                    {
-                        emitted_chunks += 1;
-                        if first_chunk_at.is_none() {
-                            first_chunk_at = Some(started.elapsed().as_millis() as u64);
-                        }
-                        on_token(content.to_string());
-                    }
-                }
-            }
-
-            if consumed_until > 0 {
-                buffer.drain(..consumed_until);
-            }
-        }
-
-        Ok(host_metrics
-            .unwrap_or_else(|| fallback_stream_metrics(started, emitted_chunks, first_chunk_at)))
+        consume_sse_stream(response, on_token).await
     }
 
     pub async fn generate_stream_messages<F>(
         &self,
         messages: &[EngineChatMessage],
         config: Option<GenerationConfig>,
-        mut on_token: F,
+        on_token: F,
     ) -> Result<GenerationMetrics, EngineClientError>
     where
         F: FnMut(String),
     {
-        let started = Instant::now();
-        let mut emitted_chunks = 0usize;
-        let mut first_chunk_at = None;
-        let mut host_metrics: Option<GenerationMetrics> = None;
-
         let body = completion_body(messages, true, config);
         let response = self
             .http
@@ -655,78 +589,93 @@ impl EngineClient {
             .header(CONTENT_TYPE, "application/json")
             .body(body.to_string())
             .send()
-            .await?;
+            .await
+            .map_err(classify_connection_error)?;
         let response = ensure_success(response, "/v1/chat/completions").await?;
+        consume_sse_stream(response, on_token).await
+    }
+}
 
-        let mut stream = response.bytes_stream();
-        let mut buffer = String::new();
+async fn consume_sse_stream<F>(
+    response: reqwest::Response,
+    mut on_token: F,
+) -> Result<GenerationMetrics, EngineClientError>
+where
+    F: FnMut(String),
+{
+    let started = Instant::now();
+    let mut emitted_chunks = 0usize;
+    let mut first_chunk_at = None;
+    let mut host_metrics: Option<GenerationMetrics> = None;
 
-        while let Some(chunk) = stream.next().await {
-            let bytes = chunk?;
-            let text = String::from_utf8_lossy(&bytes);
-            buffer.push_str(&text);
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
 
-            let mut consumed_until = 0usize;
-            while let Some(rel_newline) = buffer[consumed_until..].find('\n') {
-                let newline = consumed_until + rel_newline;
-                let line = buffer[consumed_until..newline].trim();
-                consumed_until = newline + 1;
-                if !line.starts_with("data:") {
-                    continue;
-                }
-                let data = line[5..].trim();
-                if data == "[DONE]" {
-                    return Ok(host_metrics.unwrap_or_else(|| {
-                        fallback_stream_metrics(started, emitted_chunks, first_chunk_at)
-                    }));
-                }
-                if data.is_empty() {
-                    continue;
-                }
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
-                    if let Some(error_message) = parse_error_message(&value) {
-                        return Err(EngineClientError::Message(error_message));
-                    }
+    while let Some(chunk) = stream.next().await {
+        let bytes = chunk.map_err(classify_connection_error)?;
+        let text = String::from_utf8_lossy(&bytes);
+        buffer.push_str(&text);
 
-                    if let Some(metrics_value) = value.get("smolpc_metrics") {
-                        host_metrics = Some(serde_json::from_value(metrics_value.clone())?);
-                        continue;
-                    }
-
-                    if value.get("object").and_then(|object| object.as_str())
-                        == Some("chat.completion.metrics")
-                    {
-                        return Err(EngineClientError::Message(
-                            "Engine stream metrics event is missing required smolpc_metrics payload"
-                                .to_string(),
-                        ));
-                    }
-
-                    if let Some(content) = value
-                        .get("choices")
-                        .and_then(|c| c.as_array())
-                        .and_then(|arr| arr.first())
-                        .and_then(|first| first.get("delta"))
-                        .and_then(|d| d.get("content"))
-                        .and_then(|c| c.as_str())
-                    {
-                        emitted_chunks += 1;
-                        if first_chunk_at.is_none() {
-                            first_chunk_at = Some(started.elapsed().as_millis() as u64);
-                        }
-                        on_token(content.to_string());
-                    }
-                }
+        let mut consumed_until = 0usize;
+        while let Some(rel_newline) = buffer[consumed_until..].find('\n') {
+            let newline = consumed_until + rel_newline;
+            let line = buffer[consumed_until..newline].trim();
+            consumed_until = newline + 1;
+            if !line.starts_with("data:") {
+                continue;
             }
+            let data = line[5..].trim();
+            if data == "[DONE]" {
+                return Ok(host_metrics.unwrap_or_else(|| {
+                    fallback_stream_metrics(started, emitted_chunks, first_chunk_at)
+                }));
+            }
+            if data.is_empty() {
+                continue;
+            }
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
+                if let Some(error_message) = parse_error_message(&value) {
+                    return Err(EngineClientError::Message(error_message));
+                }
 
-            if consumed_until > 0 {
-                buffer.drain(..consumed_until);
+                if let Some(metrics_value) = value.get("smolpc_metrics") {
+                    host_metrics = Some(serde_json::from_value(metrics_value.clone())?);
+                    continue;
+                }
+
+                if value.get("object").and_then(|object| object.as_str())
+                    == Some("chat.completion.metrics")
+                {
+                    return Err(EngineClientError::Message(
+                        "Engine stream metrics event is missing required smolpc_metrics payload"
+                            .to_string(),
+                    ));
+                }
+
+                if let Some(content) = value
+                    .get("choices")
+                    .and_then(|c| c.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|first| first.get("delta"))
+                    .and_then(|d| d.get("content"))
+                    .and_then(|c| c.as_str())
+                {
+                    emitted_chunks += 1;
+                    if first_chunk_at.is_none() {
+                        first_chunk_at = Some(started.elapsed().as_millis() as u64);
+                    }
+                    on_token(content.to_string());
+                }
             }
         }
 
-        Ok(host_metrics
-            .unwrap_or_else(|| fallback_stream_metrics(started, emitted_chunks, first_chunk_at)))
+        if consumed_until > 0 {
+            buffer.drain(..consumed_until);
+        }
     }
+
+    Ok(host_metrics
+        .unwrap_or_else(|| fallback_stream_metrics(started, emitted_chunks, first_chunk_at)))
 }
 
 fn default_engine_api_version() -> String {
@@ -888,6 +837,7 @@ async fn request_engine_shutdown(client: &EngineClient) -> Result<(), EngineClie
         .http
         .post(client.url("/engine/shutdown"))
         .header(AUTHORIZATION, client.auth_header())
+        .timeout(NON_STREAMING_REQUEST_TIMEOUT)
         .send()
         .await;
 
@@ -967,6 +917,14 @@ pub fn engine_api_major_compatible(actual_version: &str, required_major: u64) ->
 
 pub fn expected_engine_api_major() -> Option<u64> {
     version_major(ENGINE_API_VERSION)
+}
+
+fn classify_connection_error(e: reqwest::Error) -> EngineClientError {
+    if e.is_connect() || e.is_request() {
+        EngineClientError::EngineCrashed(e.to_string())
+    } else {
+        EngineClientError::Http(e)
+    }
 }
 
 fn parse_error_message(value: &serde_json::Value) -> Option<String> {
@@ -1140,9 +1098,13 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
+        use std::process::Stdio;
         const DETACHED_PROCESS: u32 = 0x00000008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
     }
 
     #[cfg(unix)]

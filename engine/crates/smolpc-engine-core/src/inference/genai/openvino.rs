@@ -841,11 +841,17 @@ fn create_generation_config(
         )?;
     }
     if let Some(min_new_tokens) = controls.min_new_tokens {
-        check_status(
-            api,
-            unsafe { (api.set_min_new_tokens)(config_handle.as_ptr(), min_new_tokens) },
-            "ov_genai_generation_config_set_min_new_tokens",
-        )?;
+        if min_new_tokens >= 1 {
+            log::warn!(
+                "Skipping min_new_tokens={min_new_tokens} — any value >= 1 suppresses EOS detection on OpenVINO GenAI 2026.0.0"
+            );
+        } else {
+            check_status(
+                api,
+                unsafe { (api.set_min_new_tokens)(config_handle.as_ptr(), min_new_tokens) },
+                "ov_genai_generation_config_set_min_new_tokens",
+            )?;
+        }
     }
     if let Some(stop_token_ids) = controls.stop_token_ids.as_ref() {
         if !stop_token_ids.is_empty() {
