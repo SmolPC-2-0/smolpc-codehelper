@@ -1,7 +1,7 @@
 # Phase 8: Source-Parity Chat Session Persistence + Resume UX
 
 Date: 2026-03-19  
-Status: Planned (Step 1 docs push pending)  
+Status: Completed (Step 3 docs push)  
 Owner: `apps/libreoffice-assistant`
 
 ## Goal
@@ -30,17 +30,52 @@ Out of scope:
 
 ## Acceptance Criteria
 
-1. [ ] Source-parity chat history persists in local storage and survives reloads.
-2. [ ] Persisted payload uses explicit schema versioning and supports safe normalization.
-3. [ ] Session restore hydrates message history (including tool trace and workflow outcome metadata) at startup without blocking existing chat workflow.
-4. [ ] Clear-session action requires explicit confirmation and removes persisted chat session data.
-5. [ ] Malformed/corrupt payloads do not crash the app and fall back to empty/default session state.
-6. [ ] Tool-first workflow guard behavior remains intact (send blocked when no MCP tool selected).
-7. [ ] Existing source-parity settings storage behavior remains functional.
-8. [ ] Validation gates pass:
+1. [x] Source-parity chat history persists in local storage and survives reloads.
+2. [x] Persisted payload uses explicit schema versioning and supports safe normalization.
+3. [x] Session restore hydrates message history (including tool trace and workflow outcome metadata) at startup without blocking existing chat workflow.
+4. [x] Clear-session action requires explicit confirmation and removes persisted chat session data.
+5. [x] Malformed/corrupt payloads do not crash the app and fall back to empty/default session state.
+6. [x] Tool-first workflow guard behavior remains intact (send blocked when no MCP tool selected).
+7. [x] Existing source-parity settings storage behavior remains functional.
+8. [x] Validation gates pass:
    - `npm run check:libreoffice`
    - `npm run build:libreoffice`
    - `cargo test -p smolpc-libreoffice-assistant --lib`
+
+## Shipped implementation slices
+
+1. Added schema-versioned source-parity chat session payload types:
+   - `src/lib/types/sourceParity.ts`
+2. Added localStorage key-removal helper while preserving existing settings storage behavior:
+   - `src/lib/utils/storage.ts`
+3. Added startup session restore + persistence + malformed payload fallback handling:
+   - `src/lib/stores/libreofficeChat.svelte.ts`
+4. Added explicit clear-session confirmation UX in source-parity chat:
+   - `src/lib/components/SourceParityPanel.svelte`
+5. Kept existing behavior constraints intact:
+   - no Ollama/provider logic reintroduced
+   - no backend command-surface expansion
+   - tool-first MCP selection guard remains active
+
+## Execution result (2026-03-19)
+
+1. `npm run check:libreoffice`
+   - Result: pass (`svelte-check found 0 errors and 0 warnings`)
+2. `npm run build:libreoffice`
+   - Result: pass (`vite build` completed successfully)
+3. `cargo test -p smolpc-libreoffice-assistant --lib`
+   - Result: pass (`12 passed; 0 failed`)
+
+## Delivery workflow record
+
+1. Step 1 docs push completed:
+   - commit: `0197acb`
+   - message: `docs(libreoffice): add phase 8 source parity chat persistence plan`
+2. Step 2 implementation push completed:
+   - commit: `710f043`
+   - message: `feat(libreoffice): persist source-parity chat sessions`
+3. Step 3 post-implementation docs push:
+   - completed in current docs finalization commit.
 
 ## Risks and Mitigations
 
