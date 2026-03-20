@@ -80,6 +80,19 @@
   function handleSend(message: string): void {
     void libreofficeChatStore.sendMessage(message);
   }
+
+  function handleClearSession(): void {
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm(
+        'Clear this local source-parity chat session? This removes the saved history for this browser profile.'
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    libreofficeChatStore.clearMessages();
+  }
 </script>
 
 <section class="panel source-parity">
@@ -174,10 +187,10 @@
         <button
           type="button"
           class="secondary"
-          onclick={() => libreofficeChatStore.clearMessages()}
+          onclick={handleClearSession}
           disabled={libreofficeChatStore.isGenerating}
         >
-          Clear Chat
+          Clear Session
         </button>
       </div>
 

@@ -22,6 +22,23 @@ export interface SourceParityChatMessage {
   isError?: boolean;
 }
 
+export const SOURCE_PARITY_CHAT_SESSION_SCHEMA_VERSION = 1 as const;
+
+export interface SourceParityPersistedChatMessageV1 {
+  id: string;
+  role: SourceParityChatRole;
+  content: string;
+  timestamp_iso: string;
+  workflow_outcome?: string;
+  is_error?: boolean;
+}
+
+export interface SourceParityChatSessionPayloadV1 {
+  schema_version: typeof SOURCE_PARITY_CHAT_SESSION_SCHEMA_VERSION;
+  saved_at_iso: string;
+  messages: SourceParityPersistedChatMessageV1[];
+}
+
 export interface SourceParitySettings {
   selected_model: string;
   python_path: string;

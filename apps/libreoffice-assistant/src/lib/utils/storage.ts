@@ -1,5 +1,13 @@
+function hasLocalStorage(): boolean {
+  return typeof window !== 'undefined' && typeof localStorage !== 'undefined';
+}
+
 export function saveToStorage<T>(key: string, data: T): boolean {
   try {
+    if (!hasLocalStorage()) {
+      return false;
+    }
+
     localStorage.setItem(key, JSON.stringify(data));
     return true;
   } catch (error) {
@@ -10,7 +18,7 @@ export function saveToStorage<T>(key: string, data: T): boolean {
 
 export function loadFromStorage<T>(key: string, defaultValue: T): T {
   try {
-    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    if (!hasLocalStorage()) {
       return defaultValue;
     }
 
@@ -19,5 +27,19 @@ export function loadFromStorage<T>(key: string, defaultValue: T): T {
   } catch (error) {
     console.error(`Failed to load from localStorage (${key}):`, error);
     return defaultValue;
+  }
+}
+
+export function removeFromStorage(key: string): boolean {
+  try {
+    if (!hasLocalStorage()) {
+      return false;
+    }
+
+    localStorage.removeItem(key);
+    return true;
+  } catch (error) {
+    console.error(`Failed to remove localStorage key (${key}):`, error);
+    return false;
   }
 }
