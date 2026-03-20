@@ -13,16 +13,17 @@ Use these docs in order:
 3. `apps/libreoffice-assistant/PHASE6_SOURCE_PARITY_DEPENDENCY_LOADING_PLAN.md` (completed source-parity dependency-loading phase)
 4. `apps/libreoffice-assistant/PHASE7_SOURCE_PARITY_MCP_TOOLING_PLAN.md` (completed source-parity MCP tooling workspace phase)
 5. `apps/libreoffice-assistant/PHASE8_SOURCE_PARITY_CHAT_PERSISTENCE_PLAN.md` (completed source-parity chat persistence/resume phase)
-6. `apps/libreoffice-assistant/PHASE4_FRONTEND_CONTROLLER_PLAN.md` (completed previous phase)
-7. `apps/libreoffice-assistant/UNIFIED_FRONTEND_HANDOFF.md` (merge contract for unified frontend integration)
-8. `apps/libreoffice-assistant/LIBREOFFICE_SOURCE_REPO_ANALYSIS.md` (source audit and mapping rationale)
-9. `apps/libreoffice-assistant/PHASE1_STATUS.md` (implemented baseline + validations)
-10. `apps/libreoffice-assistant/WINDOWS_PHASE1_VERIFICATION.md` (verification runbook)
-11. `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md` (MCP bridge Windows test runbook)
-12. `apps/libreoffice-assistant/WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md` (chat/tool workflow Windows runbook)
-13. `apps/libreoffice-assistant/WINDOWS_PHASE3_TEAMMATE_RESULTS_TEMPLATE.md` (teammate matrix result template)
-14. `apps/libreoffice-assistant/WINDOWS_PHASE3_TEAMMATE_RESULTS_2026-03-15.md` (completed Windows lane matrix entry)
-15. `apps/libreoffice-assistant/WINDOWS_INSTALLER_REGISTRATION.md` (legacy/deferred launcher registration reference)
+6. `apps/libreoffice-assistant/PHASE9_SOURCE_PARITY_SESSION_HARDENING_PLAN.md` (completed source-parity session resume hardening + safety UX phase)
+7. `apps/libreoffice-assistant/PHASE4_FRONTEND_CONTROLLER_PLAN.md` (completed previous phase)
+8. `apps/libreoffice-assistant/UNIFIED_FRONTEND_HANDOFF.md` (merge contract for unified frontend integration)
+9. `apps/libreoffice-assistant/LIBREOFFICE_SOURCE_REPO_ANALYSIS.md` (source audit and mapping rationale)
+10. `apps/libreoffice-assistant/PHASE1_STATUS.md` (implemented baseline + validations)
+11. `apps/libreoffice-assistant/WINDOWS_PHASE1_VERIFICATION.md` (verification runbook)
+12. `apps/libreoffice-assistant/WINDOWS_PHASE2_MCP_VERIFICATION.md` (MCP bridge Windows test runbook)
+13. `apps/libreoffice-assistant/WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md` (chat/tool workflow Windows runbook)
+14. `apps/libreoffice-assistant/WINDOWS_PHASE3_TEAMMATE_RESULTS_TEMPLATE.md` (teammate matrix result template)
+15. `apps/libreoffice-assistant/WINDOWS_PHASE3_TEAMMATE_RESULTS_2026-03-15.md` (completed Windows lane matrix entry)
+16. `apps/libreoffice-assistant/WINDOWS_INSTALLER_REGISTRATION.md` (legacy/deferred launcher registration reference)
 
 ## Mandatory phase workflow
 
@@ -59,7 +60,12 @@ Implemented baseline:
     - schema-versioned localStorage payload for source-parity chat history
     - startup restore of persisted chat session with malformed-payload fallback
     - explicit confirmation gate before clearing local chat session
-11. Diagnostics/evidence helpers:
+11. Source-parity session resume hardening + safety UX slice:
+    - restore metadata surfaced in chat store (restore happened, restored count, saved-at timestamp)
+    - resumed-session and corrupt-reset operator banners added in source-parity chat panel
+    - persisted chat payload bounded to latest history to avoid unbounded localStorage growth
+    - explicit `Start New Session` action with confirmation added
+12. Diagnostics/evidence helpers:
     - `create_integration_issue_report`
     - `run_runtime_verification_checklist`
     - `export_phase1_evidence_bundle`

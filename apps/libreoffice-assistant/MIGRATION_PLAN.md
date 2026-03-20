@@ -74,6 +74,8 @@ Current active phase plan:
    - Status (2026-03-19): completed
 4. `apps/libreoffice-assistant/PHASE8_SOURCE_PARITY_CHAT_PERSISTENCE_PLAN.md`
    - Status (2026-03-19): completed
+5. `apps/libreoffice-assistant/PHASE9_SOURCE_PARITY_SESSION_HARDENING_PLAN.md`
+   - Status (2026-03-20): completed
 
 ## Deferred
 
@@ -125,10 +127,16 @@ Implemented:
     - source-parity chat now persists schema-versioned local session payloads
     - chat session now restores on startup with malformed-payload-safe fallback
     - clear-session action now requires explicit confirmation
+14. Source-parity session resume hardening + safety UX completed:
+    - source-parity chat store now tracks restore metadata (`restoreHappened`, restored count, saved-at timestamp)
+    - source-parity chat panel now shows resumed-session and corrupt-reset operator banners
+    - explicit `Start New Session` action now confirms before clearing local session history
+    - persisted chat payload now stores only latest bounded history to prevent unbounded localStorage growth
+    - malformed/corrupt payload reset now has explicit operator-facing signaling while remaining non-crashing
 
 Not implemented yet:
 
-1. Additional source repo screens beyond shipped slices (chat/settings, dependency-loading, MCP tooling, chat persistence/resume) if reactivated in a future phase.
+1. Additional source repo screens beyond shipped slices (chat/settings, dependency-loading, MCP tooling, chat persistence/resume, session resume hardening) if reactivated in a future phase.
 2. Additional teammate machine matrix entries beyond the required Windows hard gate.
 
 ## Verification and quality gates
@@ -154,12 +162,13 @@ Use docs in this order:
 3. `PHASE6_SOURCE_PARITY_DEPENDENCY_LOADING_PLAN.md` for dependency-loading parity scope and acceptance.
 4. `PHASE7_SOURCE_PARITY_MCP_TOOLING_PLAN.md` for source-parity tooling workspace scope, completion, and validation.
 5. `PHASE8_SOURCE_PARITY_CHAT_PERSISTENCE_PLAN.md` for source-parity chat persistence/resume scope, completion, and validation.
-6. `UNIFIED_FRONTEND_HANDOFF.md` for teammate merge contract.
-7. `LIBREOFFICE_SOURCE_REPO_ANALYSIS.md` for source audit details and mapping rationale.
-8. `PHASE1_STATUS.md` for completed baseline and validation evidence.
-9. `WINDOWS_PHASE1_VERIFICATION.md` for runtime evidence capture steps.
-10. `WINDOWS_PHASE2_MCP_VERIFICATION.md` for MCP bridge validation on Windows.
-11. `WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md` for chat/tool workflow validation matrix.
-12. `WINDOWS_PHASE3_TEAMMATE_RESULTS_TEMPLATE.md` for teammate result capture format.
-13. `WINDOWS_PHASE3_TEAMMATE_RESULTS_2026-03-15.md` for completed Windows lane matrix evidence.
-14. `WINDOWS_INSTALLER_REGISTRATION.md` for legacy/deferred launcher registration contract reference.
+6. `PHASE9_SOURCE_PARITY_SESSION_HARDENING_PLAN.md` for source-parity session resume hardening scope, completion, and validation.
+7. `UNIFIED_FRONTEND_HANDOFF.md` for teammate merge contract.
+8. `LIBREOFFICE_SOURCE_REPO_ANALYSIS.md` for source audit details and mapping rationale.
+9. `PHASE1_STATUS.md` for completed baseline and validation evidence.
+10. `WINDOWS_PHASE1_VERIFICATION.md` for runtime evidence capture steps.
+11. `WINDOWS_PHASE2_MCP_VERIFICATION.md` for MCP bridge validation on Windows.
+12. `WINDOWS_PHASE3_WORKFLOW_VERIFICATION.md` for chat/tool workflow validation matrix.
+13. `WINDOWS_PHASE3_TEAMMATE_RESULTS_TEMPLATE.md` for teammate result capture format.
+14. `WINDOWS_PHASE3_TEAMMATE_RESULTS_2026-03-15.md` for completed Windows lane matrix evidence.
+15. `WINDOWS_INSTALLER_REGISTRATION.md` for legacy/deferred launcher registration contract reference.

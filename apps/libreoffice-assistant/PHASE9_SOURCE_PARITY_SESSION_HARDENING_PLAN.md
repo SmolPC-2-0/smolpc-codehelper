@@ -1,7 +1,7 @@
 # Phase 9: Source-Parity Session Resume Hardening + Safety UX
 
 Date: 2026-03-20  
-Status: Planned (Step 1 docs)  
+Status: Completed (Step 3 docs finalized locally; push blocked by non-fast-forward remote)  
 Owner: `apps/libreoffice-assistant`
 
 ## Goal
@@ -70,3 +70,22 @@ In scope:
 8. Save more than N messages, reload: only latest N restored, app remains responsive.
 9. Corrupt session payload in localStorage (invalid schema/object): app does not crash, session resets, explicit reset warning is shown.
 10. Corrupt payload containing partial malformed messages: valid messages restore, malformed entries dropped safely.
+
+## Execution Result (2026-03-20)
+
+1. `npm run check:libreoffice`
+   - Result: pass (`svelte-check found 0 errors and 0 warnings`)
+2. `npm run build:libreoffice`
+   - Result: pass (`vite build` completed successfully)
+3. `cargo test -p smolpc-libreoffice-assistant --lib`
+   - Result: pass (`12 passed; 0 failed`)
+
+## Manual QA Checklist Results (2026-03-20)
+
+1. Interactive UI checklist execution in this terminal session:
+   - Result: pending (requires live app interaction and browser localStorage mutation checks).
+2. Static/code-path verification completed for checklist logic:
+   - resumed-session banner + restored-count/saved-at rendering: implemented
+   - `Start New Session` explicit confirmation flow: implemented
+   - corrupt payload reset signaling banner: implemented
+   - bounded persistence (latest N messages): implemented (`MAX_PERSISTED_CHAT_MESSAGES = 200`)

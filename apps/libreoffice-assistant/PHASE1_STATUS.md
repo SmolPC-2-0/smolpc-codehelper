@@ -1,6 +1,6 @@
 # LibreOffice Assistant Phase 1 Status
 
-Historical note (2026-03-16): this file records implementation evidence across Phases 1-8 from the earlier launcher-era baseline to current source-parity slices.  
+Historical note (2026-03-16): this file records implementation evidence across Phases 1-9 from the earlier launcher-era baseline to current source-parity slices.  
 Use current planning docs for active scope:
 
 1. `apps/libreoffice-assistant/MIGRATION_PLAN.md`
@@ -98,6 +98,12 @@ Primary planning doc for next phases:
     - added robust localStorage helpers (including key removal) in `src/lib/utils/storage.ts`
     - added startup restore + malformed-payload fallback handling in `src/lib/stores/libreofficeChat.svelte.ts`
     - added explicit confirmation gate for session clear in `src/lib/components/SourceParityPanel.svelte`
+17. Source-parity session resume hardening + safety UX slice (2026-03-20):
+    - added source-parity session restore metadata in `src/lib/stores/libreofficeChat.svelte.ts`
+    - added resumed-session banner and corrupt-reset warning banner in `src/lib/components/SourceParityPanel.svelte`
+    - replaced clear action with explicit `Start New Session` confirmation UX
+    - bounded persisted chat payload to latest message history in localStorage
+    - added parse-corrupt payload status handling in `src/lib/utils/storage.ts` and operator reset signaling
 
 ## Validation run (local)
 
@@ -206,3 +212,15 @@ Tracked in:
    - `cargo test -p smolpc-libreoffice-assistant --lib` (`12 passed; 0 failed`)
 5. Active phase planning doc:
    - `apps/libreoffice-assistant/PHASE8_SOURCE_PARITY_CHAT_PERSISTENCE_PLAN.md`
+
+## Phase 9 source-parity session resume hardening validation (2026-03-20)
+
+1. Source-parity chat store now captures restore metadata (`restoreHappened`, restored count, persisted saved-at timestamp).
+2. Source-parity chat panel now shows explicit resumed-session and corrupt-reset operator-facing banners.
+3. Persisted session payload now stores only bounded recent history, preventing unbounded localStorage growth.
+4. Local frontend and backend validations passed:
+   - `npm run check:libreoffice` (`svelte-check found 0 errors and 0 warnings`)
+   - `npm run build:libreoffice` (`vite build` completed successfully)
+   - `cargo test -p smolpc-libreoffice-assistant --lib` (`12 passed; 0 failed`)
+5. Active phase planning doc:
+   - `apps/libreoffice-assistant/PHASE9_SOURCE_PARITY_SESSION_HARDENING_PLAN.md`
