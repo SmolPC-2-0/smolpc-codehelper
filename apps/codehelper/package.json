@@ -21,7 +21,13 @@
 		"runtime:setup:openvino": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-openvino-runtime.ps1",
 		"model:export:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/export-dml-model.ps1",
 		"model:setup:qwen25-instruct": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-qwen25-instruct-model.ps1",
-		"model:setup:qwen3-4b": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-qwen3-4b-model.ps1"
+		"model:setup:qwen3-4b": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-qwen3-4b-model.ps1",
+		"engine:build:release": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/stage-engine-sidecar.ps1",
+		"runtime:setup:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-directml-runtime.ps1",
+		"model:archive:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-dml-model-archives.ps1",
+		"model:archive:openvino": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-openvino-model-archives.ps1",
+		"package:offline": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-offline-bundle.ps1",
+		"package:offline:bundle": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-windows-local-bundle.ps1"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^1.2.9",

@@ -34,6 +34,20 @@
 			"icons/icon.icns",
 			"icons/icon.ico"
 		],
-		"resources": ["libs/*", "libs/openvino", "binaries/*", "resources/launcher/*"]
+		"resources": {
+			"libs/": "libs/",
+			"binaries/": "binaries/",
+			"resources/launcher/": "launcher/",
+			"resources/model-installer/": "model-installer/"
+		},
+		"windows": {
+			"webviewInstallMode": {
+				"type": "offlineInstaller",
+				"silent": true
+			},
+			"nsis": {
+				"installMode": "currentUser"
+			}
+		}
 	}
 }

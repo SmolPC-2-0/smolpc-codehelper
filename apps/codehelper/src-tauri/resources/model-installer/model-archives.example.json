@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "qwen2.5-1.5b-instruct",
+      "backend": "dml",
+      "archive_name": "qwen2.5-1.5b-instruct-dml.zip",
+      "archive_path": "qwen2.5-1.5b-instruct-dml.zip",
+      "sha256": ""
+    },
+    {
+      "id": "qwen2.5-1.5b-instruct",
+      "backend": "openvino",
+      "archive_name": "qwen2.5-1.5b-instruct-openvino.zip",
+      "archive_path": "qwen2.5-1.5b-instruct-openvino.zip",
+      "sha256": ""
+    },
+    {
+      "id": "qwen3-4b",
+      "backend": "dml",
+      "archive_name": "qwen3-4b-dml.zip",
+      "archive_path": "qwen3-4b-dml.zip",
+      "sha256": ""
+    },
+    {
+      "id": "qwen3-4b",
+      "backend": "openvino",
+      "archive_name": "qwen3-4b-openvino.zip",
+      "archive_path": "qwen3-4b-openvino.zip",
+      "sha256": ""
+    }
+  ]
+}
