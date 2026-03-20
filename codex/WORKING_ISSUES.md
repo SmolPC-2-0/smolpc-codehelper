@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-20
 Base branch: `main`
-Last known good commit: `38607a4` (Qwen3-4B NPU INT8 + template patch, PR #106 merged)
+Last known good commit: `3d7460e` (Engine production readiness — 20 fixes, PR #107 merged)
 
 ---
 
