@@ -37,7 +37,21 @@ impl ModelLoader {
             }
         }
 
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models")
+        #[cfg(debug_assertions)]
+        {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models")
+        }
+
+        #[cfg(not(debug_assertions))]
+        {
+            // In release builds, look next to the executable.
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(parent) = exe.parent() {
+                    return parent.join("models");
+                }
+            }
+            PathBuf::from("models")
+        }
     }
 
     fn resolve_models_dir(override_dir: Option<PathBuf>) -> PathBuf {

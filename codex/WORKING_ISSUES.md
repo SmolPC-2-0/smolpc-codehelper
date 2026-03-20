@@ -28,14 +28,13 @@ Last known good commit: `38607a4` (Qwen3-4B NPU INT8 + template patch, PR #106 m
 
 ### 2) Production model-path resolution for packaged app
 
-- Status: Open (deferred to packaging phase)
+- Status: **Partially resolved** (release-mode path fixed, packaging deferred)
 - Severity: High (shipping readiness)
 - Context:
-  - `ModelLoader` default path is still dev-oriented (`CARGO_MANIFEST_DIR/models`) unless overridden.
-  - Packaged executable should resolve model storage under runtime app data paths.
+  - `ModelLoader` default path now gated: debug uses `CARGO_MANIFEST_DIR/models`, release uses `current_exe().parent()/models`.
+  - Full packaging path (`%LOCALAPPDATA%\SmolPC\models`) still preferred via env override.
   - Packaging approach established on `feat/windows-dml-packaging` branch.
 - Next steps:
-  - Move default model root to app data directory.
   - Validate model load/generation on clean installed build.
 
 ### 3) Windows installer/runtime validation matrix incomplete
@@ -51,18 +50,10 @@ Last known good commit: `38607a4` (Qwen3-4B NPU INT8 + template patch, PR #106 m
 
 ### 4) Engine health check reports "unhealthy" after idle, client reconnect never recovers
 
-- Status: Open
-- Severity: Low-Medium (restart resolves; user-facing annoyance)
-- Context:
-  - After extended idle time with a loaded NPU model, the engine health/cache check transitions to an unhealthy state.
-  - The client displays a "reconnecting" status that never resolves until the engine is restarted.
-  - Observed during Qwen3-4B INT8 NPU testing (2026-03-20). Manual restart of the engine fully recovers.
-- Likely causes:
-  - NPU StaticLLMPipeline may not respond to keepalive/health pings after idle timeout.
-  - SSE connection or health poll could be hitting a stale cached state that isn't cleared on reconnect.
-- Next steps:
-  - Investigate engine-side health check behavior when NPU pipeline is idle.
-  - Consider adding an automatic engine-side recovery or client-side forced reconnect after repeated health failures.
+- Status: **RESOLVED** (2026-03-20, `fix/engine-prod-readiness`)
+- Severity: ~~Low-Medium~~ → Resolved
+- Root cause: `model_idle_unload` defaulted to `Some(0)` which clamped to 30s. After 30s idle, the timer fired `unload_model`, setting state to `Idle`, causing `/engine/status` to report `ready: false`.
+- Fix: Changed default to `None` (disabled). Also added `model_transition_in_progress` race guard, health endpoint now returns actual state with 503 on failure.
 
 ### 5) Backend diagnostics not fully surfaced in frontend
 

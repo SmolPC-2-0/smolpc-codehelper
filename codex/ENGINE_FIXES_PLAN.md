@@ -1,8 +1,8 @@
 # Engine Fixes Plan — Step 1
 
 Last updated: 2026-03-20
-Status: Ready for implementation
-Branch: Create `fix/engine-prod-readiness` from `main` at `8575fd9`
+Status: **Implemented** — Tiers 1-3 complete (except 3.1 token ACL and 3.5 structured errors, deferred)
+Branch: `fix/engine-prod-readiness` from `main` at `9c0c0ca`
 
 ---
 
@@ -20,7 +20,7 @@ Every issue found during the five-agent audit, organized by implementation prior
 
 ### Tier 1 — Must Fix (blocks deployment)
 
-#### 1.1 — Idle unload after 30s breaks readiness (THE "unhealthy after idle" bug)
+#### 1.1 — ~~Idle unload after 30s breaks readiness~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-host/src/main.rs`
 - **Location:** Lines 525 (default timeout), 3416-3422 (idle timer), 1511-1517 (mark_readiness_idle), 2304-2337 (unload_model)
@@ -28,7 +28,7 @@ Every issue found during the five-agent audit, organized by implementation prior
 - **Fix:** Change the default `model_idle_unload` from `Some(0)` (30s) to `None` (disabled). The engine should keep the model loaded until explicitly unloaded or a new model is loaded. If idle unload is desired in the future, it should be opt-in via a CLI flag, not the default.
 - **Verification:** Start engine, load model, wait 5 minutes, curl `/engine/status` — should still report `ready: true`.
 
-#### 1.2 — Flip backend priority to DirectML > NPU > CPU
+#### 1.2 — ~~Flip backend priority to DirectML > NPU > CPU~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-host/src/main.rs`
 - **Location:** `choose_preferred_backend()` function, lines 2494-2545
@@ -38,7 +38,7 @@ Every issue found during the five-agent audit, organized by implementation prior
 - **Also update:** CLAUDE.md already updated to `directml > openvino_npu > cpu`.
 - **Verification:** Start engine without `SMOLPC_FORCE_EP`, load model — should select DirectML if DLL bundle is present.
 
-#### 1.3 — OpenVINO startup probe has no timeout
+#### 1.3 — ~~OpenVINO startup probe has no timeout~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-host/src/main.rs`
 - **Location:** Lines 1387-1401 (`spawn_blocking` for `probe_openvino_startup`)
@@ -46,7 +46,7 @@ Every issue found during the five-agent audit, organized by implementation prior
 - **Fix:** Wrap the `spawn_blocking` call in `tokio::time::timeout(OPENVINO_STARTUP_PROBE_WAIT, ...)`, consistent with the DirectML probe pattern. On timeout, return a degraded probe result (same pattern as DirectML timeout at lines 1359-1362).
 - **Verification:** Can be unit tested by mocking a slow probe. In practice, verified by observing that startup completes even if NPU driver is unresponsive.
 
-#### 1.4 — No logger initialization (all diagnostics silently discarded)
+#### 1.4 — ~~No logger initialization~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-host/src/main.rs`
 - **Location:** `main()` function, lines 3391-3467
@@ -54,7 +54,7 @@ Every issue found during the five-agent audit, organized by implementation prior
 - **Fix:** Add `env_logger` to `Cargo.toml` dependencies. Add `env_logger::init()` at the start of `main()`. This respects `RUST_LOG` env var for filtering.
 - **Verification:** Run engine with `RUST_LOG=info` — should see startup diagnostics, backend selection decisions, DLL loading messages.
 
-#### 1.5 — CARGO_MANIFEST_DIR fallback won't work in production
+#### 1.5 — ~~CARGO_MANIFEST_DIR fallback won't work in production~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-core/src/models/loader.rs`
 - **Location:** Line 40
@@ -62,7 +62,7 @@ Every issue found during the five-agent audit, organized by implementation prior
 - **Fix:** Gate the `CARGO_MANIFEST_DIR` fallback behind `#[cfg(debug_assertions)]`. In release builds, the fallback should be `std::env::current_exe().parent().join("models")` (models adjacent to exe) or return `None` to force the `%LOCALAPPDATA%\SmolPC\models` path.
 - **Verification:** Build in release mode, check that `ModelLoader::new()` resolves to `%LOCALAPPDATA%\SmolPC\models` without `SMOLPC_MODELS_DIR` set.
 
-#### 1.6 — Health endpoint always returns ok:true
+#### 1.6 — ~~Health endpoint always returns ok:true~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-host/src/main.rs`
 - **Location:** Lines 2998-3005
@@ -74,7 +74,7 @@ Every issue found during the five-agent audit, organized by implementation prior
 
 ### Tier 2 — Should Fix (stability & resilience)
 
-#### 2.1 — expect() panics in production paths
+#### 2.1 — ~~expect() panics in production paths~~ ✅ FIXED
 
 - **Files:** `engine/crates/smolpc-engine-host/src/main.rs`
 - **Locations:**
@@ -82,7 +82,7 @@ Every issue found during the five-agent audit, organized by implementation prior
   - Line 1938: `.expect("OpenVINO startup probe should exist when artifact is ready")`
 - **Fix:** Replace both with proper error returns (HTTP 500 for the handler, `Err(...)` for the load path).
 
-#### 2.2 — Idle timer and /engine/load can race
+#### 2.2 — ~~Idle timer and /engine/load can race~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-host/src/main.rs`
 - **Location:** Lines 3416-3422 (idle timer) vs line 1731 (load_model)
@@ -90,42 +90,42 @@ Every issue found during the five-agent audit, organized by implementation prior
 - **Fix:** Add an `AtomicBool` guard `model_transition_in_progress` that is set before load/unload and checked by the idle timer. The idle timer skips its tick if a transition is in progress.
 - **Note:** With idle unload disabled by default (fix 1.1), this race is much less likely, but should still be guarded for when idle unload is explicitly enabled.
 
-#### 2.3 — Preflight has no timeout for CPU and DirectML paths
+#### 2.3 — ~~Preflight has no timeout for CPU and DirectML paths~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-host/src/main.rs`
 - **Locations:** Line 2600 (`build_openvino_cpu_runtime_adapter`), Line 2615 (`build_directml_runtime_adapter`)
 - **Bug:** `run_preflight` calls have no timeout. If a malformed model causes OpenVINO CPU or DirectML to hang during warmup, the load path hangs indefinitely.
 - **Fix:** Wrap `run_preflight` in a `tokio::time::timeout` (30s for CPU, 60s for DirectML). On timeout, return a specific error.
 
-#### 2.4 — Template patch failure only warned on NPU (should be error)
+#### 2.4 — ~~Template patch failure only warned on NPU~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-host/src/openvino.rs`
 - **Location:** Line 514
 - **Bug:** If `ensure_qwen3_nothink_template` fails, it logs a warning and continues. On NPU, the un-patched template defaults to thinking mode, causing runaway generation.
 - **Fix:** When target is NPU and template patch fails, return `OpenVinoPreflightResult::Failed` with class `"openvino_npu_template_patch_failed"`. On CPU, keep the warning (thinking mode is less harmful on CPU).
 
-#### 2.5 — chat_template can be an array in tokenizer_config.json
+#### 2.5 — ~~chat_template can be an array in tokenizer_config.json~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-host/src/openvino.rs`
 - **Location:** `extract_chat_template_from_tokenizer_config` function, lines 456-459
 - **Bug:** HuggingFace `tokenizer_config.json` can store `chat_template` as either a string or an array of `{name, template}` objects. Current code only handles the string form.
 - **Fix:** If `v.as_str()` returns `None`, try `v.as_array()` and look for the entry with `name: "default"` (or first entry). Extract its `template` field.
 
-#### 2.6 — Shutdown doesn't cancel active generation
+#### 2.6 — ~~Shutdown doesn't cancel active generation~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-host/src/main.rs`
 - **Location:** Lines 3455-3464
 - **Bug:** On shutdown, no cancellation token is set for any active generation. The blocking generation thread continues running until the tokio runtime is forcefully dropped.
 - **Fix:** Set the cancel token for any active generation during the shutdown handler, then add a brief `tokio::time::sleep(Duration::from_secs(2))` grace period before exiting.
 
-#### 2.7 — Client: 120s global timeout kills long streaming requests
+#### 2.7 — ~~Client: 120s global timeout kills long streaming requests~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-client/src/lib.rs`
 - **Location:** Lines 295-299
 - **Bug:** The `reqwest::Client` has a 120s global timeout. For streaming SSE, this applies to the entire response, not per-chunk. On slow hardware, a complex generation could exceed 120s.
 - **Fix:** Remove the global timeout. Add per-request timeouts for non-streaming endpoints (30s). For streaming endpoints, implement a per-chunk idle timeout (60s with no new data = abort).
 
-#### 2.8 — Client: No crash recovery / reconnection
+#### 2.8 — ~~Client: No crash recovery / reconnection~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-client/src/lib.rs`
 - **Location:** Lines 569-630, 664-729
@@ -143,21 +143,21 @@ Every issue found during the five-agent audit, organized by implementation prior
 - **Bug:** On Windows, `engine-token.txt` is created with default ACLs. On shared school computers, another user can read the token.
 - **Fix:** Use `%LOCALAPPDATA%\SmolPC\` for token storage (per-user ACLs by default) and set `FILE_ATTRIBUTE_HIDDEN`.
 
-#### 3.2 — min_new_tokens API loaded despite known GenAI 2026 ban
+#### 3.2 — ~~min_new_tokens API loaded despite known GenAI 2026 ban~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-core/src/inference/genai/openvino.rs`
 - **Location:** Lines 83, 195-198, 843-848
 - **Bug:** The `min_new_tokens` field exists and is applied when `Some(...)`. Per CLAUDE.md, any value >= 1 permanently suppresses EOS on GenAI 2026.0.0.
 - **Fix:** Add a runtime guard at line 843: if `min_new_tokens >= 1`, log a warning and skip the call. Or remove the field entirely.
 
-#### 3.3 — Windows spawn doesn't redirect stdio to null
+#### 3.3 — ~~Windows spawn doesn't redirect stdio to null~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-client/src/lib.rs`
 - **Location:** Lines 1140-1146
 - **Bug:** Windows path sets `DETACHED_PROCESS` but doesn't redirect stdio. If inherited handles are invalid, the engine could panic on first stdout write.
 - **Fix:** Add `.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())` matching the Unix path.
 
-#### 3.4 — Client: duplicated SSE parsing logic
+#### 3.4 — ~~Client: duplicated SSE parsing logic~~ ✅ FIXED
 
 - **File:** `engine/crates/smolpc-engine-client/src/lib.rs`
 - **Location:** Lines 541-634 vs 636-729

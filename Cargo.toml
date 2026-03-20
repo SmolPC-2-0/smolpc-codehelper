@@ -35,3 +35,4 @@ half = "2.4"
 libloading = "0.8"
 windows-sys = { version = "0.59.0", features = ["Win32_Storage_FileSystem"] }
 dirs = "6"
+env_logger = "0.11"
