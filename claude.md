@@ -104,6 +104,13 @@ Corrections discovered during development. **When you correct a mistake, append 
 - Qwen3 NPU template patch failure must be a hard error, not a warning — un-patched template defaults to thinking mode causing runaway generation
 - CPU and DirectML preflights need timeouts (30s/60s) via spawn_blocking — a hung GPU driver or malformed model can block the load path forever
 - Use a drop guard (TransitionGuard) for model_transition_in_progress — load_model has many early return paths
+- In PowerShell packaging scripts, use `$env:SystemRoot\System32\tar.exe` not bare `tar` — Git Bash tar intercepts and can't handle Windows paths
+- PowerShell `Compress-Archive` has a 2 GB limit — use Windows tar.exe for large model archives
+- PowerShell array splatting (`@array`) can split flag strings — use explicit if/else for cargo build flags
+- Tauri resource map format (`"libs/": "libs/"`) recursively copies directories including subdirectories — preferred over glob arrays for nested DLL layouts
+- DirectML on Intel integrated GPU produces garbage (no EOS, runaway generation) — only accept discrete GPUs as DirectML candidates
+- Tauri NSIS `installMode: "currentUser"` installs to `%LOCALAPPDATA%\<productName>\` and kebab-cases the binary name (e.g., `smolpc-code-helper.exe`)
+- Detached engine processes must redirect stderr to a log file — `Stdio::null()` makes crash diagnosis impossible on user machines
 
 ---
 

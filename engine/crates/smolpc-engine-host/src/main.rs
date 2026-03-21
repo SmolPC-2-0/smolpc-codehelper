@@ -40,9 +40,8 @@ use tokio::sync::{mpsc, Mutex, Notify, Semaphore};
 use tokio::time::{sleep, timeout};
 
 use crate::openvino::{
-    inspect_openvino_artifact, is_blocking_openvino_probe_failure,
-    ensure_qwen3_nothink_template, openvino_generation_controls_for_model,
-    openvino_model_tuning_for_model,
+    ensure_qwen3_nothink_template, inspect_openvino_artifact, is_blocking_openvino_probe_failure,
+    openvino_generation_controls_for_model, openvino_model_tuning_for_model,
     probe_openvino_startup, resolve_openvino_npu_tuning, run_openvino_preflight,
     OpenVinoPreflightResult, OpenVinoStartupProbeResult,
 };
@@ -667,6 +666,28 @@ fn pick_best_dml_candidate(gpus: &[hardware_query::GPUInfo]) -> Option<DirectMlC
     });
 
     let (device_index, gpu) = candidates.first()?;
+
+    // Reject integrated GPUs for DirectML — ORT+DirectML inference quality
+    // on Intel (and other) integrated GPUs is unreliable for LLM workloads
+    // (produces runaway generation / no EOS detection). Only discrete GPUs
+    // are viable DirectML targets. Integrated-only machines fall through to
+    // OpenVINO CPU, which works correctly.
+    //
+    // Accept GPUs whose type string contains "discrete", "dedicated", or
+    // "external" to cover different hardware_query reporting styles.
+    let device_type = gpu.gpu_type().to_string().to_ascii_lowercase();
+    let is_discrete = device_type.contains("discrete")
+        || device_type.contains("dedicated")
+        || device_type.contains("external");
+    if !is_discrete {
+        log::info!(
+            "DirectML candidate '{}' rejected: not a discrete GPU (type='{}'). \
+             Machines without a discrete GPU will use OpenVINO CPU.",
+            gpu.model_name(),
+            gpu.gpu_type()
+        );
+        return None;
+    }
     let vendor = gpu.vendor().to_string().to_ascii_lowercase();
     let model = gpu.model_name().trim().to_ascii_lowercase();
     let pci = gpu
@@ -1425,9 +1446,7 @@ impl EngineState {
                         log::warn!("OpenVINO startup probe task failed: {error}");
                         OpenVinoStartupProbeResult {
                             hardware_detected,
-                            failure_class: Some(
-                                "openvino_npu_plugin_unavailable".to_string(),
-                            ),
+                            failure_class: Some("openvino_npu_plugin_unavailable".to_string()),
                             failure_message: Some(format!(
                                 "OpenVINO startup probe task failed: {error}"
                             )),
@@ -1441,9 +1460,7 @@ impl EngineState {
                         );
                         OpenVinoStartupProbeResult {
                             hardware_detected,
-                            failure_class: Some(
-                                "openvino_startup_probe_timeout".to_string(),
-                            ),
+                            failure_class: Some("openvino_startup_probe_timeout".to_string()),
                             failure_message: Some(format!(
                                 "OpenVINO startup probe did not complete within {} ms",
                                 OPENVINO_STARTUP_PROBE_WAIT.as_millis()
@@ -1787,8 +1804,7 @@ impl EngineState {
         }
         self.model_transition_in_progress
             .store(true, Ordering::SeqCst);
-        let _transition_guard =
-            TransitionGuard(Arc::clone(&self.model_transition_in_progress));
+        let _transition_guard = TransitionGuard(Arc::clone(&self.model_transition_in_progress));
         let current_backend = self.active_backend().await;
         let has_loaded_model = self.current_model.lock().await.is_some();
         let directml_required =
@@ -2020,8 +2036,7 @@ impl EngineState {
                 }
             } else {
                 log::error!("OpenVINO startup probe missing unexpectedly after readiness checks");
-                openvino_failure_class =
-                    Some("openvino_startup_probe_missing".to_string());
+                openvino_failure_class = Some("openvino_startup_probe_missing".to_string());
                 openvino_failure_message =
                     Some("OpenVINO startup probe was not available".to_string());
                 openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
@@ -2134,11 +2149,7 @@ impl EngineState {
                     let dml_build_result = match timeout(
                         DIRECTML_PREFLIGHT_BUDGET,
                         tokio::task::spawn_blocking(move || {
-                            build_directml_runtime_adapter(
-                                &ort_bundle,
-                                &dml_path_owned,
-                                device_id,
-                            )
+                            build_directml_runtime_adapter(&ort_bundle, &dml_path_owned, device_id)
                         }),
                     )
                     .await
