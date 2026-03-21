@@ -3,6 +3,7 @@ mod engine_lifecycle;
 mod memory;
 mod output;
 mod prompts;
+mod runner;
 mod stats;
 
 use clap::Parser;
