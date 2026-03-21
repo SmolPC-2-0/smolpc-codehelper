@@ -1,4 +1,5 @@
 use super::blender::blender_addon_item;
+use super::gimp::gimp_plugin_runtime_item;
 use super::host_apps::{detect_all_with_policy, HostAppDetection};
 use super::launch::setup_launch_detail;
 use super::models::bundled_model_item;
@@ -42,14 +43,28 @@ pub async fn collect_setup_status(state: &SetupState) -> SetupStatusDto {
         .iter()
         .find(|detection| detection.id == SETUP_ITEM_HOST_BLENDER)
         .cloned();
+    let gimp_detection = detections
+        .iter()
+        .find(|detection| detection.id == SETUP_ITEM_HOST_GIMP)
+        .cloned();
     for detection in detections {
         let is_blender = detection.id == SETUP_ITEM_HOST_BLENDER;
+        let is_gimp = detection.id == SETUP_ITEM_HOST_GIMP;
         items.push(host_detection_item(detection));
         if is_blender {
             items.push(blender_addon_item(
                 state.resource_dir(),
                 state.app_local_data_dir(),
                 blender_detection
+                    .as_ref()
+                    .and_then(|value| value.path.as_deref()),
+            ));
+        }
+        if is_gimp {
+            items.push(gimp_plugin_runtime_item(
+                state.resource_dir(),
+                state.app_local_data_dir(),
+                gimp_detection
                     .as_ref()
                     .and_then(|value| value.path.as_deref()),
             ));
@@ -148,7 +163,7 @@ fn overall_state_for_items(items: &[SetupItemDto], has_last_error: bool) -> Setu
 mod tests {
     use super::collect_setup_status;
     use crate::setup::state::SetupState;
-    use crate::setup::types::SETUP_ITEM_BLENDER_ADDON;
+    use crate::setup::types::{SETUP_ITEM_BLENDER_ADDON, SETUP_ITEM_GIMP_PLUGIN_RUNTIME};
     use smolpc_assistant_types::{SetupItemStateDto, SetupOverallStateDto};
     use tempfile::TempDir;
 
@@ -166,7 +181,7 @@ mod tests {
         );
 
         let status = collect_setup_status(&state).await;
-        assert_eq!(status.items.len(), 7);
+        assert_eq!(status.items.len(), 8);
         assert!(status.items.iter().any(|item| item.id == "engine_runtime"));
         assert!(status.items.iter().any(|item| item.id == "bundled_model"));
         assert!(status.items.iter().any(|item| item.id == "bundled_python"));
@@ -174,6 +189,10 @@ mod tests {
             .items
             .iter()
             .any(|item| item.id == SETUP_ITEM_BLENDER_ADDON));
+        assert!(status
+            .items
+            .iter()
+            .any(|item| item.id == SETUP_ITEM_GIMP_PLUGIN_RUNTIME));
     }
 
     #[tokio::test]
