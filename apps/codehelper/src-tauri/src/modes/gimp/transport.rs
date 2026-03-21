@@ -1,8 +1,9 @@
+use crate::setup::gimp::{GIMP_BRIDGE_HOST, GIMP_BRIDGE_PORT};
 use smolpc_assistant_types::ToolDefinitionDto;
 use smolpc_mcp_client::{McpSession, McpTool, TcpTransportConfig};
 
-pub const DEFAULT_GIMP_HOST: &str = "127.0.0.1";
-pub const DEFAULT_GIMP_PORT: u16 = 10008;
+pub const DEFAULT_GIMP_HOST: &str = GIMP_BRIDGE_HOST;
+pub const DEFAULT_GIMP_PORT: u16 = GIMP_BRIDGE_PORT;
 
 pub fn default_transport_config() -> TcpTransportConfig {
     TcpTransportConfig {

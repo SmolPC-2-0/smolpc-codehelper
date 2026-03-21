@@ -45,6 +45,25 @@ impl Default for RuntimeState {
     }
 }
 
+impl Drop for RuntimeState {
+    fn drop(&mut self) {
+        if let Some(child) = self.runtime_child.take() {
+            terminate_child(child);
+        }
+    }
+}
+
+struct LiveSessionConnection {
+    session: McpSession,
+    tools: Vec<ToolDefinitionDto>,
+    detail: String,
+}
+
+fn terminate_child(mut child: Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 #[derive(Debug)]
 pub struct GimpProvider {
     config: TcpTransportConfig,
@@ -264,7 +283,7 @@ impl GimpProvider {
         format!("Unable to start the bundled GIMP MCP bridge. {error}")
     }
 
-    async fn ensure_runtime_child_started(
+    fn ensure_runtime_child_started(
         &self,
         state: &mut RuntimeState,
         runtime: &GimpRuntimeConfig,
@@ -278,7 +297,9 @@ impl GimpProvider {
                     restarted = true;
                 }
                 Err(error) => {
-                    state.runtime_child = None;
+                    if let Some(child) = state.runtime_child.take() {
+                        terminate_child(child);
+                    }
                     return Err(format!(
                         "Unable to inspect the GIMP bridge process state: {error}"
                     ));
@@ -293,14 +314,12 @@ impl GimpProvider {
 
     async fn connect_live_session(
         &self,
-        mode: AppMode,
-        state: &mut RuntimeState,
         gimp_path: &Path,
         runtime: &GimpRuntimeConfig,
         prepare_outcome: &GimpPluginRuntimePrepareOutcome,
         launch_outcome: GimpLaunchOutcome,
         runtime_note: Option<String>,
-    ) -> Result<ProviderStateDto, String> {
+    ) -> Result<LiveSessionConnection, String> {
         let mut last_error = None;
 
         for attempt in 0..GIMP_CONNECTION_RETRY_ATTEMPTS {
@@ -320,16 +339,12 @@ impl GimpProvider {
                                 notes.push(note.to_string());
                             }
                             notes.push(Self::launch_note(launch_outcome).to_string());
-
-                            state.tools = tools.clone();
-                            state.session = Some(session);
-                            state.last_error = None;
-                            state.ever_connected = true;
-                            state.detected_gimp_path = Some(gimp_path.to_path_buf());
-                            return Ok(Self::connected_state(
-                                mode,
-                                Some(Self::connected_detail(runtime, &tools, &notes)),
-                            ));
+                            let detail = Self::connected_detail(runtime, &tools, &notes);
+                            return Ok(LiveSessionConnection {
+                                session,
+                                tools,
+                                detail,
+                            });
                         }
                     }
                     Err(error) => {
@@ -353,9 +368,6 @@ impl GimpProvider {
                 .as_deref()
                 .unwrap_or("Timed out waiting for the bundled GIMP runtime."),
         );
-        state.session = None;
-        state.tools.clear();
-        state.last_error = Some(detail.clone());
         Err(detail)
     }
 
@@ -418,10 +430,7 @@ impl GimpProvider {
         let runtime_note = {
             let mut state = self.state.lock().await;
             state.detected_gimp_path = Some(gimp_path.clone());
-            match self
-                .ensure_runtime_child_started(&mut state, &runtime)
-                .await
-            {
+            match self.ensure_runtime_child_started(&mut state, &runtime) {
                 Ok(note) => note,
                 Err(error) => {
                     let detail = Self::runtime_error_detail(&error);
@@ -445,11 +454,8 @@ impl GimpProvider {
             }
         };
 
-        let mut state = self.state.lock().await;
         match self
             .connect_live_session(
-                mode,
-                &mut state,
                 &gimp_path,
                 &runtime,
                 &prepare_outcome,
@@ -458,8 +464,23 @@ impl GimpProvider {
             )
             .await
         {
-            Ok(provider_state) => provider_state,
-            Err(error) => provider_state(mode, "error", Some(error.as_str()), true, true),
+            Ok(connection) => {
+                let mut state = self.state.lock().await;
+                state.tools = connection.tools;
+                state.session = Some(connection.session);
+                state.last_error = None;
+                state.ever_connected = true;
+                state.detected_gimp_path = Some(gimp_path);
+                Self::connected_state(mode, Some(connection.detail))
+            }
+            Err(error) => {
+                let mut state = self.state.lock().await;
+                state.session = None;
+                state.tools.clear();
+                state.last_error = Some(error.clone());
+                state.detected_gimp_path = Some(gimp_path);
+                provider_state(mode, "error", Some(error.as_str()), true, true)
+            }
         }
     }
 }
@@ -560,9 +581,8 @@ impl ToolProvider for GimpProvider {
     async fn disconnect_if_needed(&self, _mode: AppMode) -> Result<(), String> {
         let mut state = self.state.lock().await;
         state.session = None;
-        if let Some(mut child) = state.runtime_child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(child) = state.runtime_child.take() {
+            terminate_child(child);
         }
         state.tools.clear();
         Ok(())

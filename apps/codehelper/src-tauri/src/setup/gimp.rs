@@ -3,8 +3,11 @@ use super::types::SETUP_ITEM_GIMP_PLUGIN_RUNTIME;
 use serde::{Deserialize, Serialize};
 use smolpc_assistant_types::{SetupItemDto, SetupItemStateDto};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub const GIMP_BRIDGE_HOST: &str = "127.0.0.1";
+pub const GIMP_BRIDGE_PORT: u16 = 10008;
 pub const GIMP_PLUGIN_SOCKET_HOST: &str = "127.0.0.1";
 pub const GIMP_PLUGIN_SOCKET_PORT: u16 = 9877;
 
@@ -109,9 +112,11 @@ pub fn gimp_plugin_runtime_item(
                     label,
                     state: SetupItemStateDto::Ready,
                     detail: Some(format!(
-                        "Bundled GIMP plugin/runtime is provisioned at {} for GIMP at {}. Runtime bridge stays on 127.0.0.1:10008.",
+                        "Bundled GIMP plugin/runtime is provisioned at {} for GIMP at {}. Runtime bridge stays on {}:{}.",
                         target_entry.display(),
-                        gimp_path.display()
+                        gimp_path.display(),
+                        GIMP_BRIDGE_HOST,
+                        GIMP_BRIDGE_PORT
                     )),
                     required: true,
                     can_prepare: false,
@@ -261,14 +266,55 @@ pub fn provision_marker_path(app_local_data_dir: Option<&Path>) -> Option<PathBu
 }
 
 pub fn validate_supported_gimp(gimp_path: &Path) -> Result<(), String> {
-    let lower = gimp_path.to_string_lossy().to_lowercase();
-    if lower.contains("gimp-2.10") || lower.contains("gimp 2") {
-        return Err(format!(
-            "Detected GIMP at {} appears to be GIMP 2.x. Phase 5 targets GIMP 3.x only.",
-            gimp_path.display()
-        ));
+    if let Some(major_version) = infer_gimp_major_version_from_path(gimp_path)
+        .or_else(|| detect_gimp_major_version_from_command(gimp_path))
+    {
+        if major_version < 3 {
+            return Err(format!(
+                "Detected GIMP at {} appears to be GIMP {}.x. Phase 5 targets GIMP 3.x only.",
+                gimp_path.display(),
+                major_version
+            ));
+        }
     }
+
     Ok(())
+}
+
+fn infer_gimp_major_version_from_path(gimp_path: &Path) -> Option<u8> {
+    let lower = gimp_path.to_string_lossy().to_lowercase();
+    if lower.contains("gimp-2.10") || lower.contains("gimp 2") || lower.contains("gimp2") {
+        return Some(2);
+    }
+    if lower.contains("gimp-3") || lower.contains("gimp 3") || lower.contains("gimp3") {
+        return Some(3);
+    }
+    None
+}
+
+fn detect_gimp_major_version_from_command(gimp_path: &Path) -> Option<u8> {
+    // Generic install paths like /usr/bin/gimp do not encode the major version,
+    // so use `--version` when the path itself is ambiguous.
+    let output = Command::new(gimp_path).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    parse_gimp_major_version(&format!("{stdout}\n{stderr}"))
+}
+
+fn parse_gimp_major_version(version_output: &str) -> Option<u8> {
+    version_output
+        .split(|ch: char| !ch.is_ascii_digit())
+        .find_map(|chunk| {
+            if chunk.is_empty() {
+                None
+            } else {
+                chunk.parse::<u8>().ok()
+            }
+        })
 }
 
 fn marker_matches_current_layout(
@@ -452,8 +498,8 @@ fn now_unix_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_gimp_plugin_runtime_prepared, gimp_plugin_runtime_item, provision_marker_path,
-        validate_supported_gimp, GimpPluginRuntimePrepareOutcome,
+        ensure_gimp_plugin_runtime_prepared, gimp_plugin_runtime_item, parse_gimp_major_version,
+        provision_marker_path, validate_supported_gimp, GimpPluginRuntimePrepareOutcome,
     };
     use smolpc_assistant_types::SetupItemStateDto;
     use std::path::{Path, PathBuf};
@@ -555,6 +601,55 @@ mod tests {
         let error = validate_supported_gimp(Path::new("/Applications/GIMP 2/bin/gimp-2.10"))
             .expect_err("gimp 2 should be rejected");
         assert!(error.contains("GIMP 3.x"));
+    }
+
+    #[test]
+    fn parse_gimp_major_version_reads_cli_output() {
+        let major = parse_gimp_major_version("GNU Image Manipulation Program version 3.0.4");
+        assert_eq!(major, Some(3));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_supported_gimp_checks_ambiguous_paths_via_version_command() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().expect("temp dir");
+        let script_path = temp.path().join("gimp");
+        std::fs::write(
+            &script_path,
+            "#!/bin/sh\necho 'GNU Image Manipulation Program version 2.10.38'\n",
+        )
+        .expect("write fake gimp");
+        let mut permissions = std::fs::metadata(&script_path)
+            .expect("script metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script_path, permissions).expect("chmod fake gimp");
+
+        let error = validate_supported_gimp(&script_path).expect_err("gimp 2 should be rejected");
+        assert!(error.contains("GIMP 2.x"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_supported_gimp_accepts_gimp_3_from_version_command() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().expect("temp dir");
+        let script_path = temp.path().join("gimp");
+        std::fs::write(
+            &script_path,
+            "#!/bin/sh\necho 'GNU Image Manipulation Program version 3.0.2'\n",
+        )
+        .expect("write fake gimp");
+        let mut permissions = std::fs::metadata(&script_path)
+            .expect("script metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script_path, permissions).expect("chmod fake gimp");
+
+        validate_supported_gimp(&script_path).expect("gimp 3 should be accepted");
     }
 
     #[test]

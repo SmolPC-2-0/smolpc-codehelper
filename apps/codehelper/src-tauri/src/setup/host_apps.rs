@@ -267,10 +267,17 @@ pub fn detect_gimp_with_policy(
     allow_system_lookup: bool,
 ) -> HostAppDetection {
     let cached = cached.map(Path::to_path_buf);
-    let spec = all_specs()
+    let Some(spec) = all_specs()
         .into_iter()
         .find(|candidate| candidate.id == SETUP_ITEM_HOST_GIMP)
-        .expect("gimp spec");
+    else {
+        return HostAppDetection {
+            id: SETUP_ITEM_HOST_GIMP,
+            label: "GIMP",
+            path: None,
+            detail: Some("GIMP host detection is unavailable in this build.".to_string()),
+        };
+    };
     detect_host_app_with_policy(&spec, cached.as_ref(), allow_system_lookup)
 }
 

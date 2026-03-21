@@ -59,7 +59,7 @@ fn prepare_setup_inner(
         state.allow_system_host_detection(),
     );
     if let Some(gimp_path) = gimp_detection.path.as_deref() {
-        let _ = ensure_gimp_plugin_runtime_prepared(
+        let _outcome = ensure_gimp_plugin_runtime_prepared(
             state.resource_dir(),
             state.app_local_data_dir(),
             gimp_path,
