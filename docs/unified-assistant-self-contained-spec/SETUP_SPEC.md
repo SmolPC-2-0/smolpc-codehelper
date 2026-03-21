@@ -1,7 +1,7 @@
 # Setup Subsystem Spec
 
 **Last Updated:** 2026-03-21
-**Status:** Phase 2 foundation contract merged; Phase 3 consumes prepared bundled Python; Phase 4 Blender provisioning has landed; Phase 5 GIMP provisioning scope is merged without changing setup command names; implementation is next
+**Status:** Phase 2 foundation contract merged; Phase 3 consumes prepared bundled Python; Phase 4 Blender provisioning has landed; Phase 5 GIMP provisioning has landed without changing setup command names; Phase 6 release packaging and validation is next
 
 ## 1. Purpose
 
@@ -46,7 +46,7 @@ Phase 4 closeout status:
 - `setup_prepare()` now provisions and enables the Blender addon through Blender CLI background execution
 - `setup_prepare()` still does not launch the interactive Blender UI
 
-Phase 5 locked next step:
+Phase 5 closeout status:
 
 - setup gains app-level GIMP plugin/server provisioning and repair visibility
 - `setup_prepare()` may provision and repair bundled GIMP plugin/server assets
@@ -98,7 +98,7 @@ Phase 4 live extension:
 - it may update app-local provision markers under `setup/state/`
 - it still must not launch the interactive Blender UI
 
-Phase 5 locked extension:
+Phase 5 live extension:
 
 - `setup_prepare()` may provision and repair bundled GIMP plugin/server assets
 - it may update app-local provision markers under `setup/state/`
@@ -142,6 +142,10 @@ Current live setup item ids:
 Phase 4 added:
 
 - `blender_addon`
+
+Phase 5 added:
+
+- `gimp_plugin_runtime`
 
 Expected meanings:
 
@@ -229,6 +233,6 @@ The single-mainline workflow adopted after Phase 2 does not change the
 `setup_status` or `setup_prepare` wire contract. It only changes where the
 future docs PRs land.
 
-The next official branch after Phase 4 closeout is:
+The next official branch after Phase 5 closeout is:
 
-- `codex/unified-self-contained-gimp-docs`
+- `codex/unified-self-contained-release-docs`

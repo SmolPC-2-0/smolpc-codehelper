@@ -1,7 +1,7 @@
 # MCP And Provider Integration For The Self-Contained Line
 
 **Last Updated:** 2026-03-21
-**Status:** Integration ownership spec with Phase 2 setup foundation, Phase 3 LibreOffice runtime ownership landed, Phase 4 Blender provisioning landed, and Phase 5 GIMP provisioning scope merged; implementation is next
+**Status:** Integration ownership spec with Phase 2 setup foundation, Phase 3 LibreOffice runtime ownership landed, Phase 4 Blender provisioning landed, and Phase 5 GIMP provisioning/runtime ownership landed; Phase 6 release packaging and validation is next
 
 ## 1. Scope
 
@@ -173,6 +173,10 @@ Phase 4 added one new setup item id:
 
 - `blender_addon`
 
+Phase 5 added one new setup item id:
+
+- `gimp_plugin_runtime`
+
 Those item ids now define the live `setup_status` wire contract.
 
 The Phase 3 workflow change does not alter those item ids or the
@@ -215,8 +219,8 @@ Expected provisioners:
 - `GimpPluginProvisioner`
 
 Phase 2 establishes the shared provisioning foundation. Phase 4 ships the
-Blender addon provisioner path. Phase 5 is the next locked implementation slice
-for GIMP provisioning and runtime ownership.
+Blender addon provisioner path. Phase 5 now ships the GIMP provisioning and
+runtime-ownership slice on the unified mainline.
 
 ## 8. Runtime Supervision Rules
 
@@ -239,8 +243,9 @@ Expected supervisors:
 Phase 2 introduces the shared setup state and packaged-resource validation
 needed before those provider-specific supervisors take ownership in later
 phases. Phase 3 is the first phase where one of those supervisors becomes a
-real packaged-mode runtime dependency, and Phase 4 extends that ownership with
-live Blender addon provisioning and mode-driven Blender launch behavior.
+real packaged-mode runtime dependency, Phase 4 extends that ownership with live
+Blender addon provisioning and mode-driven Blender launch behavior, and Phase 5
+does the same for the bundled GIMP runtime bridge.
 
 ## 9. Non-Goals In This Line
 

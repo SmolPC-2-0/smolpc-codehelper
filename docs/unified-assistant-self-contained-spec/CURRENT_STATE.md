@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-21
-**Status:** Demo line frozen; Phase 4 complete; Phase 5 GIMP preflight is merged on the single self-contained mainline; implementation is next
+**Status:** Demo line frozen; Phase 5 GIMP self-contained provisioning is complete on the single self-contained mainline; Phase 6 release packaging and validation is next
 
 ## 1. Branch State
 
@@ -20,13 +20,15 @@
 | `docs/unified-assistant-self-contained-spec` | Frozen archive/reference snapshot                     |
 
 Current implementation mainline after Phase 4 Blender closeout and Phase 5 GIMP
-preflight merge:
+closeout:
 
 - `dev/unified-assistant-self-contained` includes:
   - Phase 4 Blender docs preflight
   - Phase 4 Blender implementation
   - Phase 4 closeout docs
   - Phase 5 GIMP docs preflight
+  - Phase 5 GIMP implementation
+  - Phase 5 closeout docs
   - earlier self-contained history:
     - Phase 3 closeout docs
     - Phase 3 workflow migration docs
@@ -119,12 +121,12 @@ The self-contained delivery line must ship:
 
 ## 5. Source Ownership Summary
 
-| Mode family | Current source status                                             | Self-contained ownership direction                                 |
-| ----------- | ----------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Code        | Already owned in `apps/codehelper`                                | Keep                                                               |
-| LibreOffice | Runtime scripts already imported into unified resources           | Bundled Python now owns packaged Writer/Slides runtime path        |
-| Blender     | Bridge app-owned, addon snapshot bundled and provisioned by setup | Keep bundled addon provisioning and mode-driven launch flow        |
-| GIMP        | Unified provider exists, but runtime/plugin ownership is external | Vendor pinned upstream `maorcc/gimp-mcp` snapshot and provision it |
+| Mode family | Current source status                                             | Self-contained ownership direction                                         |
+| ----------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Code        | Already owned in `apps/codehelper`                                | Keep                                                                       |
+| LibreOffice | Runtime scripts already imported into unified resources           | Bundled Python now owns packaged Writer/Slides runtime path                |
+| Blender     | Bridge app-owned, addon snapshot bundled and provisioned by setup | Keep bundled addon provisioning and mode-driven launch flow                |
+| GIMP        | Vendored upstream snapshot is now bundled and provider-owned      | Keep bundled provisioning, bridge supervision, and mode-driven launch flow |
 
 ## 6. Phase Status
 
@@ -234,38 +236,29 @@ Phase 4 intentionally did not land:
 - GIMP host-app launch orchestration
 - Calc activation
 
-## 10. Phase 5 Readiness And Next Official Branches
+## 10. Phase 5 Closeout And Next Official Branches
 
-Phase 5 docs preflight is merged into
-`dev/unified-assistant-self-contained`.
+Phase 5 is now merged into `dev/unified-assistant-self-contained`.
 
-The next official implementation branch is:
+Phase 5 landed:
 
-- `codex/unified-self-contained-gimp`
+- vendored upstream `maorcc/gimp-mcp` snapshot bundled under `apps/codehelper/src-tauri/resources/gimp/`
+- tracked provenance row updated with the exact pin, import map, and local modifications
+- setup status now includes the app-level `gimp_plugin_runtime` readiness item
+- `setup_prepare()` now provisions and repairs bundled GIMP assets without launching the interactive GIMP UI
+- GIMP mode now validates GIMP 3.x installs, provisions assets on demand, launches GIMP only when needed, and supervises the bundled loopback bridge on `127.0.0.1:10008`
+- existing Blender, LibreOffice, Code, and Calc behavior remained unchanged
 
-The required closeout docs branch after implementation is:
+The next official docs branch is:
 
-- `codex/unified-self-contained-gimp-status-docs`
-
-Phase 5 implementation focus:
-
-- record the exact vendored `maorcc/gimp-mcp` pin and license note before
-  payload import
-- lock the file import map for the bundled GIMP plugin/server snapshot
-- keep bundled GIMP plugin/server ownership and provisioning boundaries aligned
-  to the merged preflight docs
-- keep auto-launch and runtime-supervision expectations explicit for GIMP mode
-- keep GIMP transport pinned to `127.0.0.1:10008`
-- keep setup as one app-level repair surface without a GIMP-specific setup
-  wizard
-- keep Blender, LibreOffice, Code, and Calc behavior unchanged
+- `codex/unified-self-contained-release-docs`
 
 ## 11. Known Risks
 
-| Risk                   | Why it matters                                                                                                   |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| GIMP ownership gap     | GIMP is the furthest from self-contained because the current unified line does not own the plugin/server runtime |
-| Third-party provenance | Bundling external runtime assets without exact pin/license tracking would create release risk                    |
-| Windows packaging size | Bundled model plus Python/runtime assets will increase installer size materially                                 |
-| Host-app variance      | Blender and LibreOffice install locations vary across user machines                                              |
-| Calc expectation drift | Users may assume all LibreOffice modes are live; docs and UI must keep Calc explicitly deferred                  |
+| Risk                      | Why it matters                                                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| GIMP license review       | The vendored `maorcc/gimp-mcp` payload is GPL-3.0 and still needs release-distribution review before public packaging     |
+| Windows packaging size    | Bundled model plus Python/runtime assets will increase installer size materially                                          |
+| Host-app variance         | GIMP, Blender, and LibreOffice install/profile paths still vary across user machines and clean-machine validation is next |
+| Calc expectation drift    | Users may assume all LibreOffice modes are live; docs and UI must keep Calc explicitly deferred                           |
+| Phase 6 packaging surface | The installer, first-run repair flow, and upgrade path remain the largest remaining finish-line risk                      |

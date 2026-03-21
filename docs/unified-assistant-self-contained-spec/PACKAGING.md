@@ -1,7 +1,7 @@
 # Packaging And Distribution For The Self-Contained Line
 
 **Last Updated:** 2026-03-21
-**Status:** Packaging target with Phase 2 foundation contract, Phase 3 LibreOffice bundled-Python ownership landed, Phase 4 Blender addon delivery landed, and Phase 5 GIMP packaging scope merged; implementation is next
+**Status:** Packaging target with Phase 2 foundation contract, Phase 3 LibreOffice bundled-Python ownership landed, Phase 4 Blender addon delivery landed, and Phase 5 GIMP delivery landed; Phase 6 release packaging and validation is next
 
 ## 1. Packaging Direction
 
@@ -105,7 +105,7 @@ Phase 4 provisioning rule:
 
 ## 4.3 Phase 5 GIMP Plugin/Runtime Delivery
 
-Phase 5 preflight locks the GIMP delivery shape to:
+Phase 5 locks and lands the GIMP delivery shape:
 
 - source snapshot from:
   - upstream `maorcc/gimp-mcp` pinned to an exact commit/tag before import
@@ -154,7 +154,7 @@ Phase 4 live state:
 - already running Blender sessions are not forcibly restarted
 - setup prepare may repair/provision the addon, but still must not launch interactive Blender UI
 
-Phase 5 next state:
+Phase 5 live state:
 
 - GIMP plugin/server provisioning becomes live
 - GIMP mode may auto-launch GIMP and the bundled GIMP MCP runtime on first use when needed

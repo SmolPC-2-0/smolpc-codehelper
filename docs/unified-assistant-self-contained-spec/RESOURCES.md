@@ -19,13 +19,13 @@ that the linked content has not changed since then.
 
 ## Self-Contained Delivery Sources
 
-| Resource                    | Source                                                                                                                                                    | Why it matters for the self-contained line                                                                                                 |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Blender addon payload       | `apps/blender-assistant/blender_addon/blender_helper_http.py` and companion addon files                                                                   | This in-repo source is now repackaged under unified app resources for automatic Blender addon provisioning and repair.                     |
-| LibreOffice runtime scripts | `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/`                                                                                             | Writer and Slides already depend on these bundled scripts. The self-contained line uses them as the baseline for removing external Python. |
-| GIMP MCP/plugin runtime     | Upstream `maorcc/gimp-mcp`; observed default branch `main` at `fb3c6c6a6aa9b4e260a52d277ea3e7bd8330133c` on 2026-03-21; exact vendored pin still required | The self-contained line needs a vendored, provenance-tracked import before GIMP can be provisioned and launched automatically.             |
-| Bundled Python packaging    | `uv`, `uv tool`, `uv pip`, and packaged wheel/runtime inputs                                                                                              | This is the planned app-private Python foundation for LibreOffice first, and likely for GIMP-side runtime ownership later.                 |
-| Bundled model packaging     | Engine model registry plus packaged resource layout under `apps/codehelper/src-tauri/resources/`                                                          | The self-contained finish line requires shipping a default model payload instead of expecting external model installation.                 |
+| Resource                    | Source                                                                                                                | Why it matters for the self-contained line                                                                                                    |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Blender addon payload       | `apps/blender-assistant/blender_addon/blender_helper_http.py` and companion addon files                               | This in-repo source is now repackaged under unified app resources for automatic Blender addon provisioning and repair.                        |
+| LibreOffice runtime scripts | `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/`                                                         | Writer and Slides already depend on these bundled scripts. The self-contained line uses them as the baseline for removing external Python.    |
+| GIMP MCP/plugin runtime     | Upstream `maorcc/gimp-mcp` pinned at `fb3c6c6a6aa9b4e260a52d277ea3e7bd8330133c`, now vendored under unified resources | The self-contained line now owns the bundled GIMP payload, bridge glue, and provenance tracking needed for automatic provisioning and launch. |
+| Bundled Python packaging    | `uv`, `uv tool`, `uv pip`, and packaged wheel/runtime inputs                                                          | This is the planned app-private Python foundation for LibreOffice first, and likely for GIMP-side runtime ownership later.                    |
+| Bundled model packaging     | Engine model registry plus packaged resource layout under `apps/codehelper/src-tauri/resources/`                      | The self-contained finish line requires shipping a default model payload instead of expecting external model installation.                    |
 
 Phase 2 adds the first tracked packaged-resource manifests for:
 
@@ -54,16 +54,16 @@ Phase 4 implementation repacks that snapshot into:
 
 - `apps/codehelper/src-tauri/resources/blender/addon/blender_helper_http.py`
 
-Phase 5 preflight locks the GIMP runtime source to:
+Phase 5 closeout locks and lands the GIMP runtime source at:
 
 - upstream `maorcc/gimp-mcp`
 - current observed upstream default branch as of 2026-03-21:
   - `main`
 - current observed upstream HEAD as of 2026-03-21:
   - `fb3c6c6a6aa9b4e260a52d277ea3e7bd8330133c`
-- exact import pin still must be reverified and recorded before vendoring
+- that exact pin is now recorded in `THIRD_PARTY_PROVENANCE.md` and bundled on the unified mainline
 
-Phase 5 implementation will vendor that snapshot under:
+Phase 5 implementation vendors that snapshot under:
 
 - `apps/codehelper/src-tauri/resources/gimp/`
 

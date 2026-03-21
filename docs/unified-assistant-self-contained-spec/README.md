@@ -4,7 +4,7 @@
 > and document map for the self-contained delivery line.
 
 **Last Updated:** 2026-03-21
-**Status:** Single-mainline self-contained workflow active; Phase 4 Blender provisioning complete; Phase 5 GIMP preflight merged; implementation is next
+**Status:** Single-mainline self-contained workflow active; Phase 5 GIMP self-contained provisioning complete; Phase 6 release packaging and validation is next
 
 ## Project Summary
 
@@ -52,11 +52,9 @@ As of 2026-03-21:
 - `docs/unified-assistant-self-contained-spec` remains a frozen archive at
   `06d32a5219b69d8182079843c79661aca98ad220` and is not kept in sync
 - Phase 4 Blender closeout docs are merged on the self-contained mainline
-- Phase 5 GIMP preflight docs are merged on the self-contained mainline
-- the next official implementation branch is:
-  - `codex/unified-self-contained-gimp`
-- the required closeout branch after Phase 5 implementation is:
-  - `codex/unified-self-contained-gimp-status-docs`
+- Phase 5 GIMP preflight docs, implementation, and closeout docs are merged on the self-contained mainline
+- the next official docs branch is:
+  - `codex/unified-self-contained-release-docs`
 
 ## Freeze Tags
 
@@ -172,23 +170,18 @@ self-contained roadmap phases.
 
 ## Current Phase
 
-The current mainline-ready phase is Phase 5 GIMP self-contained provisioning.
-Docs preflight is merged; implementation is next:
+The current mainline-ready phase is Phase 6 Release Packaging And Validation.
+Phase 5 is now complete on `dev/unified-assistant-self-contained`:
 
-- open the implementation branch from `origin/dev/unified-assistant-self-contained`:
-  - `codex/unified-self-contained-gimp`
-- record the exact vendored `maorcc/gimp-mcp` pin, license note, and import map
-  in [THIRD_PARTY_PROVENANCE.md](THIRD_PARTY_PROVENANCE.md) before payload
-  files are imported
-- keep bundled GIMP plugin/server provisioning and launch ownership scope
-  aligned to the locked Phase 5 docs
-- keep GIMP transport anchored to `127.0.0.1:10008`
-- keep the setup surface app-level with one `Prepare` action and no mode-specific
-  setup wizard
-- keep Blender, LibreOffice, Code, and Calc behavior unchanged in Phase 5
-- keep Calc scaffold-only
-- after implementation merges, open the closeout docs branch:
-  - `codex/unified-self-contained-gimp-status-docs`
+- the vendored `maorcc/gimp-mcp` snapshot is bundled under `apps/codehelper/src-tauri/resources/gimp/`
+- setup now reports `gimp_plugin_runtime` separately from `host_gimp`
+- `setup_prepare()` now provisions and repairs bundled GIMP assets without launching the interactive GIMP UI
+- GIMP mode now validates the detected host version, provisions missing assets on demand, launches GIMP only when needed, and supervises the bundled bridge on `127.0.0.1:10008`
+- Blender, LibreOffice, Code, and Calc behavior remained unchanged during Phase 5
+
+The next official docs branch is:
+
+- `codex/unified-self-contained-release-docs`
 
 ## Rule Of Thumb
 
