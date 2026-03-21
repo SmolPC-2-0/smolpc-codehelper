@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-17
-**Status:** Demo line frozen; Phase 3 complete; Phase 4 Blender docs preflight is next on the single self-contained mainline
+**Status:** Demo line frozen; Phase 4 complete; Phase 5 GIMP docs preflight is next on the single self-contained mainline
 
 ## 1. Branch State
 
@@ -19,15 +19,18 @@
 | `dev/unified-assistant-self-contained`       | Sole active implementation and documentation mainline |
 | `docs/unified-assistant-self-contained-spec` | Frozen archive/reference snapshot                     |
 
-Current implementation head after Phase 3 LibreOffice runtime ownership:
+Current implementation head after Phase 4 Blender provisioning:
 
 - `dev/unified-assistant-self-contained` includes:
-  - Phase 3 workflow migration docs
-  - Phase 3 LibreOffice implementation
-  - Phase 3 closeout docs
+  - Phase 4 Blender docs preflight
+  - Phase 4 Blender implementation
+  - Phase 4 closeout docs
   - current implementation head:
-    - `bfc4d6c2c55f29b60bad0a574a216ba2bb38ae6b`
+    - `a6269b26537df522b69f8b60d43f9c9464e19ae9`
   - earlier self-contained history:
+    - Phase 3 closeout docs
+    - Phase 3 workflow migration docs
+    - Phase 3 LibreOffice implementation
     - baseline cleanup sync
     - Phase 2 docs sync
     - Phase 2 foundation implementation
@@ -119,7 +122,7 @@ The self-contained delivery line must ship:
 | ----------- | ----------------------------------------------------------------- | ----------------------------------------------------------- |
 | Code        | Already owned in `apps/codehelper`                                | Keep                                                        |
 | LibreOffice | Runtime scripts already imported into unified resources           | Bundled Python now owns packaged Writer/Slides runtime path |
-| Blender     | Bridge already owned by unified app; addon still external         | Bundle and provision addon from repo source                 |
+| Blender     | Bridge app-owned, addon snapshot bundled and provisioned by setup | Keep bundled addon provisioning and mode-driven launch flow |
 | GIMP        | Unified provider exists, but runtime/plugin ownership is external | Vendor pinned upstream `gimp-mcp` snapshot and provision it |
 
 ## 6. Phase Status
@@ -211,23 +214,41 @@ Phase 3 intentionally did not land:
 - Calc activation
 - settings UI for manual LibreOffice path overrides
 
-## 9. Next Official Branches
+## 9. Phase 4 Scope
+
+Phase 4 is now merged into `dev/unified-assistant-self-contained`.
+
+Phase 4 landed:
+
+- bundled Blender addon snapshot under unified resources
+- setup status now includes the app-level `blender_addon` readiness item
+- `setup_prepare()` now provisions and enables the addon through Blender CLI background execution
+- setup keeps the single app-level `Prepare` action and still does not launch interactive Blender UI
+- Blender mode now auto-provisions the addon when missing, auto-launches Blender only when no matching process is running, and never kills/restarts running Blender instances
+- provider status now reports when a currently running Blender session may need one reopen for the addon to load
+
+Phase 4 intentionally did not land:
+
+- GIMP plugin/server provisioning
+- GIMP host-app launch orchestration
+- Calc activation
+
+## 10. Next Official Branches
 
 The next required branch sequence is:
 
-1. `codex/unified-self-contained-blender-docs`
-2. `codex/unified-self-contained-blender`
-3. `codex/unified-self-contained-blender-status-docs`
+1. `codex/unified-self-contained-gimp-docs`
+2. `codex/unified-self-contained-gimp`
+3. `codex/unified-self-contained-gimp-status-docs`
 
-Phase 4 preflight focus:
+Phase 5 preflight focus:
 
-- bundle the Blender addon under unified resources
-- provision and enable the addon through Blender CLI background execution
-- expose Blender addon readiness in setup state
-- auto-launch Blender on first Blender-mode use when Blender is installed
-- keep GIMP, LibreOffice, Code, and Calc behavior unchanged
+- lock provenance and license notes for the pinned `gimp-mcp` snapshot before import
+- lock bundled GIMP plugin/server ownership and provisioning boundaries
+- lock auto-launch/runtime-supervision expectations for GIMP mode
+- keep Blender, LibreOffice, Code, and Calc behavior unchanged
 
-## 10. Known Risks
+## 11. Known Risks
 
 | Risk                   | Why it matters                                                                                                   |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------- |

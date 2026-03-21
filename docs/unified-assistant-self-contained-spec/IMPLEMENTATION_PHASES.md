@@ -1,7 +1,7 @@
 # Self-Contained Delivery Phases
 
 **Last Updated:** 2026-03-17
-**Status:** Branch cut, cleanup, foundation, and Phase 3 complete; Phase 4 Blender docs preflight next
+**Status:** Branch cut, cleanup, foundation, Phase 4 complete; Phase 5 GIMP docs preflight next
 
 ## Phase 0: Demo Freeze And Branch Cut
 
@@ -178,7 +178,7 @@ The next official branch after Phase 3 closeout docs is:
 
 ## Phase 4: Blender Self-Contained Provisioning
 
-**Status:** next
+**Status:** complete
 
 **Branches**
 
@@ -218,7 +218,24 @@ The next official branch after Phase 3 closeout docs is:
 - Blender mode works on a machine with Blender installed but no addon manually installed
 - no manual addon installation or enable step remains
 
+**Closeout status**
+
+Complete on the self-contained implementation line:
+
+- Blender addon snapshot is now bundled at:
+  - `apps/codehelper/src-tauri/resources/blender/addon/blender_helper_http.py`
+- setup status now includes `blender_addon`
+- `setup_prepare()` now provisions and enables the addon through Blender CLI background execution
+- setup still does not launch the interactive Blender UI
+- Blender mode now provisions and enables the addon on demand, launches Blender only when needed, and preserves already-running Blender sessions
+
+The next official branch after Phase 4 closeout docs is:
+
+- `codex/unified-self-contained-gimp-docs`
+
 ## Phase 5: GIMP Self-Contained Provisioning
+
+**Status:** next
 
 **Branches**
 

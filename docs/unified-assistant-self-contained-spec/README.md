@@ -4,7 +4,7 @@
 > and document map for the self-contained delivery line.
 
 **Last Updated:** 2026-03-17
-**Status:** Single-mainline self-contained workflow active; Phase 4 Blender docs preflight next
+**Status:** Single-mainline self-contained workflow active; Phase 4 Blender provisioning complete; Phase 5 GIMP docs preflight next
 
 ## Project Summary
 
@@ -157,13 +157,13 @@ self-contained roadmap phases.
 
 ## Current Phase
 
-The current active docs-first phase is Phase 4 Blender self-contained
-provisioning preflight:
+The current active docs-first phase is Phase 5 GIMP self-contained provisioning
+preflight:
 
 - keep the single-mainline workflow explicit on `dev/unified-assistant-self-contained`
-- copy the Blender addon snapshot into unified resources
-- lock Blender addon provisioning and enablement through Blender CLI background execution
-- keep GIMP provisioning deferred to the following phase
+- lock `gimp-mcp` source pin and license/provenance notes before import
+- lock bundled GIMP plugin/server provisioning and launch ownership scope
+- keep Blender, LibreOffice, Code, and Calc behavior unchanged in this docs preflight
 - keep Calc scaffold-only
 
 ## Rule Of Thumb

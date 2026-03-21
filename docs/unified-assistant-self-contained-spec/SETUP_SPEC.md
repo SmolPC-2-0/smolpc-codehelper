@@ -1,7 +1,7 @@
 # Setup Subsystem Spec
 
 **Last Updated:** 2026-03-17
-**Status:** Phase 2 foundation contract merged; Phase 3 consumes prepared bundled Python; Phase 4 Blender provisioning preflight is locked without changing setup command names
+**Status:** Phase 2 foundation contract merged; Phase 3 consumes prepared bundled Python; Phase 4 Blender provisioning has landed without changing setup command names
 
 ## 1. Purpose
 
@@ -40,11 +40,11 @@ Phase 3 follow-on status:
 - setup remains app-level and foundation-only
 - `setup_status` and `setup_prepare` remain wire-compatible with the Phase 2 contract
 
-Phase 4 locked next step:
+Phase 4 closeout status:
 
-- setup gains one additional status item for Blender addon readiness
-- `setup_prepare()` may provision and enable the Blender addon through Blender CLI background execution
-- `setup_prepare()` still must not launch the interactive Blender UI
+- setup now includes one additional status item for Blender addon readiness
+- `setup_prepare()` now provisions and enables the Blender addon through Blender CLI background execution
+- `setup_prepare()` still does not launch the interactive Blender UI
 
 Phase 2 setup work does not include:
 
@@ -85,7 +85,7 @@ returns the updated app-level setup snapshot.
 - provision addons or plugins
 - replace existing mode-specific commands
 
-Phase 4 locked extension:
+Phase 4 live extension:
 
 - `setup_prepare()` may provision and enable the Blender addon
 - it does so through Blender CLI background execution
@@ -127,7 +127,7 @@ Current live setup item ids:
 - `host_blender`
 - `host_libreoffice`
 
-Phase 4 adds:
+Phase 4 added:
 
 - `blender_addon`
 
@@ -217,6 +217,6 @@ The single-mainline workflow adopted after Phase 2 does not change the
 `setup_status` or `setup_prepare` wire contract. It only changes where the
 future docs PRs land.
 
-The next official branch after Phase 3 closeout is:
+The next official branch after Phase 4 closeout is:
 
-- `codex/unified-self-contained-blender-docs`
+- `codex/unified-self-contained-gimp-docs`

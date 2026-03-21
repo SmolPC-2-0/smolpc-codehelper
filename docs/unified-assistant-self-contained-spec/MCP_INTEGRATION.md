@@ -1,7 +1,7 @@
 # MCP And Provider Integration For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Integration ownership spec with Phase 2 setup foundation, Phase 3 LibreOffice runtime ownership landed, and Phase 4 Blender provisioning preflight locked
+**Status:** Integration ownership spec with Phase 2 setup foundation, Phase 3 LibreOffice runtime ownership landed, and Phase 4 Blender provisioning landed
 
 ## 1. Scope
 
@@ -166,7 +166,7 @@ Phase 2 setup item ids are locked to:
 - `host_blender`
 - `host_libreoffice`
 
-Phase 4 adds one new setup item id:
+Phase 4 added one new setup item id:
 
 - `blender_addon`
 
@@ -191,7 +191,7 @@ The Phase 3 workflow change does not alter those item ids or the
 - launch GIMP, Blender, or LibreOffice
 - replace `mode_refresh_tools`
 
-Phase 4 locked extension:
+Phase 4 live extension:
 
 - `setup_prepare()` may provision and enable the Blender addon through Blender CLI background execution when Blender is installed
 - `setup_prepare()` still must not launch the interactive Blender UI
@@ -211,8 +211,8 @@ Expected provisioners:
 - `BlenderAddonProvisioner`
 - `GimpPluginProvisioner`
 
-Phase 2 only establishes the shared provisioning foundation. It does not ship
-mode-specific provisioners yet.
+Phase 2 establishes the shared provisioning foundation. Phase 4 now ships the
+Blender addon provisioner path while keeping GIMP provisioning for Phase 5.
 
 ## 8. Runtime Supervision Rules
 
@@ -235,7 +235,8 @@ Expected supervisors:
 Phase 2 introduces the shared setup state and packaged-resource validation
 needed before those provider-specific supervisors take ownership in later
 phases. Phase 3 is the first phase where one of those supervisors becomes a
-real packaged-mode runtime dependency, and that LibreOffice slice is now merged.
+real packaged-mode runtime dependency, and Phase 4 extends that ownership with
+live Blender addon provisioning and mode-driven Blender launch behavior.
 
 ## 9. Non-Goals In This Line
 
