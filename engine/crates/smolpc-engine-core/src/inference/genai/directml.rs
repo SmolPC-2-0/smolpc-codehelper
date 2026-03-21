@@ -643,6 +643,8 @@ fn generate_stream_blocking(
         time_to_first_token_ms: first_token_time_ms,
         tokens_per_second,
         total_time_ms,
+        truncated: false,
+        truncation_reason: None,
     })
 }
 
