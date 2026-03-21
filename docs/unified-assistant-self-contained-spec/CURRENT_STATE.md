@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-21
-**Status:** Demo line frozen; Phase 5 GIMP self-contained provisioning is complete on the single self-contained mainline; Phase 6 release packaging and validation is next
+**Status:** Demo line frozen; Phase 5 GIMP self-contained provisioning is complete on the single self-contained mainline; Windows source-based functional validation is the active gate before engine reconciliation or broader Phase 6 packaging work
 
 ## 1. Branch State
 
@@ -236,7 +236,7 @@ Phase 4 intentionally did not land:
 - GIMP host-app launch orchestration
 - Calc activation
 
-## 10. Phase 5 Closeout And Next Official Branches
+## 10. Phase 5 Closeout And Current Validation Gate
 
 Phase 5 is now merged into `dev/unified-assistant-self-contained`.
 
@@ -249,7 +249,21 @@ Phase 5 landed:
 - GIMP mode now validates GIMP 3.x installs, provisions assets on demand, launches GIMP only when needed, and supervises the bundled loopback bridge on `127.0.0.1:10008`
 - existing Blender, LibreOffice, Code, and Calc behavior remained unchanged
 
-The next official docs branch is:
+Before engine/platform reconciliation or packaging work, the current mainline
+needs a clean source-based Windows functional validation pass.
+
+Active validation branches:
+
+- docs: `codex/unified-self-contained-functional-test-docs`
+- implementation: `codex/unified-self-contained-functional-test-prep`
+- closeout docs: `codex/unified-self-contained-functional-test-status-docs`
+
+Tester handoff docs for this gate:
+
+- [WINDOWS_SOURCE_TESTING.md](WINDOWS_SOURCE_TESTING.md)
+- [WINDOWS_SOURCE_TEST_RESULTS_TEMPLATE.md](WINDOWS_SOURCE_TEST_RESULTS_TEMPLATE.md)
+
+After this validation gate closes out, the next official docs branch returns to:
 
 - `codex/unified-self-contained-release-docs`
 
@@ -262,6 +276,12 @@ The next official docs branch is:
 | Host-app variance         | GIMP, Blender, and LibreOffice install/profile paths still vary across user machines and clean-machine validation is next           |
 | Calc expectation drift    | Users may assume all LibreOffice modes are live; docs and UI must keep Calc explicitly deferred                                     |
 | Phase 6 packaging surface | The installer, first-run repair flow, and upgrade path remain the largest remaining finish-line risk                                |
+
+Current validation note:
+
+- before broader Windows testing, source-based tester handoff still needs to
+  prove that another developer can follow the runbook on
+  `dev/unified-assistant-self-contained` without relying on tribal knowledge
 
 Tracking note for the GPL-3.0 release gate:
 
