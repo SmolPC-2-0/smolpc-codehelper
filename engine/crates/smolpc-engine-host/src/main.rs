@@ -404,13 +404,13 @@ fn env_default_model_id() -> Option<String> {
 fn select_best_model_for_ram(
     models: &[smolpc_engine_core::ModelDefinition],
     total_ram_gb: f64,
-) -> Option<String> {
+) -> Option<(String, f32)> {
     let mut eligible: Vec<_> = models
         .iter()
         .filter(|m| (m.min_ram_gb as f64) <= total_ram_gb)
         .collect();
     eligible.sort_by(|a, b| b.min_ram_gb.partial_cmp(&a.min_ram_gb).unwrap_or(CmpOrdering::Equal));
-    eligible.first().map(|m| m.id.clone())
+    eligible.first().map(|m| (m.id.clone(), m.min_ram_gb))
 }
 
 fn built_in_default_model_id() -> Option<String> {
@@ -419,13 +419,15 @@ fn built_in_default_model_id() -> Option<String> {
         .ok()
         .map(|info| info.memory().total_gb());
     if let Some(ram) = total_ram_gb {
-        if let Some(id) = select_best_model_for_ram(&models, ram) {
-            let min = models.iter().find(|m| m.id == id).map(|m| m.min_ram_gb).unwrap_or(0.0);
+        if let Some((id, min)) = select_best_model_for_ram(&models, ram) {
             log::info!(
                 "Auto-selected default model '{id}' (total RAM: {ram:.1}GB, model requires: {min:.1}GB)",
             );
             return Some(id);
         }
+        log::warn!(
+            "No model fits available RAM ({ram:.1}GB) — falling back to smallest registered model",
+        );
     }
     models.into_iter().next().map(|m| m.id)
 }
@@ -4589,34 +4591,53 @@ mod tests {
         assert!(!StartupMode::Auto.requires_directml());
     }
 
-    fn test_models() -> Vec<smolpc_engine_core::ModelDefinition> {
-        ModelRegistry::available_models()
+    fn fixture_models() -> Vec<smolpc_engine_core::ModelDefinition> {
+        vec![
+            smolpc_engine_core::ModelDefinition {
+                id: "small-model".to_string(),
+                name: "Small".to_string(),
+                size: "1.5B".to_string(),
+                disk_size_gb: 0.9,
+                min_ram_gb: 8.0,
+                directory: "small".to_string(),
+                description: "test".to_string(),
+            },
+            smolpc_engine_core::ModelDefinition {
+                id: "large-model".to_string(),
+                name: "Large".to_string(),
+                size: "4B".to_string(),
+                disk_size_gb: 2.5,
+                min_ram_gb: 16.0,
+                directory: "large".to_string(),
+                description: "test".to_string(),
+            },
+        ]
     }
 
     #[test]
-    fn ram_selection_32gb_picks_qwen3() {
-        let models = test_models();
+    fn ram_selection_32gb_picks_largest() {
+        let models = fixture_models();
         let selected = select_best_model_for_ram(&models, 32.0);
-        assert_eq!(selected.as_deref(), Some("qwen3-4b"));
+        assert_eq!(selected, Some(("large-model".to_string(), 16.0)));
     }
 
     #[test]
-    fn ram_selection_16gb_picks_qwen3() {
-        let models = test_models();
+    fn ram_selection_16gb_picks_largest_at_threshold() {
+        let models = fixture_models();
         let selected = select_best_model_for_ram(&models, 16.0);
-        assert_eq!(selected.as_deref(), Some("qwen3-4b"));
+        assert_eq!(selected, Some(("large-model".to_string(), 16.0)));
     }
 
     #[test]
-    fn ram_selection_12gb_picks_qwen25() {
-        let models = test_models();
+    fn ram_selection_12gb_picks_smaller() {
+        let models = fixture_models();
         let selected = select_best_model_for_ram(&models, 12.0);
-        assert_eq!(selected.as_deref(), Some("qwen2.5-1.5b-instruct"));
+        assert_eq!(selected, Some(("small-model".to_string(), 8.0)));
     }
 
     #[test]
-    fn ram_selection_4gb_picks_fallback() {
-        let models = test_models();
+    fn ram_selection_4gb_returns_none() {
+        let models = fixture_models();
         let selected = select_best_model_for_ram(&models, 4.0);
         assert_eq!(selected, None);
     }
