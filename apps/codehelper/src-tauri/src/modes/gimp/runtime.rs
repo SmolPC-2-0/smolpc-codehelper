@@ -90,11 +90,29 @@ impl GimpRuntimeConfig {
 }
 
 fn resolve_python_command(app_local_data_dir: Option<&Path>) -> Result<String, String> {
+    resolve_python_command_with_candidates(
+        app_local_data_dir,
+        cfg!(debug_assertions),
+        development_python_candidates(&development_repo_root()),
+    )
+}
+
+fn resolve_python_command_with_candidates(
+    app_local_data_dir: Option<&Path>,
+    allow_dev_fallback: bool,
+    development_candidates: Vec<PathBuf>,
+) -> Result<String, String> {
     if let Some(command) = resolve_prepared_python_command(app_local_data_dir) {
         return Ok(command);
     }
 
-    if cfg!(debug_assertions) {
+    if allow_dev_fallback {
+        for candidate in development_candidates {
+            if candidate.is_file() {
+                return Ok(candidate.to_string_lossy().to_string());
+            }
+        }
+
         return Ok(DEFAULT_PYTHON_COMMAND.to_string());
     }
 
@@ -102,6 +120,31 @@ fn resolve_python_command(app_local_data_dir: Option<&Path>) -> Result<String, S
         "Bundled Python is not prepared yet. Use setup_prepare() from the setup panel before starting GIMP."
             .to_string(),
     )
+}
+
+fn development_repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("..")
+}
+
+fn development_python_candidates(repo_root: &Path) -> Vec<PathBuf> {
+    let venv_dir = repo_root.join(".venv");
+    let mut candidates = Vec::new();
+
+    #[cfg(windows)]
+    {
+        candidates.push(venv_dir.join("Scripts").join("python.exe"));
+    }
+
+    #[cfg(not(windows))]
+    {
+        candidates.push(venv_dir.join("bin").join("python3"));
+        candidates.push(venv_dir.join("bin").join("python"));
+    }
+
+    candidates
 }
 
 fn resolve_log_dir(app_local_data_dir: Option<&Path>) -> PathBuf {
@@ -119,4 +162,83 @@ fn ensure_log_dir(path: &Path) -> Result<PathBuf, String> {
         .map_err(|error| format!("Unable to create GIMP log directory: {error}"))?;
     std::fs::canonicalize(path)
         .map_err(|error| format!("Unable to canonicalize GIMP log directory: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        development_python_candidates, resolve_python_command_with_candidates,
+        DEFAULT_PYTHON_COMMAND,
+    };
+    use crate::setup::python::prepared_python_root;
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    fn write_file(path: &Path, contents: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent dirs");
+        }
+        std::fs::write(path, contents).expect("write file");
+    }
+
+    fn prepared_python_candidate_path(root: &Path) -> std::path::PathBuf {
+        #[cfg(windows)]
+        {
+            root.join("payload").join("python.exe")
+        }
+
+        #[cfg(not(windows))]
+        {
+            root.join("payload").join("bin").join("python3")
+        }
+    }
+
+    #[test]
+    fn resolve_python_command_prefers_prepared_runtime_over_dev_candidates() {
+        let app_temp = TempDir::new().expect("app temp");
+        let prepared_root =
+            prepared_python_root(Some(app_temp.path())).expect("prepared python root");
+        let prepared_python = prepared_python_candidate_path(&prepared_root);
+        write_file(&prepared_python, "python");
+
+        let repo_temp = TempDir::new().expect("repo temp");
+        let candidates = development_python_candidates(repo_temp.path());
+        let dev_python = candidates.first().expect("dev candidate").clone();
+        write_file(&dev_python, "python");
+
+        let command =
+            resolve_python_command_with_candidates(Some(app_temp.path()), true, candidates)
+                .expect("resolve python command");
+
+        assert_eq!(command, prepared_python.to_string_lossy().to_string());
+    }
+
+    #[test]
+    fn resolve_python_command_prefers_repo_venv_before_path_python() {
+        let repo_temp = TempDir::new().expect("repo temp");
+        let candidates = development_python_candidates(repo_temp.path());
+        let dev_python = candidates.first().expect("dev candidate").clone();
+        write_file(&dev_python, "python");
+
+        let command = resolve_python_command_with_candidates(None, true, candidates)
+            .expect("resolve python command");
+
+        assert_eq!(command, dev_python.to_string_lossy().to_string());
+    }
+
+    #[test]
+    fn resolve_python_command_falls_back_to_path_python_in_debug_mode() {
+        let command = resolve_python_command_with_candidates(None, true, Vec::new())
+            .expect("resolve python command");
+
+        assert_eq!(command, DEFAULT_PYTHON_COMMAND);
+    }
+
+    #[test]
+    fn resolve_python_command_requires_prepared_python_when_dev_fallback_is_disabled() {
+        let error = resolve_python_command_with_candidates(None, false, Vec::new())
+            .expect_err("strict mode should require prepared python");
+
+        assert!(error.contains("Bundled Python is not prepared yet"));
+    }
 }
