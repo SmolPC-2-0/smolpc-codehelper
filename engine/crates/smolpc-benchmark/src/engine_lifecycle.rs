@@ -21,7 +21,11 @@ fn shared_runtime_dir() -> PathBuf {
 }
 
 /// Spawn (or restart) the engine forced to the given backend.
-pub async fn spawn_engine(backend: BenchmarkBackend, port: u16) -> Result<EngineClient> {
+pub async fn spawn_engine(
+    backend: BenchmarkBackend,
+    port: u16,
+    resource_dir: Option<PathBuf>,
+) -> Result<EngineClient> {
     let runtime_dir = shared_runtime_dir();
     let data_dir = runtime_dir.join(HOST_DATA_DIR);
 
@@ -30,7 +34,7 @@ pub async fn spawn_engine(backend: BenchmarkBackend, port: u16) -> Result<Engine
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         shared_runtime_dir: runtime_dir,
         data_dir,
-        resource_dir: None,
+        resource_dir,
         models_dir: None,
         host_binary: None,
         runtime_mode: backend.to_runtime_mode(),

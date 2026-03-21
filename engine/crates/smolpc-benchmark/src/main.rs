@@ -56,6 +56,10 @@ struct Cli {
     #[arg(long, default_value_t = 19432)]
     port: u16,
 
+    /// Resource directory containing libs/ and binaries/ (e.g. installed app dir)
+    #[arg(long)]
+    resource_dir: Option<String>,
+
     /// Print test matrix and exit without running
     #[arg(long)]
     dry_run: bool,
@@ -97,6 +101,8 @@ async fn main() -> Result<()> {
             .unwrap_or("./benchmark-results"),
     );
 
+    let resource_dir = cli.resource_dir.map(PathBuf::from);
+
     let config = BenchmarkConfig {
         machine: cli.machine.clone(),
         backends: backends.clone(),
@@ -106,6 +112,7 @@ async fn main() -> Result<()> {
         cooldown_secs: cli.cooldown,
         output_dir: output_dir.clone(),
         port: cli.port,
+        resource_dir: resource_dir.clone(),
         dry_run: cli.dry_run,
     };
 
@@ -148,7 +155,9 @@ async fn main() -> Result<()> {
         }
 
         // Spawn engine for this backend
-        let client = match engine_lifecycle::spawn_engine(backend, config.port).await {
+        let client = match engine_lifecycle::spawn_engine(backend, config.port, resource_dir.clone())
+            .await
+        {
             Ok(c) => c,
             Err(err) => {
                 log::error!("Failed to spawn engine for {backend}: {err:#}");

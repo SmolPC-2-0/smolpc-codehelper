@@ -69,6 +69,7 @@ pub struct BenchmarkConfig {
     pub cooldown_secs: u64,
     pub output_dir: PathBuf,
     pub port: u16,
+    pub resource_dir: Option<PathBuf>,
     pub dry_run: bool,
 }
 
