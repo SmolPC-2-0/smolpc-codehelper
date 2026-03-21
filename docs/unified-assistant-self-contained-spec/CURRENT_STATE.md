@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-21
-**Status:** Demo line frozen; Phase 5 GIMP self-contained provisioning is complete on the single self-contained mainline; Windows source-based functional validation is the active gate before engine reconciliation or broader Phase 6 packaging work
+**Status:** Demo line frozen; Phase 5 GIMP self-contained provisioning is complete on the single self-contained mainline; Windows source-testing handoff is merged and broader Windows source testing is the active gate before engine reconciliation or broader Phase 6 packaging work
 
 ## 1. Branch State
 
@@ -236,7 +236,7 @@ Phase 4 intentionally did not land:
 - GIMP host-app launch orchestration
 - Calc activation
 
-## 10. Phase 5 Closeout And Current Validation Gate
+## 10. Phase 5 Closeout And Functional Test Handoff
 
 Phase 5 is now merged into `dev/unified-assistant-self-contained`.
 
@@ -250,20 +250,29 @@ Phase 5 landed:
 - existing Blender, LibreOffice, Code, and Calc behavior remained unchanged
 
 Before engine/platform reconciliation or packaging work, the current mainline
-needs a clean source-based Windows functional validation pass.
+needed a clean source-based Windows functional validation pass.
 
-Active validation branches:
+That repo-side handoff work is now merged on the mainline:
 
-- docs: `codex/unified-self-contained-functional-test-docs`
-- implementation: `codex/unified-self-contained-functional-test-prep`
-- closeout docs: `codex/unified-self-contained-functional-test-status-docs`
+- the Windows testing guide is merged
+- the repeated-results template is merged
+- the narrow prep fixes are merged:
+  - GIMP source mode now prefers prepared bundled Python, then repo `.venv`,
+    then PATH Python in debug/source mode
+  - Windows host detection now accepts `gimp-3.exe` during system lookup
+- `dev/unified-assistant-self-contained` is now ready for broader
+  source-based Windows testing from clean developer clones
 
 Tester handoff docs for this gate:
 
 - [WINDOWS_SOURCE_TESTING.md](WINDOWS_SOURCE_TESTING.md)
 - [WINDOWS_SOURCE_TEST_RESULTS_TEMPLATE.md](WINDOWS_SOURCE_TEST_RESULTS_TEMPLATE.md)
 
-After this validation gate closes out, the next official docs branch returns to:
+This closeout makes the branch ready for testing; it does not claim that the
+real Windows test matrix has already been executed.
+
+After initial Windows testing and any narrow tester-found follow-ups, the next
+official docs branch returns to:
 
 - `codex/unified-self-contained-release-docs`
 
@@ -279,9 +288,9 @@ After this validation gate closes out, the next official docs branch returns to:
 
 Current validation note:
 
-- before broader Windows testing, source-based tester handoff still needs to
-  prove that another developer can follow the runbook on
-  `dev/unified-assistant-self-contained` without relying on tribal knowledge
+- the repo-side tester handoff is now merged
+- the next required input is actual Windows tester results recorded with the
+  shared runbook and results template
 
 Tracking note for the GPL-3.0 release gate:
 

@@ -283,7 +283,21 @@ Complete on the self-contained implementation line:
 - GIMP mode works on a machine with GIMP installed but no plugin/server manually configured
 - no manual clone, environment variable, plugin copy, or terminal start step remains
 
-The next official branch after Phase 5 closeout docs is:
+Immediately after Phase 5 closeout, the unified mainline runs a narrow Windows
+source-testing gate:
+
+- docs:
+  - `codex/unified-self-contained-functional-test-docs`
+- implementation:
+  - `codex/unified-self-contained-functional-test-prep`
+- closeout docs:
+  - `codex/unified-self-contained-functional-test-status-docs`
+
+That gate is now merged and leaves the branch ready for broader Windows
+source-based testing without renumbering phases.
+
+After initial Windows testing results and any narrow follow-up fixes, the next
+official Phase 6 docs branch is:
 
 - `codex/unified-self-contained-release-docs`
 

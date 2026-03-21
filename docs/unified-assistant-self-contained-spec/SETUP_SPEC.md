@@ -233,6 +233,11 @@ The single-mainline workflow adopted after Phase 2 does not change the
 `setup_status` or `setup_prepare` wire contract. It only changes where the
 future docs PRs land.
 
-The next official branch after Phase 5 closeout is:
+After Phase 5 closeout, the mainline runs a narrow Windows source-testing gate
+before broader Phase 6 release work. That gate is now merged, and the next step
+is to run the shared Windows source-testing guide on real developer laptops and
+record results.
+
+The next official new Phase 6 docs branch after that testing remains:
 
 - `codex/unified-self-contained-release-docs`

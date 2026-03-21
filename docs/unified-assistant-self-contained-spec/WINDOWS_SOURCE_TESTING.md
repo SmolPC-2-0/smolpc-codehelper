@@ -1,11 +1,16 @@
 # Windows Source Testing Guide
 
 **Last Updated:** 2026-03-21
-**Status:** Pre-upgrade functional validation gate for `dev/unified-assistant-self-contained` before engine reconciliation, packaging, or installer work
+**Status:** Canonical handoff guide for broader Windows source-based functional testing on `dev/unified-assistant-self-contained` before engine reconciliation, packaging, or installer work
 
 ## 1. Purpose
 
 Use this guide to test the actual unified app behavior on Windows from source.
+
+The runbook and narrow source-testing prep fixes are already merged on
+`dev/unified-assistant-self-contained`. Use this guide to collect the first real
+multi-developer Windows results; do not treat the existence of this guide as
+proof that those results already exist.
 
 This is intentionally narrower than Phase 6 packaging work:
 
@@ -22,7 +27,7 @@ This is intentionally narrower than Phase 6 packaging work:
 ## 2. Branch And Clone Rules
 
 - branch to test:
-  - `origin/dev/unified-assistant-self-contained`
+  - latest `origin/dev/unified-assistant-self-contained`
 - use a separate clean clone for this work
 - do not test from a stale local `main` checkout
 - do not mix this testing pass with engine/platform reconciliation branches

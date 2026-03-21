@@ -4,7 +4,7 @@
 > and document map for the self-contained delivery line.
 
 **Last Updated:** 2026-03-21
-**Status:** Single-mainline self-contained workflow active; Phase 5 GIMP self-contained provisioning complete; source-based Windows functional validation is the active gate before broader Phase 6 packaging work
+**Status:** Single-mainline self-contained workflow active; Phase 5 GIMP self-contained provisioning complete; Windows source-testing handoff is merged and broader Windows source testing is the active gate before broader Phase 6 packaging work
 
 ## Project Summary
 
@@ -52,11 +52,17 @@ As of 2026-03-21:
 - `docs/unified-assistant-self-contained-spec` remains a frozen archive at
   `06d32a5219b69d8182079843c79661aca98ad220` and is not kept in sync
 - Phase 4 Blender closeout docs are merged on the self-contained mainline
-- Phase 5 GIMP preflight docs, implementation, and closeout docs are merged on the self-contained mainline
-- the active post-Phase-5 validation pass is:
-  - docs: `codex/unified-self-contained-functional-test-docs`
-  - implementation: `codex/unified-self-contained-functional-test-prep`
-  - closeout docs: `codex/unified-self-contained-functional-test-status-docs`
+- Phase 5 GIMP preflight docs, implementation, and closeout docs are merged on
+  the self-contained mainline
+- the Windows source-testing guide and results template are merged on the
+  self-contained mainline
+- the narrow Windows source-testing prep changes are merged on the
+  self-contained mainline
+- `dev/unified-assistant-self-contained` is now handoff-ready for broader
+  source-based Windows functional testing from clean developer clones
+- after initial Windows test results and any narrow follow-up fixes, the next
+  new docs-first branch returns to:
+  - `codex/unified-self-contained-release-docs`
 
 ## Freeze Tags
 
@@ -187,18 +193,24 @@ Phase 5 is now complete on `dev/unified-assistant-self-contained`:
 - GIMP mode now validates the detected host version, provisions missing assets on demand, launches GIMP only when needed, and supervises the bundled bridge on `127.0.0.1:10008`
 - Blender, LibreOffice, Code, and Calc behavior remained unchanged during Phase 5
 
-Current validation branches:
+The source-testing handoff is now merged on the mainline:
 
-- docs: `codex/unified-self-contained-functional-test-docs`
-- implementation: `codex/unified-self-contained-functional-test-prep`
-- closeout docs: `codex/unified-self-contained-functional-test-status-docs`
+- the Windows testing runbook and results template are merged
+- the narrow prep fixes are merged:
+  - GIMP source mode now prefers prepared bundled Python, then repo `.venv`,
+    then PATH Python in debug/source mode
+  - Windows host detection now accepts `gimp-3.exe` during system lookup
 
-Use these alongside:
+Use these to start broader Windows testing:
 
 - [WINDOWS_SOURCE_TESTING.md](WINDOWS_SOURCE_TESTING.md)
 - [WINDOWS_SOURCE_TEST_RESULTS_TEMPLATE.md](WINDOWS_SOURCE_TEST_RESULTS_TEMPLATE.md)
 
-After this validation gate is closed out, the branch queue returns to:
+This pass makes the branch ready for broader Windows testing; it does not
+replace the actual tester results from separate Windows laptops.
+
+After initial Windows testing and any narrow follow-up fixes, the branch queue
+returns to:
 
 - `codex/unified-self-contained-release-docs`
 

@@ -1,7 +1,7 @@
 # Git Workflow For The Self-Contained Unified Assistant Line
 
 **Last Updated:** 2026-03-21
-**Status:** Required workflow on the single self-contained mainline; Phase 5 is complete and the immediate post-Phase-5 branch stack is the Windows source-testing validation gate before broader Phase 6 release work
+**Status:** Required workflow on the single self-contained mainline; Phase 5 is complete, the Windows source-testing handoff stack is merged, and broader Windows source testing is the active gate before broader Phase 6 release work
 
 ## 1. Branch Roles
 
@@ -72,7 +72,7 @@ No future self-contained PR should target
 Phase 5 is now complete on the mainline.
 
 Before engine upgrades, packaging work, or broader Phase 6 release changes, the
-immediate branch stack is:
+post-Phase-5 validation stack is:
 
 - docs:
   - `codex/unified-self-contained-functional-test-docs`
@@ -81,10 +81,14 @@ immediate branch stack is:
 - closeout docs:
   - `codex/unified-self-contained-functional-test-status-docs`
 
-That stack is a narrow functional validation gate on
-`dev/unified-assistant-self-contained`, not a phase renumbering.
+That stack is now merged on `dev/unified-assistant-self-contained`. It is a
+narrow functional validation gate, not a phase renumbering.
 
-After it closes out, the branch queue returns to:
+The next work is broader Windows source testing from clean developer clones
+using the merged runbook and results template.
+
+After those test results and any narrow follow-up fixes, the branch queue
+returns to:
 
 - `codex/unified-self-contained-release-docs`
 
@@ -224,9 +228,10 @@ As of 2026-03-21:
   `dev/unified-assistant-self-contained`
 - Phase 5 closeout docs are merged on
   `dev/unified-assistant-self-contained`
-- the active validation gate branches are:
+- the merged validation gate branches are:
   - `codex/unified-self-contained-functional-test-docs`
   - `codex/unified-self-contained-functional-test-prep`
   - `codex/unified-self-contained-functional-test-status-docs`
-- after that gate closes out, the queue returns to:
+- broader Windows source testing is now the active manual work on the mainline
+- after those test results and any narrow follow-up fixes, the queue returns to:
   - `codex/unified-self-contained-release-docs`
