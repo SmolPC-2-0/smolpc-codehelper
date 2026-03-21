@@ -22,6 +22,8 @@
 
 - **LibreOffice must not silently swap interpreters once bundled Python owns the runtime** (2026-03-17): After Phase 3, the bundled LibreOffice runtime must keep using the exact interpreter that launched `main.py`. Letting the runtime rediscover and switch to an office-bundled Python would undermine the whole packaged-mode ownership contract and make setup status misleading.
 
+- **Blender provisioning must be session-aware, not restart-driven** (2026-03-17): Phase 4 is safer when addon provisioning and enablement run through Blender CLI background execution, while live sessions are left untouched. If Blender is already running, report that one reopen may be needed instead of killing or force-restarting the session.
+
 - **Provenance must be documented before third-party imports land** (2026-03-17): Any vendored runtime, addon, plugin, or model payload needs a pinned source reference, license notes, and local modification tracking in `THIRD_PARTY_PROVENANCE.md` before implementation branches import it.
 
 - **Keep setup state app-level and phase-limited at first** (2026-03-17): Phase 2 stayed low-risk because it introduced setup state, detection, manifests, and a lightweight UI without changing any mode activation paths. That kept the foundation branch additive and made later runtime/provisioning phases narrower.
