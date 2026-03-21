@@ -262,3 +262,8 @@ The next official docs branch is:
 | Host-app variance         | GIMP, Blender, and LibreOffice install/profile paths still vary across user machines and clean-machine validation is next           |
 | Calc expectation drift    | Users may assume all LibreOffice modes are live; docs and UI must keep Calc explicitly deferred                                     |
 | Phase 6 packaging surface | The installer, first-run repair flow, and upgrade path remain the largest remaining finish-line risk                                |
+
+Tracking note for the GPL-3.0 release gate:
+
+- owner/workstream: `codex/unified-self-contained-release-docs` and the follow-on Phase 6 release packaging branch
+- required decision before any public installer milestone: confirm the planned distribution model is license-compatible, adjust the packaging boundary until it is, or replace the vendored GIMP delivery approach
