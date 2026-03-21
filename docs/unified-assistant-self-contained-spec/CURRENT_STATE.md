@@ -255,10 +255,10 @@ The next official docs branch is:
 
 ## 11. Known Risks
 
-| Risk                      | Why it matters                                                                                                            |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| GIMP license review       | The vendored `maorcc/gimp-mcp` payload is GPL-3.0 and still needs release-distribution review before public packaging     |
-| Windows packaging size    | Bundled model plus Python/runtime assets will increase installer size materially                                          |
-| Host-app variance         | GIMP, Blender, and LibreOffice install/profile paths still vary across user machines and clean-machine validation is next |
-| Calc expectation drift    | Users may assume all LibreOffice modes are live; docs and UI must keep Calc explicitly deferred                           |
-| Phase 6 packaging surface | The installer, first-run repair flow, and upgrade path remain the largest remaining finish-line risk                      |
+| Risk                      | Why it matters                                                                                                                      |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| GIMP license review       | The vendored `maorcc/gimp-mcp` payload is GPL-3.0 and remains a blocking Phase 6 release gate until distribution review is resolved |
+| Windows packaging size    | Bundled model plus Python/runtime assets will increase installer size materially                                                    |
+| Host-app variance         | GIMP, Blender, and LibreOffice install/profile paths still vary across user machines and clean-machine validation is next           |
+| Calc expectation drift    | Users may assume all LibreOffice modes are live; docs and UI must keep Calc explicitly deferred                                     |
+| Phase 6 packaging surface | The installer, first-run repair flow, and upgrade path remain the largest remaining finish-line risk                                |

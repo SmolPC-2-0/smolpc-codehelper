@@ -205,6 +205,7 @@ Before calling the self-contained line ready, verify on Windows:
 8. first GIMP use provisions plugin/server and launches GIMP
 9. Calc remains disabled
 10. upgrade path preserves chats and reprovisions only when asset version changed
+11. the GPL-3.0 distribution review for the vendored `maorcc/gimp-mcp` payload is resolved before any public packaging milestone
 
 Phase 2 validation focuses on:
 
@@ -218,6 +219,17 @@ Phase 2 validation focuses on:
 Still deferred after Step 1:
 
 - final installer naming/versioning policy
+
+## 10. Phase 6 Release Gate
+
+Before any public packaging milestone, Phase 6 must explicitly resolve the
+GPL-3.0 distribution review for the vendored `maorcc/gimp-mcp` payload.
+
+That can mean one of:
+
+- confirming the planned distribution model is license-compatible
+- adjusting the packaging boundary so the distribution model is license-compatible
+- replacing the vendored payload with a different approved delivery approach
 - whether to ship slim vs full installers later
 - future optional model packs
 - future Calc packaging requirements

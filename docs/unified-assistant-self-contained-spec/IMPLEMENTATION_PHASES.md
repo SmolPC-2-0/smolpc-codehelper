@@ -310,6 +310,7 @@ The next official branch after Phase 5 closeout docs is:
 
 - external users can install one app and use Code, GIMP, Blender, Writer, and Slides without manual secondary setup
 - only host-app installs remain external prerequisites
+- the GPL-3.0 distribution review for the vendored `maorcc/gimp-mcp` payload is resolved before any public packaging milestone
 - Calc remains visible but disabled
 
 ## Calc Status
