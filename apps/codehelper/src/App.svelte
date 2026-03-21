@@ -8,16 +8,22 @@
 	import KeyboardShortcutsOverlay from '$lib/components/KeyboardShortcutsOverlay.svelte';
 	import WorkspaceHeader from '$lib/components/layout/WorkspaceHeader.svelte';
 	import WorkspaceControls from '$lib/components/layout/WorkspaceControls.svelte';
+	import AppModeDropdown from '$lib/components/layout/AppModeDropdown.svelte';
 	import ConversationView from '$lib/components/chat/ConversationView.svelte';
 	import ComposerBar from '$lib/components/chat/ComposerBar.svelte';
+	import SetupBanner from '$lib/components/setup/SetupBanner.svelte';
+	import SetupPanel from '$lib/components/setup/SetupPanel.svelte';
 	import { chatsStore } from '$lib/stores/chats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { inferenceStore } from '$lib/stores/inference.svelte';
 	import { hardwareStore } from '$lib/stores/hardware.svelte';
 	import { uiStore } from '$lib/stores/ui.svelte';
+	import { modeStore } from '$lib/stores/mode.svelte';
+	import { setupStore } from '$lib/stores/setup.svelte';
 	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
 	import type { GenerationConfig, InferenceChatMessage } from '$lib/types/inference';
+	import type { AppMode } from '$lib/types/mode';
 
 	let messagesContainer: HTMLDivElement | undefined = $state();
 	let activeStreamSessionId = $state<string | null>(null);
@@ -25,6 +31,14 @@
 	let currentStreamingMessageId = $state<string | null>(null);
 	let bottomOffset = $state(0);
 	let showShortcutsOverlay = $state(false);
+	let showSetupPanel = $state(false);
+
+	// Unified mode state
+	const activeMode = $derived(modeStore.activeMode);
+	const activeModeConfigs = $derived(modeStore.modeConfigs);
+	const setupNeedsAttention = $derived(setupStore.initialized && setupStore.needsAttention);
+	const setupStatus = $derived(setupStore.status);
+	const setupError = $derived(setupStore.error);
 
 	const currentChat = $derived(chatsStore.currentChat);
 	const messages = $derived(currentChat?.messages ?? []);
@@ -323,6 +337,10 @@ Teaching rules:
 		}
 	}
 
+	function handleModeChange(mode: AppMode) {
+		modeStore.setActiveMode(mode);
+	}
+
 	function handleKeyDown(event: KeyboardEvent) {
 		const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 		const modifierKey = isMac ? event.metaKey : event.ctrlKey;
@@ -398,6 +416,8 @@ Teaching rules:
 		}
 
 		initInference();
+		modeStore.initialize();
+		setupStore.initialize();
 		hardwareStore.getCached();
 
 		if (hasNoChats) {
@@ -478,7 +498,23 @@ Teaching rules:
 			onExportChat={handleExportChat}
 		/>
 
-		<WorkspaceControls />
+		<WorkspaceControls>
+			{#snippet modeSelector()}
+				<AppModeDropdown
+					modes={activeModeConfigs}
+					{activeMode}
+					onChange={handleModeChange}
+				/>
+			{/snippet}
+		</WorkspaceControls>
+
+		{#if setupNeedsAttention}
+			<SetupBanner
+				status={setupStatus}
+				error={setupError}
+				onOpen={() => (showSetupPanel = true)}
+			/>
+		{/if}
 
 		<ConversationView
 			{messages}
@@ -517,6 +553,16 @@ Teaching rules:
 	<KeyboardShortcutsOverlay
 		open={showShortcutsOverlay}
 		onClose={() => (showShortcutsOverlay = false)}
+	/>
+	<SetupPanel
+		visible={showSetupPanel}
+		status={setupStatus}
+		error={setupError}
+		loading={setupStore.loading}
+		preparing={setupStore.preparing}
+		onRefresh={() => setupStore.refresh()}
+		onPrepare={() => setupStore.prepare()}
+		onClose={() => (showSetupPanel = false)}
 	/>
 </div>
 

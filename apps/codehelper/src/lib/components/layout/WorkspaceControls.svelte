@@ -1,10 +1,20 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import ContextToggle from '$lib/components/ContextToggle.svelte';
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
+
+	interface Props {
+		modeSelector?: Snippet;
+	}
+
+	let { modeSelector }: Props = $props();
 </script>
 
 <section class="workspace-controls" aria-label="Session controls">
 	<div class="workspace-controls__row">
+		{#if modeSelector}
+			{@render modeSelector()}
+		{/if}
 		<ContextToggle />
 	</div>
 	<div class="workspace-controls__row workspace-controls__row--compact">
