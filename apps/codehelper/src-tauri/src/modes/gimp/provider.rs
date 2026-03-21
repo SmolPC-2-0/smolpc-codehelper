@@ -17,6 +17,7 @@ use smolpc_mcp_client::{McpSession, TcpTransportConfig};
 use std::path::{Path, PathBuf};
 use std::process::Child;
 use tokio::sync::Mutex;
+use tokio::task;
 use tokio::time::{sleep, Duration};
 
 const GIMP_CONNECTION_RETRY_ATTEMPTS: usize = 24;
@@ -389,18 +390,40 @@ impl GimpProvider {
             return provider_state(mode, "disconnected", Some(detail.as_str()), true, true);
         };
 
-        if let Err(detail) = validate_supported_gimp(&gimp_path) {
+        let gimp_path_for_validation = gimp_path.clone();
+        let validation_result = task::spawn_blocking(move || {
+            validate_supported_gimp(gimp_path_for_validation.as_path())
+        })
+        .await;
+        if let Err(detail) = match validation_result {
+            Ok(result) => result,
+            Err(error) => Err(format!(
+                "Unable to validate the detected GIMP install in a background task. {error}"
+            )),
+        } {
             let mut state = self.state.lock().await;
             state.detected_gimp_path = Some(gimp_path);
             state.last_error = Some(detail.clone());
             return provider_state(mode, "error", Some(detail.as_str()), true, true);
         }
 
-        let prepare_outcome = match ensure_gimp_plugin_runtime_prepared(
-            self.resource_dir.as_deref(),
-            self.app_local_data_dir.as_deref(),
-            &gimp_path,
-        ) {
+        let resource_dir = self.resource_dir.clone();
+        let app_local_data_dir = self.app_local_data_dir.clone();
+        let gimp_path_for_prepare = gimp_path.clone();
+        let prepare_result = task::spawn_blocking(move || {
+            ensure_gimp_plugin_runtime_prepared(
+                resource_dir.as_deref(),
+                app_local_data_dir.as_deref(),
+                gimp_path_for_prepare.as_path(),
+            )
+        })
+        .await;
+        let prepare_outcome = match match prepare_result {
+            Ok(result) => result,
+            Err(error) => Err(format!(
+                "Unable to provision the bundled GIMP plugin/runtime in a background task. {error}"
+            )),
+        } {
             Ok(outcome) => outcome,
             Err(error) => {
                 let detail = format!(

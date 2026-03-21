@@ -90,10 +90,35 @@ mod tests {
     };
     use smolpc_assistant_types::SetupItemStateDto;
     use std::path::Path;
+    use std::sync::{Mutex as StdMutex, OnceLock};
     use tempfile::TempDir;
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+
+    static ENV_LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
+
+    fn env_lock() -> &'static StdMutex<()> {
+        ENV_LOCK.get_or_init(|| StdMutex::new(()))
+    }
+
+    fn with_profile_env<T>(base: &Path, callback: impl FnOnce() -> T) -> T {
+        let _guard = env_lock().lock().expect("env lock");
+
+        #[cfg(windows)]
+        let key = "APPDATA";
+        #[cfg(not(windows))]
+        let key = "HOME";
+
+        let original = std::env::var_os(key);
+        std::env::set_var(key, base);
+        let result = callback();
+        match original {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
+        result
+    }
 
     fn write_blender_resources(root: &Path) {
         let blender_root = root.join("blender");
@@ -330,8 +355,8 @@ exit 0
             .exists());
     }
 
-    #[tokio::test]
-    async fn prepare_setup_provisions_gimp_plugin_runtime_when_gimp_is_detected() {
+    #[test]
+    fn prepare_setup_provisions_gimp_plugin_runtime_when_gimp_is_detected() {
         let resource_temp = TempDir::new().expect("resource temp");
         let app_temp = TempDir::new().expect("app temp");
         let host_temp = TempDir::new().expect("host temp");
@@ -429,31 +454,32 @@ exit 0
 
         let profile_root = app_temp.path().join("profile");
         std::fs::create_dir_all(&profile_root).expect("profile root");
-        #[cfg(windows)]
-        std::env::set_var("APPDATA", &profile_root);
-        #[cfg(not(windows))]
-        std::env::set_var("HOME", &profile_root);
 
-        let state = SetupState::with_host_detection(
-            Some(resource_temp.path().to_path_buf()),
-            Some(app_temp.path().to_path_buf()),
-            false,
-        );
-        let gimp_path = host_temp.path().join("gimp-3.exe");
-        std::fs::write(&gimp_path, "gimp").expect("fake gimp");
-        {
-            let mut cache = state.cache().await;
-            cache
-                .resolved_host_apps
-                .insert(SETUP_ITEM_HOST_GIMP.to_string(), gimp_path);
-        }
+        with_profile_env(&profile_root, || {
+            let runtime = tokio::runtime::Runtime::new().expect("runtime");
+            runtime.block_on(async {
+                let state = SetupState::with_host_detection(
+                    Some(resource_temp.path().to_path_buf()),
+                    Some(app_temp.path().to_path_buf()),
+                    false,
+                );
+                let gimp_path = host_temp.path().join("gimp-3.exe");
+                std::fs::write(&gimp_path, "gimp").expect("fake gimp");
+                {
+                    let mut cache = state.cache().await;
+                    cache
+                        .resolved_host_apps
+                        .insert(SETUP_ITEM_HOST_GIMP.to_string(), gimp_path);
+                }
 
-        let status = prepare_setup(&state).await;
-        let gimp_item = status
-            .items
-            .iter()
-            .find(|item| item.id == SETUP_ITEM_GIMP_PLUGIN_RUNTIME)
-            .expect("gimp item");
-        assert_eq!(gimp_item.state, SetupItemStateDto::Ready);
+                let status = prepare_setup(&state).await;
+                let gimp_item = status
+                    .items
+                    .iter()
+                    .find(|item| item.id == SETUP_ITEM_GIMP_PLUGIN_RUNTIME)
+                    .expect("gimp item");
+                assert_eq!(gimp_item.state, SetupItemStateDto::Ready);
+            });
+        });
     }
 }

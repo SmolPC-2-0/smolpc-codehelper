@@ -30,3 +30,4 @@ Runtime contract:
 2. the SmolPC bridge listens on `127.0.0.1:10008`
 3. Rust connects to the SmolPC bridge over TCP MCP
 4. the bridge forwards tool calls to the provisioned plugin socket
+5. both sockets are loopback-only and must not be rebound to non-local interfaces

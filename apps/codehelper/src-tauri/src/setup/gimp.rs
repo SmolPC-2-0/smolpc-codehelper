@@ -306,7 +306,12 @@ fn detect_gimp_major_version_from_command(gimp_path: &Path) -> Option<u8> {
 }
 
 fn parse_gimp_major_version(version_output: &str) -> Option<u8> {
-    version_output
+    let search_start = version_output
+        .to_ascii_lowercase()
+        .find("version")
+        .map(|index| index + "version".len())
+        .unwrap_or(0);
+    version_output[search_start..]
         .split(|ch: char| !ch.is_ascii_digit())
         .find_map(|chunk| {
             if chunk.is_empty() {
@@ -377,6 +382,9 @@ fn write_marker(
 fn resolve_gimp_plugin_target_dir(_gimp_path: &Path) -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
+        // Phase 5 targets the GIMP 3.0 profile layout that current upstream
+        // `maorcc/gimp-mcp` expects. Revisit this if GIMP 3.1+ changes the
+        // user-profile directory convention.
         let appdata = std::env::var_os("APPDATA")
             .map(PathBuf::from)
             .ok_or_else(|| {
@@ -391,6 +399,9 @@ fn resolve_gimp_plugin_target_dir(_gimp_path: &Path) -> Result<PathBuf, String> 
 
     #[cfg(target_os = "macos")]
     {
+        // Phase 5 targets the GIMP 3.0 profile layout that current upstream
+        // `maorcc/gimp-mcp` expects. Revisit this if GIMP 3.1+ changes the
+        // user-profile directory convention.
         let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
             "HOME is unavailable, so the GIMP profile root cannot be resolved.".to_string()
         })?;
@@ -405,6 +416,9 @@ fn resolve_gimp_plugin_target_dir(_gimp_path: &Path) -> Result<PathBuf, String> 
 
     #[cfg(all(not(windows), not(target_os = "macos")))]
     {
+        // Phase 5 targets the GIMP 3.0 profile layout that current upstream
+        // `maorcc/gimp-mcp` expects. Revisit this if GIMP 3.1+ changes the
+        // user-profile directory convention.
         let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
             "HOME is unavailable, so the GIMP profile root cannot be resolved.".to_string()
         })?;
@@ -606,6 +620,12 @@ mod tests {
     #[test]
     fn parse_gimp_major_version_reads_cli_output() {
         let major = parse_gimp_major_version("GNU Image Manipulation Program version 3.0.4");
+        assert_eq!(major, Some(3));
+    }
+
+    #[test]
+    fn parse_gimp_major_version_ignores_leading_numbers() {
+        let major = parse_gimp_major_version("1 result: GIMP version 3.0.4");
         assert_eq!(major, Some(3));
     }
 
