@@ -4,7 +4,7 @@
 >
 > **Audience:** Every AI session. Read relevant sections before working on that subsystem.
 >
-> **Last Updated:** 2026-03-17
+> **Last Updated:** 2026-03-21
 
 ---
 
@@ -29,6 +29,8 @@
 - **Keep setup state app-level and phase-limited at first** (2026-03-17): Phase 2 stayed low-risk because it introduced setup state, detection, manifests, and a lightweight UI without changing any mode activation paths. That kept the foundation branch additive and made later runtime/provisioning phases narrower.
 
 - **Track resource roots before payloads land** (2026-03-17): Adding manifests, placeholder READMEs, and staging hooks in Phase 2 is worthwhile even before the large Python/model payloads are imported. It gives the setup subsystem something honest to validate and avoids mixing contract work with heavy runtime imports.
+
+- **The archive docs branch is reference-only, not a sync target** (2026-03-21): Once `dev/unified-assistant-self-contained` became the sole active self-contained mainline, the frozen `docs/unified-assistant-self-contained-spec` branch stopped being a status mirror. Keep the archive branch pinned for history, but treat the docs tree on the implementation mainline as the only source of truth.
 
 ---
 
@@ -166,6 +168,8 @@
 - **Launcher path tests need platform-specific absolute fixtures** (2026-03): A Windows-style absolute path string is not absolute on macOS/Linux. Tests that validate launcher manifest rules should use a fixture that is absolute on the current platform or they can fail for the wrong reason.
 
 - **Root incremental style gates need root frontend config entrypoints** (2026-03): CI runs `prettier` and `eslint` from the repo root against `apps/codehelper/...` paths. That requires a root `eslint.config.mjs` that re-exports the workspace config, plus a real `apps/codehelper/.gitignore` so `includeIgnoreFile()` does not crash.
+
+- **Docs-only PRs still need repo-root Prettier hygiene** (2026-03-21): Incremental style gates check changed Markdown files too, not just code. For self-contained docs branches, run Prettier from the repo root on the touched `docs/unified-assistant-self-contained-spec/*.md` files before opening the PR or the branch can merge with avoidable CI noise.
 
 - **Keep shell diffs off legacy lint surfaces unless they are truly needed** (2026-03): Incremental style gates only lint changed files. Touching a legacy frontend file with an unrelated existing lint violation can turn that old issue into a new CI blocker for the current phase.
 

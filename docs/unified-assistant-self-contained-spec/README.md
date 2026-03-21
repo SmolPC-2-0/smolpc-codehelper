@@ -3,8 +3,8 @@
 > Read this document first. It defines the branch policy, frozen demo baseline,
 > and document map for the self-contained delivery line.
 
-**Last Updated:** 2026-03-17
-**Status:** Single-mainline self-contained workflow active; Phase 4 Blender provisioning complete; Phase 5 GIMP docs preflight active
+**Last Updated:** 2026-03-21
+**Status:** Single-mainline self-contained workflow active; Phase 4 Blender provisioning complete; Phase 5 GIMP preflight merged; implementation is next
 
 ## Project Summary
 
@@ -44,6 +44,20 @@ Finish-line definition:
 | `docs/unified-assistant-self-contained-spec` | Frozen self-contained archive/reference snapshot                     |
 | `codex/*`                                    | Narrow work branches from `dev/unified-assistant-self-contained`     |
 
+## Current Mainline Snapshot
+
+As of 2026-03-21:
+
+- source of truth is `dev/unified-assistant-self-contained`
+- `docs/unified-assistant-self-contained-spec` remains a frozen archive at
+  `06d32a5219b69d8182079843c79661aca98ad220` and is not kept in sync
+- Phase 4 Blender closeout docs are merged on the self-contained mainline
+- Phase 5 GIMP preflight docs are merged on the self-contained mainline
+- the next official implementation branch is:
+  - `codex/unified-self-contained-gimp`
+- the required closeout branch after Phase 5 implementation is:
+  - `codex/unified-self-contained-gimp-status-docs`
+
 ## Freeze Tags
 
 The demo baseline is frozen at:
@@ -57,7 +71,8 @@ Phase 0 through Phase 2 used a temporary dual-mainline workflow to get the
 self-contained line established cleanly.
 
 Starting with Phase 3, all new self-contained work lands directly on
-`dev/unified-assistant-self-contained` in this three-PR sequence:
+`dev/unified-assistant-self-contained` through this standard three-PR phase
+sequence:
 
 1. open `codex/<phase>-docs` from `origin/dev/unified-assistant-self-contained`
 2. merge the docs-only preflight PR into `dev/unified-assistant-self-contained`
@@ -142,31 +157,38 @@ self-contained roadmap phases.
 
 ## Locked Decisions
 
-| Area                  | Decision                                                               |
-| --------------------- | ---------------------------------------------------------------------- |
-| Host apps             | GIMP, Blender, and LibreOffice remain separately installed             |
-| External dependencies | No external Python, MCP server, plugin, addon, or model setup allowed  |
-| Default bundled model | `qwen3-4b-instruct-2507`                                               |
-| Calc                  | Deferred and disabled                                                  |
-| Bundle identifier     | `com.smolpc.codehelper` remains unchanged                              |
-| Shipping OS           | Windows only                                                           |
-| Python ownership      | Bundled app-private runtime                                            |
-| Blender integration   | Reuse existing repo addon source; provision automatically              |
+| Area                  | Decision                                                                      |
+| --------------------- | ----------------------------------------------------------------------------- |
+| Host apps             | GIMP, Blender, and LibreOffice remain separately installed                    |
+| External dependencies | No external Python, MCP server, plugin, addon, or model setup allowed         |
+| Default bundled model | `qwen3-4b-instruct-2507`                                                      |
+| Calc                  | Deferred and disabled                                                         |
+| Bundle identifier     | `com.smolpc.codehelper` remains unchanged                                     |
+| Shipping OS           | Windows only                                                                  |
+| Python ownership      | Bundled app-private runtime                                                   |
+| Blender integration   | Reuse existing repo addon source; provision automatically                     |
 | GIMP integration      | Vendor pinned upstream `maorcc/gimp-mcp` snapshot and provision automatically |
-| Provenance            | Mandatory before bundling imported third-party runtime assets          |
+| Provenance            | Mandatory before bundling imported third-party runtime assets                 |
 
 ## Current Phase
 
-The current active docs-first phase is Phase 5 GIMP self-contained provisioning
-preflight (in progress):
+The current mainline-ready phase is Phase 5 GIMP self-contained provisioning.
+Docs preflight is merged; implementation is next:
 
-- keep the single-mainline workflow explicit on `dev/unified-assistant-self-contained`
-- lock `maorcc/gimp-mcp` source pin and license/provenance notes before import
-- lock bundled GIMP plugin/server provisioning and launch ownership scope
+- open the implementation branch from `origin/dev/unified-assistant-self-contained`:
+  - `codex/unified-self-contained-gimp`
+- record the exact vendored `maorcc/gimp-mcp` pin, license note, and import map
+  in [THIRD_PARTY_PROVENANCE.md](THIRD_PARTY_PROVENANCE.md) before payload
+  files are imported
+- keep bundled GIMP plugin/server provisioning and launch ownership scope
+  aligned to the locked Phase 5 docs
 - keep GIMP transport anchored to `127.0.0.1:10008`
-- keep the setup surface app-level with one `Prepare` action and no mode-specific setup wizard
-- keep Blender, LibreOffice, Code, and Calc behavior unchanged in this docs preflight
+- keep the setup surface app-level with one `Prepare` action and no mode-specific
+  setup wizard
+- keep Blender, LibreOffice, Code, and Calc behavior unchanged in Phase 5
 - keep Calc scaffold-only
+- after implementation merges, open the closeout docs branch:
+  - `codex/unified-self-contained-gimp-status-docs`
 
 ## Rule Of Thumb
 

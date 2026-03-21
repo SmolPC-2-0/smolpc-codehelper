@@ -1,7 +1,7 @@
 # Packaging And Distribution For The Self-Contained Line
 
-**Last Updated:** 2026-03-17
-**Status:** Packaging target with Phase 2 foundation contract, Phase 3 LibreOffice bundled-Python ownership landed, Phase 4 Blender addon delivery landed, and Phase 5 GIMP packaging rules preflight locked
+**Last Updated:** 2026-03-21
+**Status:** Packaging target with Phase 2 foundation contract, Phase 3 LibreOffice bundled-Python ownership landed, Phase 4 Blender addon delivery landed, and Phase 5 GIMP packaging scope merged; implementation is next
 
 ## 1. Packaging Direction
 
@@ -71,6 +71,19 @@ Phase 2 also adds tracked resource roots for:
 | Blender provider assets     | Blender                             | addon payload, bridge helpers, manifests    |
 | LibreOffice provider assets | Writer/Slides                       | bundled runtime scripts and manifests       |
 
+## 4.1 Phase 3 Bundled Python Delivery
+
+Phase 3 locks the bundled Python delivery source for Writer and Slides to:
+
+- the official Windows x64 CPython embeddable distribution from `python.org`
+- a pinned `uv` Windows binary from Astral for packaging/runtime management
+- provider-owned wheel/runtime inputs staged into `resources/python/payload/`
+
+Phase 3 packaged-mode rule:
+
+- Writer and Slides must launch from the prepared bundled Python runtime only
+- packaged mode must not fall back to system `python` or `python3`
+
 ## 4.2 Phase 4 Blender Addon Delivery
 
 Phase 4 locks and lands the Blender addon delivery shape:
@@ -106,19 +119,6 @@ Phase 5 provisioning rule:
 - setup and provider paths may provision/repair bundled GIMP plugin/server assets
 - setup and provider paths must not force-launch or restart an already-running GIMP session
 - setup panel remains repair-focused and must not launch interactive GIMP UI
-
-## 4.1 Phase 3 Bundled Python Delivery
-
-Phase 3 locks the bundled Python delivery source for Writer and Slides to:
-
-- the official Windows x64 CPython embeddable distribution from `python.org`
-- a pinned `uv` Windows binary from Astral for packaging/runtime management
-- provider-owned wheel/runtime inputs staged into `resources/python/payload/`
-
-Phase 3 packaged-mode rule:
-
-- Writer and Slides must launch from the prepared bundled Python runtime only
-- packaged mode must not fall back to system `python` or `python3`
 
 ## 5. Host-App Expectations
 
