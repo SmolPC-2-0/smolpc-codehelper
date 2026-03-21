@@ -1,4 +1,6 @@
 mod config;
+mod engine_lifecycle;
+mod memory;
 mod prompts;
 mod stats;
 
