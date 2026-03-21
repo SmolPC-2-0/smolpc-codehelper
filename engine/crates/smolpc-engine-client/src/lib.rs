@@ -1357,10 +1357,7 @@ fn is_lock_holder_dead(lock_path: &Path) -> bool {
     let Ok(contents) = std::fs::read_to_string(lock_path) else {
         return true; // Can't read -> treat as dead.
     };
-    let Some(pid_str) = contents
-        .lines()
-        .find_map(|line| line.strip_prefix("pid="))
-    else {
+    let Some(pid_str) = contents.lines().find_map(|line| line.strip_prefix("pid=")) else {
         return true; // No PID recorded -> treat as dead.
     };
     let Ok(pid) = pid_str.trim().parse::<u32>() else {

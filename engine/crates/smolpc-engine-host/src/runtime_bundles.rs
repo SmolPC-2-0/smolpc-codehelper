@@ -697,7 +697,10 @@ mod tests {
         let bundle = build_openvino_bundle(root);
         assert!(bundle.cpu_validated());
         assert!(!bundle.npu_validated());
-        assert_eq!(bundle.npu_failure_code(), Some("openvino_npu_plugin_missing"));
+        assert_eq!(
+            bundle.npu_failure_code(),
+            Some("openvino_npu_plugin_missing")
+        );
     }
 
     #[test]
@@ -710,7 +713,10 @@ mod tests {
         let bundle = build_openvino_bundle(root);
         assert!(bundle.cpu_validated());
         assert!(!bundle.npu_validated());
-        assert_eq!(bundle.npu_failure_code(), Some("openvino_npu_plugin_missing"));
+        assert_eq!(
+            bundle.npu_failure_code(),
+            Some("openvino_npu_plugin_missing")
+        );
     }
 
     #[test]

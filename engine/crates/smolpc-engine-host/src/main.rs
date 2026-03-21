@@ -40,9 +40,8 @@ use tokio::sync::{mpsc, Mutex, Notify, Semaphore};
 use tokio::time::{sleep, timeout};
 
 use crate::openvino::{
-    inspect_openvino_artifact, is_blocking_openvino_probe_failure,
-    ensure_qwen3_nothink_template, openvino_generation_controls_for_model,
-    openvino_model_tuning_for_model,
+    ensure_qwen3_nothink_template, inspect_openvino_artifact, is_blocking_openvino_probe_failure,
+    openvino_generation_controls_for_model, openvino_model_tuning_for_model,
     probe_openvino_startup, resolve_openvino_npu_tuning, run_openvino_preflight,
     OpenVinoPreflightResult, OpenVinoStartupProbeResult,
 };
@@ -1447,9 +1446,7 @@ impl EngineState {
                         log::warn!("OpenVINO startup probe task failed: {error}");
                         OpenVinoStartupProbeResult {
                             hardware_detected,
-                            failure_class: Some(
-                                "openvino_npu_plugin_unavailable".to_string(),
-                            ),
+                            failure_class: Some("openvino_npu_plugin_unavailable".to_string()),
                             failure_message: Some(format!(
                                 "OpenVINO startup probe task failed: {error}"
                             )),
@@ -1463,9 +1460,7 @@ impl EngineState {
                         );
                         OpenVinoStartupProbeResult {
                             hardware_detected,
-                            failure_class: Some(
-                                "openvino_startup_probe_timeout".to_string(),
-                            ),
+                            failure_class: Some("openvino_startup_probe_timeout".to_string()),
                             failure_message: Some(format!(
                                 "OpenVINO startup probe did not complete within {} ms",
                                 OPENVINO_STARTUP_PROBE_WAIT.as_millis()
@@ -1809,8 +1804,7 @@ impl EngineState {
         }
         self.model_transition_in_progress
             .store(true, Ordering::SeqCst);
-        let _transition_guard =
-            TransitionGuard(Arc::clone(&self.model_transition_in_progress));
+        let _transition_guard = TransitionGuard(Arc::clone(&self.model_transition_in_progress));
         let current_backend = self.active_backend().await;
         let has_loaded_model = self.current_model.lock().await.is_some();
         let directml_required =
@@ -2042,8 +2036,7 @@ impl EngineState {
                 }
             } else {
                 log::error!("OpenVINO startup probe missing unexpectedly after readiness checks");
-                openvino_failure_class =
-                    Some("openvino_startup_probe_missing".to_string());
+                openvino_failure_class = Some("openvino_startup_probe_missing".to_string());
                 openvino_failure_message =
                     Some("OpenVINO startup probe was not available".to_string());
                 openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
@@ -2156,11 +2149,7 @@ impl EngineState {
                     let dml_build_result = match timeout(
                         DIRECTML_PREFLIGHT_BUDGET,
                         tokio::task::spawn_blocking(move || {
-                            build_directml_runtime_adapter(
-                                &ort_bundle,
-                                &dml_path_owned,
-                                device_id,
-                            )
+                            build_directml_runtime_adapter(&ort_bundle, &dml_path_owned, device_id)
                         }),
                     )
                     .await
