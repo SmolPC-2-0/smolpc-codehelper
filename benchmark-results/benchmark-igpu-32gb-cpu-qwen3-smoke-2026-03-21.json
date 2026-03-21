@@ -1,0 +1,176 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-03-21T17:20:41.339773400+00:00",
+  "tool_version": "0.1.0",
+  "machine": {
+    "label": "igpu-32gb-cpu-qwen3-smoke",
+    "os": "windows x86_64",
+    "hostname": "DESKTOP-EU6FFOD"
+  },
+  "hardware": {
+    "cpu_brand": "12th Gen Intel(R) Core(TM) i7-1255U",
+    "cpu_cores_physical": 10,
+    "cpu_cores_logical": 12,
+    "gpus": [
+      {
+        "name": "Intel(R) Iris(R) Xe Graphics",
+        "vendor": "Intel",
+        "vram_mb": 2047
+      }
+    ],
+    "npu": "Intel Gaussian Neural Accelerator | 1.0 TOPS",
+    "memory_total_gb": 31.7001953125
+  },
+  "test_config": {
+    "backends": [
+      "cpu"
+    ],
+    "models": [
+      "qwen3-4b"
+    ],
+    "runs_per_prompt": 0,
+    "warmup_runs": 0,
+    "temperature": 0.0,
+    "repetition_penalty": 1.0
+  },
+  "results": [
+    {
+      "backend": "cpu",
+      "model_id": "qwen3-4b",
+      "cold_start_ttft_ms": null,
+      "prompts": [
+        {
+          "prompt_id": "short_1",
+          "tier": "short",
+          "max_tokens": 128,
+          "runs": [],
+          "stats": {
+            "ttft": null,
+            "tokens_per_second": null,
+            "tpot": null,
+            "total_time": null,
+            "peak_memory_mb": null
+          }
+        },
+        {
+          "prompt_id": "short_2",
+          "tier": "short",
+          "max_tokens": 128,
+          "runs": [],
+          "stats": {
+            "ttft": null,
+            "tokens_per_second": null,
+            "tpot": null,
+            "total_time": null,
+            "peak_memory_mb": null
+          }
+        },
+        {
+          "prompt_id": "short_3",
+          "tier": "short",
+          "max_tokens": 128,
+          "runs": [],
+          "stats": {
+            "ttft": null,
+            "tokens_per_second": null,
+            "tpot": null,
+            "total_time": null,
+            "peak_memory_mb": null
+          }
+        },
+        {
+          "prompt_id": "short_4",
+          "tier": "short",
+          "max_tokens": 128,
+          "runs": [],
+          "stats": {
+            "ttft": null,
+            "tokens_per_second": null,
+            "tpot": null,
+            "total_time": null,
+            "peak_memory_mb": null
+          }
+        },
+        {
+          "prompt_id": "medium_1",
+          "tier": "medium",
+          "max_tokens": 256,
+          "runs": [],
+          "stats": {
+            "ttft": null,
+            "tokens_per_second": null,
+            "tpot": null,
+            "total_time": null,
+            "peak_memory_mb": null
+          }
+        },
+        {
+          "prompt_id": "medium_2",
+          "tier": "medium",
+          "max_tokens": 256,
+          "runs": [],
+          "stats": {
+            "ttft": null,
+            "tokens_per_second": null,
+            "tpot": null,
+            "total_time": null,
+            "peak_memory_mb": null
+          }
+        },
+        {
+          "prompt_id": "medium_3",
+          "tier": "medium",
+          "max_tokens": 256,
+          "runs": [],
+          "stats": {
+            "ttft": null,
+            "tokens_per_second": null,
+            "tpot": null,
+            "total_time": null,
+            "peak_memory_mb": null
+          }
+        },
+        {
+          "prompt_id": "medium_4",
+          "tier": "medium",
+          "max_tokens": 256,
+          "runs": [],
+          "stats": {
+            "ttft": null,
+            "tokens_per_second": null,
+            "tpot": null,
+            "total_time": null,
+            "peak_memory_mb": null
+          }
+        },
+        {
+          "prompt_id": "long_1",
+          "tier": "long",
+          "max_tokens": 512,
+          "runs": [],
+          "stats": {
+            "ttft": null,
+            "tokens_per_second": null,
+            "tpot": null,
+            "total_time": null,
+            "peak_memory_mb": null
+          }
+        },
+        {
+          "prompt_id": "long_2",
+          "tier": "long",
+          "max_tokens": 512,
+          "runs": [],
+          "stats": {
+            "ttft": null,
+            "tokens_per_second": null,
+            "tpot": null,
+            "total_time": null,
+            "peak_memory_mb": null
+          }
+        }
+      ]
+    }
+  ],
+  "skipped": []
+}

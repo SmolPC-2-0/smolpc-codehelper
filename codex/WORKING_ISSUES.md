@@ -1,6 +1,6 @@
 # Working Issues
 
-Last updated: 2026-03-20
+Last updated: 2026-03-21
 Base branch: `main`
 Last known good commit: `3d7460e` (Engine production readiness — 20 fixes, PR #107 merged)
 
@@ -31,6 +31,21 @@ Last known good commit: `3d7460e` (Engine production readiness — 20 fixes, PR 
 - Next steps:
   - Verify current frontend status display coverage.
   - Add missing status fields if needed for handoff demo.
+
+### 3) Benchmark CLI release run skips expected model combos on this laptop
+
+- Status: Open
+- Severity: Medium
+- Context:
+  - On `feat/benchmark` commit `c8a8662`, `cargo run --release -p smolpc-benchmark -- --machine igpu-32gb --resource-dir "%LOCALAPPDATA%\\SmolPC Code Helper"` completed but skipped 3/4 combos.
+  - Fast repro (no generation): `cargo run --release -p smolpc-benchmark -- --machine igpu-32gb-cpu-two-model-smoke --backends cpu --models qwen2.5-1.5b-instruct,qwen3-4b --runs 0 --warmup 0 --cooldown 1 --resource-dir "%LOCALAPPDATA%\\SmolPC Code Helper"` reproduces the `qwen3-4b` conflict in ~20s.
+  - CPU lane ran `qwen2.5-1.5b-instruct` successfully, but `qwen3-4b` failed with `HTTP 409 STARTUP_POLICY_CONFLICT` (`Engine is already ready under a different startup mode/policy`).
+  - Auto-detection included `openvino_npu`, then both NPU combos failed with `HTTP 503 STARTUP_MODEL_LOAD_FAILED` (`NPU hardware was detected, but OpenVINO did not expose an NPU device`).
+  - Result file: `benchmark-results/benchmark-igpu-32gb-2026-03-21.json`.
+- Next steps:
+  - Reproduce with explicit backends (`--backends cpu`) to unblock benchmark practice sessions.
+  - Fix benchmark lifecycle for per-model CPU runs (likely needs explicit model load/switch semantics between combos).
+  - Tighten backend auto-detect or preflight gating so unsupported NPU lanes are skipped before scheduling combos.
 
 ---
 
