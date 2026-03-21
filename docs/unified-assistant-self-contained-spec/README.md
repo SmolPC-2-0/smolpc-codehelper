@@ -4,7 +4,7 @@
 > and document map for the self-contained delivery line.
 
 **Last Updated:** 2026-03-21
-**Status:** Single-mainline self-contained workflow active; Phase 5 GIMP self-contained provisioning complete; Phase 6 release packaging and validation is next
+**Status:** Single-mainline self-contained workflow active; Phase 5 GIMP self-contained provisioning complete; source-based Windows functional validation is the active gate before broader Phase 6 packaging work
 
 ## Project Summary
 
@@ -53,8 +53,10 @@ As of 2026-03-21:
   `06d32a5219b69d8182079843c79661aca98ad220` and is not kept in sync
 - Phase 4 Blender closeout docs are merged on the self-contained mainline
 - Phase 5 GIMP preflight docs, implementation, and closeout docs are merged on the self-contained mainline
-- the next official docs branch is:
-  - `codex/unified-self-contained-release-docs`
+- the active post-Phase-5 validation pass is:
+  - docs: `codex/unified-self-contained-functional-test-docs`
+  - implementation: `codex/unified-self-contained-functional-test-prep`
+  - closeout docs: `codex/unified-self-contained-functional-test-status-docs`
 
 ## Freeze Tags
 
@@ -113,9 +115,10 @@ Never branch new self-contained work from the frozen demo branches.
 
 1. [CURRENT_STATE.md](CURRENT_STATE.md)
 2. [GIT_WORKFLOW.md](GIT_WORKFLOW.md)
-3. [IMPLEMENTATION_PHASES.md](IMPLEMENTATION_PHASES.md)
-4. [SETUP_SPEC.md](SETUP_SPEC.md)
-5. [SELF_CONTAINED_PLAN.md](SELF_CONTAINED_PLAN.md)
+3. [WINDOWS_SOURCE_TESTING.md](WINDOWS_SOURCE_TESTING.md)
+4. [IMPLEMENTATION_PHASES.md](IMPLEMENTATION_PHASES.md)
+5. [SETUP_SPEC.md](SETUP_SPEC.md)
+6. [SELF_CONTAINED_PLAN.md](SELF_CONTAINED_PLAN.md)
 
 `SETUP_SPEC.md` is intentionally cross-listed in both architecture and workflow
 reading orders because it defines both the technical setup contract and the
@@ -134,24 +137,26 @@ self-contained roadmap phases.
 
 ## Document Index
 
-| Document                                               | Purpose                                                                           |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| [CURRENT_STATE.md](CURRENT_STATE.md)                   | Frozen demo baseline, new mainlines, current gap to self-contained shipping       |
-| [IMPLEMENTATION_PHASES.md](IMPLEMENTATION_PHASES.md)   | Ordered self-contained delivery phases after the branch cut                       |
-| [ARCHITECTURE.md](ARCHITECTURE.md)                     | Target architecture for owned runtimes, provisioning, and host-app orchestration  |
-| [MCP_INTEGRATION.md](MCP_INTEGRATION.md)               | Mode-by-mode integration ownership, transports, and runtime supervision rules     |
-| [PACKAGING.md](PACKAGING.md)                           | Packaged layout, bundled runtime rules, and Windows validation checklist          |
-| [MODEL_STRATEGY.md](MODEL_STRATEGY.md)                 | Bundled default model decision and future model packaging policy                  |
-| [SETUP_SPEC.md](SETUP_SPEC.md)                         | App-level setup subsystem, public setup DTOs, setup commands, and Phase 2 limits  |
-| [SELF_CONTAINED_PLAN.md](SELF_CONTAINED_PLAN.md)       | Master roadmap from demo baseline to externally usable self-contained app         |
-| [THIRD_PARTY_PROVENANCE.md](THIRD_PARTY_PROVENANCE.md) | Pinned source, license, and modification tracking for imported third-party assets |
-| [GIT_WORKFLOW.md](GIT_WORKFLOW.md)                     | Required branch policy for the self-contained line                                |
-| [LEARNINGS.md](LEARNINGS.md)                           | Cross-phase corrections and non-obvious productization gotchas                    |
-| [RESOURCES.md](RESOURCES.md)                           | External repos, packaging tools, and upstream integration references              |
-| [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)             | Shared coding standards carried forward from the demo line                        |
-| [FRONTEND_SPEC.md](FRONTEND_SPEC.md)                   | Shared shell/UI reference carried forward from the demo line                      |
-| [CODE_MODE_SPEC.md](CODE_MODE_SPEC.md)                 | Historical Code-mode reference from the demo line; not a self-contained driver    |
-| [VSCODE_EXTENSION_SPEC.md](VSCODE_EXTENSION_SPEC.md)   | Historical extension research reference from the demo line                        |
+| Document                                                                           | Purpose                                                                           |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| [CURRENT_STATE.md](CURRENT_STATE.md)                                               | Frozen demo baseline, new mainlines, current gap to self-contained shipping       |
+| [IMPLEMENTATION_PHASES.md](IMPLEMENTATION_PHASES.md)                               | Ordered self-contained delivery phases after the branch cut                       |
+| [ARCHITECTURE.md](ARCHITECTURE.md)                                                 | Target architecture for owned runtimes, provisioning, and host-app orchestration  |
+| [MCP_INTEGRATION.md](MCP_INTEGRATION.md)                                           | Mode-by-mode integration ownership, transports, and runtime supervision rules     |
+| [PACKAGING.md](PACKAGING.md)                                                       | Packaged layout, bundled runtime rules, and Windows validation checklist          |
+| [MODEL_STRATEGY.md](MODEL_STRATEGY.md)                                             | Bundled default model decision and future model packaging policy                  |
+| [SETUP_SPEC.md](SETUP_SPEC.md)                                                     | App-level setup subsystem, public setup DTOs, setup commands, and Phase 2 limits  |
+| [SELF_CONTAINED_PLAN.md](SELF_CONTAINED_PLAN.md)                                   | Master roadmap from demo baseline to externally usable self-contained app         |
+| [THIRD_PARTY_PROVENANCE.md](THIRD_PARTY_PROVENANCE.md)                             | Pinned source, license, and modification tracking for imported third-party assets |
+| [GIT_WORKFLOW.md](GIT_WORKFLOW.md)                                                 | Required branch policy for the self-contained line                                |
+| [WINDOWS_SOURCE_TESTING.md](WINDOWS_SOURCE_TESTING.md)                             | Decision-complete Windows source-testing guide for the current functional gate    |
+| [WINDOWS_SOURCE_TEST_RESULTS_TEMPLATE.md](WINDOWS_SOURCE_TEST_RESULTS_TEMPLATE.md) | Short reporting template for repeated Windows source-test runs                    |
+| [LEARNINGS.md](LEARNINGS.md)                                                       | Cross-phase corrections and non-obvious productization gotchas                    |
+| [RESOURCES.md](RESOURCES.md)                                                       | External repos, packaging tools, and upstream integration references              |
+| [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)                                         | Shared coding standards carried forward from the demo line                        |
+| [FRONTEND_SPEC.md](FRONTEND_SPEC.md)                                               | Shared shell/UI reference carried forward from the demo line                      |
+| [CODE_MODE_SPEC.md](CODE_MODE_SPEC.md)                                             | Historical Code-mode reference from the demo line; not a self-contained driver    |
+| [VSCODE_EXTENSION_SPEC.md](VSCODE_EXTENSION_SPEC.md)                               | Historical extension research reference from the demo line                        |
 
 ## Locked Decisions
 
@@ -170,7 +175,10 @@ self-contained roadmap phases.
 
 ## Current Phase
 
-The current mainline-ready phase is Phase 6 Release Packaging And Validation.
+The current mainline-ready phase is still Phase 6 Release Packaging And
+Validation, but the immediate gate before broader Phase 6 work is a dedicated
+Windows source-based functional validation pass on the unified mainline.
+
 Phase 5 is now complete on `dev/unified-assistant-self-contained`:
 
 - the vendored `maorcc/gimp-mcp` snapshot is bundled under `apps/codehelper/src-tauri/resources/gimp/`
@@ -179,7 +187,18 @@ Phase 5 is now complete on `dev/unified-assistant-self-contained`:
 - GIMP mode now validates the detected host version, provisions missing assets on demand, launches GIMP only when needed, and supervises the bundled bridge on `127.0.0.1:10008`
 - Blender, LibreOffice, Code, and Calc behavior remained unchanged during Phase 5
 
-The next official docs branch is:
+Current validation branches:
+
+- docs: `codex/unified-self-contained-functional-test-docs`
+- implementation: `codex/unified-self-contained-functional-test-prep`
+- closeout docs: `codex/unified-self-contained-functional-test-status-docs`
+
+Use these alongside:
+
+- [WINDOWS_SOURCE_TESTING.md](WINDOWS_SOURCE_TESTING.md)
+- [WINDOWS_SOURCE_TEST_RESULTS_TEMPLATE.md](WINDOWS_SOURCE_TEST_RESULTS_TEMPLATE.md)
+
+After this validation gate is closed out, the branch queue returns to:
 
 - `codex/unified-self-contained-release-docs`
 

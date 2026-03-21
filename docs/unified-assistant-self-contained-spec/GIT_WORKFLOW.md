@@ -1,7 +1,7 @@
 # Git Workflow For The Self-Contained Unified Assistant Line
 
 **Last Updated:** 2026-03-21
-**Status:** Required workflow on the single self-contained mainline; Phase 5 is complete and Phase 6 release docs are next
+**Status:** Required workflow on the single self-contained mainline; Phase 5 is complete and the immediate post-Phase-5 branch stack is the Windows source-testing validation gate before broader Phase 6 release work
 
 ## 1. Branch Roles
 
@@ -69,13 +69,24 @@ The standard self-contained phase flow now follows this exact sequence:
 No future self-contained PR should target
 `docs/unified-assistant-self-contained-spec`.
 
-Phase 5 is now complete on the mainline:
+Phase 5 is now complete on the mainline.
 
-- Phase 5 docs preflight is merged on the mainline
-- Phase 5 implementation is merged on the mainline
-- Phase 5 closeout docs are merged on the mainline
-- the next official docs branch should be:
-  - `codex/unified-self-contained-release-docs`
+Before engine upgrades, packaging work, or broader Phase 6 release changes, the
+immediate branch stack is:
+
+- docs:
+  - `codex/unified-self-contained-functional-test-docs`
+- implementation:
+  - `codex/unified-self-contained-functional-test-prep`
+- closeout docs:
+  - `codex/unified-self-contained-functional-test-status-docs`
+
+That stack is a narrow functional validation gate on
+`dev/unified-assistant-self-contained`, not a phase renumbering.
+
+After it closes out, the branch queue returns to:
+
+- `codex/unified-self-contained-release-docs`
 
 ## 6. Clone Rule
 
@@ -128,6 +139,7 @@ Allowed:
 - packaging and provenance documentation
 - API contract documentation
 - workflow migration or phase-closeout docs that belong on the active mainline
+- tester runbooks and repeatable validation templates
 
 Avoid:
 
@@ -210,5 +222,11 @@ As of 2026-03-21:
   `dev/unified-assistant-self-contained`
 - Phase 5 GIMP implementation is merged on
   `dev/unified-assistant-self-contained`
-- the next official docs branch is:
+- Phase 5 closeout docs are merged on
+  `dev/unified-assistant-self-contained`
+- the active validation gate branches are:
+  - `codex/unified-self-contained-functional-test-docs`
+  - `codex/unified-self-contained-functional-test-prep`
+  - `codex/unified-self-contained-functional-test-status-docs`
+- after that gate closes out, the queue returns to:
   - `codex/unified-self-contained-release-docs`
