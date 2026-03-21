@@ -30,6 +30,12 @@ rfd = "0.15.4"
 dirs = "6"
 smolpc-engine-core = { path = "../../../engine/crates/smolpc-engine-core" }
 smolpc-engine-client = { path = "../../../engine/crates/smolpc-engine-client" }
+smolpc-assistant-types = { path = "../../../crates/smolpc-assistant-types" }
+smolpc-mcp-client = { path = "../../../crates/smolpc-mcp-client" }
+async-trait = { workspace = true }
+axum = { workspace = true }
+rand = { workspace = true }
+serde-pickle = "1.2"
 
 # Benchmarking dependencies
 sysinfo = "0.32"

@@ -1,7 +1,8 @@
 [workspace]
 members = [
   "apps/codehelper/src-tauri",
-  "apps/gimp-assistant/src-tauri",
+  "crates/smolpc-assistant-types",
+  "crates/smolpc-mcp-client",
   "engine/crates/smolpc-engine-core",
   "engine/crates/smolpc-engine-host",
   "engine/crates/smolpc-engine-client",
@@ -26,6 +27,7 @@ axum = { version = "0.8", features = ["macros"] }
 async-stream = "0.3"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace"] }
+async-trait = "0.1"
 rand = "0.8"
 rand_distr = "0.4"
 url = "2.5"
