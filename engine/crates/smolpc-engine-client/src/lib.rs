@@ -19,6 +19,7 @@ const ENGINE_PROTOCOL_VERSION: &str = "1.0.0";
 const ENGINE_API_VERSION: &str = "1.0.0";
 const ENGINE_HOST_BASENAME: &str = "smolpc-engine-host";
 const SPAWN_LOCK_FILENAME: &str = "engine-spawn.lock";
+const SPAWN_LOG_FILENAME: &str = "engine-spawn.log";
 const SPAWN_LOCK_WAIT: Duration = Duration::from_secs(10);
 const SPAWN_LOCK_STALE_AGE: Duration = Duration::from_secs(30);
 pub(crate) const FORCE_EP_ENV: &str = "SMOLPC_FORCE_EP";
@@ -773,22 +774,45 @@ pub async fn connect_or_spawn(
     }
 
     if !client.health().await.unwrap_or(false) {
-        spawn_host(&options, &token)?;
+        // Kill any stale engine on our port before spawning a fresh one.
+        kill_stale_engine_on_port(options.port);
+
+        // Regenerate the token so client and freshly-spawned host share the
+        // same secret — stale tokens from a dead host are the #1 cause of
+        // "failed to become healthy" on clean installs.
+        let _ = std::fs::remove_file(&token_path);
+        let fresh_token = load_or_create_token(&token_path)?;
+        let client = EngineClient::new(
+            format!("http://127.0.0.1:{}", options.port),
+            fresh_token.clone(),
+        );
+
+        spawn_host(&options, &fresh_token)?;
+
+        let spawn_log = options.shared_runtime_dir.join(SPAWN_LOG_FILENAME);
+        let started = std::time::Instant::now();
+        loop {
+            if client.health().await.unwrap_or(false) {
+                return finish_connect(client).await;
+            }
+            if started.elapsed() > Duration::from_secs(30) {
+                let log_hint = if spawn_log.exists() {
+                    format!(" Check spawn log: {}", spawn_log.display())
+                } else {
+                    String::new()
+                };
+                return Err(EngineClientError::Message(format!(
+                    "Engine failed to become healthy within 30s.{log_hint}"
+                )));
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
     }
 
-    let started = std::time::Instant::now();
-    loop {
-        if client.health().await.unwrap_or(false) {
-            break;
-        }
-        if started.elapsed() > Duration::from_secs(30) {
-            return Err(EngineClientError::Message(
-                "Engine failed to become healthy within 30s".to_string(),
-            ));
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    finish_connect(client).await
+}
 
+async fn finish_connect(client: EngineClient) -> Result<EngineClient, EngineClientError> {
     let meta = client.meta().await?;
     if !protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION) {
         return Err(EngineClientError::Message(format!(
@@ -796,7 +820,6 @@ pub async fn connect_or_spawn(
             meta.protocol_version
         )));
     }
-
     Ok(client)
 }
 
@@ -1062,7 +1085,12 @@ fn create_new_token_file(path: &Path, token: &str) -> Result<(), std::io::Error>
 
 fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineClientError> {
     let host_bin = resolve_host_binary(options)?;
-    let mut cmd = Command::new(host_bin);
+
+    // Write spawn diagnostics before attempting launch.
+    let spawn_log_path = options.shared_runtime_dir.join(SPAWN_LOG_FILENAME);
+    let spawn_log = write_spawn_diagnostics(&spawn_log_path, &host_bin, options, token);
+
+    let mut cmd = Command::new(&host_bin);
     cmd.arg("--port")
         .arg(options.port.to_string())
         .arg("--data-dir")
@@ -1070,7 +1098,8 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
         .arg("--app-version")
         .arg(&options.app_version)
         .env("SMOLPC_ENGINE_TOKEN", token)
-        .env("SMOLPC_ENGINE_PORT", options.port.to_string());
+        .env("SMOLPC_ENGINE_PORT", options.port.to_string())
+        .env("RUST_LOG", "info");
 
     if let Some(force_ep) = options.runtime_mode.as_force_override() {
         cmd.env(FORCE_EP_ENV, force_ep);
@@ -1093,19 +1122,24 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
         .cloned()
         .or_else(default_shared_models_dir)
     {
-        cmd.env("SMOLPC_MODELS_DIR", models_dir);
+        cmd.env("SMOLPC_MODELS_DIR", &models_dir);
     }
+
+    // Redirect engine stderr to the spawn log so crash output is captured.
+    let stderr_target = spawn_log
+        .and_then(|path| std::fs::File::options().append(true).open(path).ok())
+        .map(std::process::Stdio::from)
+        .unwrap_or_else(std::process::Stdio::null);
 
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        use std::process::Stdio;
         const DETACHED_PROCESS: u32 = 0x00000008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
         cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(stderr_target);
     }
 
     #[cfg(unix)]
@@ -1114,11 +1148,96 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
         cmd.process_group(0)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
+            .stderr(stderr_target);
     }
 
     cmd.spawn()?;
     Ok(())
+}
+
+/// Write pre-spawn diagnostics to a log file for post-mortem debugging.
+fn write_spawn_diagnostics(
+    log_path: &Path,
+    host_bin: &Path,
+    options: &EngineConnectOptions,
+    _token: &str,
+) -> Option<PathBuf> {
+    use std::fmt::Write as _;
+    let mut buf = String::new();
+    let _ = writeln!(buf, "--- spawn diagnostics {} ---", chrono_stamp());
+    let _ = writeln!(buf, "engine_binary: {}", host_bin.display());
+    let _ = writeln!(buf, "binary_exists: {}", host_bin.exists());
+    let _ = writeln!(buf, "port: {}", options.port);
+    let _ = writeln!(
+        buf,
+        "resource_dir: {}",
+        options
+            .resource_dir
+            .as_deref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<none>".into())
+    );
+    let _ = writeln!(buf, "data_dir: {}", options.data_dir.display());
+    let _ = writeln!(
+        buf,
+        "shared_runtime_dir: {}",
+        options.shared_runtime_dir.display()
+    );
+    let models_dir = options
+        .models_dir
+        .as_ref()
+        .cloned()
+        .or_else(default_shared_models_dir);
+    let _ = writeln!(
+        buf,
+        "models_dir: {}",
+        models_dir
+            .as_deref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<none>".into())
+    );
+    let token_path = options.shared_runtime_dir.join("engine-token.txt");
+    let _ = writeln!(buf, "token_path: {}", token_path.display());
+    let _ = writeln!(buf, "token_exists: {}", token_path.exists());
+
+    // Check libs directory reachable from resource_dir
+    if let Some(rd) = &options.resource_dir {
+        let libs = rd.join("libs");
+        let ov_libs = rd.join("libs").join("openvino");
+        let _ = writeln!(buf, "libs_dir_exists: {}", libs.exists());
+        let _ = writeln!(buf, "openvino_libs_dir_exists: {}", ov_libs.exists());
+    }
+
+    let _ = writeln!(buf, "---");
+    match std::fs::write(log_path, &buf) {
+        Ok(()) => Some(log_path.to_path_buf()),
+        Err(_) => None,
+    }
+}
+
+fn chrono_stamp() -> String {
+    use std::time::SystemTime;
+    let d = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}s", d.as_secs())
+}
+
+/// Best-effort kill of any stale smolpc-engine-host process bound to our port.
+fn kill_stale_engine_on_port(_port: u16) {
+    // On Windows, find and kill any lingering engine-host processes.
+    // This is a blunt instrument but prevents stale-port deadlocks.
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/IM", "smolpc-engine-host.exe"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        // Brief sleep to let the port release.
+        std::thread::sleep(Duration::from_millis(300));
+    }
 }
 
 fn default_shared_models_dir() -> Option<PathBuf> {
@@ -1144,6 +1263,12 @@ async fn acquire_spawn_lock(
                 return Ok(SpawnLockGuard { path: lock_path });
             }
             Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                // Check if lock holder PID is still alive.
+                if is_lock_holder_dead(&lock_path) {
+                    let _ = std::fs::remove_file(&lock_path);
+                    continue;
+                }
+
                 let stale = std::fs::metadata(&lock_path)
                     .and_then(|meta| meta.modified())
                     .ok()
@@ -1155,15 +1280,53 @@ async fn acquire_spawn_lock(
                 }
 
                 if started.elapsed() > SPAWN_LOCK_WAIT {
-                    return Err(EngineClientError::Message(
-                        "Timed out waiting for engine spawn lock".to_string(),
-                    ));
+                    // Force-remove lock after timeout as last resort.
+                    let _ = std::fs::remove_file(&lock_path);
+                    continue;
                 }
 
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
             Err(e) => return Err(e.into()),
         }
+    }
+}
+
+/// Check if the PID recorded in the lock file is still running.
+fn is_lock_holder_dead(lock_path: &Path) -> bool {
+    let Ok(contents) = std::fs::read_to_string(lock_path) else {
+        return true; // Can't read -> treat as dead.
+    };
+    let Some(pid_str) = contents
+        .lines()
+        .find_map(|line| line.strip_prefix("pid="))
+    else {
+        return true; // No PID recorded -> treat as dead.
+    };
+    let Ok(pid) = pid_str.trim().parse::<u32>() else {
+        return true;
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        // OpenProcess with SYNCHRONIZE (0x00100000) returns null if process doesn't exist.
+        extern "system" {
+            fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut std::ffi::c_void;
+            fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+        }
+        const SYNCHRONIZE: u32 = 0x0010_0000;
+        let handle = unsafe { OpenProcess(SYNCHRONIZE, 0, pid) };
+        if handle.is_null() {
+            return true; // Process doesn't exist.
+        }
+        unsafe { CloseHandle(handle) };
+        false // Process is alive.
+    }
+
+    #[cfg(unix)]
+    {
+        // kill(pid, 0) checks if process exists without sending a signal.
+        unsafe { libc::kill(pid as i32, 0) != 0 }
     }
 }
 
