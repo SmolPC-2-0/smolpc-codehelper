@@ -1,4 +1,6 @@
 mod config;
+mod prompts;
+mod stats;
 
 use clap::Parser;
 
@@ -47,5 +49,5 @@ struct Cli {
 
 fn main() {
     let _cli = Cli::parse();
-    println!("smolpc-benchmark: scaffold ready");
+    println!("smolpc-benchmark: {} prompts loaded", prompts::PROMPTS.len());
 }
