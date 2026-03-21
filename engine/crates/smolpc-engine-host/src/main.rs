@@ -401,11 +401,33 @@ fn env_default_model_id() -> Option<String> {
         .or_else(|| normalize_non_empty(std::env::var(LEGACY_DEFAULT_MODEL_ENV).ok()))
 }
 
+fn select_best_model_for_ram(
+    models: &[smolpc_engine_core::ModelDefinition],
+    total_ram_gb: f64,
+) -> Option<String> {
+    let mut eligible: Vec<_> = models
+        .iter()
+        .filter(|m| (m.min_ram_gb as f64) <= total_ram_gb)
+        .collect();
+    eligible.sort_by(|a, b| b.min_ram_gb.partial_cmp(&a.min_ram_gb).unwrap_or(CmpOrdering::Equal));
+    eligible.first().map(|m| m.id.clone())
+}
+
 fn built_in_default_model_id() -> Option<String> {
-    ModelRegistry::available_models()
-        .into_iter()
-        .next()
-        .map(|m| m.id)
+    let models = ModelRegistry::available_models();
+    let total_ram_gb = hardware_query::HardwareInfo::query()
+        .ok()
+        .map(|info| info.memory().total_gb());
+    if let Some(ram) = total_ram_gb {
+        if let Some(id) = select_best_model_for_ram(&models, ram) {
+            let min = models.iter().find(|m| m.id == id).map(|m| m.min_ram_gb).unwrap_or(0.0);
+            log::info!(
+                "Auto-selected default model '{id}' (total RAM: {ram:.1}GB, model requires: {min:.1}GB)",
+            );
+            return Some(id);
+        }
+    }
+    models.into_iter().next().map(|m| m.id)
 }
 
 fn resolve_default_model_id_with_sources(
@@ -4554,5 +4576,37 @@ mod tests {
     fn startup_mode_directml_required_sets_directml_gate() {
         assert!(StartupMode::DirectmlRequired.requires_directml());
         assert!(!StartupMode::Auto.requires_directml());
+    }
+
+    fn test_models() -> Vec<smolpc_engine_core::ModelDefinition> {
+        ModelRegistry::available_models()
+    }
+
+    #[test]
+    fn ram_selection_32gb_picks_qwen3() {
+        let models = test_models();
+        let selected = select_best_model_for_ram(&models, 32.0);
+        assert_eq!(selected.as_deref(), Some("qwen3-4b"));
+    }
+
+    #[test]
+    fn ram_selection_16gb_picks_qwen3() {
+        let models = test_models();
+        let selected = select_best_model_for_ram(&models, 16.0);
+        assert_eq!(selected.as_deref(), Some("qwen3-4b"));
+    }
+
+    #[test]
+    fn ram_selection_12gb_picks_qwen25() {
+        let models = test_models();
+        let selected = select_best_model_for_ram(&models, 12.0);
+        assert_eq!(selected.as_deref(), Some("qwen2.5-1.5b-instruct"));
+    }
+
+    #[test]
+    fn ram_selection_4gb_picks_fallback() {
+        let models = test_models();
+        let selected = select_best_model_for_ram(&models, 4.0);
+        assert_eq!(selected, None);
     }
 }
