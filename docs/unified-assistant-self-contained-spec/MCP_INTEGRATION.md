@@ -1,7 +1,7 @@
 # MCP And Provider Integration For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Integration ownership spec with Phase 2 setup foundation, Phase 3 LibreOffice runtime ownership landed, and Phase 4 Blender provisioning landed
+**Status:** Integration ownership spec with Phase 2 setup foundation, Phase 3 LibreOffice runtime ownership landed, Phase 4 Blender provisioning landed, and Phase 5 GIMP provisioning preflight locked
 
 ## 1. Scope
 
@@ -140,14 +140,17 @@ Transport/runtime rules:
 
 - unified provider keeps TCP MCP transport on `127.0.0.1:10008`
 - bundled GIMP MCP runtime is launched by the unified app
+- transport contract remains unchanged for Phase 5
 
 Ownership rules:
 
 - GIMP remains separately installed
+- authoritative upstream source is `maorcc/gimp-mcp` pinned to an exact commit/tag before import
 - plugin/server payload is bundled by the unified app
 - unified app provisions plugin files into the user GIMP profile
 - unified app launches GIMP when needed
 - unified app launches the bundled GIMP MCP server when needed
+- unified app should reuse an already-running GIMP session instead of force-restarting it
 
 ## 6. Setup API Expectations
 
@@ -211,8 +214,9 @@ Expected provisioners:
 - `BlenderAddonProvisioner`
 - `GimpPluginProvisioner`
 
-Phase 2 establishes the shared provisioning foundation. Phase 4 now ships the
-Blender addon provisioner path while keeping GIMP provisioning for Phase 5.
+Phase 2 establishes the shared provisioning foundation. Phase 4 ships the
+Blender addon provisioner path. Phase 5 is the next locked implementation slice
+for GIMP provisioning and runtime ownership.
 
 ## 8. Runtime Supervision Rules
 

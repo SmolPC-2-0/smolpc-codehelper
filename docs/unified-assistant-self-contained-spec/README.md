@@ -4,7 +4,7 @@
 > and document map for the self-contained delivery line.
 
 **Last Updated:** 2026-03-17
-**Status:** Single-mainline self-contained workflow active; Phase 4 Blender provisioning complete; Phase 5 GIMP docs preflight next
+**Status:** Single-mainline self-contained workflow active; Phase 4 Blender provisioning complete; Phase 5 GIMP docs preflight active
 
 ## Project Summary
 
@@ -152,17 +152,19 @@ self-contained roadmap phases.
 | Shipping OS           | Windows only                                                           |
 | Python ownership      | Bundled app-private runtime                                            |
 | Blender integration   | Reuse existing repo addon source; provision automatically              |
-| GIMP integration      | Vendor pinned upstream `gimp-mcp` snapshot and provision automatically |
+| GIMP integration      | Vendor pinned upstream `maorcc/gimp-mcp` snapshot and provision automatically |
 | Provenance            | Mandatory before bundling imported third-party runtime assets          |
 
 ## Current Phase
 
 The current active docs-first phase is Phase 5 GIMP self-contained provisioning
-preflight:
+preflight (in progress):
 
 - keep the single-mainline workflow explicit on `dev/unified-assistant-self-contained`
-- lock `gimp-mcp` source pin and license/provenance notes before import
+- lock `maorcc/gimp-mcp` source pin and license/provenance notes before import
 - lock bundled GIMP plugin/server provisioning and launch ownership scope
+- keep GIMP transport anchored to `127.0.0.1:10008`
+- keep the setup surface app-level with one `Prepare` action and no mode-specific setup wizard
 - keep Blender, LibreOffice, Code, and Calc behavior unchanged in this docs preflight
 - keep Calc scaffold-only
 

@@ -1,7 +1,7 @@
 # Current State
 
 **Last Updated:** 2026-03-17
-**Status:** Demo line frozen; Phase 4 complete; Phase 5 GIMP docs preflight is next on the single self-contained mainline
+**Status:** Demo line frozen; Phase 4 complete; Phase 5 GIMP docs preflight is active on the single self-contained mainline
 
 ## 1. Branch State
 
@@ -123,7 +123,7 @@ The self-contained delivery line must ship:
 | Code        | Already owned in `apps/codehelper`                                | Keep                                                        |
 | LibreOffice | Runtime scripts already imported into unified resources           | Bundled Python now owns packaged Writer/Slides runtime path |
 | Blender     | Bridge app-owned, addon snapshot bundled and provisioned by setup | Keep bundled addon provisioning and mode-driven launch flow |
-| GIMP        | Unified provider exists, but runtime/plugin ownership is external | Vendor pinned upstream `gimp-mcp` snapshot and provision it |
+| GIMP        | Unified provider exists, but runtime/plugin ownership is external | Vendor pinned upstream `maorcc/gimp-mcp` snapshot and provision it |
 
 ## 6. Phase Status
 
@@ -235,17 +235,22 @@ Phase 4 intentionally did not land:
 
 ## 10. Next Official Branches
 
-The next required branch sequence is:
+Phase 5 docs preflight branch is now active:
 
-1. `codex/unified-self-contained-gimp-docs`
-2. `codex/unified-self-contained-gimp`
-3. `codex/unified-self-contained-gimp-status-docs`
+- `codex/unified-self-contained-gimp-docs`
 
-Phase 5 preflight focus:
+The next required branches after this docs preflight merges are:
 
-- lock provenance and license notes for the pinned `gimp-mcp` snapshot before import
+1. `codex/unified-self-contained-gimp`
+2. `codex/unified-self-contained-gimp-status-docs`
+
+Phase 5 preflight lock-in focus:
+
+- lock provenance and license notes for the pinned `maorcc/gimp-mcp` snapshot before import
 - lock bundled GIMP plugin/server ownership and provisioning boundaries
 - lock auto-launch/runtime-supervision expectations for GIMP mode
+- keep GIMP transport pinned to `127.0.0.1:10008`
+- keep setup as one app-level repair surface without a GIMP-specific setup wizard
 - keep Blender, LibreOffice, Code, and Calc behavior unchanged
 
 ## 11. Known Risks

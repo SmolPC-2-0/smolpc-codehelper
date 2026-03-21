@@ -1,7 +1,7 @@
 # Setup Subsystem Spec
 
 **Last Updated:** 2026-03-17
-**Status:** Phase 2 foundation contract merged; Phase 3 consumes prepared bundled Python; Phase 4 Blender provisioning has landed without changing setup command names
+**Status:** Phase 2 foundation contract merged; Phase 3 consumes prepared bundled Python; Phase 4 Blender provisioning has landed; Phase 5 GIMP provisioning preflight is locked without changing setup command names
 
 ## 1. Purpose
 
@@ -45,6 +45,12 @@ Phase 4 closeout status:
 - setup now includes one additional status item for Blender addon readiness
 - `setup_prepare()` now provisions and enables the Blender addon through Blender CLI background execution
 - `setup_prepare()` still does not launch the interactive Blender UI
+
+Phase 5 locked next step:
+
+- setup gains app-level GIMP plugin/server provisioning and repair visibility
+- `setup_prepare()` may provision and repair bundled GIMP plugin/server assets
+- `setup_prepare()` still must not launch the interactive GIMP UI
 
 Phase 2 setup work does not include:
 
@@ -91,6 +97,12 @@ Phase 4 live extension:
 - it does so through Blender CLI background execution
 - it may update app-local provision markers under `setup/state/`
 - it still must not launch the interactive Blender UI
+
+Phase 5 locked extension:
+
+- `setup_prepare()` may provision and repair bundled GIMP plugin/server assets
+- it may update app-local provision markers under `setup/state/`
+- it still must not launch the interactive GIMP UI
 
 ## 4. Public DTOs
 
