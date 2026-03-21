@@ -1,7 +1,7 @@
 # Current State
 
-**Last Updated:** 2026-03-17
-**Status:** Demo line frozen; Phase 4 complete; Phase 5 GIMP docs preflight is active on the single self-contained mainline
+**Last Updated:** 2026-03-21
+**Status:** Demo line frozen; Phase 4 complete; Phase 5 GIMP preflight is merged on the single self-contained mainline; implementation is next
 
 ## 1. Branch State
 
@@ -19,14 +19,14 @@
 | `dev/unified-assistant-self-contained`       | Sole active implementation and documentation mainline |
 | `docs/unified-assistant-self-contained-spec` | Frozen archive/reference snapshot                     |
 
-Current implementation head after Phase 4 Blender provisioning:
+Current implementation mainline after Phase 4 Blender closeout and Phase 5 GIMP
+preflight merge:
 
 - `dev/unified-assistant-self-contained` includes:
   - Phase 4 Blender docs preflight
   - Phase 4 Blender implementation
   - Phase 4 closeout docs
-  - current implementation head:
-    - `a6269b26537df522b69f8b60d43f9c9464e19ae9`
+  - Phase 5 GIMP docs preflight
   - earlier self-contained history:
     - Phase 3 closeout docs
     - Phase 3 workflow migration docs
@@ -41,10 +41,11 @@ Current frozen archive snapshot:
 
 - `docs/unified-assistant-self-contained-spec` remains frozen at:
   - `06d32a5219b69d8182079843c79661aca98ad220`
-
-No docs sync is pending. The docs tree under
-`docs/unified-assistant-self-contained-spec/` is already identical between the
-archive branch snapshot and `dev/unified-assistant-self-contained`.
+- the archive branch is intentionally reference-only and is no longer kept
+  identical to the active mainline docs tree
+- when docs disagree, the source of truth is the docs tree under
+  `docs/unified-assistant-self-contained-spec/` on
+  `dev/unified-assistant-self-contained`
 
 ### Freeze tags
 
@@ -118,11 +119,11 @@ The self-contained delivery line must ship:
 
 ## 5. Source Ownership Summary
 
-| Mode family | Current source status                                             | Self-contained ownership direction                          |
-| ----------- | ----------------------------------------------------------------- | ----------------------------------------------------------- |
-| Code        | Already owned in `apps/codehelper`                                | Keep                                                        |
-| LibreOffice | Runtime scripts already imported into unified resources           | Bundled Python now owns packaged Writer/Slides runtime path |
-| Blender     | Bridge app-owned, addon snapshot bundled and provisioned by setup | Keep bundled addon provisioning and mode-driven launch flow |
+| Mode family | Current source status                                             | Self-contained ownership direction                                 |
+| ----------- | ----------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Code        | Already owned in `apps/codehelper`                                | Keep                                                               |
+| LibreOffice | Runtime scripts already imported into unified resources           | Bundled Python now owns packaged Writer/Slides runtime path        |
+| Blender     | Bridge app-owned, addon snapshot bundled and provisioned by setup | Keep bundled addon provisioning and mode-driven launch flow        |
 | GIMP        | Unified provider exists, but runtime/plugin ownership is external | Vendor pinned upstream `maorcc/gimp-mcp` snapshot and provision it |
 
 ## 6. Phase Status
@@ -233,24 +234,30 @@ Phase 4 intentionally did not land:
 - GIMP host-app launch orchestration
 - Calc activation
 
-## 10. Next Official Branches
+## 10. Phase 5 Readiness And Next Official Branches
 
-Phase 5 docs preflight branch is now active:
+Phase 5 docs preflight is merged into
+`dev/unified-assistant-self-contained`.
 
-- `codex/unified-self-contained-gimp-docs`
+The next official implementation branch is:
 
-The next required branches after this docs preflight merges are:
+- `codex/unified-self-contained-gimp`
 
-1. `codex/unified-self-contained-gimp`
-2. `codex/unified-self-contained-gimp-status-docs`
+The required closeout docs branch after implementation is:
 
-Phase 5 preflight lock-in focus:
+- `codex/unified-self-contained-gimp-status-docs`
 
-- lock provenance and license notes for the pinned `maorcc/gimp-mcp` snapshot before import
-- lock bundled GIMP plugin/server ownership and provisioning boundaries
-- lock auto-launch/runtime-supervision expectations for GIMP mode
+Phase 5 implementation focus:
+
+- record the exact vendored `maorcc/gimp-mcp` pin and license note before
+  payload import
+- lock the file import map for the bundled GIMP plugin/server snapshot
+- keep bundled GIMP plugin/server ownership and provisioning boundaries aligned
+  to the merged preflight docs
+- keep auto-launch and runtime-supervision expectations explicit for GIMP mode
 - keep GIMP transport pinned to `127.0.0.1:10008`
-- keep setup as one app-level repair surface without a GIMP-specific setup wizard
+- keep setup as one app-level repair surface without a GIMP-specific setup
+  wizard
 - keep Blender, LibreOffice, Code, and Calc behavior unchanged
 
 ## 11. Known Risks

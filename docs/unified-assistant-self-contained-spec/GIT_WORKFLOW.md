@@ -1,7 +1,7 @@
 # Git Workflow For The Self-Contained Unified Assistant Line
 
-**Last Updated:** 2026-03-17
-**Status:** Required workflow after the Phase 3 single-mainline transition
+**Last Updated:** 2026-03-21
+**Status:** Required workflow on the single self-contained mainline; Phase 5 GIMP implementation is next
 
 ## 1. Branch Roles
 
@@ -13,7 +13,18 @@
 | `docs/unified-assistant-self-contained-spec` | Frozen self-contained archive snapshot |
 | `codex/*`                                    | Narrow task branches                   |
 
-## 2. Branch Cut Rule
+## 2. Active Source Of Truth
+
+- active implementation and docs mainline:
+  - `dev/unified-assistant-self-contained`
+- frozen archive/reference branch:
+  - `docs/unified-assistant-self-contained-spec` at
+    `06d32a5219b69d8182079843c79661aca98ad220`
+- the archive branch is not a PR target and is not synced forward
+- if the docs ever disagree, trust the docs tree on
+  `dev/unified-assistant-self-contained`
+
+## 3. Branch Cut Rule
 
 The branch cut is complete.
 
@@ -24,7 +35,7 @@ Do not branch new self-contained work from:
 
 Use those branches only for explicit demo hotfixes.
 
-## 3. Historical Note
+## 4. Historical Note
 
 Phases 0 through 2 intentionally used a dual-mainline workflow:
 
@@ -38,9 +49,9 @@ once the docs tree was already fully in sync with the implementation mainline.
 The historical merged PRs and branch names from that period are correct and
 should not be rewritten. Phase 3 onward uses the simplified workflow below.
 
-## 4. Docs-First Rule
+## 5. Docs-First Rule
 
-Every self-contained phase now follows this exact sequence:
+The standard self-contained phase flow now follows this exact sequence:
 
 1. create `codex/<phase>-docs` from
    `origin/dev/unified-assistant-self-contained`
@@ -58,7 +69,15 @@ Every self-contained phase now follows this exact sequence:
 No future self-contained PR should target
 `docs/unified-assistant-self-contained-spec`.
 
-## 5. Clone Rule
+Phase 5 is currently between steps 2 and 3:
+
+- Phase 5 docs preflight is already merged on the mainline
+- the next implementation branch should be:
+  - `codex/unified-self-contained-gimp`
+- the required closeout docs branch after implementation remains:
+  - `codex/unified-self-contained-gimp-status-docs`
+
+## 6. Clone Rule
 
 Use separate clones, not worktrees.
 
@@ -74,15 +93,17 @@ Recommended clone set:
 
 Do not do self-contained work from the stale local `main` checkout.
 
-## 6. Merge Policy
+## 7. Merge Policy
 
 - no direct pushes to `dev/unified-assistant-self-contained`
 - narrow `codex/*` branch per phase
 - merge demo hotfixes forward only when still relevant
 - do not merge self-contained work back into the demo line
 - no new PRs target `docs/unified-assistant-self-contained-spec`
+- before opening the next implementation branch, confirm the core status and
+  workflow docs agree on the current phase and next branch
 
-## 7. Demo Hotfix Rule
+## 8. Demo Hotfix Rule
 
 Allowed on the frozen demo line:
 
@@ -96,7 +117,7 @@ If a demo hotfix is also relevant to self-contained work:
 2. cherry-pick or re-implement it onto the self-contained line
 3. do not reverse-merge the self-contained line into the demo line
 
-## 8. Branch Boundaries
+## 9. Branch Boundaries
 
 ### Docs branches
 
@@ -138,10 +159,10 @@ Avoid:
 - rewriting standalone apps wholesale
 - unrelated engine redesign
 
-## 9. Provenance Rule
+## 10. Provenance Rule
 
-Before importing third-party runtime or plugin assets, the docs-only preflight
-branch for that phase must update `THIRD_PARTY_PROVENANCE.md` with:
+Before importing third-party runtime or plugin assets, the phase's docs/preflight
+work must update `THIRD_PARTY_PROVENANCE.md` with:
 
 - upstream source location
 - exact pinned commit/tag/version
@@ -151,7 +172,7 @@ branch for that phase must update `THIRD_PARTY_PROVENANCE.md` with:
 
 No third-party asset import should land without provenance recorded first.
 
-## 10. PR Targets
+## 11. PR Targets
 
 | Branch type    | PR target                              |
 | -------------- | -------------------------------------- |
@@ -159,7 +180,7 @@ No third-party asset import should land without provenance recorded first.
 | implementation | `dev/unified-assistant-self-contained` |
 | closeout docs  | `dev/unified-assistant-self-contained` |
 
-## 11. Per-Phase Checklist
+## 12. Per-Phase Checklist
 
 Use this checklist for every self-contained phase:
 
@@ -169,8 +190,9 @@ Use this checklist for every self-contained phase:
 - implementation branch merged into `dev/unified-assistant-self-contained`
 - status-docs branch opened from updated `origin/dev/unified-assistant-self-contained`
 - status-docs branch merged into `dev/unified-assistant-self-contained`
+- changed markdown files pass repo-root Prettier checks before PR open
 
-## 12. Archived Docs Branch Rule
+## 13. Archived Docs Branch Rule
 
 `docs/unified-assistant-self-contained-spec` remains in the remote as a frozen
 reference snapshot at `06d32a5219b69d8182079843c79661aca98ad220`.
@@ -178,11 +200,15 @@ reference snapshot at `06d32a5219b69d8182079843c79661aca98ad220`.
 Use it only as historical reference for the dual-mainline transition period.
 Do not open new PRs against it.
 
-## 13. First Branch In This Line
+## 14. Current Branch Queue
 
-The first required branch is:
+As of 2026-03-21:
 
-- `codex/unified-self-contained-master-plan-docs`
-
-No implementation branch should open on the self-contained line until that
-master-plan docs branch is merged through both new mainlines.
+- Phase 4 Blender closeout docs are merged on
+  `dev/unified-assistant-self-contained`
+- Phase 5 GIMP preflight docs are merged on
+  `dev/unified-assistant-self-contained`
+- the next official implementation branch is:
+  - `codex/unified-self-contained-gimp`
+- the required closeout docs branch after implementation is:
+  - `codex/unified-self-contained-gimp-status-docs`

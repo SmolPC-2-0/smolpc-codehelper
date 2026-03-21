@@ -1,7 +1,7 @@
 # Setup Subsystem Spec
 
-**Last Updated:** 2026-03-17
-**Status:** Phase 2 foundation contract merged; Phase 3 consumes prepared bundled Python; Phase 4 Blender provisioning has landed; Phase 5 GIMP provisioning preflight is locked without changing setup command names
+**Last Updated:** 2026-03-21
+**Status:** Phase 2 foundation contract merged; Phase 3 consumes prepared bundled Python; Phase 4 Blender provisioning has landed; Phase 5 GIMP provisioning scope is merged without changing setup command names; implementation is next
 
 ## 1. Purpose
 

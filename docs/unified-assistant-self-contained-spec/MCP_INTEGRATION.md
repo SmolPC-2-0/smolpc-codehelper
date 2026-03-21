@@ -1,7 +1,7 @@
 # MCP And Provider Integration For The Self-Contained Line
 
-**Last Updated:** 2026-03-17
-**Status:** Integration ownership spec with Phase 2 setup foundation, Phase 3 LibreOffice runtime ownership landed, Phase 4 Blender provisioning landed, and Phase 5 GIMP provisioning preflight locked
+**Last Updated:** 2026-03-21
+**Status:** Integration ownership spec with Phase 2 setup foundation, Phase 3 LibreOffice runtime ownership landed, Phase 4 Blender provisioning landed, and Phase 5 GIMP provisioning scope merged; implementation is next
 
 ## 1. Scope
 

@@ -1,7 +1,7 @@
 # SmolPC Unified Assistant Self-Contained Architecture
 
-**Last Updated:** 2026-03-17
-**Status:** Target architecture with Phase 2 foundation, Phase 3 LibreOffice runtime ownership landed, Phase 4 Blender provisioning landed, and Phase 5 GIMP provisioning preflight locked
+**Last Updated:** 2026-03-21
+**Status:** Target architecture with Phase 2 foundation, Phase 3 LibreOffice runtime ownership landed, Phase 4 Blender provisioning landed, and Phase 5 GIMP provisioning scope merged; implementation is next
 
 ## 1. Product Shape
 

@@ -1,7 +1,7 @@
 # Self-Contained Delivery Phases
 
-**Last Updated:** 2026-03-17
-**Status:** Branch cut, cleanup, foundation, Phase 4 complete; Phase 5 GIMP docs preflight active
+**Last Updated:** 2026-03-21
+**Status:** Branch cut, cleanup, foundation, Phase 4 complete; Phase 5 GIMP preflight merged; implementation is next
 
 ## Phase 0: Demo Freeze And Branch Cut
 
@@ -235,7 +235,7 @@ The next official branch after Phase 4 closeout docs is:
 
 ## Phase 5: GIMP Self-Contained Provisioning
 
-**Status:** docs preflight active
+**Status:** preflight merged; implementation next
 
 **Branches**
 
@@ -267,12 +267,20 @@ The next official branch after Phase 4 closeout docs is:
 - mode-driven first-use may auto-launch GIMP and the bundled GIMP MCP runtime when required
 - existing Blender, LibreOffice, Code, and Calc behaviors must remain unchanged in this phase
 
+**Current readiness**
+
+- Phase 5 docs preflight is merged on `dev/unified-assistant-self-contained`
+- the next official implementation branch is:
+  - `codex/unified-self-contained-gimp`
+- the required closeout docs branch after implementation is:
+  - `codex/unified-self-contained-gimp-status-docs`
+
 **Exit criteria**
 
 - GIMP mode works on a machine with GIMP installed but no plugin/server manually configured
 - no manual clone, environment variable, plugin copy, or terminal start step remains
 
-The next official branch after Phase 5 docs preflight merge is:
+The next official branch is:
 
 - `codex/unified-self-contained-gimp`
 
