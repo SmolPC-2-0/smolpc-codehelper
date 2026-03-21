@@ -1,7 +1,7 @@
 # SmolPC Unified Assistant Self-Contained Architecture
 
 **Last Updated:** 2026-03-17
-**Status:** Target architecture with Phase 2 foundation, Phase 3 LibreOffice runtime ownership landed, and Phase 4 Blender provisioning landed
+**Status:** Target architecture with Phase 2 foundation, Phase 3 LibreOffice runtime ownership landed, Phase 4 Blender provisioning landed, and Phase 5 GIMP provisioning preflight locked
 
 ## 1. Product Shape
 
@@ -122,6 +122,12 @@ Phase 4 consumer now live:
 - `setup_prepare()` may provision and enable the Blender addon through Blender CLI background execution
 - interactive Blender launch remains mode-driven rather than setup-panel-driven
 
+Phase 5 next consumer (preflight locked):
+
+- GIMP extends setup/provisioning state with plugin/server repair visibility
+- `setup_prepare()` may provision and repair bundled GIMP plugin/server assets
+- interactive GIMP launch remains mode-driven rather than setup-panel-driven
+
 ### 4.4 Mode providers
 
 Responsibilities:
@@ -238,10 +244,11 @@ Those roots are now part of the implementation contract on
 ### 8.4 GIMP
 
 - provider transport stays TCP on `127.0.0.1:10008`
-- self-contained line vendors a pinned `gimp-mcp` snapshot
+- self-contained line vendors a pinned `maorcc/gimp-mcp` snapshot
 - plugin/server payload becomes bundled unified-app-owned resource
 - provider provisions plugin files into the GIMP profile in Phase 5
 - provider launches both GIMP and the bundled GIMP MCP runtime when needed in Phase 5
+- provider reuses running GIMP sessions when available and must not force-restart an existing session
 
 ## 9. Boot Flow
 
@@ -274,7 +281,7 @@ On first use of a live external mode:
 
 Phase 2 does not yet implement this full flow for every provider. Phase 3
 implements the LibreOffice slice, and Phase 4 now implements the Blender slice
-while leaving GIMP provisioning for the next phase.
+while Phase 5 is the next provisioning slice for GIMP.
 
 ## 11. Deferred Architecture
 

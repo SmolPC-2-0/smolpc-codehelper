@@ -23,7 +23,7 @@ not changed since then.
 | --------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Blender addon payload       | `apps/blender-assistant/blender_addon/blender_helper_http.py` and companion addon files          | This in-repo source is now repackaged under unified app resources for automatic Blender addon provisioning and repair.                      |
 | LibreOffice runtime scripts | `apps/codehelper/src-tauri/resources/libreoffice/mcp_server/`                                    | Writer and Slides already depend on these bundled scripts. The self-contained line uses them as the baseline for removing external Python. |
-| GIMP MCP/plugin runtime     | Pending pinned upstream `gimp-mcp` snapshot                                                      | The self-contained line needs a vendored, provenance-tracked import before GIMP can be provisioned and launched automatically.             |
+| GIMP MCP/plugin runtime     | Pending pinned upstream `maorcc/gimp-mcp` snapshot                                               | The self-contained line needs a vendored, provenance-tracked import before GIMP can be provisioned and launched automatically.             |
 | Bundled Python packaging    | `uv`, `uv tool`, `uv pip`, and packaged wheel/runtime inputs                                     | This is the planned app-private Python foundation for LibreOffice first, and likely for GIMP-side runtime ownership later.                 |
 | Bundled model packaging     | Engine model registry plus packaged resource layout under `apps/codehelper/src-tauri/resources/` | The self-contained finish line requires shipping a default model payload instead of expecting external model installation.                 |
 
@@ -53,6 +53,14 @@ Phase 4 closeout locks and lands the Blender addon snapshot source at:
 Phase 4 implementation repacks that snapshot into:
 
 - `apps/codehelper/src-tauri/resources/blender/addon/blender_helper_http.py`
+
+Phase 5 preflight locks the GIMP runtime source to:
+
+- upstream `maorcc/gimp-mcp` with an exact commit/tag pin required before import
+
+Phase 5 implementation will vendor that snapshot under:
+
+- `apps/codehelper/src-tauri/resources/gimp/`
 
 ---
 
