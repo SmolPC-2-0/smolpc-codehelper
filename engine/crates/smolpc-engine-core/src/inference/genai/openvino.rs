@@ -764,7 +764,12 @@ fn generate_stream_with_history_blocking(
     let gen_config = clamp_max_new_tokens(gen_config, guard.max_new_tokens_cap);
     let max_callback_count = gen_config.max_length;
     let config = create_generation_config(&guard, gen_config, &guard.generation_controls)?;
-    let history = create_chat_history(&guard.api, &messages, guard.disable_thinking, guard.device_target)?;
+    let history = create_chat_history(
+        &guard.api,
+        &messages,
+        guard.disable_thinking,
+        guard.device_target,
+    )?;
     let start = Instant::now();
     let mut callback_state = StreamCallbackState {
         sender: token_tx,
@@ -1065,9 +1070,7 @@ fn create_chat_history(
     let npu_thinking_messages;
     let messages = if disable_thinking && device_target == OpenVinoDeviceTarget::Npu {
         npu_thinking_messages = inject_nothink_into_messages(messages);
-        log::info!(
-            "NPU: injected /nothink into system message (extra_context not supported)"
-        );
+        log::info!("NPU: injected /nothink into system message (extra_context not supported)");
         &npu_thinking_messages
     } else {
         messages
@@ -1599,8 +1602,14 @@ mod tests {
     fn inject_nothink_prepends_to_existing_system_message() {
         use crate::inference::types::InferenceChatMessage;
         let messages = vec![
-            InferenceChatMessage { role: "system".into(), content: "You are helpful.".into() },
-            InferenceChatMessage { role: "user".into(), content: "Hi".into() },
+            InferenceChatMessage {
+                role: "system".into(),
+                content: "You are helpful.".into(),
+            },
+            InferenceChatMessage {
+                role: "user".into(),
+                content: "Hi".into(),
+            },
         ];
         let result = super::inject_nothink_into_messages(&messages);
         assert_eq!(result[0].role, "system");
@@ -1611,9 +1620,10 @@ mod tests {
     #[test]
     fn inject_nothink_creates_system_message_if_absent() {
         use crate::inference::types::InferenceChatMessage;
-        let messages = vec![
-            InferenceChatMessage { role: "user".into(), content: "Hi".into() },
-        ];
+        let messages = vec![InferenceChatMessage {
+            role: "user".into(),
+            content: "Hi".into(),
+        }];
         let result = super::inject_nothink_into_messages(&messages);
         assert_eq!(result[0].role, "system");
         assert_eq!(result[0].content, "/nothink");
@@ -1625,8 +1635,14 @@ mod tests {
     fn inject_nothink_is_idempotent() {
         use crate::inference::types::InferenceChatMessage;
         let messages = vec![
-            InferenceChatMessage { role: "system".into(), content: "/nothink\nYou are helpful.".into() },
-            InferenceChatMessage { role: "user".into(), content: "Hi".into() },
+            InferenceChatMessage {
+                role: "system".into(),
+                content: "/nothink\nYou are helpful.".into(),
+            },
+            InferenceChatMessage {
+                role: "user".into(),
+                content: "Hi".into(),
+            },
         ];
         let result = super::inject_nothink_into_messages(&messages);
         assert_eq!(result[0].content, "/nothink\nYou are helpful.");

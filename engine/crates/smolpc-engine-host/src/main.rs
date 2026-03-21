@@ -409,7 +409,11 @@ fn select_best_model_for_ram(
         .iter()
         .filter(|m| (m.min_ram_gb as f64) <= total_ram_gb)
         .collect();
-    eligible.sort_by(|a, b| b.min_ram_gb.partial_cmp(&a.min_ram_gb).unwrap_or(CmpOrdering::Equal));
+    eligible.sort_by(|a, b| {
+        b.min_ram_gb
+            .partial_cmp(&a.min_ram_gb)
+            .unwrap_or(CmpOrdering::Equal)
+    });
     eligible.first().map(|m| (m.id.clone(), m.min_ram_gb))
 }
 
@@ -2549,7 +2553,8 @@ impl EngineState {
         let metrics = match result {
             Ok(metrics) => metrics,
             Err(error) => {
-                let recovered = self.try_runtime_fallback_after_directml_failure(&error)
+                let recovered = self
+                    .try_runtime_fallback_after_directml_failure(&error)
                     .await;
                 if recovered {
                     return Err(format!(
@@ -2587,7 +2592,8 @@ impl EngineState {
         let metrics = match result {
             Ok(metrics) => metrics,
             Err(error) => {
-                let recovered = self.try_runtime_fallback_after_directml_failure(&error)
+                let recovered = self
+                    .try_runtime_fallback_after_directml_failure(&error)
                     .await;
                 if recovered {
                     return Err(format!(
