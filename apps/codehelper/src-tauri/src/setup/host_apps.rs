@@ -71,7 +71,7 @@ fn all_specs() -> Vec<HostAppSpec> {
             id: SETUP_ITEM_HOST_GIMP,
             label: "GIMP",
             executable_names: if cfg!(windows) {
-                &["gimp-2.10.exe", "gimp.exe"]
+                &["gimp-3.exe", "gimp-2.10.exe", "gimp.exe"]
             } else {
                 &["gimp", "gimp-2.10"]
             },
@@ -301,8 +301,29 @@ fn _path_exists(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{detect_host_app, HostAppSpec};
+    use std::env;
     use std::path::PathBuf;
+    use std::sync::{Mutex as StdMutex, OnceLock};
     use tempfile::TempDir;
+
+    static PATH_LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
+
+    fn path_lock() -> &'static StdMutex<()> {
+        PATH_LOCK.get_or_init(|| StdMutex::new(()))
+    }
+
+    fn with_path(path: &std::path::Path, callback: impl FnOnce()) {
+        let _guard = path_lock()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let original = env::var_os("PATH");
+        env::set_var("PATH", path.as_os_str());
+        callback();
+        match original {
+            Some(value) => env::set_var("PATH", value),
+            None => env::remove_var("PATH"),
+        }
+    }
 
     #[test]
     fn cached_path_wins_when_it_still_exists() {
@@ -336,5 +357,24 @@ mod tests {
 
         let detection = detect_host_app(&spec, Some(&PathBuf::from("/missing/gimp.exe")));
         assert_eq!(detection.path, Some(executable));
+    }
+
+    #[test]
+    fn path_lookup_accepts_gimp_3_executable_name() {
+        let temp = TempDir::new().expect("temp dir");
+        let executable = temp.path().join("gimp-3.exe");
+        std::fs::write(&executable, "bin").expect("write executable");
+
+        let spec = HostAppSpec {
+            id: "host_gimp",
+            label: "GIMP",
+            executable_names: &["gimp-3.exe", "gimp.exe"],
+            standard_paths: vec![],
+        };
+
+        with_path(temp.path(), || {
+            let detection = detect_host_app(&spec, Some(&PathBuf::from("/missing/gimp.exe")));
+            assert_eq!(detection.path, Some(executable.clone()));
+        });
     }
 }
