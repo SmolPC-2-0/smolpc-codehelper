@@ -738,12 +738,17 @@ fn generate_stream_blocking(
             .unwrap_or_default(),
         callback_count: 0,
         max_callback_count,
+        truncated: false,
+        truncation_reason: None,
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
         args: &mut callback_state as *mut StreamCallbackState as *mut c_void,
     };
-    generate_once(&guard, &prompt, config.as_ptr(), Some(&streamer), start)
+    let mut metrics = generate_once(&guard, &prompt, config.as_ptr(), Some(&streamer), start)?;
+    metrics.truncated = callback_state.truncated;
+    metrics.truncation_reason = callback_state.truncation_reason;
+    Ok(metrics)
 }
 
 fn generate_stream_with_history_blocking(
@@ -759,7 +764,12 @@ fn generate_stream_with_history_blocking(
     let gen_config = clamp_max_new_tokens(gen_config, guard.max_new_tokens_cap);
     let max_callback_count = gen_config.max_length;
     let config = create_generation_config(&guard, gen_config, &guard.generation_controls)?;
-    let history = create_chat_history(&guard.api, &messages, guard.disable_thinking, guard.device_target)?;
+    let history = create_chat_history(
+        &guard.api,
+        &messages,
+        guard.disable_thinking,
+        guard.device_target,
+    )?;
     let start = Instant::now();
     let mut callback_state = StreamCallbackState {
         sender: token_tx,
@@ -773,18 +783,23 @@ fn generate_stream_with_history_blocking(
             .unwrap_or_default(),
         callback_count: 0,
         max_callback_count,
+        truncated: false,
+        truncation_reason: None,
     };
     let streamer = StreamerCallback {
         callback_func: Some(stream_callback),
         args: &mut callback_state as *mut StreamCallbackState as *mut c_void,
     };
-    generate_with_history_once(
+    let mut metrics = generate_with_history_once(
         &guard,
         history.as_ptr(),
         config.as_ptr(),
         Some(&streamer),
         start,
-    )
+    )?;
+    metrics.truncated = callback_state.truncated;
+    metrics.truncation_reason = callback_state.truncation_reason;
+    Ok(metrics)
 }
 
 fn create_generation_config(
@@ -1055,9 +1070,7 @@ fn create_chat_history(
     let npu_thinking_messages;
     let messages = if disable_thinking && device_target == OpenVinoDeviceTarget::Npu {
         npu_thinking_messages = inject_nothink_into_messages(messages);
-        log::info!(
-            "NPU: injected /nothink into system message (extra_context not supported)"
-        );
+        log::info!("NPU: injected /nothink into system message (extra_context not supported)");
         &npu_thinking_messages
     } else {
         messages
@@ -1209,6 +1222,8 @@ fn read_generation_metrics(
         time_to_first_token_ms: Some(time_to_first_token_ms),
         tokens_per_second: tokens_per_second as f64,
         total_time_ms,
+        truncated: false,
+        truncation_reason: None,
     })
 }
 
@@ -1262,6 +1277,8 @@ fn fallback_metrics(started: Instant, total_tokens: usize) -> GenerationMetrics 
         time_to_first_token_ms: None,
         tokens_per_second,
         total_time_ms,
+        truncated: false,
+        truncation_reason: None,
     }
 }
 
@@ -1275,6 +1292,8 @@ struct StreamCallbackState {
     /// is not honoured for any reason (e.g. pipeline bug or ABI mismatch).
     callback_count: usize,
     max_callback_count: usize,
+    truncated: bool,
+    truncation_reason: Option<String>,
 }
 
 unsafe extern "C" fn stream_callback(
@@ -1300,6 +1319,11 @@ unsafe extern "C" fn stream_callback(
                     state.callback_count,
                     state.max_callback_count,
                 );
+                state.truncated = true;
+                state.truncation_reason = Some(format!(
+                    "Token count ({}) exceeded safety limit ({})",
+                    state.callback_count, state.max_callback_count,
+                ));
                 return OvGenAiStreamingStatus::Stop;
             }
         }
@@ -1322,6 +1346,11 @@ unsafe extern "C" fn stream_callback(
                 "Stopping OpenVINO stream due to degenerate trailing dot run ({})",
                 state.trailing_dot_run
             );
+            state.truncated = true;
+            state.truncation_reason = Some(format!(
+                "Degenerate trailing dot run ({})",
+                state.trailing_dot_run,
+            ));
             return OvGenAiStreamingStatus::Stop;
         }
         if !piece.is_empty() && state.sender.send(piece).is_err() {
@@ -1573,8 +1602,14 @@ mod tests {
     fn inject_nothink_prepends_to_existing_system_message() {
         use crate::inference::types::InferenceChatMessage;
         let messages = vec![
-            InferenceChatMessage { role: "system".into(), content: "You are helpful.".into() },
-            InferenceChatMessage { role: "user".into(), content: "Hi".into() },
+            InferenceChatMessage {
+                role: "system".into(),
+                content: "You are helpful.".into(),
+            },
+            InferenceChatMessage {
+                role: "user".into(),
+                content: "Hi".into(),
+            },
         ];
         let result = super::inject_nothink_into_messages(&messages);
         assert_eq!(result[0].role, "system");
@@ -1585,9 +1620,10 @@ mod tests {
     #[test]
     fn inject_nothink_creates_system_message_if_absent() {
         use crate::inference::types::InferenceChatMessage;
-        let messages = vec![
-            InferenceChatMessage { role: "user".into(), content: "Hi".into() },
-        ];
+        let messages = vec![InferenceChatMessage {
+            role: "user".into(),
+            content: "Hi".into(),
+        }];
         let result = super::inject_nothink_into_messages(&messages);
         assert_eq!(result[0].role, "system");
         assert_eq!(result[0].content, "/nothink");
@@ -1599,8 +1635,14 @@ mod tests {
     fn inject_nothink_is_idempotent() {
         use crate::inference::types::InferenceChatMessage;
         let messages = vec![
-            InferenceChatMessage { role: "system".into(), content: "/nothink\nYou are helpful.".into() },
-            InferenceChatMessage { role: "user".into(), content: "Hi".into() },
+            InferenceChatMessage {
+                role: "system".into(),
+                content: "/nothink\nYou are helpful.".into(),
+            },
+            InferenceChatMessage {
+                role: "user".into(),
+                content: "Hi".into(),
+            },
         ];
         let result = super::inject_nothink_into_messages(&messages);
         assert_eq!(result[0].content, "/nothink\nYou are helpful.");

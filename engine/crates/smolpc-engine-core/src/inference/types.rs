@@ -15,6 +15,14 @@ pub struct GenerationMetrics {
 
     /// Total generation time (milliseconds)
     pub total_time_ms: u64,
+
+    /// Whether output was truncated by a safety limit
+    #[serde(default)]
+    pub truncated: bool,
+
+    /// Reason for truncation, if any
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncation_reason: Option<String>,
 }
 
 /// Model metadata

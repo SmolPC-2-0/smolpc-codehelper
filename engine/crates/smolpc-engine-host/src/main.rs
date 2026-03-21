@@ -401,11 +401,39 @@ fn env_default_model_id() -> Option<String> {
         .or_else(|| normalize_non_empty(std::env::var(LEGACY_DEFAULT_MODEL_ENV).ok()))
 }
 
+fn select_best_model_for_ram(
+    models: &[smolpc_engine_core::ModelDefinition],
+    total_ram_gb: f64,
+) -> Option<(String, f32)> {
+    let mut eligible: Vec<_> = models
+        .iter()
+        .filter(|m| (m.min_ram_gb as f64) <= total_ram_gb)
+        .collect();
+    eligible.sort_by(|a, b| {
+        b.min_ram_gb
+            .partial_cmp(&a.min_ram_gb)
+            .unwrap_or(CmpOrdering::Equal)
+    });
+    eligible.first().map(|m| (m.id.clone(), m.min_ram_gb))
+}
+
 fn built_in_default_model_id() -> Option<String> {
-    ModelRegistry::available_models()
-        .into_iter()
-        .next()
-        .map(|m| m.id)
+    let models = ModelRegistry::available_models();
+    let total_ram_gb = hardware_query::HardwareInfo::query()
+        .ok()
+        .map(|info| info.memory().total_gb());
+    if let Some(ram) = total_ram_gb {
+        if let Some((id, min)) = select_best_model_for_ram(&models, ram) {
+            log::info!(
+                "Auto-selected default model '{id}' (total RAM: {ram:.1}GB, model requires: {min:.1}GB)",
+            );
+            return Some(id);
+        }
+        log::warn!(
+            "No model fits available RAM ({ram:.1}GB) — falling back to smallest registered model",
+        );
+    }
+    models.into_iter().next().map(|m| m.id)
 }
 
 fn resolve_default_model_id_with_sources(
@@ -2420,24 +2448,24 @@ impl EngineState {
         Ok(())
     }
 
-    async fn try_runtime_fallback_after_directml_failure(&self, error: &str) {
+    async fn try_runtime_fallback_after_directml_failure(&self, error: &str) -> bool {
         if error.contains("INFERENCE_GENERATION_CANCELLED") {
-            return;
+            return false;
         }
         if parse_force_override() == Some(InferenceBackend::DirectML) {
-            return;
+            return false;
         }
 
         let status_snapshot = self.backend_status.lock().await.clone();
         if status_snapshot.active_backend != Some(InferenceBackend::DirectML) {
-            return;
+            return false;
         }
 
         let Some(model_id) = self.current_model.lock().await.clone() else {
-            return;
+            return false;
         };
         let Some(model_def) = ModelRegistry::get_model(&model_id) else {
-            return;
+            return false;
         };
         let model_artifacts = resolve_model_lane_artifacts(&model_def.directory);
         let cpu_model_dir = ModelLoader::openvino_dir(&model_def.directory);
@@ -2446,7 +2474,7 @@ impl EngineState {
             &model_id,
             &cpu_model_dir,
         ) else {
-            return;
+            return false;
         };
 
         *self.runtime_adapter.lock().await = Some(cpu_adapter);
@@ -2500,6 +2528,7 @@ impl EngineState {
             self.persist_backend_record(decision_key, persisted_record_decision, counters)
                 .await;
         }
+        true
     }
 
     async fn generate_stream<F>(
@@ -2524,8 +2553,14 @@ impl EngineState {
         let metrics = match result {
             Ok(metrics) => metrics,
             Err(error) => {
-                self.try_runtime_fallback_after_directml_failure(&error)
+                let recovered = self
+                    .try_runtime_fallback_after_directml_failure(&error)
                     .await;
+                if recovered {
+                    return Err(format!(
+                        "{error} [DirectML failed; backend switched to CPU — retry your request]"
+                    ));
+                }
                 return Err(error);
             }
         };
@@ -2557,8 +2592,14 @@ impl EngineState {
         let metrics = match result {
             Ok(metrics) => metrics,
             Err(error) => {
-                self.try_runtime_fallback_after_directml_failure(&error)
+                let recovered = self
+                    .try_runtime_fallback_after_directml_failure(&error)
                     .await;
+                if recovered {
+                    return Err(format!(
+                        "{error} [DirectML failed; backend switched to CPU — retry your request]"
+                    ));
+                }
                 return Err(error);
             }
         };
@@ -2681,7 +2722,11 @@ fn build_openvino_cpu_runtime_adapter(
         match ensure_qwen3_nothink_template(model_dir) {
             Ok(true) => log::info!("Patched Qwen3 chat template for CPU non-thinking default"),
             Ok(false) => {}
-            Err(e) => log::warn!("Failed to patch Qwen3 chat template: {e}"),
+            Err(e) => {
+                return Err(format!(
+                    "Qwen3 CPU requires non-thinking template but patch failed: {e}"
+                ));
+            }
         }
     }
 
@@ -4550,5 +4595,56 @@ mod tests {
     fn startup_mode_directml_required_sets_directml_gate() {
         assert!(StartupMode::DirectmlRequired.requires_directml());
         assert!(!StartupMode::Auto.requires_directml());
+    }
+
+    fn fixture_models() -> Vec<smolpc_engine_core::ModelDefinition> {
+        vec![
+            smolpc_engine_core::ModelDefinition {
+                id: "small-model".to_string(),
+                name: "Small".to_string(),
+                size: "1.5B".to_string(),
+                disk_size_gb: 0.9,
+                min_ram_gb: 8.0,
+                directory: "small".to_string(),
+                description: "test".to_string(),
+            },
+            smolpc_engine_core::ModelDefinition {
+                id: "large-model".to_string(),
+                name: "Large".to_string(),
+                size: "4B".to_string(),
+                disk_size_gb: 2.5,
+                min_ram_gb: 16.0,
+                directory: "large".to_string(),
+                description: "test".to_string(),
+            },
+        ]
+    }
+
+    #[test]
+    fn ram_selection_32gb_picks_largest() {
+        let models = fixture_models();
+        let selected = select_best_model_for_ram(&models, 32.0);
+        assert_eq!(selected, Some(("large-model".to_string(), 16.0)));
+    }
+
+    #[test]
+    fn ram_selection_16gb_picks_largest_at_threshold() {
+        let models = fixture_models();
+        let selected = select_best_model_for_ram(&models, 16.0);
+        assert_eq!(selected, Some(("large-model".to_string(), 16.0)));
+    }
+
+    #[test]
+    fn ram_selection_12gb_picks_smaller() {
+        let models = fixture_models();
+        let selected = select_best_model_for_ram(&models, 12.0);
+        assert_eq!(selected, Some(("small-model".to_string(), 8.0)));
+    }
+
+    #[test]
+    fn ram_selection_4gb_returns_none() {
+        let models = fixture_models();
+        let selected = select_best_model_for_ram(&models, 4.0);
+        assert_eq!(selected, None);
     }
 }

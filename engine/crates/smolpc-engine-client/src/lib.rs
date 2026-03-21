@@ -1017,6 +1017,8 @@ fn fallback_stream_metrics(
         time_to_first_token_ms: first_chunk_at,
         tokens_per_second,
         total_time_ms,
+        truncated: false,
+        truncation_reason: None,
     }
 }
 
