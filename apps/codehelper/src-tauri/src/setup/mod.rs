@@ -1,4 +1,5 @@
 pub mod blender;
+pub mod gimp;
 pub mod host_apps;
 pub mod launch;
 pub mod manifests;

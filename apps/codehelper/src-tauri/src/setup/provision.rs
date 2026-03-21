@@ -1,21 +1,29 @@
 use super::blender::ensure_blender_addon_prepared;
-use super::host_apps::detect_blender_with_policy;
+use super::gimp::ensure_gimp_plugin_runtime_prepared;
+use super::host_apps::{detect_blender_with_policy, detect_gimp_with_policy};
 use super::python::prepare_bundled_python;
 use super::state::SetupState;
 use super::status::collect_setup_status;
-use super::types::SETUP_ITEM_HOST_BLENDER;
+use super::types::{SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP};
 use std::path::Path;
 use std::path::PathBuf;
 
 pub async fn prepare_setup(state: &SetupState) -> SetupResult {
-    let cached_blender_path = {
+    let (cached_blender_path, cached_gimp_path) = {
         let cache = state.cache().await;
-        cache
-            .resolved_host_apps
-            .get(SETUP_ITEM_HOST_BLENDER)
-            .cloned()
+        (
+            cache
+                .resolved_host_apps
+                .get(SETUP_ITEM_HOST_BLENDER)
+                .cloned(),
+            cache.resolved_host_apps.get(SETUP_ITEM_HOST_GIMP).cloned(),
+        )
     };
-    let result = prepare_setup_inner(state, cached_blender_path.as_ref());
+    let result = prepare_setup_inner(
+        state,
+        cached_blender_path.as_ref(),
+        cached_gimp_path.as_ref(),
+    );
     {
         let mut cache = state.cache().await;
         cache.last_error = result.err();
@@ -28,6 +36,7 @@ type SetupResult = smolpc_assistant_types::SetupStatusDto;
 fn prepare_setup_inner(
     state: &SetupState,
     cached_blender_path: Option<&PathBuf>,
+    cached_gimp_path: Option<&PathBuf>,
 ) -> Result<(), String> {
     let setup_root = state
         .setup_root()
@@ -43,6 +52,17 @@ fn prepare_setup_inner(
             state.resource_dir(),
             state.app_local_data_dir(),
             blender_path,
+        )?;
+    }
+    let gimp_detection = detect_gimp_with_policy(
+        cached_gimp_path.map(PathBuf::as_path),
+        state.allow_system_host_detection(),
+    );
+    if let Some(gimp_path) = gimp_detection.path.as_deref() {
+        let _ = ensure_gimp_plugin_runtime_prepared(
+            state.resource_dir(),
+            state.app_local_data_dir(),
+            gimp_path,
         )?;
     }
     Ok(())
@@ -65,7 +85,9 @@ fn prepare_setup_directories(setup_root: &Path) -> Result<(), String> {
 mod tests {
     use super::prepare_setup;
     use crate::setup::state::SetupState;
-    use crate::setup::types::SETUP_ITEM_HOST_BLENDER;
+    use crate::setup::types::{
+        SETUP_ITEM_GIMP_PLUGIN_RUNTIME, SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP,
+    };
     use smolpc_assistant_types::SetupItemStateDto;
     use std::path::Path;
     use tempfile::TempDir;
@@ -306,5 +328,132 @@ exit 0
             .join("state")
             .join("blender-addon.json")
             .exists());
+    }
+
+    #[tokio::test]
+    async fn prepare_setup_provisions_gimp_plugin_runtime_when_gimp_is_detected() {
+        let resource_temp = TempDir::new().expect("resource temp");
+        let app_temp = TempDir::new().expect("app temp");
+        let host_temp = TempDir::new().expect("host temp");
+
+        let python_root = resource_temp.path().join("python");
+        let models_root = resource_temp.path().join("models");
+        let gimp_root = resource_temp.path().join("gimp");
+        std::fs::create_dir_all(python_root.join("payload").join("bin")).expect("python payload");
+        std::fs::create_dir_all(&models_root).expect("models root");
+        std::fs::create_dir_all(gimp_root.join("upstream")).expect("gimp upstream");
+        std::fs::create_dir_all(gimp_root.join("bridge")).expect("gimp bridge");
+        std::fs::create_dir_all(gimp_root.join("plugin").join("gimp-mcp-plugin"))
+            .expect("gimp plugin");
+        std::fs::write(python_root.join("README.md"), "placeholder").expect("readme");
+        std::fs::write(
+            python_root.join("payload").join("bin").join("python"),
+            "python",
+        )
+        .expect("runtime file");
+        std::fs::write(
+            python_root.join("manifest.json"),
+            r#"{
+              "version": "phase2",
+              "source": "tests",
+              "expectedPaths": ["README.md", "payload"],
+              "status": "staged"
+            }"#,
+        )
+        .expect("manifest");
+        std::fs::write(
+            models_root.join("manifest.json"),
+            r#"{
+              "version": "phase2",
+              "source": "tests",
+              "expectedPaths": ["qwen3-4b-instruct-2507"],
+              "status": "placeholder"
+            }"#,
+        )
+        .expect("manifest");
+        std::fs::write(gimp_root.join("README.md"), "gimp").expect("gimp readme");
+        std::fs::write(gimp_root.join("LICENSE"), "GPL").expect("gimp license");
+        std::fs::write(gimp_root.join("upstream").join("README.md"), "upstream")
+            .expect("upstream readme");
+        std::fs::write(
+            gimp_root.join("upstream").join("GIMP_MCP_PROTOCOL.md"),
+            "protocol",
+        )
+        .expect("protocol");
+        std::fs::write(
+            gimp_root.join("upstream").join("gimp_mcp_server.py"),
+            "print('server')\n",
+        )
+        .expect("server");
+        std::fs::write(
+            gimp_root.join("upstream").join("pyproject.toml"),
+            "[project]\nname='gimp-mcp'\n",
+        )
+        .expect("pyproject");
+        std::fs::write(gimp_root.join("upstream").join("uv.lock"), "lock").expect("uv lock");
+        std::fs::write(
+            gimp_root
+                .join("plugin")
+                .join("gimp-mcp-plugin")
+                .join("gimp-mcp-plugin.py"),
+            "#!/usr/bin/env python3\nprint('plugin')\n",
+        )
+        .expect("plugin");
+        std::fs::write(
+            gimp_root
+                .join("bridge")
+                .join("smolpc_gimp_mcp_tcp_bridge.py"),
+            "#!/usr/bin/env python3\nprint('bridge')\n",
+        )
+        .expect("bridge");
+        std::fs::write(
+            gimp_root.join("manifest.json"),
+            r#"{
+              "version": "phase5-test",
+              "source": "tests",
+              "expectedPaths": [
+                "README.md",
+                "LICENSE",
+                "upstream/README.md",
+                "upstream/GIMP_MCP_PROTOCOL.md",
+                "upstream/gimp_mcp_server.py",
+                "upstream/pyproject.toml",
+                "upstream/uv.lock",
+                "plugin/gimp-mcp-plugin/gimp-mcp-plugin.py",
+                "bridge/smolpc_gimp_mcp_tcp_bridge.py"
+              ],
+              "status": "tracked"
+            }"#,
+        )
+        .expect("manifest");
+
+        let profile_root = app_temp.path().join("profile");
+        std::fs::create_dir_all(&profile_root).expect("profile root");
+        #[cfg(windows)]
+        std::env::set_var("APPDATA", &profile_root);
+        #[cfg(not(windows))]
+        std::env::set_var("HOME", &profile_root);
+
+        let state = SetupState::with_host_detection(
+            Some(resource_temp.path().to_path_buf()),
+            Some(app_temp.path().to_path_buf()),
+            false,
+        );
+        let gimp_path = host_temp.path().join("gimp-3.exe");
+        std::fs::write(&gimp_path, "gimp").expect("fake gimp");
+        {
+            let mut cache = state.cache().await;
+            cache
+                .resolved_host_apps
+                .insert(SETUP_ITEM_HOST_GIMP.to_string(), gimp_path);
+        }
+
+        let status = prepare_setup(&state).await;
+        let gimp_item = status
+            .items
+            .iter()
+            .find(|item| item.id == SETUP_ITEM_GIMP_PLUGIN_RUNTIME)
+            .expect("gimp item");
+        assert_eq!(gimp_item.state, SetupItemStateDto::Ready);
     }
 }

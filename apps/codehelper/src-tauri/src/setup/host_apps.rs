@@ -258,6 +258,22 @@ pub fn detect_blender(cached: Option<&Path>) -> HostAppDetection {
     detect_blender_with_policy(cached, true)
 }
 
+pub fn detect_gimp(cached: Option<&Path>) -> HostAppDetection {
+    detect_gimp_with_policy(cached, true)
+}
+
+pub fn detect_gimp_with_policy(
+    cached: Option<&Path>,
+    allow_system_lookup: bool,
+) -> HostAppDetection {
+    let cached = cached.map(Path::to_path_buf);
+    let spec = all_specs()
+        .into_iter()
+        .find(|candidate| candidate.id == SETUP_ITEM_HOST_GIMP)
+        .expect("gimp spec");
+    detect_host_app_with_policy(&spec, cached.as_ref(), allow_system_lookup)
+}
+
 pub fn detect_blender_with_policy(
     cached: Option<&Path>,
     allow_system_lookup: bool,

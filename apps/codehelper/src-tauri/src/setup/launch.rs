@@ -8,8 +8,14 @@ pub enum BlenderLaunchOutcome {
     Launched,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GimpLaunchOutcome {
+    AlreadyRunning,
+    Launched,
+}
+
 pub fn setup_launch_detail() -> &'static str {
-    "Host-app launch remains mode-driven. Blender may auto-launch on first use once its addon is provisioned."
+    "Host-app launch remains mode-driven. Blender and GIMP may auto-launch on first use once their bundled assets are provisioned."
 }
 
 pub fn is_matching_blender_process_running(blender_path: &Path) -> bool {
@@ -32,6 +38,26 @@ pub fn launch_blender_if_needed(blender_path: &Path) -> Result<BlenderLaunchOutc
                 .map_err(|error| format!("Failed to launch Blender at {}: {error}", path.display()))
         },
     )
+}
+
+pub fn is_matching_gimp_process_running(gimp_path: &Path) -> bool {
+    let mut system = System::new_all();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    system
+        .processes()
+        .values()
+        .any(|process| executable_matches(process.exe(), gimp_path))
+}
+
+pub fn launch_gimp_if_needed(gimp_path: &Path) -> Result<GimpLaunchOutcome, String> {
+    if is_matching_gimp_process_running(gimp_path) {
+        return Ok(GimpLaunchOutcome::AlreadyRunning);
+    }
+
+    Command::new(gimp_path)
+        .spawn()
+        .map_err(|error| format!("Failed to launch GIMP at {}: {error}", gimp_path.display()))?;
+    Ok(GimpLaunchOutcome::Launched)
 }
 
 fn maybe_launch_blender_with<F>(
@@ -68,7 +94,9 @@ fn path_identity(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{executable_matches, maybe_launch_blender_with, BlenderLaunchOutcome};
+    use super::{
+        executable_matches, launch_gimp_if_needed, maybe_launch_blender_with, BlenderLaunchOutcome,
+    };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -107,5 +135,12 @@ mod tests {
     fn executable_matches_accepts_exact_target_path() {
         let target = PathBuf::from("/tmp/fake-blender");
         assert!(executable_matches(Some(target.as_path()), target.as_path()));
+    }
+
+    #[test]
+    fn launch_gimp_if_needed_errors_for_missing_executable() {
+        let error =
+            launch_gimp_if_needed(Path::new("/missing/gimp-3")).expect_err("launch should fail");
+        assert!(error.contains("Failed to launch GIMP"));
     }
 }
