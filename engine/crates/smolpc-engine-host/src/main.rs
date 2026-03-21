@@ -673,10 +673,16 @@ fn pick_best_dml_candidate(gpus: &[hardware_query::GPUInfo]) -> Option<DirectMlC
     // (produces runaway generation / no EOS detection). Only discrete GPUs
     // are viable DirectML targets. Integrated-only machines fall through to
     // OpenVINO CPU, which works correctly.
+    //
+    // Accept GPUs whose type string contains "discrete", "dedicated", or
+    // "external" to cover different hardware_query reporting styles.
     let device_type = gpu.gpu_type().to_string().to_ascii_lowercase();
-    if !device_type.contains("discrete") {
+    let is_discrete = device_type.contains("discrete")
+        || device_type.contains("dedicated")
+        || device_type.contains("external");
+    if !is_discrete {
         log::info!(
-            "DirectML candidate '{}' rejected: integrated GPU (type='{}'). \
+            "DirectML candidate '{}' rejected: not a discrete GPU (type='{}'). \
              Machines without a discrete GPU will use OpenVINO CPU.",
             gpu.model_name(),
             gpu.gpu_type()

@@ -774,8 +774,8 @@ pub async fn connect_or_spawn(
     }
 
     if !client.health().await.unwrap_or(false) {
-        // Kill any stale engine on our port before spawning a fresh one.
-        kill_stale_engine_on_port(options.port);
+        // Kill any stale engine processes before spawning a fresh one.
+        kill_stale_engine_processes();
 
         // Regenerate the token so client and freshly-spawned host share the
         // same secret — stale tokens from a dead host are the #1 cause of
@@ -1209,7 +1209,12 @@ fn write_spawn_diagnostics(
     }
 
     let _ = writeln!(buf, "---");
-    match std::fs::write(log_path, &buf) {
+    match OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .and_then(|mut f| f.write_all(buf.as_bytes()))
+    {
         Ok(()) => Some(log_path.to_path_buf()),
         Err(_) => None,
     }
@@ -1217,16 +1222,58 @@ fn write_spawn_diagnostics(
 
 fn chrono_stamp() -> String {
     use std::time::SystemTime;
-    let d = SystemTime::now()
+    let secs = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}s", d.as_secs())
+        .unwrap_or_default()
+        .as_secs();
+    // Convert to rough UTC date-time without pulling in chrono crate.
+    let days = secs / 86400;
+    let time_of_day = secs % 86400;
+    let hours = time_of_day / 3600;
+    let minutes = (time_of_day % 3600) / 60;
+    let seconds = time_of_day % 60;
+    // Days since epoch -> year/month/day (simplified, ignoring leap-second edge cases).
+    let (year, month, day) = days_to_ymd(days);
+    format!("{year:04}-{month:02}-{day:02} {hours:02}:{minutes:02}:{seconds:02} UTC")
 }
 
-/// Best-effort kill of any stale smolpc-engine-host process bound to our port.
-fn kill_stale_engine_on_port(_port: u16) {
-    // On Windows, find and kill any lingering engine-host processes.
-    // This is a blunt instrument but prevents stale-port deadlocks.
+fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
+    let mut year = 1970;
+    loop {
+        let days_in_year = if is_leap(year) { 366 } else { 365 };
+        if days < days_in_year {
+            break;
+        }
+        days -= days_in_year;
+        year += 1;
+    }
+    let month_lengths: [u64; 12] = if is_leap(year) {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    let mut month = 1;
+    for &ml in &month_lengths {
+        if days < ml {
+            break;
+        }
+        days -= ml;
+        month += 1;
+    }
+    (year, month, days + 1)
+}
+
+fn is_leap(year: u64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+/// Best-effort kill of any stale smolpc-engine-host process.
+///
+/// This kills all `smolpc-engine-host.exe` processes by name. On a
+/// single-app install (the current deployment model) this is correct.
+/// A future multi-app setup may need port-specific PID lookup via
+/// `Get-NetTCPConnection`.
+fn kill_stale_engine_processes() {
     #[cfg(target_os = "windows")]
     {
         let _ = Command::new("taskkill")
@@ -1235,8 +1282,8 @@ fn kill_stale_engine_on_port(_port: u16) {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
-        // Brief sleep to let the port release.
-        std::thread::sleep(Duration::from_millis(300));
+        // No blocking sleep — the health-check loop retries every 100ms
+        // and will naturally wait for the port to become available.
     }
 }
 
@@ -1280,9 +1327,22 @@ async fn acquire_spawn_lock(
                 }
 
                 if started.elapsed() > SPAWN_LOCK_WAIT {
-                    // Force-remove lock after timeout as last resort.
+                    // Force-remove and try exactly once more. If a
+                    // concurrent process re-creates the lock, give up.
                     let _ = std::fs::remove_file(&lock_path);
-                    continue;
+                    return match OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&lock_path)
+                    {
+                        Ok(mut file) => {
+                            let _ = writeln!(file, "pid={}", std::process::id());
+                            Ok(SpawnLockGuard { path: lock_path })
+                        }
+                        Err(_) => Err(EngineClientError::Message(
+                            "Timed out waiting for engine spawn lock".to_string(),
+                        )),
+                    };
                 }
 
                 tokio::time::sleep(Duration::from_millis(100)).await;
