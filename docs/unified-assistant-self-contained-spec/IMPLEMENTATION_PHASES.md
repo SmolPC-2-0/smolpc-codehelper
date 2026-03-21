@@ -1,7 +1,7 @@
 # Self-Contained Delivery Phases
 
 **Last Updated:** 2026-03-17
-**Status:** Branch cut, cleanup, foundation, Phase 4 complete; Phase 5 GIMP docs preflight next
+**Status:** Branch cut, cleanup, foundation, Phase 4 complete; Phase 5 GIMP docs preflight active
 
 ## Phase 0: Demo Freeze And Branch Cut
 
@@ -235,7 +235,7 @@ The next official branch after Phase 4 closeout docs is:
 
 ## Phase 5: GIMP Self-Contained Provisioning
 
-**Status:** next
+**Status:** docs preflight active
 
 **Branches**
 
@@ -248,16 +248,33 @@ The next official branch after Phase 4 closeout docs is:
 
 **Scope**
 
-- vendor pinned upstream `gimp-mcp` source snapshot
+- vendor pinned upstream `maorcc/gimp-mcp` source snapshot
 - bundle GIMP plugin/server resources under unified app ownership
 - auto-provision GIMP plugin files into the user profile
 - auto-launch GIMP and bundled GIMP MCP runtime
 - keep unified provider transport on `127.0.0.1:10008`
 
+**Locked Phase 5 decisions**
+
+- authoritative GIMP runtime source is:
+  - upstream `maorcc/gimp-mcp` pinned to an exact commit/tag before implementation PR opens
+- unified bundled import target remains:
+  - `apps/codehelper/src-tauri/resources/gimp/`
+- setup remains app-level:
+  - one `Prepare` action only
+  - no GIMP-specific setup wizard or path-settings surface
+- `setup_prepare()` may provision/repair GIMP plugin/server assets, but it must not launch the interactive GIMP UI
+- mode-driven first-use may auto-launch GIMP and the bundled GIMP MCP runtime when required
+- existing Blender, LibreOffice, Code, and Calc behaviors must remain unchanged in this phase
+
 **Exit criteria**
 
 - GIMP mode works on a machine with GIMP installed but no plugin/server manually configured
 - no manual clone, environment variable, plugin copy, or terminal start step remains
+
+The next official branch after Phase 5 docs preflight merge is:
+
+- `codex/unified-self-contained-gimp`
 
 ## Phase 6: Release Packaging And Validation
 

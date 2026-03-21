@@ -1,7 +1,7 @@
 # Packaging And Distribution For The Self-Contained Line
 
 **Last Updated:** 2026-03-17
-**Status:** Packaging target with Phase 2 foundation contract, Phase 3 LibreOffice bundled-Python ownership landed, and Phase 4 Blender addon delivery landed
+**Status:** Packaging target with Phase 2 foundation contract, Phase 3 LibreOffice bundled-Python ownership landed, Phase 4 Blender addon delivery landed, and Phase 5 GIMP packaging rules preflight locked
 
 ## 1. Packaging Direction
 
@@ -90,6 +90,23 @@ Phase 4 provisioning rule:
 - the app enables the addon through Blender CLI background execution
 - the setup panel may repair or provision the addon, but it must not launch the interactive Blender UI
 
+## 4.3 Phase 5 GIMP Plugin/Runtime Delivery
+
+Phase 5 preflight locks the GIMP delivery shape to:
+
+- source snapshot from:
+  - upstream `maorcc/gimp-mcp` pinned to an exact commit/tag before import
+- bundled unified resource target root:
+  - `apps/codehelper/src-tauri/resources/gimp/`
+- existing GIMP provider transport unchanged:
+  - `127.0.0.1:10008`
+
+Phase 5 provisioning rule:
+
+- setup and provider paths may provision/repair bundled GIMP plugin/server assets
+- setup and provider paths must not force-launch or restart an already-running GIMP session
+- setup panel remains repair-focused and must not launch interactive GIMP UI
+
 ## 4.1 Phase 3 Bundled Python Delivery
 
 Phase 3 locks the bundled Python delivery source for Writer and Slides to:
@@ -136,6 +153,12 @@ Phase 4 live state:
 - Blender interactive launch may happen on first Blender mode use
 - already running Blender sessions are not forcibly restarted
 - setup prepare may repair/provision the addon, but still must not launch interactive Blender UI
+
+Phase 5 next state:
+
+- GIMP plugin/server provisioning becomes live
+- GIMP mode may auto-launch GIMP and the bundled GIMP MCP runtime on first use when needed
+- setup prepare may repair/provision GIMP assets, but still must not launch interactive GIMP UI
 
 ## 6. Packaging Invariants
 
