@@ -1,7 +1,7 @@
 # SmolPC Unified Assistant Self-Contained Architecture
 
 **Last Updated:** 2026-03-21
-**Status:** Target architecture with Phase 2 foundation, Phase 3 LibreOffice runtime ownership landed, Phase 4 Blender provisioning landed, and Phase 5 GIMP provisioning scope merged; implementation is next
+**Status:** Target architecture with Phase 2 foundation, Phase 3 LibreOffice runtime ownership landed, Phase 4 Blender provisioning landed, and Phase 5 GIMP provisioning landed; Phase 6 release packaging and validation is next
 
 ## 1. Product Shape
 
@@ -122,7 +122,7 @@ Phase 4 consumer now live:
 - `setup_prepare()` may provision and enable the Blender addon through Blender CLI background execution
 - interactive Blender launch remains mode-driven rather than setup-panel-driven
 
-Phase 5 next consumer (preflight locked):
+Phase 5 consumer now live:
 
 - GIMP extends setup/provisioning state with plugin/server repair visibility
 - `setup_prepare()` may provision and repair bundled GIMP plugin/server assets
@@ -246,8 +246,8 @@ Those roots are now part of the implementation contract on
 - provider transport stays TCP on `127.0.0.1:10008`
 - self-contained line vendors a pinned `maorcc/gimp-mcp` snapshot
 - plugin/server payload becomes bundled unified-app-owned resource
-- provider provisions plugin files into the GIMP profile in Phase 5
-- provider launches both GIMP and the bundled GIMP MCP runtime when needed in Phase 5
+- provider provisions plugin files into the GIMP profile
+- provider launches both GIMP and the bundled GIMP MCP runtime when needed
 - provider reuses running GIMP sessions when available and must not force-restart an existing session
 
 ## 9. Boot Flow
@@ -280,8 +280,9 @@ On first use of a live external mode:
 6. assistant flow proceeds normally
 
 Phase 2 does not yet implement this full flow for every provider. Phase 3
-implements the LibreOffice slice, and Phase 4 now implements the Blender slice
-while Phase 5 is the next provisioning slice for GIMP.
+implements the LibreOffice slice, Phase 4 implements the Blender slice, and
+Phase 5 now implements the GIMP provisioning/runtime slice. Phase 6 is next for
+installer, first-run, and clean-machine validation.
 
 ## 11. Deferred Architecture
 

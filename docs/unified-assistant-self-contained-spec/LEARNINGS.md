@@ -32,6 +32,12 @@
 
 - **The archive docs branch is reference-only, not a sync target** (2026-03-21): Once `dev/unified-assistant-self-contained` became the sole active self-contained mainline, the frozen `docs/unified-assistant-self-contained-spec` branch stopped being a status mirror. Keep the archive branch pinned for history, but treat the docs tree on the implementation mainline as the only source of truth.
 
+- **Generic GIMP install paths need version probing, not just path heuristics** (2026-03-21): Windows often exposes `gimp-3.exe`, but Linux and some macOS installs surface generic paths like `/usr/bin/gimp`. Phase 5 needed `gimp --version` fallback logic so the unified app can reject GIMP 2.x honestly instead of silently provisioning against the wrong host.
+
+- **First-use provisioning in async providers should move blocking work off the async lane** (2026-03-21): GIMP Phase 5 showed that version probing, recursive asset copy, and marker repair can happen during the first provider connect. Wrapping that path in `tokio::task::spawn_blocking` keeps the shared async runtime responsive while the provider acquires ownership of bundled assets.
+
+- **Setup tests that mutate `HOME` or `APPDATA` need an env lock** (2026-03-21): The new app-level provisioning tests for bundled integrations can race when they mutate profile-root env vars in parallel. Reuse a single env guard helper anywhere setup tests touch process-wide profile variables.
+
 ---
 
 ## How to Use This Document

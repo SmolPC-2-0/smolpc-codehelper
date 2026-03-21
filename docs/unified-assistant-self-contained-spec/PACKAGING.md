@@ -1,7 +1,7 @@
 # Packaging And Distribution For The Self-Contained Line
 
 **Last Updated:** 2026-03-21
-**Status:** Packaging target with Phase 2 foundation contract, Phase 3 LibreOffice bundled-Python ownership landed, Phase 4 Blender addon delivery landed, and Phase 5 GIMP packaging scope merged; implementation is next
+**Status:** Packaging target with Phase 2 foundation contract, Phase 3 LibreOffice bundled-Python ownership landed, Phase 4 Blender addon delivery landed, and Phase 5 GIMP delivery landed; Phase 6 release packaging and validation is next
 
 ## 1. Packaging Direction
 
@@ -105,7 +105,7 @@ Phase 4 provisioning rule:
 
 ## 4.3 Phase 5 GIMP Plugin/Runtime Delivery
 
-Phase 5 preflight locks the GIMP delivery shape to:
+Phase 5 locks and lands the GIMP delivery shape:
 
 - source snapshot from:
   - upstream `maorcc/gimp-mcp` pinned to an exact commit/tag before import
@@ -154,7 +154,7 @@ Phase 4 live state:
 - already running Blender sessions are not forcibly restarted
 - setup prepare may repair/provision the addon, but still must not launch interactive Blender UI
 
-Phase 5 next state:
+Phase 5 live state:
 
 - GIMP plugin/server provisioning becomes live
 - GIMP mode may auto-launch GIMP and the bundled GIMP MCP runtime on first use when needed
@@ -205,6 +205,7 @@ Before calling the self-contained line ready, verify on Windows:
 8. first GIMP use provisions plugin/server and launches GIMP
 9. Calc remains disabled
 10. upgrade path preserves chats and reprovisions only when asset version changed
+11. the GPL-3.0 distribution review for the vendored `maorcc/gimp-mcp` payload is resolved before any public packaging milestone
 
 Phase 2 validation focuses on:
 
@@ -218,6 +219,17 @@ Phase 2 validation focuses on:
 Still deferred after Step 1:
 
 - final installer naming/versioning policy
+
+## 10. Phase 6 Release Gate
+
+Before any public packaging milestone, Phase 6 must explicitly resolve the
+GPL-3.0 distribution review for the vendored `maorcc/gimp-mcp` payload.
+
+That can mean one of:
+
+- confirming the planned distribution model is license-compatible
+- adjusting the packaging boundary so the distribution model is license-compatible
+- replacing the vendored payload with a different approved delivery approach
 - whether to ship slim vs full installers later
 - future optional model packs
 - future Calc packaging requirements

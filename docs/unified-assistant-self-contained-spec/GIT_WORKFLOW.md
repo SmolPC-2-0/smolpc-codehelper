@@ -1,7 +1,7 @@
 # Git Workflow For The Self-Contained Unified Assistant Line
 
 **Last Updated:** 2026-03-21
-**Status:** Required workflow on the single self-contained mainline; Phase 5 GIMP implementation is next
+**Status:** Required workflow on the single self-contained mainline; Phase 5 is complete and Phase 6 release docs are next
 
 ## 1. Branch Roles
 
@@ -69,13 +69,13 @@ The standard self-contained phase flow now follows this exact sequence:
 No future self-contained PR should target
 `docs/unified-assistant-self-contained-spec`.
 
-Phase 5 is currently between steps 2 and 3:
+Phase 5 is now complete on the mainline:
 
-- Phase 5 docs preflight is already merged on the mainline
-- the next implementation branch should be:
-  - `codex/unified-self-contained-gimp`
-- the required closeout docs branch after implementation remains:
-  - `codex/unified-self-contained-gimp-status-docs`
+- Phase 5 docs preflight is merged on the mainline
+- Phase 5 implementation is merged on the mainline
+- Phase 5 closeout docs are merged on the mainline
+- the next official docs branch should be:
+  - `codex/unified-self-contained-release-docs`
 
 ## 6. Clone Rule
 
@@ -208,7 +208,7 @@ As of 2026-03-21:
   `dev/unified-assistant-self-contained`
 - Phase 5 GIMP preflight docs are merged on
   `dev/unified-assistant-self-contained`
-- the next official implementation branch is:
-  - `codex/unified-self-contained-gimp`
-- the required closeout docs branch after implementation is:
-  - `codex/unified-self-contained-gimp-status-docs`
+- Phase 5 GIMP implementation is merged on
+  `dev/unified-assistant-self-contained`
+- the next official docs branch is:
+  - `codex/unified-self-contained-release-docs`
