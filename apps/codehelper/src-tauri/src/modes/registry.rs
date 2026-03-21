@@ -32,7 +32,10 @@ impl ModeProviderRegistry {
     pub fn new(resource_dir: Option<PathBuf>, app_local_data_dir: Option<PathBuf>) -> Self {
         Self {
             code: Arc::new(CodeProvider),
-            gimp: Arc::new(GimpProvider::default()),
+            gimp: Arc::new(GimpProvider::new(
+                resource_dir.clone(),
+                app_local_data_dir.clone(),
+            )),
             blender: Arc::new(BlenderProvider::new(
                 resource_dir.clone(),
                 app_local_data_dir.clone(),

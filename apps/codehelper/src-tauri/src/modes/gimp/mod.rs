@@ -4,6 +4,7 @@ mod macros;
 mod planner;
 mod provider;
 mod response;
+mod runtime;
 mod transport;
 
 pub use executor::execute_gimp_request;
