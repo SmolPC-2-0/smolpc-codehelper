@@ -2442,24 +2442,24 @@ impl EngineState {
         Ok(())
     }
 
-    async fn try_runtime_fallback_after_directml_failure(&self, error: &str) {
+    async fn try_runtime_fallback_after_directml_failure(&self, error: &str) -> bool {
         if error.contains("INFERENCE_GENERATION_CANCELLED") {
-            return;
+            return false;
         }
         if parse_force_override() == Some(InferenceBackend::DirectML) {
-            return;
+            return false;
         }
 
         let status_snapshot = self.backend_status.lock().await.clone();
         if status_snapshot.active_backend != Some(InferenceBackend::DirectML) {
-            return;
+            return false;
         }
 
         let Some(model_id) = self.current_model.lock().await.clone() else {
-            return;
+            return false;
         };
         let Some(model_def) = ModelRegistry::get_model(&model_id) else {
-            return;
+            return false;
         };
         let model_artifacts = resolve_model_lane_artifacts(&model_def.directory);
         let cpu_model_dir = ModelLoader::openvino_dir(&model_def.directory);
@@ -2468,7 +2468,7 @@ impl EngineState {
             &model_id,
             &cpu_model_dir,
         ) else {
-            return;
+            return false;
         };
 
         *self.runtime_adapter.lock().await = Some(cpu_adapter);
@@ -2522,6 +2522,7 @@ impl EngineState {
             self.persist_backend_record(decision_key, persisted_record_decision, counters)
                 .await;
         }
+        true
     }
 
     async fn generate_stream<F>(
@@ -2546,8 +2547,13 @@ impl EngineState {
         let metrics = match result {
             Ok(metrics) => metrics,
             Err(error) => {
-                self.try_runtime_fallback_after_directml_failure(&error)
+                let recovered = self.try_runtime_fallback_after_directml_failure(&error)
                     .await;
+                if recovered {
+                    return Err(format!(
+                        "{error} [DirectML failed; backend switched to CPU — retry your request]"
+                    ));
+                }
                 return Err(error);
             }
         };
@@ -2579,8 +2585,13 @@ impl EngineState {
         let metrics = match result {
             Ok(metrics) => metrics,
             Err(error) => {
-                self.try_runtime_fallback_after_directml_failure(&error)
+                let recovered = self.try_runtime_fallback_after_directml_failure(&error)
                     .await;
+                if recovered {
+                    return Err(format!(
+                        "{error} [DirectML failed; backend switched to CPU — retry your request]"
+                    ));
+                }
                 return Err(error);
             }
         };
