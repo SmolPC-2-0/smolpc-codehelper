@@ -87,14 +87,9 @@ async fn main() -> Result<()> {
         Some(list) => list.clone(),
         None => ModelRegistry::available_models()
             .into_iter()
-            .filter(|m| (m.min_ram_gb as f64) <= memory_total_gb)
             .map(|m| m.id)
             .collect(),
     };
-
-    if models.is_empty() {
-        anyhow::bail!("No models fit in {memory_total_gb:.1} GB RAM");
-    }
 
     let output_dir = PathBuf::from(
         cli.output_dir
