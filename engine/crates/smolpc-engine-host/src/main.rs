@@ -2681,7 +2681,11 @@ fn build_openvino_cpu_runtime_adapter(
         match ensure_qwen3_nothink_template(model_dir) {
             Ok(true) => log::info!("Patched Qwen3 chat template for CPU non-thinking default"),
             Ok(false) => {}
-            Err(e) => log::warn!("Failed to patch Qwen3 chat template: {e}"),
+            Err(e) => {
+                return Err(format!(
+                    "Qwen3 CPU requires non-thinking template but patch failed: {e}"
+                ));
+            }
         }
     }
 
