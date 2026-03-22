@@ -90,7 +90,7 @@ pub fn run() {
         if let tauri::RunEvent::ExitRequested { .. } = event {
             log::info!("App exit requested, shutting down engine");
             let state = app_handle.state::<InferenceState>();
-            let _ = tauri::async_runtime::block_on(async {
+            tauri::async_runtime::block_on(async {
                 match tokio::time::timeout(
                     std::time::Duration::from_secs(2),
                     state.shutdown_engine(),
