@@ -20,10 +20,12 @@
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { modeStore } from '$lib/stores/mode.svelte';
 	import { setupStore } from '$lib/stores/setup.svelte';
+	import { assistantSend, assistantCancel } from '$lib/api/unified';
 	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
 	import type { GenerationConfig, InferenceChatMessage } from '$lib/types/inference';
 	import type { AppMode } from '$lib/types/mode';
+	import type { AssistantStreamEvent } from '$lib/types/assistant';
 
 	let messagesContainer: HTMLDivElement | undefined = $state();
 	let activeStreamSessionId = $state<string | null>(null);
@@ -150,8 +152,19 @@ Teaching rules:
 		);
 	}
 
+	function appendToken(chatId: string, messageId: string, sessionId: string, token: string) {
+		if (activeStreamSessionId !== sessionId) return;
+		const chat = chatsStore.chats.find((c) => c.id === chatId);
+		if (!chat) return;
+		const msg = chat.messages.find((m) => m.id === messageId);
+		if (!msg || !msg.isStreaming) return;
+		chatsStore.updateMessage(chatId, messageId, { content: msg.content + token });
+		if (currentChat?.id === chatId) scrollToBottom();
+	}
+
 	async function handleSendMessage(content: string) {
-		if (!inferenceStore.isLoaded || isInferenceBusy) return;
+		if (activeMode === 'code' && (!inferenceStore.isLoaded || isInferenceBusy)) return;
+		if (activeMode !== 'code' && isInferenceBusy) return;
 
 		const activeChat =
 			currentChat ?? chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
@@ -188,41 +201,46 @@ Teaching rules:
 		const chatId = activeChat.id;
 		const messageId = assistantMessage.id;
 
-		try {
-			const messagesPayload = buildStructuredMessages(content, historyBeforeMessage);
-			const isOpenVinoNpu = inferenceStore.status.activeBackend === 'openvino_npu';
-			const config: Partial<GenerationConfig> = {
-				// OpenVINO NPU runs are more stable with greedy decoding and a tighter default
-				// token budget; users can still continue generation explicitly from the UI.
-				max_length: isOpenVinoNpu ? 512 : 2048,
-				temperature: isOpenVinoNpu ? 0 : settingsStore.temperature,
-				top_k: 40,
-				top_p: 0.85,
-				repetition_penalty: 1.15,
-				repetition_penalty_last_n: 128
-			};
+			try {
+			if (activeMode === 'code') {
+				const messagesPayload = buildStructuredMessages(content, historyBeforeMessage);
+				const isOpenVinoNpu = inferenceStore.status.activeBackend === 'openvino_npu';
+				const config: Partial<GenerationConfig> = {
+					max_length: isOpenVinoNpu ? 512 : 2048,
+					temperature: isOpenVinoNpu ? 0 : settingsStore.temperature,
+					top_k: 40,
+					top_p: 0.85,
+					repetition_penalty: 1.15,
+					repetition_penalty_last_n: 128
+				};
 
-			await inferenceStore.generateStreamMessages(
-				messagesPayload,
-				(token: string) => {
+				await inferenceStore.generateStreamMessages(
+					messagesPayload,
+					(token: string) => appendToken(chatId, messageId, streamSessionId, token),
+					config
+				);
+			} else {
+				const request = {
+					mode: activeMode,
+					chatId,
+					messages: historyBeforeMessage.map((m) => ({ role: m.role, content: m.content })),
+					userText: content
+				};
+
+				await assistantSend(request, (event: AssistantStreamEvent) => {
 					if (activeStreamSessionId !== streamSessionId) return;
-
-					const streamingChat = chatsStore.chats.find((chat) => chat.id === chatId);
-					if (!streamingChat) return;
-
-					const streamingMessage = streamingChat.messages.find((msg) => msg.id === messageId);
-					if (!streamingMessage || !streamingMessage.isStreaming) return;
-
-					chatsStore.updateMessage(chatId, messageId, {
-						content: streamingMessage.content + token
-					});
-
-					if (currentChat?.id === chatId) {
-						scrollToBottom();
+					switch (event.kind) {
+						case 'token':
+							appendToken(chatId, messageId, streamSessionId, event.token);
+							break;
+						case 'error':
+							chatsStore.updateMessage(chatId, messageId, {
+								content: `Error: ${event.message}`
+							});
+							break;
 					}
-				},
-				config
-			);
+				});
+			}
 		} catch (error) {
 			console.error('Generation error:', error);
 			chatsStore.updateMessage(chatId, messageId, {
@@ -332,7 +350,11 @@ Teaching rules:
 		activeStreamSessionId = null;
 
 		try {
-			await inferenceStore.cancel();
+			if (activeMode === 'code') {
+				await inferenceStore.cancel();
+			} else {
+				await assistantCancel();
+			}
 		} catch (error) {
 			console.error('Failed to cancel generation:', error);
 		}
