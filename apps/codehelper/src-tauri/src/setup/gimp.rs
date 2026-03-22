@@ -379,66 +379,76 @@ fn write_marker(
     })
 }
 
+/// Find the newest GIMP 3.x profile version directory (e.g., "3.0", "3.2").
+/// Falls back to "3.0" if no profile exists yet.
+fn resolve_gimp_profile_version(gimp_config_root: &Path) -> String {
+    if let Ok(entries) = std::fs::read_dir(gimp_config_root) {
+        let mut versions: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                if name.starts_with("3.") && e.path().is_dir() {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        versions.sort();
+        if let Some(latest) = versions.last() {
+            return latest.clone();
+        }
+    }
+    "3.0".to_string()
+}
+
 fn resolve_gimp_plugin_target_dir(_gimp_path: &Path) -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
-        // Phase 5 targets the GIMP 3.0 profile layout that current upstream
-        // `maorcc/gimp-mcp` expects. Revisit this if GIMP 3.1+ changes the
-        // user-profile directory convention.
         let appdata = std::env::var_os("APPDATA")
             .map(PathBuf::from)
             .ok_or_else(|| {
                 "APPDATA is unavailable, so the GIMP profile root cannot be resolved.".to_string()
             })?;
-        Ok(appdata
-            .join("GIMP")
-            .join("3.0")
+        let gimp_root = appdata.join("GIMP");
+        let version = resolve_gimp_profile_version(&gimp_root);
+        Ok(gimp_root
+            .join(version)
             .join("plug-ins")
             .join("gimp-mcp-plugin"))
     }
 
     #[cfg(target_os = "macos")]
     {
-        // Phase 5 targets the GIMP 3.0 profile layout that current upstream
-        // `maorcc/gimp-mcp` expects. Revisit this if GIMP 3.1+ changes the
-        // user-profile directory convention.
         let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
             "HOME is unavailable, so the GIMP profile root cannot be resolved.".to_string()
         })?;
-        return Ok(home
-            .join("Library")
-            .join("Application Support")
-            .join("GIMP")
-            .join("3.0")
+        let gimp_root = home.join("Library").join("Application Support").join("GIMP");
+        let version = resolve_gimp_profile_version(&gimp_root);
+        return Ok(gimp_root
+            .join(version)
             .join("plug-ins")
             .join("gimp-mcp-plugin"));
     }
 
     #[cfg(all(not(windows), not(target_os = "macos")))]
     {
-        // Phase 5 targets the GIMP 3.0 profile layout that current upstream
-        // `maorcc/gimp-mcp` expects. Revisit this if GIMP 3.1+ changes the
-        // user-profile directory convention.
         let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
             "HOME is unavailable, so the GIMP profile root cannot be resolved.".to_string()
         })?;
         let lower = _gimp_path.to_string_lossy().to_lowercase();
-        if lower.contains("/snap/") {
-            return Ok(home
-                .join("snap")
+        let gimp_root = if lower.contains("/snap/") {
+            home.join("snap")
                 .join("gimp")
                 .join("current")
                 .join(".config")
                 .join("GIMP")
-                .join("3.0")
-                .join("plug-ins")
-                .join("gimp-mcp-plugin"));
-        }
-
-        Ok(home
-            .join(".config")
-            .join("GIMP")
-            .join("3.0")
+        } else {
+            home.join(".config").join("GIMP")
+        };
+        let version = resolve_gimp_profile_version(&gimp_root);
+        Ok(gimp_root
+            .join(version)
             .join("plug-ins")
             .join("gimp-mcp-plugin"))
     }
