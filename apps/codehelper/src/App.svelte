@@ -613,7 +613,8 @@ Teaching rules:
 		initInference();
 		modeStore.initialize();
 		setupStore.initialize();
-		hardwareStore.getCached();
+		// Hardware detection deferred to HardwarePanel open — WMI takes ~10s
+		// and is purely cosmetic (engine does its own detection independently)
 		chatsStore.finalizeStaleStreamingMessages();
 		chatsStore.setMode(modeStore.activeMode);
 
