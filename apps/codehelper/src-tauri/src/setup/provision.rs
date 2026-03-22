@@ -9,6 +9,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub async fn prepare_setup(state: &SetupState) -> SetupResult {
+    state.load_cache_from_disk_if_needed().await;
+
     let (cached_blender_path, cached_gimp_path) = {
         let cache = state.cache().await;
         (
@@ -24,10 +26,19 @@ pub async fn prepare_setup(state: &SetupState) -> SetupResult {
         cached_blender_path.as_ref(),
         cached_gimp_path.as_ref(),
     );
-    {
+    let should_persist_last_error = {
         let mut cache = state.cache().await;
-        cache.last_error = result.err();
+        let next_error = result.err();
+        let changed = cache.last_error != next_error;
+        cache.last_error = next_error;
+        changed
+    };
+
+    // Persist `last_error` when it changes so troubleshooting context survives relaunches.
+    if should_persist_last_error {
+        state.persist_cache_to_disk().await;
     }
+
     collect_setup_status(state).await
 }
 

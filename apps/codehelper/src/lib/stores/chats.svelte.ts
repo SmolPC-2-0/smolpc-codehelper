@@ -1,5 +1,6 @@
 import type { Chat, Message } from '$lib/types/chat';
 import type { AppMode } from '$lib/types/mode';
+import { composerDraftStore } from '$lib/stores/composerDraft.svelte';
 import { saveToStorage, loadFromStorage } from '$lib/utils/storage';
 
 const STORAGE_KEY = 'smolpc_chats';
@@ -16,7 +17,11 @@ const initialModeChats = loadFromStorage<Partial<Record<AppMode, string | null>>
 	legacySingle ? { code: legacySingle } : {}
 );
 if (legacySingle) {
-	try { localStorage.removeItem(CURRENT_CHAT_KEY); } catch { /* best-effort */ }
+	try {
+		localStorage.removeItem(CURRENT_CHAT_KEY);
+	} catch {
+		/* best-effort */
+	}
 }
 
 // Svelte 5 state using runes
@@ -47,6 +52,10 @@ function cloneChat(chat: Chat): Chat {
 
 function persistModeChats() {
 	saveToStorage(MODE_CHAT_KEY, currentChatIdByMode);
+}
+
+function draftKeyForChat(chat: Chat): string {
+	return `${chat.mode ?? 'code'}:${chat.id}`;
 }
 
 // Store object with methods
@@ -143,14 +152,13 @@ export const chatsStore = {
 				index,
 				wasCurrent: currentChatIdByMode[chatMode] === id
 			};
+			composerDraftStore.clearDraft(draftKeyForChat(chatToDelete));
 
 			chats = chats.filter((chat) => chat.id !== id);
 
 			// If deleted was current for its mode, pick next in same mode
 			if (currentChatIdByMode[chatMode] === id) {
-				const next = chats.find(
-					(c) => (c.mode ?? 'code') === chatMode && !c.archived
-				);
+				const next = chats.find((c) => (c.mode ?? 'code') === chatMode && !c.archived);
 				currentChatIdByMode = { ...currentChatIdByMode, [chatMode]: next?.id ?? null };
 				persistModeChats();
 			}
@@ -210,12 +218,13 @@ export const chatsStore = {
 			const nextChat =
 				chats.find(
 					(candidate) =>
-						candidate.id !== id &&
-						(candidate.mode ?? 'code') === chatMode &&
-						!candidate.archived
+						candidate.id !== id && (candidate.mode ?? 'code') === chatMode && !candidate.archived
 				) ?? null;
 			currentChatIdByMode = { ...currentChatIdByMode, [chatMode]: nextChat?.id ?? null };
 			persistModeChats();
+		}
+		if (chat.archived) {
+			composerDraftStore.clearDraft(draftKeyForChat(chat));
 		}
 
 		this.persist();
@@ -250,10 +259,41 @@ export const chatsStore = {
 	},
 
 	clearAllChats() {
+		for (const chat of chats) {
+			composerDraftStore.clearDraft(draftKeyForChat(chat));
+		}
 		chats = [];
 		currentChatIdByMode = {};
 		persistModeChats();
 		this.persist();
+	},
+
+	finalizeStaleStreamingMessages() {
+		let changed = false;
+
+		for (const chat of chats) {
+			let chatChanged = false;
+			for (const message of chat.messages) {
+				if (!message.isStreaming) {
+					continue;
+				}
+
+				message.isStreaming = false;
+				if (!message.content.trim()) {
+					message.content = 'Generation interrupted before completion.';
+				}
+				chatChanged = true;
+			}
+
+			if (chatChanged) {
+				chat.updatedAt = Date.now();
+				changed = true;
+			}
+		}
+
+		if (changed) {
+			this.persist();
+		}
 	},
 
 	persist() {

@@ -168,7 +168,10 @@
 		isSwitching = true;
 		try {
 			const reloadModelId = inferenceStore.currentModel ?? settingsStore.selectedModel ?? null;
-			await inferenceStore.setRuntimeMode(mode, reloadModelId);
+			const switched = await inferenceStore.setRuntimeMode(mode, reloadModelId);
+			if (switched) {
+				settingsStore.setRuntimeModePreference(mode);
+			}
 		} finally {
 			isSwitching = false;
 		}

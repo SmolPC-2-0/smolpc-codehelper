@@ -263,7 +263,10 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
     let child = cmd.spawn()?;
     let pid_path = options.shared_runtime_dir.join("engine.pid");
     if let Err(e) = std::fs::write(&pid_path, child.id().to_string()) {
-        log::warn!("Failed to write engine PID file {}: {e}", pid_path.display());
+        log::warn!(
+            "Failed to write engine PID file {}: {e}",
+            pid_path.display()
+        );
     }
     Ok(())
 }
@@ -377,7 +380,7 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
 }
 
 fn is_leap(year: u64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 struct SpawnLockGuard {

@@ -1,26 +1,41 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
+	import { composerDraftStore } from '$lib/stores/composerDraft.svelte';
 	import { CornerDownLeft, Send } from '@lucide/svelte';
 
 	interface Props {
 		onSend: (message: string) => void;
 		disabled?: boolean;
 		placeholder?: string;
+		draftKey?: string;
 	}
 
-	let { onSend, disabled = false, placeholder = 'Ask a coding question...' }: Props = $props();
+	let {
+		onSend,
+		disabled = false,
+		placeholder = 'Ask a coding question...',
+		draftKey = 'global'
+	}: Props = $props();
 
 	let inputValue = $state('');
 	let textarea: HTMLTextAreaElement;
+	let hydratedDraftKey = $state<string | null>(null);
+	const normalizedDraftKey = $derived(draftKey.trim() || 'global');
+
+	function resizeTextarea() {
+		if (textarea) {
+			textarea.style.height = 'auto';
+			textarea.style.height = textarea.scrollHeight + 'px';
+		}
+	}
 
 	function handleSubmit() {
 		const trimmed = inputValue.trim();
 		if (trimmed && !disabled) {
 			onSend(trimmed);
 			inputValue = '';
-			if (textarea) {
-				textarea.style.height = 'auto';
-			}
+			composerDraftStore.clearDraft(normalizedDraftKey);
+			resizeTextarea();
 		}
 	}
 
@@ -32,11 +47,20 @@
 	}
 
 	function handleInput() {
-		if (textarea) {
-			textarea.style.height = 'auto';
-			textarea.style.height = textarea.scrollHeight + 'px';
-		}
+		resizeTextarea();
+		composerDraftStore.setDraft(normalizedDraftKey, inputValue);
 	}
+
+	$effect(() => {
+		const key = normalizedDraftKey;
+		if (hydratedDraftKey === key) {
+			return;
+		}
+
+		hydratedDraftKey = key;
+		inputValue = composerDraftStore.getDraft(key);
+		queueMicrotask(() => resizeTextarea());
+	});
 </script>
 
 <div class="chat-input">

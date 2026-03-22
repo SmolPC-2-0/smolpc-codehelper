@@ -14,10 +14,9 @@ use commands::default::{read, save_code, write};
 use commands::engine_client_adapter::{engine_ensure_started, engine_status};
 use commands::hardware::{detect_hardware, get_cached_hardware, HardwareCache};
 use commands::inference::{
-    check_model_exists, check_model_readiness, get_current_model,
-    get_inference_backend_status, inference_cancel, inference_generate,
-    inference_generate_messages, is_generating, list_models, load_model,
-    set_inference_runtime_mode, unload_model, InferenceState,
+    check_model_exists, check_model_readiness, get_current_model, get_inference_backend_status,
+    inference_cancel, inference_generate, inference_generate_messages, is_generating, list_models,
+    load_model, set_inference_runtime_mode, unload_model, InferenceState,
 };
 use commands::launcher::{launcher_launch_or_focus, launcher_list_apps};
 use commands::modes::{list_modes, mode_refresh_tools, mode_status};
@@ -41,6 +40,11 @@ pub fn run() {
             }
 
             log::info!("Hardware detection will occur on first request");
+
+            let resource_dir = app.path().resource_dir().ok();
+            let app_local_data_dir = app.path().app_local_data_dir().ok();
+            app.manage(SetupState::new(resource_dir, app_local_data_dir));
+
             Ok(())
         })
         .manage(AssistantState::default())
@@ -48,7 +52,6 @@ pub fn run() {
         .manage(InferenceState::default())
         .manage(LauncherState::default())
         .manage(ModeProviderRegistry::default())
-        .manage(SetupState::default())
         .invoke_handler(tauri::generate_handler![
             read,
             write,
@@ -129,9 +132,15 @@ fn cleanup_engine_pid() {
 }
 
 fn force_kill_engine() {
-    let Some(pid_path) = engine_pid_path() else { return };
-    let Ok(pid_str) = std::fs::read_to_string(&pid_path) else { return };
-    let Ok(pid) = pid_str.trim().parse::<u32>() else { return };
+    let Some(pid_path) = engine_pid_path() else {
+        return;
+    };
+    let Ok(pid_str) = std::fs::read_to_string(&pid_path) else {
+        return;
+    };
+    let Ok(pid) = pid_str.trim().parse::<u32>() else {
+        return;
+    };
 
     // Verify the PID is still an engine process before killing
     #[cfg(target_os = "windows")]
@@ -163,7 +172,9 @@ fn force_kill_engine() {
     {
         // SIGKILL because the graceful path already failed — no point in SIGTERM
         log::info!("Force-killing engine process (PID {pid})");
-        unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
     }
 
     let _ = std::fs::remove_file(&pid_path);
