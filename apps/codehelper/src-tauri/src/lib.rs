@@ -25,10 +25,12 @@ use commands::setup::{setup_prepare, setup_status};
 use launcher::orchestrator::LauncherState;
 use modes::registry::ModeProviderRegistry;
 use setup::SetupState;
+use tauri::Manager;
+
 #[allow(clippy::missing_panics_doc)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -81,6 +83,54 @@ pub fn run() {
             setup_status,
             setup_prepare
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            log::info!("App exit requested, shutting down engine");
+            let state = app_handle.state::<InferenceState>();
+            let _ = tauri::async_runtime::block_on(async {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    state.shutdown_engine(),
+                )
+                .await
+                {
+                    Ok(Ok(_)) => log::info!("Engine shut down gracefully"),
+                    Ok(Err(e)) => {
+                        log::warn!("Engine graceful shutdown failed: {e}");
+                        force_kill_engine();
+                    }
+                    Err(_) => {
+                        log::warn!("Engine shutdown timed out after 2s");
+                        force_kill_engine();
+                    }
+                }
+            });
+        }
+    });
+}
+
+fn force_kill_engine() {
+    let runtime_dir = dirs::data_local_dir()
+        .map(|d| d.join("SmolPC").join("engine-runtime"));
+    if let Some(dir) = runtime_dir {
+        let pid_path = dir.join("engine.pid");
+        if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+            if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                log::info!("Force-killing engine process (PID {pid})");
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/F", "/PID", &pid.to_string()])
+                        .output();
+                }
+                #[cfg(unix)]
+                {
+                    unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+                }
+            }
+        }
+    }
 }
