@@ -11,6 +11,7 @@ pub use spawn::connect_or_spawn;
 pub use version::{engine_api_major_compatible, expected_engine_api_major, version_major};
 
 use smolpc_engine_core::inference::backend::BackendStatus;
+use std::path::PathBuf;
 use std::time::Duration;
 
 const ENGINE_PROTOCOL_VERSION: &str = "1.0.0";
@@ -158,11 +159,11 @@ pub enum EngineClientError {
 pub struct EngineConnectOptions {
     pub port: u16,
     pub app_version: String,
-    pub shared_runtime_dir: std::path::PathBuf,
-    pub data_dir: std::path::PathBuf,
-    pub resource_dir: Option<std::path::PathBuf>,
-    pub models_dir: Option<std::path::PathBuf>,
-    pub host_binary: Option<std::path::PathBuf>,
+    pub shared_runtime_dir: PathBuf,
+    pub data_dir: PathBuf,
+    pub resource_dir: Option<PathBuf>,
+    pub models_dir: Option<PathBuf>,
+    pub host_binary: Option<PathBuf>,
     pub runtime_mode: RuntimeModePreference,
     pub dml_device_id: Option<i32>,
     pub force_respawn: bool,

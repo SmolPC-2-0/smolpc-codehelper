@@ -33,13 +33,11 @@ pub(crate) fn auth(headers: &HeaderMap, token: &str) -> Result<(), ApiError> {
 }
 
 pub(crate) fn constant_time_eq(lhs: &[u8], rhs: &[u8]) -> bool {
-    if lhs.len() != rhs.len() {
-        return false;
-    }
-
-    let mut diff = 0u8;
-    for (a, b) in lhs.iter().zip(rhs.iter()) {
-        diff |= a ^ b;
+    let len_diff = (lhs.len() ^ rhs.len()) as u8;
+    let min_len = lhs.len().min(rhs.len());
+    let mut diff = len_diff;
+    for i in 0..min_len {
+        diff |= lhs[i] ^ rhs[i];
     }
     diff == 0
 }

@@ -2,7 +2,10 @@ use smolpc_engine_core::inference::types::InferenceChatMessage;
 use smolpc_engine_core::GenerationConfig;
 
 use crate::openvino::openvino_model_tuning_for_model;
-use crate::types::*;
+use crate::types::{
+    ChatCompletionMessage, ChatCompletionRequest, OPENVINO_MAX_TOKENS_HARD_CAP_DEFAULT,
+    OPENVINO_MAX_TOKENS_HARD_CAP_ENV,
+};
 
 /// Returns true for model families that default to "thinking" mode (e.g. Qwen3).
 pub(crate) fn model_has_thinking_mode(model_id: &str) -> bool {
