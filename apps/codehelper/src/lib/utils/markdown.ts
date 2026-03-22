@@ -104,10 +104,7 @@ function splitTableRow(line: string): string[] | null {
  * Parse a markdown table delimiter row and extract alignments.
  * Requires at least three dashes per column to avoid misparsing ordinary prose.
  */
-function parseTableDelimiter(
-	line: string,
-	expectedColumns: number
-): TableAlignment[] | null {
+function parseTableDelimiter(line: string, expectedColumns: number): TableAlignment[] | null {
 	const cells = splitTableRow(line);
 	if (!cells || cells.length !== expectedColumns) return null;
 
@@ -140,20 +137,14 @@ function generateTableHTML(
 		`markdown-table__cell markdown-table__cell--align-${alignment}`;
 
 	const headerHtml = headers
-		.map(
-			(header, index) =>
-				`<th class="${renderCellClass(alignments[index])}">${header}</th>`
-		)
+		.map((header, index) => `<th class="${renderCellClass(alignments[index])}">${header}</th>`)
 		.join('');
 
 	const bodyHtml = rows
 		.map(
 			(row) =>
 				`<tr>${row
-					.map(
-						(cell, index) =>
-							`<td class="${renderCellClass(alignments[index])}">${cell}</td>`
-					)
+					.map((cell, index) => `<td class="${renderCellClass(alignments[index])}">${cell}</td>`)
 					.join('')}</tr>`
 		)
 		.join('');
@@ -179,11 +170,7 @@ function generatePlainPipeBlockHTML(lines: string[]): string {
  * Tables require a delimiter row and at least one body row.
  * Invalid table-like blocks remain plain text with preserved line breaks.
  */
-function replaceTables(
-	text: string,
-	tableBlocks: string[],
-	plainPipeBlocks: string[]
-): string {
+function replaceTables(text: string, tableBlocks: string[], plainPipeBlocks: string[]): string {
 	const lines = text.split('\n');
 	const output: string[] = [];
 

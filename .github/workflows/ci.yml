@@ -125,7 +125,15 @@ jobs:
           })
           if ($prettierFiles.Count -gt 0) {
             Write-Host "Running Prettier check on changed files..."
-            foreach ($file in $prettierFiles) {
+            $workspacePrettierFiles = @($prettierFiles | Where-Object { $_ -like 'apps/codehelper/*' })
+            $rootPrettierFiles = @($prettierFiles | Where-Object { $_ -notlike 'apps/codehelper/*' })
+
+            foreach ($file in $workspacePrettierFiles) {
+              $workspaceFile = $file.Substring('apps/codehelper/'.Length)
+              npm exec --workspace apps/codehelper prettier -- --check $workspaceFile
+            }
+
+            foreach ($file in $rootPrettierFiles) {
               npx prettier --check -- $file
             }
           } else {
