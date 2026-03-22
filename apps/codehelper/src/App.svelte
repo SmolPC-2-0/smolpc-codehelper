@@ -475,7 +475,10 @@ Teaching rules:
 			if (hasActiveStream || inferenceStore.isGenerating) {
 				await handleCancelGeneration();
 			}
-			await modeStore.setActiveMode(mode);
+			// Don't await setActiveMode — the status refresh can hang if a
+			// provider is slow to connect. The mode switch itself is synchronous
+			// (activeMode + storage); status refresh is fire-and-forget.
+			modeStore.setActiveMode(mode);
 			chatsStore.setMode(mode);
 		} finally {
 			isSwitchingMode = false;
