@@ -30,6 +30,7 @@
 	}: Props = $props();
 
 	let open = $state(false);
+	let focusedIndex = $state(-1);
 	let triggerEl: HTMLButtonElement | undefined = $state();
 	let popoverEl: HTMLDivElement | undefined = $state();
 
@@ -42,28 +43,73 @@
 		presentation: Presentation
 	};
 
+	const POPOVER_ID = 'mode-dropdown-listbox';
+
 	const activeConfig = $derived(modes.find((m) => m.id === activeMode) ?? modes[0]);
 
 	function isAvailable(modeId: string): boolean {
-		if (modeId === 'code') return true;
 		return modeAvailability[modeId] ?? true;
 	}
 
 	function toggleOpen() {
 		if (disabled) return;
 		open = !open;
+		if (open) {
+			focusedIndex = modes.findIndex((m) => m.id === activeMode);
+		}
 	}
 
 	function selectMode(modeId: AppMode) {
 		if (!isAvailable(modeId)) return;
 		onChange(modeId);
 		open = false;
+		triggerEl?.focus();
+	}
+
+	function moveFocus(direction: 1 | -1) {
+		if (!open) return;
+		let next = focusedIndex + direction;
+		// Wrap around
+		if (next < 0) next = modes.length - 1;
+		if (next >= modes.length) next = 0;
+		focusedIndex = next;
+
+		// Scroll the focused option into view
+		const options = popoverEl?.querySelectorAll('[role="option"]');
+		if (options?.[focusedIndex]) {
+			(options[focusedIndex] as HTMLElement).scrollIntoView({ block: 'nearest' });
+		}
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
-		if (event.key === 'Escape') {
-			open = false;
-			triggerEl?.focus();
+		switch (event.key) {
+			case 'Escape':
+				open = false;
+				triggerEl?.focus();
+				event.preventDefault();
+				break;
+			case 'ArrowDown':
+				if (!open) {
+					open = true;
+					focusedIndex = modes.findIndex((m) => m.id === activeMode);
+				} else {
+					moveFocus(1);
+				}
+				event.preventDefault();
+				break;
+			case 'ArrowUp':
+				if (open) {
+					moveFocus(-1);
+				}
+				event.preventDefault();
+				break;
+			case 'Enter':
+			case ' ':
+				if (open && focusedIndex >= 0 && focusedIndex < modes.length) {
+					selectMode(modes[focusedIndex].id as AppMode);
+					event.preventDefault();
+				}
+				break;
 		}
 	}
 
@@ -91,6 +137,7 @@
 		onclick={toggleOpen}
 		aria-haspopup="listbox"
 		aria-expanded={open}
+		aria-controls={POPOVER_ID}
 		aria-label="Select assistant mode"
 	>
 		{#if activeConfig}
@@ -104,16 +151,24 @@
 	</button>
 
 	{#if open}
-		<div bind:this={popoverEl} class="mode-dropdown__popover" role="listbox">
-			{#each modes as mode (mode.id)}
+		<div
+			bind:this={popoverEl}
+			id={POPOVER_ID}
+			class="mode-dropdown__popover"
+			role="listbox"
+			aria-label="Assistant modes"
+		>
+			{#each modes as mode, index (mode.id)}
 				{@const available = isAvailable(mode.id)}
 				{@const IconComponent = ICON_MAP[mode.icon]}
-				<button
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<div
 					class="mode-dropdown__option"
 					class:active={mode.id === activeMode}
 					class:unavailable={!available}
-					disabled={!available}
+					class:focused={index === focusedIndex}
 					role="option"
+					tabindex="-1"
 					aria-selected={mode.id === activeMode}
 					aria-disabled={!available}
 					onclick={() => selectMode(mode.id as AppMode)}
@@ -131,7 +186,7 @@
 							>
 						{/if}
 					</span>
-				</button>
+				</div>
 			{/each}
 		</div>
 	{/if}
@@ -205,8 +260,13 @@
 		text-align: left;
 	}
 
-	.mode-dropdown__option:hover:not(:disabled) {
+	.mode-dropdown__option:hover:not(.unavailable) {
 		background: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+	}
+
+	.mode-dropdown__option.focused:not(.unavailable) {
+		background: color-mix(in srgb, var(--color-foreground) 10%, transparent);
+		outline: 1px solid var(--outline-soft);
 	}
 
 	.mode-dropdown__option.active {

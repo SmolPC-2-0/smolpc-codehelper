@@ -44,15 +44,16 @@
 	const setupStatus = $derived(setupStore.status);
 	const setupError = $derived(setupStore.error);
 
-	// Availability gating: map setup item detection → mode availability
-	const SETUP_ID_TO_MODES: Record<string, string[]> = {
+	// Availability gating: map setup item detection → mode availability.
+	// Static mapping — modes not listed here default to available.
+	const SETUP_ID_TO_MODES: Readonly<Record<string, string[]>> = {
 		host_gimp: ['gimp'],
 		host_blender: ['blender'],
 		host_libreoffice: ['writer', 'calc', 'impress']
 	};
 
 	const modeAvailability = $derived.by(() => {
-		const result: Record<string, boolean> = { code: true };
+		const result: Record<string, boolean> = { code: true }; // Code always available
 		for (const item of setupStore.items) {
 			const modes = SETUP_ID_TO_MODES[item.id];
 			if (modes) {
