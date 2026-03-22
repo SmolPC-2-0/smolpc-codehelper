@@ -63,6 +63,9 @@ Master roadmap: issue #143
 
 ## Recently Resolved
 
+- **Issue #155 GIMP silent failure when connection/setup is unavailable** (2026-03-22)
+  - Status: Resolved (codex/issue-155-gimp-error-surface, commit 1031045)
+  - Scope: GIMP requests now fail with explicit user-facing connection guidance when provider readiness is not connected, and assistant `complete` events now populate chat replies so non-token mode responses are no longer blank.
 - **Issue #142 state module split polish** (2026-03-22)
   - Status: Resolved (codex/issue-142-state-module-split, commit d3b5c26)
   - Scope: Split `state.rs` by extracting model loading flow (`model_loading.rs`), startup orchestration (`startup.rs`), and runtime adapter builders (`adapters.rs`) while preserving behavior and checks.
