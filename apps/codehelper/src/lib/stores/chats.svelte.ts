@@ -1,21 +1,33 @@
 import type { Chat, Message } from '$lib/types/chat';
+import type { AppMode } from '$lib/types/mode';
 import { saveToStorage, loadFromStorage } from '$lib/utils/storage';
 
 const STORAGE_KEY = 'smolpc_chats';
-const CURRENT_CHAT_KEY = 'smolpc_current_chat';
+const CURRENT_CHAT_KEY = 'smolpc_current_chat'; // legacy single key — kept for migration
+const MODE_CHAT_KEY = 'smolpc_mode_chats';
 
 // Load initial state from localStorage
 const initialChats = loadFromStorage<Chat[]>(STORAGE_KEY, []);
-const initialCurrentId = loadFromStorage<string | null>(CURRENT_CHAT_KEY, null);
+
+// Migrate: if legacy single currentChatId exists, seed it as the 'code' mode chat
+const legacySingle = loadFromStorage<string | null>(CURRENT_CHAT_KEY, null);
+const initialModeChats = loadFromStorage<Partial<Record<AppMode, string | null>>>(
+	MODE_CHAT_KEY,
+	legacySingle ? { code: legacySingle } : {}
+);
 
 // Svelte 5 state using runes
 let chats = $state<Chat[]>(initialChats);
-let currentChatId = $state<string | null>(initialCurrentId);
+let currentMode = $state<AppMode>('code');
+let currentChatIdByMode = $state<Partial<Record<AppMode, string | null>>>(initialModeChats);
 
 // Derived state
+const currentChatId = $derived<string | null>(currentChatIdByMode[currentMode] ?? null);
 const currentChat = $derived<Chat | null>(chats.find((chat) => chat.id === currentChatId) ?? null);
-
 const sortedChats = $derived<Chat[]>([...chats].sort((a, b) => b.updatedAt - a.updatedAt));
+const modeChats = $derived<Chat[]>(
+	sortedChats.filter((chat) => (chat.mode ?? 'code') === currentMode)
+);
 
 export interface DeletedChatSnapshot {
 	chat: Chat;
@@ -28,6 +40,10 @@ function cloneChat(chat: Chat): Chat {
 		...chat,
 		messages: chat.messages.map((message) => ({ ...message }))
 	};
+}
+
+function persistModeChats() {
+	saveToStorage(MODE_CHAT_KEY, currentChatIdByMode);
 }
 
 // Store object with methods
@@ -45,9 +61,18 @@ export const chatsStore = {
 	get sortedChats() {
 		return sortedChats;
 	},
+	get modeChats() {
+		return modeChats;
+	},
 
 	// Actions
-	createChat(model: string): Chat {
+
+	setMode(mode: AppMode) {
+		currentMode = mode;
+	},
+
+	createChat(model: string, mode?: AppMode): Chat {
+		const chatMode = mode ?? currentMode;
 		const newChat: Chat = {
 			id: crypto.randomUUID(),
 			title: 'New Chat',
@@ -55,19 +80,23 @@ export const chatsStore = {
 			createdAt: Date.now(),
 			updatedAt: Date.now(),
 			model,
+			mode: chatMode,
 			pinned: false,
 			archived: false
 		};
 		chats = [...chats, newChat];
-		currentChatId = newChat.id;
+		currentChatIdByMode = { ...currentChatIdByMode, [chatMode]: newChat.id };
+		persistModeChats();
 		this.persist();
 		return newChat;
 	},
 
 	setCurrentChat(id: string) {
-		if (chats.some((chat) => chat.id === id)) {
-			currentChatId = id;
-			saveToStorage(CURRENT_CHAT_KEY, id);
+		const chat = chats.find((c) => c.id === id);
+		if (chat) {
+			const chatMode = chat.mode ?? 'code';
+			currentChatIdByMode = { ...currentChatIdByMode, [chatMode]: id };
+			persistModeChats();
 		}
 	},
 
@@ -102,17 +131,22 @@ export const chatsStore = {
 		const index = chats.findIndex((chat) => chat.id === id);
 		if (index !== -1) {
 			const chatToDelete = chats[index];
+			const chatMode = chatToDelete.mode ?? 'code';
 			const snapshot: DeletedChatSnapshot = {
 				chat: cloneChat(chatToDelete),
 				index,
-				wasCurrent: currentChatId === id
+				wasCurrent: currentChatIdByMode[chatMode] === id
 			};
 
 			chats = chats.filter((chat) => chat.id !== id);
 
-			if (currentChatId === id) {
-				currentChatId = chats.length > 0 ? chats[0].id : null;
-				saveToStorage(CURRENT_CHAT_KEY, currentChatId);
+			// If deleted was current for its mode, pick next in same mode
+			if (currentChatIdByMode[chatMode] === id) {
+				const next = chats.find(
+					(c) => c.id !== id && (c.mode ?? 'code') === chatMode && !c.archived
+				);
+				currentChatIdByMode = { ...currentChatIdByMode, [chatMode]: next?.id ?? null };
+				persistModeChats();
 			}
 
 			this.persist();
@@ -126,11 +160,16 @@ export const chatsStore = {
 		const safeIndex = Math.max(0, Math.min(snapshot.index, chats.length));
 		chats = [...chats.slice(0, safeIndex), snapshot.chat, ...chats.slice(safeIndex)];
 
-		if (snapshot.wasCurrent || !currentChatId || !chats.some((chat) => chat.id === currentChatId)) {
-			currentChatId = snapshot.chat.id;
+		const chatMode = snapshot.chat.mode ?? 'code';
+		if (
+			snapshot.wasCurrent ||
+			!currentChatIdByMode[chatMode] ||
+			!chats.some((chat) => chat.id === currentChatIdByMode[chatMode])
+		) {
+			currentChatIdByMode = { ...currentChatIdByMode, [chatMode]: snapshot.chat.id };
 		}
 
-		saveToStorage(CURRENT_CHAT_KEY, currentChatId);
+		persistModeChats();
 		this.persist();
 	},
 
@@ -160,11 +199,17 @@ export const chatsStore = {
 		chat.pinned = chat.archived ? false : chat.pinned;
 		chat.updatedAt = Date.now();
 
-		if (chat.archived && currentChatId === id) {
+		const chatMode = chat.mode ?? 'code';
+		if (chat.archived && currentChatIdByMode[chatMode] === id) {
 			const nextChat =
-				chats.find((candidate) => candidate.id !== id && !candidate.archived) ?? null;
-			currentChatId = nextChat?.id ?? null;
-			saveToStorage(CURRENT_CHAT_KEY, currentChatId);
+				chats.find(
+					(candidate) =>
+						candidate.id !== id &&
+						(candidate.mode ?? 'code') === chatMode &&
+						!candidate.archived
+				) ?? null;
+			currentChatIdByMode = { ...currentChatIdByMode, [chatMode]: nextChat?.id ?? null };
+			persistModeChats();
 		}
 
 		this.persist();
@@ -174,12 +219,14 @@ export const chatsStore = {
 		const source = chats.find((chat) => chat.id === id);
 		if (!source) return null;
 
+		const chatMode = source.mode ?? 'code';
 		const duplicate: Chat = {
 			...cloneChat(source),
 			id: crypto.randomUUID(),
 			title: `${source.title} (Copy)`,
 			createdAt: Date.now(),
 			updatedAt: Date.now(),
+			mode: chatMode,
 			pinned: false,
 			archived: false,
 			messages: source.messages.map((message) => ({
@@ -190,17 +237,17 @@ export const chatsStore = {
 		};
 
 		chats = [...chats, duplicate];
-		currentChatId = duplicate.id;
-		saveToStorage(CURRENT_CHAT_KEY, currentChatId);
+		currentChatIdByMode = { ...currentChatIdByMode, [chatMode]: duplicate.id };
+		persistModeChats();
 		this.persist();
 		return duplicate;
 	},
 
 	clearAllChats() {
 		chats = [];
-		currentChatId = null;
+		currentChatIdByMode = {};
+		persistModeChats();
 		this.persist();
-		saveToStorage(CURRENT_CHAT_KEY, null);
 	},
 
 	persist() {

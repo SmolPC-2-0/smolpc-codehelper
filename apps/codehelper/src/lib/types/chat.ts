@@ -13,6 +13,7 @@ export interface Chat {
 	createdAt: number;
 	updatedAt: number;
 	model: string;
+	mode?: import('$lib/types/mode').AppMode;
 	pinned?: boolean;
 	archived?: boolean;
 }

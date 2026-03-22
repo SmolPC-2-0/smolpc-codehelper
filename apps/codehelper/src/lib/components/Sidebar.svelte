@@ -4,6 +4,7 @@
 	import type { DeletedChatSnapshot } from '$lib/stores/chats.svelte';
 	import type { Chat } from '$lib/types/chat';
 	import { settingsStore } from '$lib/stores/settings.svelte';
+	import { modeStore } from '$lib/stores/mode.svelte';
 	import { formatTimestamp, groupChatsByTime } from '$lib/utils/date';
 	import {
 		Archive,
@@ -51,13 +52,13 @@
 	}
 
 	const activeChats = $derived(
-		chatsStore.sortedChats.filter(
+		chatsStore.modeChats.filter(
 			(chat) => !chat.archived && chatMatchesQuery(chat, normalizedQuery)
 		)
 	);
 
 	const archivedChats = $derived(
-		chatsStore.sortedChats.filter(
+		chatsStore.modeChats.filter(
 			(chat) => chat.archived && chatMatchesQuery(chat, normalizedQuery)
 		)
 	);
@@ -70,7 +71,9 @@
 	function handleNewChat() {
 		actionsMenuChatId = null;
 		editingChatId = null;
-		chatsStore.createChat(settingsStore.selectedModel);
+		const label =
+			modeStore.activeMode === 'code' ? settingsStore.selectedModel : modeStore.activeMode;
+		chatsStore.createChat(label, modeStore.activeMode);
 	}
 
 	function handleSelectChat(chatId: string) {
