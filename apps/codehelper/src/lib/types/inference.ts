@@ -59,6 +59,9 @@ export interface AvailableModel {
 	/** Model artifact directory */
 	directory: string;
 
+	/** @deprecated Legacy alias for directory kept for compatibility */
+	path: string;
+
 	/** Human-readable summary */
 	description: string;
 }

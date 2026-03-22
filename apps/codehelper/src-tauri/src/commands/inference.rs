@@ -80,6 +80,23 @@ pub struct MemoryPressureStatus {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AvailableModelDto {
+    #[serde(flatten)]
+    pub model: ModelDefinition,
+    /// Legacy alias retained for compatibility with older frontend payload contracts.
+    pub path: String,
+}
+
+impl From<ModelDefinition> for AvailableModelDto {
+    fn from(model: ModelDefinition) -> Self {
+        Self {
+            path: model.directory.clone(),
+            model,
+        }
+    }
+}
+
 impl Default for InferenceState {
     fn default() -> Self {
         Self {
@@ -165,6 +182,8 @@ fn format_runtime_mode_switch_failure(
 
 fn sysinfo_memory_values_are_bytes(total_raw: u64) -> bool {
     // sysinfo may expose bytes (newer releases) or KiB (older releases).
+    // Cargo.toml pins sysinfo to 0.32.1; this check guards us if that contract
+    // changes during dependency updates.
     // This heuristic is intentionally scoped to supported SmolPC targets where
     // model minimum RAM starts at 8 GB. In that range, KiB totals remain far
     // below 1e9 while byte totals are above 1e9.
@@ -302,6 +321,10 @@ fn build_memory_pressure_message(
             }
         }
     }
+}
+
+fn is_generation_in_progress_unload_error(error: &str) -> bool {
+    error.contains("Cannot unload model while generation is in progress")
 }
 
 pub(super) async fn resolve_client(
@@ -556,11 +579,12 @@ pub async fn unload_model(
 pub async fn list_models(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
-) -> Result<Vec<ModelDefinition>, String> {
+) -> Result<Vec<AvailableModelDto>, String> {
     let client = resolve_client(&app_handle, &state, false).await?;
     client
         .list_models()
         .await
+        .map(|models| models.into_iter().map(AvailableModelDto::from).collect())
         .map_err(|e| format!("Failed to list models: {e}"))
 }
 
@@ -769,10 +793,8 @@ pub async fn evaluate_memory_pressure(
 
     let client = resolve_client(&app_handle, &state, false).await.ok();
     let mut current_model_id = None;
-    let mut generating = false;
     if let Some(client) = client.as_ref() {
         if let Ok(status) = client.status().await {
-            generating = status.generating;
             current_model_id = status.current_model;
         }
     }
@@ -787,10 +809,7 @@ pub async fn evaluate_memory_pressure(
     );
 
     let mut auto_unloaded = false;
-    if request.app_minimized
-        && level == MemoryPressureLevel::Critical
-        && !generating
-        && current_model_id.is_some()
+    if request.app_minimized && level == MemoryPressureLevel::Critical && current_model_id.is_some()
     {
         if let Some(client) = client.as_ref() {
             match client.unload_model(false).await {
@@ -800,9 +819,16 @@ pub async fn evaluate_memory_pressure(
                     auto_unloaded = true;
                 }
                 Err(error) => {
-                    log::warn!(
-                        "Failed to auto-unload model during critical memory pressure: {error}"
-                    );
+                    let error_text = error.to_string();
+                    if is_generation_in_progress_unload_error(&error_text) {
+                        log::debug!(
+                            "Skipped auto-unload during critical memory pressure because generation was in progress"
+                        );
+                    } else {
+                        log::warn!(
+                            "Failed to auto-unload model during critical memory pressure: {error_text}"
+                        );
+                    }
                 }
             }
         }
@@ -924,6 +950,28 @@ mod tests {
         assert!(!sysinfo_memory_values_are_bytes(8 * 1024 * 1024));
         assert!(sysinfo_memory_values_are_bytes(8 * 1024 * 1024 * 1024));
         assert!(!sysinfo_memory_values_are_bytes(999_999_488));
+    }
+
+    #[test]
+    fn sysinfo_032_contract_matches_ci_host_expectation() {
+        let mut system = System::new();
+        system.refresh_memory();
+        let total_raw = system.total_memory();
+
+        assert!(
+            !sysinfo_memory_values_are_bytes(total_raw),
+            "Pinned sysinfo=0.32.1 is expected to report KiB totals on CI/dev hosts (<1 TiB RAM). Got raw total {total_raw}; revisit memory unit conversion on dependency upgrade."
+        );
+    }
+
+    #[test]
+    fn unload_in_progress_error_detection_matches_engine_message() {
+        assert!(is_generation_in_progress_unload_error(
+            "/engine/unload failed with HTTP 409: Cannot unload model while generation is in progress"
+        ));
+        assert!(!is_generation_in_progress_unload_error(
+            "Failed to auto-unload model during critical memory pressure: network timeout"
+        ));
     }
 
     #[test]
