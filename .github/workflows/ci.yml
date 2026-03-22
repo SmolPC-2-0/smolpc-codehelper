@@ -128,9 +128,16 @@ jobs:
             $workspacePrettierFiles = @($prettierFiles | Where-Object { $_ -like 'apps/codehelper/*' })
             $rootPrettierFiles = @($prettierFiles | Where-Object { $_ -notlike 'apps/codehelper/*' })
 
-            foreach ($file in $workspacePrettierFiles) {
-              $workspaceFile = $file.Substring('apps/codehelper/'.Length)
-              npm exec --workspace apps/codehelper prettier -- --check $workspaceFile
+            if ($workspacePrettierFiles.Count -gt 0) {
+              Push-Location apps/codehelper
+              try {
+                foreach ($file in $workspacePrettierFiles) {
+                  $workspaceFile = $file.Substring('apps/codehelper/'.Length)
+                  & ".\node_modules\.bin\prettier.cmd" --check -- $workspaceFile
+                }
+              } finally {
+                Pop-Location
+              }
             }
 
             foreach ($file in $rootPrettierFiles) {
