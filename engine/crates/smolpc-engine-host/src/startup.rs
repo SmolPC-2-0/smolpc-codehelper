@@ -79,17 +79,16 @@ impl EngineState {
             engine.startup_probe_ready.notify_waiters();
 
             let openvino_bundle = engine.runtime_bundles().openvino.clone();
-            let hardware_detected = probed.npu_hardware_detected;
             let openvino_probe_task = tokio::task::spawn_blocking(move || {
-                probe_openvino_startup(&openvino_bundle, hardware_detected)
+                probe_openvino_startup(&openvino_bundle)
             });
             let openvino_probe =
                 match timeout(OPENVINO_STARTUP_PROBE_WAIT, openvino_probe_task).await {
                     Ok(Ok(result)) => result,
                     Ok(Err(error)) => {
                         log::warn!("OpenVINO startup probe task failed: {error}");
+                        // Timeout/error means unknown — probe didn't complete.
                         OpenVinoStartupProbeResult {
-                            hardware_detected,
                             failure_class: Some("openvino_npu_plugin_unavailable".to_string()),
                             failure_message: Some(format!(
                                 "OpenVINO startup probe task failed: {error}"
@@ -102,8 +101,8 @@ impl EngineState {
                             "OpenVINO startup probe timed out after {} ms",
                             OPENVINO_STARTUP_PROBE_WAIT.as_millis()
                         );
+                        // Timeout means unknown — probe didn't complete.
                         OpenVinoStartupProbeResult {
-                            hardware_detected,
                             failure_class: Some("openvino_startup_probe_timeout".to_string()),
                             failure_message: Some(format!(
                                 "OpenVINO startup probe did not complete within {} ms",
