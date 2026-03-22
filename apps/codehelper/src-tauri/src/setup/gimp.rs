@@ -394,7 +394,11 @@ fn resolve_gimp_profile_version(gimp_config_root: &Path) -> String {
                 }
             })
             .collect();
-        versions.sort();
+        // Numeric sort on minor version (handles 3.10 > 3.9 correctly)
+        versions.sort_by(|a, b| {
+            let parse_minor = |s: &str| s.trim_start_matches("3.").parse::<u32>().unwrap_or(0);
+            parse_minor(a).cmp(&parse_minor(b))
+        });
         if let Some(latest) = versions.last() {
             return latest.clone();
         }
