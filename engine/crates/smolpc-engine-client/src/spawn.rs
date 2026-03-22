@@ -260,7 +260,9 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
             .stderr(stderr_target);
     }
 
-    cmd.spawn()?;
+    let child = cmd.spawn()?;
+    let pid_path = options.shared_runtime_dir.join("engine.pid");
+    let _ = std::fs::write(&pid_path, child.id().to_string());
     Ok(())
 }
 

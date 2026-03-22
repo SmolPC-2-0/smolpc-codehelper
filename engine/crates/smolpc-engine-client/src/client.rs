@@ -245,6 +245,18 @@ impl EngineClient {
         Ok(())
     }
 
+    pub async fn shutdown(&self) -> Result<(), EngineClientError> {
+        let response = self
+            .http
+            .post(self.url("/engine/shutdown"))
+            .header(AUTHORIZATION, self.auth_header())
+            .timeout(Duration::from_secs(2))
+            .send()
+            .await?;
+        let _ = ensure_success(response, "/engine/shutdown").await?;
+        Ok(())
+    }
+
     /// Returns the full lane-based readiness response for a model.
     pub async fn check_model_readiness(
         &self,
