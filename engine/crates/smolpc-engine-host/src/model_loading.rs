@@ -300,7 +300,8 @@ impl EngineState {
             apply_directml_startup_probe_status(&mut status, &probe);
             apply_openvino_startup_probe_status(&mut status, openvino_probe.as_ref());
             apply_model_lane_artifacts(&mut status, &artifacts);
-            apply_directml_device(&mut status, device_id, device_name);
+            let vram = probe.directml_candidate.as_ref().map(|c| c.vram_mb);
+            apply_directml_device(&mut status, device_id, device_name, vram);
             status
         };
 
@@ -763,7 +764,8 @@ impl EngineState {
         apply_directml_startup_probe_status(&mut status, &probe);
         apply_openvino_startup_probe_status(&mut status, openvino_probe.as_ref());
         apply_model_lane_artifacts(&mut status, &artifacts);
-        apply_directml_device(&mut status, selected_device_id, selected_device_name);
+        let vram = probe.directml_candidate.as_ref().map(|c| c.vram_mb);
+        apply_directml_device(&mut status, selected_device_id, selected_device_name, vram);
         apply_persisted_eligibility(&mut status, persisted_record_decision.as_ref());
         status.lanes.directml.preflight_state = directml_preflight_state;
         status.lanes.openvino_npu.preflight_state = openvino_preflight_state;

@@ -69,6 +69,25 @@ cargo test -p smolpc-engine-core && cargo test -p smolpc-engine-host
 cd apps/codehelper && npm run check && npm run lint
 ```
 
+**Plugin and tool usage (mandatory):**
+
+*Code intelligence — always use LSP over grep:*
+- When tracing symbol usage: `LSP findReferences` (Rust) or TypeScript LSP (frontend)
+- When finding where something is defined: `LSP goToDefinition`
+- When checking what calls a function: `LSP incomingCalls`
+- When removing/renaming a field or function: `LSP findReferences` first to find ALL consumers
+- Subagents exploring the codebase MUST be instructed to use LSP
+
+*Superpowers plugin — invoke via Skill tool when the trigger matches:*
+- **Brainstorming** (`superpowers:brainstorming`): User says "let's brainstorm", "be creative", "what are our options", or asks to explore architectural decisions. Invoke BEFORE proposing solutions.
+- **Writing plans** (`superpowers:writing-plans`): When given specs/requirements for a multi-step task, before touching code. Use instead of ad-hoc plan files.
+- **Executing plans** (`superpowers:executing-plans`): When a written plan exists and is approved. Provides review checkpoints during implementation.
+- **Verification before completion** (`superpowers:verification-before-completion`): BEFORE claiming work is done, fixed, or passing. Run verification commands, confirm output, THEN claim success. Never say "should work" — prove it works.
+- **Receiving code review** (`superpowers:receiving-code-review`): When processing review feedback. Requires technical rigour — verify the reviewer's claims against the code before implementing fixes. Don't blindly agree.
+- **Systematic debugging** (`superpowers:systematic-debugging`): When encountering bugs, test failures, or unexpected behavior. Use before proposing fixes.
+- **Dispatching parallel agents** (`superpowers:dispatching-parallel-agents`): When facing 2+ independent tasks that can be parallelised.
+- **Code review** (`superpowers:requesting-code-review`): When completing major features or before merging — verify work meets requirements.
+
 ---
 
 ## Learnings
@@ -111,6 +130,19 @@ Corrections discovered during development. **When you correct a mistake, append 
 - DirectML on Intel integrated GPU produces garbage (no EOS, runaway generation) — only accept discrete GPUs as DirectML candidates
 - Tauri NSIS `installMode: "currentUser"` installs to `%LOCALAPPDATA%\<productName>\` and kebab-cases the binary name (e.g., `smolpc-code-helper.exe`)
 - Detached engine processes must redirect stderr to a log file — `Stdio::null()` makes crash diagnosis impossible on user machines
+- `npm ci` fails with EPERM on Tailwind's `.node` binary when VS Code Tailwind IntelliSense extension holds a file lock — close VS Code or disable the extension before running `npm ci`
+- Tauri 2 `Builder::run()` has no RunEvent access — use `Builder::build()` + `App::run(callback)` to hook `ExitRequested` for cleanup
+- Use `tauri::async_runtime::block_on()` for async cleanup in `RunEvent::ExitRequested` — the closure is sync (`FnMut`), not async
+- Engine PID must be written to `engine.pid` on spawn — DETACHED_PROCESS children survive parent exit and need explicit cleanup
+- Verify PID identity before force-killing — stale `engine.pid` after crash can match a reused PID from an unrelated process
+- Clean up `engine.pid` on both graceful exit and after force-kill to prevent stale PID accumulation
+- GIMP NSIS installer defaults to per-user install at `%LOCALAPPDATA%\Programs\GIMP 3\`, not `Program Files` — check both paths
+- GIMP 3.2 creates its profile under `GIMP/3.2/`, not `GIMP/3.0/` — resolve profile version dynamically by scanning the config root
+- Blender version detection must use dynamic directory enumeration, not hardcoded versions — Blender Foundation updates version numbers frequently
+- When removing a dependency, trace every consumed field to its terminal behavior — a "hint" boolean can be a hard gate downstream (e.g., `npu_hardware_detected` gates the entire OpenVINO probe)
+- After replacing a hardware data source, verify all backend paths with live tests (`SMOLPC_FORCE_EP=openvino_npu` curl test) — unit tests don't catch hardware path regressions
+- DXGI adapter enumeration is 1000x faster than WMI for GPU detection — use `IDXGIFactory6::EnumAdapterByGpuPreference` with fallback to `IDXGIFactory1::EnumAdapters1`
+- Always use the LSP tool (`findReferences`, `incomingCalls`, `goToDefinition`) when tracing symbol usage — grep misses indirect consumers and caused the NPU regression. Subagents exploring the codebase must also be instructed to use LSP.
 
 ---
 

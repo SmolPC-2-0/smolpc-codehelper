@@ -167,6 +167,7 @@ pub(crate) fn apply_directml_device(
     status: &mut BackendStatus,
     device_id: Option<i32>,
     device_name: Option<String>,
+    vram_mb: Option<u64>,
 ) {
     status.lanes.directml.device_id = device_id;
     status.lanes.directml.device_name = device_name.clone();
@@ -175,6 +176,7 @@ pub(crate) fn apply_directml_device(
             backend: InferenceBackend::DirectML,
             device_id,
             device_name,
+            vram_mb,
         })
     } else {
         None
@@ -207,6 +209,7 @@ pub(crate) fn apply_directml_startup_probe_status(
             status,
             Some(candidate.device_id),
             Some(candidate.device_name.clone()),
+            Some(candidate.vram_mb),
         );
     } else {
         status.lanes.directml.startup_probe_state = LaneStartupProbeState::Error;
@@ -218,7 +221,7 @@ pub(crate) fn apply_directml_startup_probe_status(
             .directml_probe_failure_message
             .clone()
             .or_else(|| Some("No DirectML-capable adapter detected".to_string()));
-        apply_directml_device(status, None, None);
+        apply_directml_device(status, None, None, None);
     }
     rebuild_available_backends(status);
 }
@@ -232,7 +235,7 @@ pub(crate) fn apply_openvino_startup_probe_status(
         return;
     };
 
-    status.lanes.openvino_npu.detected = probe.hardware_detected;
+    status.lanes.openvino_npu.detected = probe.device_visible;
     status.lanes.openvino_npu.device_name = probe.device_name.clone();
     status.lanes.openvino_npu.driver_version = probe.driver_version.clone();
     status.lanes.openvino_npu.device_id = None;

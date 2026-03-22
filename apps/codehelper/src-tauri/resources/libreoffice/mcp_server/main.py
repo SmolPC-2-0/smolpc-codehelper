@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import IO, Optional
 
 HELPER_PORT = 8765
 OFFICE_PORT = 2002
@@ -19,10 +19,14 @@ STARTUP_POLL_INTERVAL_SECONDS = 0.2
 SHUTDOWN_TIMEOUT_SECONDS = 5.0
 HELPER_AUTH_TOKEN_ENV = "SMOLPC_LIBREOFFICE_HELPER_AUTH_TOKEN"
 OFFICE_PATH_ENV = "SMOLPC_LIBREOFFICE_OFFICE_PATH"
+HELPER_PYTHON_PATH_ENV = "SMOLPC_LIBREOFFICE_HELPER_PYTHON_PATH"
+MCP_LOG_DIR_ENV = "SMOLPC_MCP_LOG_DIR"
+HELPER_STDERR_LOG_FILENAME = "helper.stderr.log"
 
 office_process: Optional[subprocess.Popen] = None
 helper_process: Optional[subprocess.Popen] = None
 server_process: Optional[subprocess.Popen] = None
+helper_stderr_handle: Optional[IO[str]] = None
 
 
 def configure_logging() -> None:
@@ -51,15 +55,22 @@ def stop_process(label: str, process: Optional[subprocess.Popen]) -> None:
 
 
 def cleanup_processes() -> None:
-    global office_process, helper_process, server_process
+    global office_process, helper_process, server_process, helper_stderr_handle
 
     stop_process("MCP server", server_process)
     stop_process("LibreOffice helper", helper_process)
     stop_process("LibreOffice office", office_process)
 
+    if helper_stderr_handle is not None:
+        try:
+            helper_stderr_handle.close()
+        except OSError:
+            logging.warning("Unable to close helper stderr log handle", exc_info=True)
+
     server_process = None
     helper_process = None
     office_process = None
+    helper_stderr_handle = None
 
 
 def signal_handler(signum, _frame) -> None:
@@ -109,8 +120,77 @@ def get_office_path() -> str:
     )
 
 
-def get_python_path() -> str:
-    return sys.executable
+def get_python_path(soffice_path: str) -> str:
+    configured_python = os.environ.get(HELPER_PYTHON_PATH_ENV)
+    if configured_python:
+        if os.path.isfile(configured_python):
+            logging.info(
+                "Using helper Python from %s: %s",
+                HELPER_PYTHON_PATH_ENV,
+                configured_python,
+            )
+            return configured_python
+        raise FileNotFoundError(
+            f"Configured helper Python from {HELPER_PYTHON_PATH_ENV} is not a file: {configured_python}"
+        )
+
+    office_program_dir = Path(soffice_path).resolve().parent
+    system = platform.system().lower()
+    candidate_paths = []
+
+    if system == "windows":
+        candidate_paths.append(office_program_dir / "python.exe")
+        for python_core_dir in sorted(
+            office_program_dir.glob("python-core-*"), reverse=True
+        ):
+            candidate_paths.append(python_core_dir / "bin" / "python.exe")
+    else:
+        candidate_paths.append(office_program_dir / "python3")
+        candidate_paths.append(office_program_dir / "python")
+        for python_core_dir in sorted(
+            office_program_dir.glob("python-core-*"), reverse=True
+        ):
+            candidate_paths.append(python_core_dir / "bin" / "python3")
+            candidate_paths.append(python_core_dir / "bin" / "python")
+        candidate_paths.append(office_program_dir.parent / "Resources" / "python")
+
+    for candidate_path in candidate_paths:
+        if candidate_path.is_file():
+            candidate = str(candidate_path)
+            logging.info(
+                "Using LibreOffice Python for helper startup: %s",
+                candidate,
+            )
+            return candidate
+
+    fallback = sys.executable
+    logging.warning(
+        "Unable to locate LibreOffice Python next to %s; falling back to runtime interpreter %s. Set %s to override.",
+        soffice_path,
+        fallback,
+        HELPER_PYTHON_PATH_ENV,
+    )
+    return fallback
+
+
+def resolve_log_path(filename: str) -> Path:
+    configured_dir = os.getenv(MCP_LOG_DIR_ENV)
+    if configured_dir:
+        try:
+            log_dir = Path(configured_dir).expanduser()
+            if not log_dir.is_absolute():
+                raise ValueError(f"{MCP_LOG_DIR_ENV} must be an absolute path")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            return log_dir.resolve(strict=True) / filename
+        except (OSError, ValueError):
+            logging.warning(
+                "Unable to use %s=%s for log output; falling back to runtime directory",
+                MCP_LOG_DIR_ENV,
+                configured_dir,
+            )
+
+    module_dir = Path(__file__).resolve().parent
+    return module_dir / filename
 
 
 def is_port_in_use(port: int) -> bool:
@@ -119,12 +199,24 @@ def is_port_in_use(port: int) -> bool:
         return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
-def wait_for_port_ready(port: int, label: str) -> None:
+def wait_for_port_ready(
+    port: int,
+    label: str,
+    process: Optional[subprocess.Popen] = None,
+    failure_hint: Optional[str] = None,
+) -> None:
     deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         if is_port_in_use(port):
             logging.info("%s is ready on port %s", label, port)
             return
+        if process is not None:
+            return_code = process.poll()
+            if return_code is not None:
+                hint_suffix = f" {failure_hint}" if failure_hint else ""
+                raise RuntimeError(
+                    f"{label} exited before becoming ready on port {port} (exit code {return_code}).{hint_suffix}"
+                )
         time.sleep(STARTUP_POLL_INTERVAL_SECONDS)
     raise TimeoutError(f"{label} did not become ready on port {port}")
 
@@ -162,7 +254,7 @@ def build_child_env(helper_token: str) -> dict:
 
 
 def start_helper(helper_token: str, port: int = HELPER_PORT) -> None:
-    global helper_process
+    global helper_process, helper_stderr_handle
 
     if is_port_in_use(port):
         raise RuntimeError(
@@ -170,16 +262,29 @@ def start_helper(helper_token: str, port: int = HELPER_PORT) -> None:
         )
 
     helper_script = Path(__file__).with_name("helper.py")
-    python_path = get_python_path()
+    python_path = get_python_path(get_office_path())
     logging.info("Starting LibreOffice helper from %s", helper_script)
-    helper_process = subprocess.Popen(
-        [python_path, str(helper_script)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=build_child_env(helper_token),
+    helper_stderr_path = resolve_log_path(HELPER_STDERR_LOG_FILENAME)
+    logging.info("Capturing LibreOffice helper stderr to %s", helper_stderr_path)
+    helper_stderr_handle = open(helper_stderr_path, "a", encoding="utf-8", buffering=1)
+    try:
+        helper_process = subprocess.Popen(
+            [python_path, str(helper_script)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=helper_stderr_handle,
+            env=build_child_env(helper_token),
+        )
+    except Exception:
+        helper_stderr_handle.close()
+        helper_stderr_handle = None
+        raise
+    wait_for_port_ready(
+        port,
+        "LibreOffice helper socket",
+        process=helper_process,
+        failure_hint="Check helper.log and helper.stderr.log for UNO import errors.",
     )
-    wait_for_port_ready(port, "LibreOffice helper socket")
 
 
 def start_mcp_server(helper_token: str) -> int:

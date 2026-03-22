@@ -527,11 +527,11 @@ use chrono::Utc;
                 device_id: 0,
                 device_name: "Intel Arc".to_string(),
                 adapter_identity: "intel:arc".to_string(),
-                driver_version: "31.0.101.5522".to_string(),
+                driver_version: String::new(),
+                vram_mb: 4096,
             }),
             directml_probe_failure_class: None,
             directml_probe_failure_message: None,
-            npu_hardware_detected: false,
         };
 
         let response =
@@ -638,7 +638,6 @@ use chrono::Utc;
             directml_probe_failure_message: Some(
                 "No DirectML-capable adapter detected".to_string(),
             ),
-            npu_hardware_detected: false,
         };
 
         let response =
@@ -692,14 +691,13 @@ use chrono::Utc;
                 device_id: 0,
                 device_name: "Intel Arc".to_string(),
                 adapter_identity: "intel:arc".to_string(),
-                driver_version: "31.0.101.5522".to_string(),
+                driver_version: String::new(),
+                vram_mb: 4096,
             }),
             directml_probe_failure_class: None,
             directml_probe_failure_message: None,
-            npu_hardware_detected: true,
         };
         let openvino_probe = OpenVinoStartupProbeResult {
-            hardware_detected: true,
             startup_ready: true,
             device_visible: true,
             adapter_identity: Some("openvino:npu:intel_npu".to_string()),
@@ -780,14 +778,13 @@ use chrono::Utc;
                 device_id: 0,
                 device_name: "Intel Arc".to_string(),
                 adapter_identity: "intel:arc".to_string(),
-                driver_version: "31.0.101.5522".to_string(),
+                driver_version: String::new(),
+                vram_mb: 4096,
             }),
             directml_probe_failure_class: None,
             directml_probe_failure_message: None,
-            npu_hardware_detected: true,
         };
         let openvino_probe = OpenVinoStartupProbeResult {
-            hardware_detected: true,
             startup_ready: true,
             device_visible: true,
             adapter_identity: Some("openvino:npu:intel_npu".to_string()),

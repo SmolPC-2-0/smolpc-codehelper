@@ -157,7 +157,6 @@ impl OpenVinoArtifactCheck {
 
 #[derive(Debug, Clone, Default)]
 pub struct OpenVinoStartupProbeResult {
-    pub hardware_detected: bool,
     pub startup_ready: bool,
     pub device_visible: bool,
     pub adapter_identity: Option<String>,
@@ -288,22 +287,17 @@ pub fn inspect_openvino_artifact(manifest_path: &Path) -> OpenVinoArtifactCheck 
     })
 }
 
+/// Authoritative NPU probe — no upstream hint required. OpenVINO validates
+/// the actual runtime, driver, and device. If there's no NPU, it reports
+/// failure gracefully. The gate on `hardware_detected` was removed because
+/// it created a fragile dependency on the upstream probe providing a hint.
 pub fn probe_openvino_startup(
     bundle: &OpenVinoRuntimeBundle,
-    hardware_detected: bool,
 ) -> OpenVinoStartupProbeResult {
-    if !hardware_detected {
-        return OpenVinoStartupProbeResult {
-            hardware_detected,
-            failure_class: Some("no_npu_hardware".to_string()),
-            failure_message: Some("No NPU hardware detected on this machine".to_string()),
-            ..Default::default()
-        };
-    }
+    log::info!("Starting OpenVINO NPU probe (authoritative)");
 
     if let Some(code) = bundle.npu_failure_code() {
         return OpenVinoStartupProbeResult {
-            hardware_detected,
             failure_class: Some(code.to_string()),
             failure_message: Some(format!(
                 "OpenVINO runtime bundle is incomplete at {}",
@@ -318,8 +312,7 @@ pub fn probe_openvino_startup(
             let npu_device_name = device_probe.npu_device_name.clone();
             if npu_device_name.is_none() {
                 return OpenVinoStartupProbeResult {
-                    hardware_detected,
-                    failure_class: Some("openvino_npu_driver_missing".to_string()),
+                            failure_class: Some("openvino_npu_driver_missing".to_string()),
                     failure_message: Some(
                         "NPU hardware was detected, but OpenVINO did not expose an NPU device"
                             .to_string(),
@@ -346,7 +339,6 @@ pub fn probe_openvino_startup(
                 Ok(tuning) => tuning,
                 Err(error) => {
                     return OpenVinoStartupProbeResult {
-                        hardware_detected,
                         device_visible: true,
                         adapter_identity,
                         device_name: full_device_name,
@@ -361,7 +353,6 @@ pub fn probe_openvino_startup(
                 let (failure_class, failure_message) =
                     classify_openvino_runtime_activation_error(&error);
                 return OpenVinoStartupProbeResult {
-                    hardware_detected,
                     device_visible: true,
                     adapter_identity,
                     device_name: full_device_name,
@@ -380,7 +371,6 @@ pub fn probe_openvino_startup(
             );
 
             OpenVinoStartupProbeResult {
-                hardware_detected,
                 startup_ready: true,
                 device_visible: true,
                 adapter_identity,
@@ -391,7 +381,6 @@ pub fn probe_openvino_startup(
             }
         }
         Err(error) => OpenVinoStartupProbeResult {
-            hardware_detected,
             failure_class: Some("openvino_npu_plugin_unavailable".to_string()),
             failure_message: Some(error),
             ..Default::default()

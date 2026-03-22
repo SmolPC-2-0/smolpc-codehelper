@@ -59,9 +59,7 @@ pub(crate) fn select_best_model_for_ram(
 
 pub(crate) fn built_in_default_model_id() -> Option<String> {
     let models = ModelRegistry::available_models();
-    let total_ram_gb = hardware_query::HardwareInfo::query()
-        .ok()
-        .map(|info| info.memory().total_gb());
+    let total_ram_gb = crate::probe::total_system_ram_gb();
     if let Some(ram) = total_ram_gb {
         if let Some((id, min)) = select_best_model_for_ram(&models, ram) {
             log::info!(
