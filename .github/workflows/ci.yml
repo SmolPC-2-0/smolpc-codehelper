@@ -120,7 +120,9 @@ jobs:
             exit 0
           }
 
-          $prettierFiles = @($changed | Where-Object {
+          $normalizedChanged = @($changed | ForEach-Object { $_ -replace '\\', '/' })
+
+          $prettierFiles = @($normalizedChanged | Where-Object {
             $_ -match '\.(cjs|mjs|js|jsx|ts|tsx|json|md|css|scss|yml|yaml|html|svelte)$'
           })
           if ($prettierFiles.Count -gt 0) {
@@ -147,7 +149,7 @@ jobs:
             Write-Host "No changed files matched Prettier extensions."
           }
 
-          $eslintFiles = @($changed | Where-Object {
+          $eslintFiles = @($normalizedChanged | Where-Object {
             $_ -match '\.(js|jsx|ts|tsx|svelte)$'
           })
           if ($eslintFiles.Count -gt 0) {
@@ -159,7 +161,7 @@ jobs:
             Write-Host "No changed files matched ESLint extensions."
           }
 
-          $rustFiles = @($changed | Where-Object { $_.ToLower().EndsWith(".rs") })
+          $rustFiles = @($normalizedChanged | Where-Object { $_.ToLower().EndsWith(".rs") })
           if ($rustFiles.Count -gt 0) {
             Write-Host "Running rustfmt check on changed Rust files..."
             foreach ($file in $rustFiles) {

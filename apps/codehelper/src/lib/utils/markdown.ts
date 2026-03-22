@@ -137,7 +137,10 @@ function generateTableHTML(
 		`markdown-table__cell markdown-table__cell--align-${alignment}`;
 
 	const headerHtml = headers
-		.map((header, index) => `<th class="${renderCellClass(alignments[index])}">${header}</th>`)
+		.map(
+			(header, index) =>
+				`<th scope="col" class="${renderCellClass(alignments[index])}">${header}</th>`
+		)
 		.join('');
 
 	const bodyHtml = rows
@@ -217,7 +220,10 @@ function replaceTables(text: string, tableBlocks: string[], plainPipeBlocks: str
 
 		// Leave malformed or incomplete tables untouched.
 		if (bodyRows.length === 0) {
-			output.push(lines[i]);
+			const placeholder = `___PIPEBLOCK${plainPipeBlocks.length}___`;
+			plainPipeBlocks.push(generatePlainPipeBlockHTML([lines[i], lines[i + 1]]));
+			output.push(placeholder);
+			i = rowIndex - 1;
 			continue;
 		}
 
@@ -408,6 +414,7 @@ export function renderMarkdown(text: string): string {
 		ALLOWED_ATTR: [
 			'href',
 			'class',
+			'scope',
 			'data-code',
 			'title',
 			'aria-label',
