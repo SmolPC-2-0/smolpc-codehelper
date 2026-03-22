@@ -166,8 +166,9 @@ Teaching rules:
 		if (activeMode === 'code' && (!inferenceStore.isLoaded || isInferenceBusy)) return;
 		if (activeMode !== 'code' && isInferenceBusy) return;
 
-		const activeChat =
-			currentChat ?? chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
+		const chatLabel =
+			activeMode === 'code' ? (inferenceStore.currentModel ?? 'onnx-model') : activeMode;
+		const activeChat = currentChat ?? chatsStore.createChat(chatLabel);
 		if (!activeChat) return;
 		const historyBeforeMessage = [...activeChat.messages];
 
@@ -201,7 +202,9 @@ Teaching rules:
 		const chatId = activeChat.id;
 		const messageId = assistantMessage.id;
 
-			try {
+		let handledByEventStream = false;
+
+		try {
 			if (activeMode === 'code') {
 				const messagesPayload = buildStructuredMessages(content, historyBeforeMessage);
 				const isOpenVinoNpu = inferenceStore.status.activeBackend === 'openvino_npu';
@@ -234,19 +237,25 @@ Teaching rules:
 							appendToken(chatId, messageId, streamSessionId, event.token);
 							break;
 						case 'error':
+							handledByEventStream = true;
 							chatsStore.updateMessage(chatId, messageId, {
 								content: `Error: ${event.message}`
 							});
+							break;
+						case 'complete':
+							// TODO: wire up event.response.undoable for undo support (#132)
 							break;
 					}
 				});
 			}
 		} catch (error) {
-			console.error('Generation error:', error);
-			chatsStore.updateMessage(chatId, messageId, {
-				content: `Error: ${error}`,
-				isStreaming: false
-			});
+			if (!handledByEventStream) {
+				console.error('Generation error:', error);
+				chatsStore.updateMessage(chatId, messageId, {
+					content: `Error: ${error}`,
+					isStreaming: false
+				});
+			}
 		} finally {
 			chatsStore.updateMessage(chatId, messageId, {
 				isStreaming: false
