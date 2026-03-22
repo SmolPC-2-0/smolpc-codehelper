@@ -1,11 +1,24 @@
+import type { InferenceRuntimeMode } from '$lib/types/inference';
 import type { AppSettings } from '$lib/types/settings';
 import { DEFAULT_SETTINGS } from '$lib/types/settings';
 import { saveToStorage, loadFromStorage } from '$lib/utils/storage';
 
 const STORAGE_KEY = 'smolpc_settings';
 
-// Load initial state from localStorage
-const initialSettings = loadFromStorage<AppSettings>(STORAGE_KEY, DEFAULT_SETTINGS);
+function normalizeRuntimeModePreference(value: string | undefined): InferenceRuntimeMode {
+	if (value === 'auto' || value === 'cpu' || value === 'dml' || value === 'npu') {
+		return value;
+	}
+	return DEFAULT_SETTINGS.runtimeModePreference;
+}
+
+// Load initial state from localStorage with schema-default migration.
+const storedSettings = loadFromStorage<Partial<AppSettings>>(STORAGE_KEY, {});
+const initialSettings: AppSettings = {
+	...DEFAULT_SETTINGS,
+	...storedSettings,
+	runtimeModePreference: normalizeRuntimeModePreference(storedSettings.runtimeModePreference)
+};
 
 // Svelte 5 state using runes
 let settings = $state<AppSettings>(initialSettings);
@@ -18,6 +31,9 @@ export const settingsStore = {
 	},
 	get selectedModel() {
 		return settings.selectedModel;
+	},
+	get runtimeModePreference() {
+		return settings.runtimeModePreference;
 	},
 	get contextEnabled() {
 		return settings.contextEnabled;
@@ -32,6 +48,11 @@ export const settingsStore = {
 	// Actions
 	setModel(model: string) {
 		settings.selectedModel = model;
+		this.persist();
+	},
+
+	setRuntimeModePreference(mode: InferenceRuntimeMode) {
+		settings.runtimeModePreference = mode;
 		this.persist();
 	},
 

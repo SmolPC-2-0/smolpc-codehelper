@@ -35,6 +35,7 @@
 	let showShortcutsOverlay = $state(false);
 	let showSetupPanel = $state(false);
 	let isSwitchingMode = $state(false);
+	let reconnectingEngineSession = $state(false);
 
 	// Unified mode state
 	const activeMode = $derived(modeStore.activeMode);
@@ -54,6 +55,7 @@
 	const hasActiveStream = $derived(currentStreamingMessageId !== null);
 	const isCancelling = $derived(inferenceStore.cancelState === 'pending');
 	const isInferenceBusy = $derived(inferenceStore.isGenerating || isCancelling || hasActiveStream);
+	const composerDraftKey = $derived(`${activeMode}:${currentChat?.id ?? 'new'}`);
 	const latestAssistantMessageId = $derived(
 		[...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null
 	);
@@ -160,6 +162,58 @@ Teaching rules:
 		if (!msg || !msg.isStreaming) return;
 		chatsStore.updateMessage(chatId, messageId, { content: msg.content + token });
 		if (currentChat?.id === chatId) scrollToBottom();
+	}
+
+	function resolvePreferredModelId(): string | null {
+		const available = inferenceStore.availableModels;
+		if (available.length === 0) {
+			return null;
+		}
+
+		const selected = settingsStore.selectedModel?.trim();
+		if (selected && available.some((model) => model.id === selected)) {
+			return selected;
+		}
+
+		return available[0]?.id ?? null;
+	}
+
+	async function reestablishEngineSession() {
+		const preferredModelId = resolvePreferredModelId();
+		await inferenceStore.ensureStarted({
+			mode: 'auto',
+			startup_policy: preferredModelId ? { default_model_id: preferredModelId } : null
+		});
+
+		const preferredRuntimeMode = settingsStore.runtimeModePreference;
+		if (preferredRuntimeMode !== 'auto' && preferredRuntimeMode !== inferenceStore.runtimeMode) {
+			await inferenceStore.setRuntimeMode(preferredRuntimeMode, preferredModelId);
+		}
+
+		await inferenceStore.syncStatus();
+		if (inferenceStore.currentModel) {
+			settingsStore.setModel(inferenceStore.currentModel);
+		}
+	}
+
+	function finalizeActiveStreamingMessage(fallbackContent: string) {
+		if (!currentStreamingChatId || !currentStreamingMessageId) {
+			activeStreamSessionId = null;
+			return;
+		}
+
+		const chat = chatsStore.chats.find((entry) => entry.id === currentStreamingChatId);
+		const message = chat?.messages.find((entry) => entry.id === currentStreamingMessageId);
+		const content = message?.content?.trim() ? message.content : fallbackContent;
+
+		chatsStore.updateMessage(currentStreamingChatId, currentStreamingMessageId, {
+			content,
+			isStreaming: false
+		});
+
+		currentStreamingChatId = null;
+		currentStreamingMessageId = null;
+		activeStreamSessionId = null;
 	}
 
 	async function handleSendMessage(content: string) {
@@ -378,7 +432,7 @@ Teaching rules:
 			if (hasActiveStream || inferenceStore.isGenerating) {
 				await handleCancelGeneration();
 			}
-			modeStore.setActiveMode(mode);
+			await modeStore.setActiveMode(mode);
 			chatsStore.setMode(mode);
 		} finally {
 			isSwitchingMode = false;
@@ -442,20 +496,11 @@ Teaching rules:
 		window.visualViewport?.addEventListener('resize', handleResize);
 
 		async function initInference() {
-			await inferenceStore.listModels();
-			const availableModelIds = new Set(inferenceStore.availableModels.map((model) => model.id));
-			const selectedModelId = availableModelIds.has(settingsStore.selectedModel)
-				? settingsStore.selectedModel
-				: (inferenceStore.availableModels[0]?.id ?? null);
-
-			await inferenceStore.ensureStarted({
-				mode: 'auto',
-				startup_policy: selectedModelId ? { default_model_id: selectedModelId } : null
-			});
-			await inferenceStore.syncStatus();
-
-			if (inferenceStore.currentModel) {
-				settingsStore.setModel(inferenceStore.currentModel);
+			try {
+				await inferenceStore.listModels();
+				await reestablishEngineSession();
+			} catch (error) {
+				console.error('Failed to initialize inference session:', error);
 			}
 		}
 
@@ -463,6 +508,7 @@ Teaching rules:
 		modeStore.initialize();
 		setupStore.initialize();
 		hardwareStore.getCached();
+		chatsStore.finalizeStaleStreamingMessages();
 		chatsStore.setMode(modeStore.activeMode);
 
 		// Bootstrap a Code chat for brand-new users (zero chats across all modes).
@@ -478,6 +524,10 @@ Teaching rules:
 			window.removeEventListener('resize', handleResize);
 			window.visualViewport?.removeEventListener('resize', handleResize);
 		};
+	});
+
+	$effect(() => {
+		chatsStore.setMode(activeMode);
 	});
 
 	$effect(() => {
@@ -499,15 +549,19 @@ Teaching rules:
 			return;
 		}
 
-		activeStreamSessionId = null;
+		finalizeActiveStreamingMessage('Generation interrupted after cancel timeout.');
+	});
 
-		if (currentStreamingChatId && currentStreamingMessageId) {
-			chatsStore.updateMessage(currentStreamingChatId, currentStreamingMessageId, {
-				isStreaming: false
-			});
-			currentStreamingChatId = null;
-			currentStreamingMessageId = null;
+	$effect(() => {
+		if (inferenceStore.engineHealthy) {
+			return;
 		}
+
+		if (!currentStreamingChatId || !currentStreamingMessageId) {
+			return;
+		}
+
+		finalizeActiveStreamingMessage('Generation interrupted while reconnecting to the engine.');
 	});
 
 	// Engine health polling — immediate check + 10s interval
@@ -518,8 +572,15 @@ Teaching rules:
 			const wasHealthy = inferenceStore.engineHealthy;
 			const isHealthy = await inferenceStore.checkHealth();
 
-			if (!wasHealthy && isHealthy) {
-				await inferenceStore.syncStatus();
+			if (!wasHealthy && isHealthy && !reconnectingEngineSession) {
+				reconnectingEngineSession = true;
+				try {
+					await reestablishEngineSession();
+				} catch (error) {
+					console.error('Failed to restore engine session after reconnect:', error);
+				} finally {
+					reconnectingEngineSession = false;
+				}
 			}
 		}, 10_000);
 
@@ -563,28 +624,20 @@ Teaching rules:
 
 		<WorkspaceControls>
 			{#snippet modeSelector()}
-				<AppModeDropdown
-					modes={activeModeConfigs}
-					{activeMode}
-					onChange={handleModeChange}
-				/>
+				<AppModeDropdown modes={activeModeConfigs} {activeMode} onChange={handleModeChange} />
 			{/snippet}
 		</WorkspaceControls>
 
-		{#if !inferenceStore.engineHealthy}
+		{#if !inferenceStore.engineHealthy || reconnectingEngineSession}
 			<div
 				class="mx-4 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-200"
 			>
-				Engine disconnected — attempting to reconnect...
+				Engine disconnected — restoring session state...
 			</div>
 		{/if}
 
 		{#if setupNeedsAttention}
-			<SetupBanner
-				status={setupStatus}
-				error={setupError}
-				onOpen={() => (showSetupPanel = true)}
-			/>
+			<SetupBanner status={setupStatus} error={setupError} onOpen={() => (showSetupPanel = true)} />
 		{/if}
 
 		<ConversationView
@@ -609,6 +662,7 @@ Teaching rules:
 			{hasActiveStream}
 			{isCancelling}
 			{bottomOffset}
+			draftKey={composerDraftKey}
 			onSend={handleSendMessage}
 			onCancel={handleCancelGeneration}
 		/>

@@ -9,6 +9,7 @@
 		hasActiveStream: boolean;
 		isCancelling: boolean;
 		bottomOffset: number;
+		draftKey: string;
 		onSend: (content: string) => void;
 		onCancel: () => void;
 	}
@@ -19,6 +20,7 @@
 		hasActiveStream,
 		isCancelling,
 		bottomOffset,
+		draftKey,
 		onSend,
 		onCancel
 	}: Props = $props();
@@ -49,6 +51,7 @@
 			{onSend}
 			disabled={!isLoaded || isGenerating || hasActiveStream || isCancelling}
 			placeholder={inputPlaceholder}
+			{draftKey}
 		/>
 	</div>
 </section>

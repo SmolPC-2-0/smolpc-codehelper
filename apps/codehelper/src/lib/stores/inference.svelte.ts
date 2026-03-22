@@ -310,6 +310,7 @@ export const inferenceStore = {
 		} catch (e) {
 			error = String(e);
 			console.error('Failed to load model:', e);
+			await this.syncStatus();
 			return false;
 		}
 	},

@@ -279,52 +279,38 @@ impl BackendDecision {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendSelectionState {
+    #[default]
     Pending,
     Ready,
     Fallback,
     Error,
 }
 
-impl Default for BackendSelectionState {
-    fn default() -> Self {
-        Self::Pending
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DecisionPersistenceState {
+    #[default]
     None,
     Persisted,
     TemporaryFallback,
 }
 
-impl Default for DecisionPersistenceState {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum LaneStartupProbeState {
+    #[default]
     NotStarted,
     Ready,
     Error,
 }
 
-impl Default for LaneStartupProbeState {
-    fn default() -> Self {
-        Self::NotStarted
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum LanePreflightState {
+    #[default]
     NotStarted,
     Pending,
     Ready,
@@ -332,24 +318,13 @@ pub enum LanePreflightState {
     Error,
 }
 
-impl Default for LanePreflightState {
-    fn default() -> Self {
-        Self::NotStarted
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum LaneCacheState {
+    #[default]
     Unknown,
     Cold,
     Warm,
-}
-
-impl Default for LaneCacheState {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

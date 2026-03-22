@@ -14,13 +14,15 @@ use smolpc_assistant_types::{
 };
 
 pub async fn collect_setup_status(state: &SetupState) -> SetupStatusDto {
-    let detections = {
+    state.load_cache_from_disk_if_needed().await;
+
+    let (detections, cache_changed) = {
         let mut cache = state.cache().await;
         let detections = detect_all_with_policy(
             &cache.resolved_host_apps,
             state.allow_system_host_detection(),
         );
-        cache.resolved_host_apps = detections
+        let next_resolved = detections
             .iter()
             .filter_map(|detection| {
                 detection
@@ -29,8 +31,18 @@ pub async fn collect_setup_status(state: &SetupState) -> SetupStatusDto {
                     .map(|path| (detection.id.to_string(), path.clone()))
             })
             .collect();
-        detections
+
+        let cache_changed = cache.resolved_host_apps != next_resolved;
+        if cache_changed {
+            cache.resolved_host_apps = next_resolved;
+        }
+
+        (detections, cache_changed)
     };
+
+    if cache_changed {
+        state.persist_cache_to_disk().await;
+    }
 
     let mut items = Vec::new();
     items.push(engine_runtime_item(state));

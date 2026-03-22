@@ -9,6 +9,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub async fn prepare_setup(state: &SetupState) -> SetupResult {
+    state.load_cache_from_disk_if_needed().await;
+
     let (cached_blender_path, cached_gimp_path) = {
         let cache = state.cache().await;
         (
@@ -28,6 +30,7 @@ pub async fn prepare_setup(state: &SetupState) -> SetupResult {
         let mut cache = state.cache().await;
         cache.last_error = result.err();
     }
+    state.persist_cache_to_disk().await;
     collect_setup_status(state).await
 }
 
