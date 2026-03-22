@@ -1,3 +1,4 @@
+mod app_paths;
 mod assistant;
 mod benchmark;
 mod commands;
@@ -7,6 +8,10 @@ mod modes;
 mod security;
 mod setup;
 
+use app_paths::{
+    bundled_resource_dir_path, bundled_resource_dir_source, default_dev_bundled_resource_dir,
+    select_bundled_resource_dir_resolution, BundledResourceDirResolution,
+};
 use assistant::state::AssistantState;
 use commands::assistant::{assistant_cancel, assistant_send, mode_undo};
 use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_benchmark};
@@ -157,6 +162,66 @@ fn resolve_app_local_data_dir<R: tauri::Runtime>(app: &tauri::App<R>) -> Option<
     }
 }
 
+fn resolve_bundled_resource_dir<R: tauri::Runtime>(app: &tauri::App<R>) -> Option<PathBuf> {
+    let tauri_result = app.path().resource_dir().map_err(|error| {
+        let message = error.to_string();
+        log::warn!("Unable to resolve Tauri resource directory: {message}");
+        message
+    });
+    let tauri_error = tauri_result.as_ref().err().cloned();
+    let tauri_path = tauri_result.as_ref().ok().cloned();
+
+    match select_bundled_resource_dir_resolution(
+        tauri_result,
+        cfg!(debug_assertions),
+        Some(default_dev_bundled_resource_dir()),
+    ) {
+        Some(
+            resolution @ (BundledResourceDirResolution::Direct(_)
+            | BundledResourceDirResolution::NestedResources(_)),
+        ) => {
+            let path = bundled_resource_dir_path(&resolution).to_path_buf();
+            let source = bundled_resource_dir_source(&resolution);
+            log::info!(
+                "Resolved bundled resource base at {} (source: {})",
+                path.display(),
+                source
+            );
+            Some(path)
+        }
+        Some(BundledResourceDirResolution::DevFallback(path)) => {
+            if let Some(tauri_path) = tauri_path {
+                log::warn!(
+                    "Using dev bundled-resource fallback at {} because Tauri resource directory {} did not contain bundled resources directly or under /resources",
+                    path.display(),
+                    tauri_path.display()
+                );
+            } else if let Some(tauri_error) = tauri_error {
+                log::warn!(
+                    "Using dev bundled-resource fallback at {} after Tauri resource directory resolution failed: {}",
+                    path.display(),
+                    tauri_error
+                );
+            }
+            Some(path)
+        }
+        None => {
+            if let Some(tauri_path) = tauri_path {
+                log::warn!(
+                    "Bundled resource base is unavailable because Tauri resource directory {} did not contain bundled resources directly or under /resources, and no dev fallback was usable",
+                    tauri_path.display()
+                );
+            } else if let Some(tauri_error) = tauri_error {
+                log::warn!(
+                    "Bundled resource base is unavailable after Tauri resource directory resolution failed: {}",
+                    tauri_error
+                );
+            }
+            None
+        }
+    }
+}
+
 #[allow(clippy::missing_panics_doc)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -172,13 +237,7 @@ pub fn run() {
 
             log::info!("Hardware detection will occur on first request");
 
-            let resource_dir = match app.path().resource_dir() {
-                Ok(path) => Some(path),
-                Err(error) => {
-                    log::warn!("Unable to resolve Tauri resource directory: {error}");
-                    None
-                }
-            };
+            let resource_dir = resolve_bundled_resource_dir(app);
             let app_local_data_dir = resolve_app_local_data_dir(app);
             let (setup_state, mode_provider_registry) =
                 build_managed_state(resource_dir, app_local_data_dir);
@@ -421,6 +480,7 @@ mod tests {
             Some(app_temp.path().to_path_buf()),
         );
 
+        assert_eq!(setup_state.resource_dir(), Some(resource_temp.path()));
         assert_eq!(setup_state.app_local_data_dir(), Some(app_temp.path()));
 
         let provider_state = registry
