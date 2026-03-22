@@ -63,6 +63,9 @@ Master roadmap: issue #143
 
 ## Recently Resolved
 
+- **Issue #142 state module split polish** (2026-03-22)
+  - Status: Resolved (codex/issue-142-state-module-split, commit d3b5c26)
+  - Scope: Split `state.rs` by extracting model loading flow (`model_loading.rs`), startup orchestration (`startup.rs`), and runtime adapter builders (`adapters.rs`) while preserving behavior and checks.
 - **Issue #137 memory-aware degradation (P1)** (2026-03-22)
   - Status: Resolved (codex/issue-137-memory-pressure, commit ab63120)
   - Scope: Added runtime memory-pressure polling with warnings, minimized-state critical auto-unload, memory-impact model labels, and explicit OOM fallback guidance toward smaller models.
