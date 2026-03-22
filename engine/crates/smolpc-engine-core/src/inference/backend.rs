@@ -332,6 +332,8 @@ pub struct BackendSelectedDevice {
     pub backend: InferenceBackend,
     pub device_id: Option<i32>,
     pub device_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vram_mb: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

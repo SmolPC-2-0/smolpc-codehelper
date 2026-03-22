@@ -12,6 +12,7 @@ pub(crate) struct DirectMlCandidate {
     pub(crate) device_name: String,
     pub(crate) adapter_identity: String,
     pub(crate) driver_version: String,
+    pub(crate) vram_mb: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -106,32 +107,99 @@ pub(crate) fn directml_unavailable_reason(
     }
 }
 
+// ---------------------------------------------------------------------------
+// DXGI GPU enumeration (replaces WMI-based hardware_query, sub-5ms)
+// ---------------------------------------------------------------------------
+
 #[cfg(target_os = "windows")]
-fn gpu_rank_key(gpu: &hardware_query::GPUInfo) -> (bool, u64, String) {
-    let device_type = gpu.gpu_type().to_string().to_ascii_lowercase();
-    let is_discrete = device_type.contains("discrete");
-    let vram_mb = gpu.memory_mb();
-    let name = gpu.model_name().to_ascii_lowercase();
-    (is_discrete, vram_mb, name)
+#[derive(Debug, Clone)]
+struct DxgiGpuInfo {
+    name: String,
+    vendor_id: u32,
+    device_id: u32,
+    vram_mb: u64,
+    is_software: bool,
+    is_discrete: bool,
+    _perf_rank: u32,
 }
 
 #[cfg(target_os = "windows")]
-pub(crate) fn pick_best_dml_candidate(
-    gpus: &[hardware_query::GPUInfo],
-) -> Option<DirectMlCandidate> {
-    let mut candidates = gpus
+fn enumerate_dxgi_gpus() -> Vec<DxgiGpuInfo> {
+    use windows::core::Interface;
+    use windows::Win32::Graphics::Dxgi::{
+        CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIFactory6,
+        DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+    };
+
+    let factory: IDXGIFactory1 = match unsafe { CreateDXGIFactory1() } {
+        Ok(f) => f,
+        Err(e) => {
+            log::warn!("CreateDXGIFactory1 failed: {e}");
+            return Vec::new();
+        }
+    };
+
+    let factory6 = factory.cast::<IDXGIFactory6>().ok();
+    let mut gpus = Vec::new();
+
+    for i in 0u32.. {
+        let adapter: Result<IDXGIAdapter1, _> = if let Some(ref f6) = factory6 {
+            unsafe { f6.EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE) }
+        } else {
+            unsafe { factory.EnumAdapters1(i) }
+        };
+
+        let adapter = match adapter {
+            Ok(a) => a,
+            Err(_) => break, // end of adapter list
+        };
+
+        let desc = match unsafe { adapter.GetDesc1() } {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        let name = String::from_utf16_lossy(
+            &desc.Description[..desc
+                .Description
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(desc.Description.len())],
+        );
+
+        let is_software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32) != 0;
+        let vram_mb = desc.DedicatedVideoMemory as u64 / (1024 * 1024);
+        // Discrete GPUs have dedicated VRAM > 512 MB and are not software adapters
+        let is_discrete = !is_software && vram_mb > 512;
+
+        gpus.push(DxgiGpuInfo {
+            name,
+            vendor_id: desc.VendorId,
+            device_id: desc.DeviceId,
+            vram_mb,
+            is_software,
+            is_discrete,
+            _perf_rank: i,
+        });
+    }
+
+    gpus
+}
+
+#[cfg(target_os = "windows")]
+fn pick_best_dml_candidate(gpus: &[DxgiGpuInfo]) -> Option<DirectMlCandidate> {
+    // Filter to non-software adapters, sort by discrete > VRAM > name
+    let mut candidates: Vec<(usize, &DxgiGpuInfo)> = gpus
         .iter()
         .enumerate()
-        .filter(|(_, gpu)| gpu.supports_directml())
-        .collect::<Vec<_>>();
+        .filter(|(_, gpu)| !gpu.is_software)
+        .collect();
+
     candidates.sort_by(|a, b| {
-        let ka = gpu_rank_key(a.1);
-        let kb = gpu_rank_key(b.1);
+        let ka = (a.1.is_discrete, a.1.vram_mb);
+        let kb = (b.1.is_discrete, b.1.vram_mb);
         match kb.0.cmp(&ka.0) {
-            CmpOrdering::Equal => match kb.1.cmp(&ka.1) {
-                CmpOrdering::Equal => ka.2.cmp(&kb.2),
-                other => other,
-            },
+            CmpOrdering::Equal => kb.1.cmp(&ka.1),
             other => other,
         }
     });
@@ -143,72 +211,47 @@ pub(crate) fn pick_best_dml_candidate(
     // (produces runaway generation / no EOS detection). Only discrete GPUs
     // are viable DirectML targets. Integrated-only machines fall through to
     // OpenVINO CPU, which works correctly.
-    //
-    // Accept GPUs whose type string contains "discrete", "dedicated", or
-    // "external" to cover different hardware_query reporting styles.
-    let device_type = gpu.gpu_type().to_string().to_ascii_lowercase();
-    let is_discrete = device_type.contains("discrete")
-        || device_type.contains("dedicated")
-        || device_type.contains("external");
-    if !is_discrete {
+    if !gpu.is_discrete {
         log::info!(
-            "DirectML candidate '{}' rejected: not a discrete GPU (type='{}'). \
+            "DirectML candidate '{}' rejected: not a discrete GPU (vram={}MB). \
              Machines without a discrete GPU will use OpenVINO CPU.",
-            gpu.model_name(),
-            gpu.gpu_type()
+            gpu.name,
+            gpu.vram_mb
         );
         return None;
     }
-    let vendor = gpu.vendor().to_string().to_ascii_lowercase();
-    let model = gpu.model_name().trim().to_ascii_lowercase();
-    let pci = gpu
-        .pci_device_id
-        .as_deref()
-        .unwrap_or("unknown")
-        .trim()
-        .to_ascii_lowercase();
-    let driver = gpu
-        .driver_version
-        .as_deref()
-        .unwrap_or("unknown")
-        .trim()
-        .to_string();
+
+    let vendor = format!("0x{:04x}", gpu.vendor_id);
+    let device = format!("0x{:04x}", gpu.device_id);
+
     Some(DirectMlCandidate {
         device_id: *device_index as i32,
-        device_name: gpu.model_name().to_string(),
-        adapter_identity: format!("{vendor}:{model}:{pci}"),
-        driver_version: driver,
+        device_name: gpu.name.clone(),
+        adapter_identity: format!("{vendor}:{device}"),
+        driver_version: String::new(), // DXGI doesn't provide driver version directly
+        vram_mb: gpu.vram_mb,
     })
 }
 
 #[cfg(target_os = "windows")]
 pub(crate) fn probe_backend_capabilities() -> BackendProbeResult {
-    let info = match hardware_query::HardwareInfo::query() {
-        Ok(info) => info,
-        Err(error) => {
-            return BackendProbeResult::directml_probe_failure(
-                "directml_startup_probe_failed",
-                format!("DirectML hardware query failed: {error}"),
-            );
-        }
-    };
-    let directml_device_count = info
-        .gpus()
-        .iter()
-        .filter(|gpu| gpu.supports_directml())
-        .count();
+    let gpus = enumerate_dxgi_gpus();
+    let directml_device_count = gpus.iter().filter(|gpu| !gpu.is_software).count();
+
     let mut result = BackendProbeResult {
-        npu_hardware_detected: !info.npus().is_empty(),
+        // NPU detection delegated to OpenVINO startup probe (independent)
+        npu_hardware_detected: false,
         directml_device_count,
         ..Default::default()
     };
-    if let Some(candidate) = pick_best_dml_candidate(info.gpus()) {
+
+    if let Some(candidate) = pick_best_dml_candidate(&gpus) {
         result.available_backends.push(InferenceBackend::DirectML);
         result.directml_candidate = Some(candidate);
     } else {
         result.directml_probe_failure_class = Some("directml_candidate_missing".to_string());
         result.directml_probe_failure_message =
-            Some("No DirectML-capable adapter detected".to_string());
+            Some("No DirectML-capable discrete GPU detected".to_string());
     }
     result
 }
@@ -216,4 +259,28 @@ pub(crate) fn probe_backend_capabilities() -> BackendProbeResult {
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn probe_backend_capabilities() -> BackendProbeResult {
     BackendProbeResult::default()
+}
+
+// ---------------------------------------------------------------------------
+// System RAM query (for model auto-selection, replaces hardware_query)
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "windows")]
+pub(crate) fn total_system_ram_gb() -> Option<f64> {
+    use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    let mut status = MEMORYSTATUSEX {
+        dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
+        ..Default::default()
+    };
+    let ok = unsafe { GlobalMemoryStatusEx(&mut status) };
+    if ok.is_ok() {
+        Some(status.ullTotalPhys as f64 / (1024.0 * 1024.0 * 1024.0))
+    } else {
+        None
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn total_system_ram_gb() -> Option<f64> {
+    None
 }
