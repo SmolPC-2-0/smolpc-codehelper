@@ -14,6 +14,7 @@
 	import ComposerBar from '$lib/components/chat/ComposerBar.svelte';
 	import SetupBanner from '$lib/components/setup/SetupBanner.svelte';
 	import SetupPanel from '$lib/components/setup/SetupPanel.svelte';
+	import StartupLoadingScreen from '$lib/components/StartupLoadingScreen.svelte';
 	import { chatsStore } from '$lib/stores/chats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { inferenceStore } from '$lib/stores/inference.svelte';
@@ -39,6 +40,7 @@
 	let bottomOffset = $state(0);
 	let showShortcutsOverlay = $state(false);
 	let showSetupPanel = $state(false);
+	let startupComplete = $state(false);
 	let isSwitchingMode = $state(false);
 	let reconnectingEngineSession = $state(false);
 	let memoryPressureNotice = $state<string | null>(null);
@@ -668,6 +670,15 @@ Teaching rules:
 		finalizeActiveStreamingMessage('Generation interrupted while reconnecting to the engine.');
 	});
 
+	// Startup loading screen — dismiss when engine is ready
+	$effect(() => {
+		if (inferenceStore.isReady && !startupComplete) {
+			setTimeout(() => {
+				startupComplete = true;
+			}, 800);
+		}
+	});
+
 	// Engine health polling — immediate check + 10s interval
 	$effect(() => {
 		inferenceStore.checkHealth(); // immediate first check
@@ -705,6 +716,12 @@ Teaching rules:
 		return () => unwatch();
 	});
 </script>
+
+<StartupLoadingScreen
+	readiness={inferenceStore.readiness}
+	onRetry={reestablishEngineSession}
+	visible={!startupComplete}
+/>
 
 <div class="app-shell">
 	<div
