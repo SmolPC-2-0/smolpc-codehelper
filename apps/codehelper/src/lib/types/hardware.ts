@@ -14,13 +14,13 @@ export interface CpuInfo {
 	cores_physical: number;
 	cores_logical: number;
 	frequency_mhz?: number;
-	features: string[]; // CPUFeature enum variants from hardware-query
+	features: string[]; // Normalized ISA feature labels from backend detection
 	cache_l1_kb?: number;
 	cache_l2_kb?: number;
 	cache_l3_kb?: number;
 }
 
-// CPU feature types from hardware-query CPUFeature enum
+// CPU feature labels emitted by backend detection
 export type CpuFeature =
 	| 'AVX'
 	| 'AVX2'
