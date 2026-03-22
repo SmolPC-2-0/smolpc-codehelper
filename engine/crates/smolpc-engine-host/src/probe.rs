@@ -252,14 +252,19 @@ pub(crate) fn probe_backend_capabilities() -> BackendProbeResult {
     let gpus = enumerate_dxgi_gpus();
     let directml_device_count = gpus.iter().filter(|gpu| !gpu.is_software).count();
 
+    // Detect NPU by scanning DXGI adapter names for Intel AI Boost / NPU indicators.
+    // This is a hint for the OpenVINO startup probe — if false, the probe skips
+    // OpenVINO initialization entirely (saving time on machines without NPU).
+    let npu_detected = gpus.iter().any(|gpu| {
+        let lower = gpu.name.to_ascii_lowercase();
+        lower.contains("ai boost") || lower.contains("npu")
+    });
+
     // directml_device_count = non-software DXGI adapters. All WDDM hardware
     // adapters support DirectML, so this is equivalent to the old
     // hardware_query supports_directml() filter.
     let mut result = BackendProbeResult {
-        // NPU detection is fully handled by the OpenVINO startup probe
-        // (probe_openvino_startup in startup.rs). This field is just a hint;
-        // setting it to false is safe — the OpenVINO probe does its own detection.
-        npu_hardware_detected: false,
+        npu_hardware_detected: npu_detected,
         directml_device_count,
         ..Default::default()
     };
