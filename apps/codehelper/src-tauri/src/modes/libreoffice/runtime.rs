@@ -809,4 +809,62 @@ print("terminated" if child.poll() is not None else "alive")
         );
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "terminated");
     }
+
+    #[test]
+    fn main_runtime_prefers_office_python_for_helper_startup() {
+        let tempdir = tempdir().expect("tempdir");
+        let office_program_dir = tempdir.path().join("office").join("program");
+        fs::create_dir_all(&office_program_dir).expect("create office program dir");
+
+        #[cfg(windows)]
+        let soffice_path = office_program_dir.join("soffice.exe");
+        #[cfg(not(windows))]
+        let soffice_path = office_program_dir.join("soffice");
+
+        #[cfg(windows)]
+        let office_python_path = office_program_dir.join("python.exe");
+        #[cfg(not(windows))]
+        let office_python_path = office_program_dir.join("python3");
+
+        write_file(&soffice_path, "");
+        write_file(&office_python_path, "");
+
+        let runner_path = tempdir.path().join("resolve_helper_python.py");
+        write_file(
+            &runner_path,
+            &format!(
+                r#"
+import importlib.util
+import os
+import sys
+
+spec = importlib.util.spec_from_file_location("smolpc_main_runtime", r"{path}")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+os.environ["SMOLPC_LIBREOFFICE_OFFICE_PATH"] = r"{soffice_path}"
+resolved = module.get_python_path(module.get_office_path())
+sys.stdout.write(resolved)
+"#,
+                path = main_script_path().display(),
+                soffice_path = soffice_path.display(),
+            ),
+        );
+
+        let output = Command::new(python_command())
+            .arg(&runner_path)
+            .output()
+            .expect("run helper python resolver");
+        assert!(
+            output.status.success(),
+            "helper python resolver failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let resolved = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        let resolved_canonical = fs::canonicalize(resolved).expect("canonical resolved path");
+        let expected_canonical =
+            fs::canonicalize(office_python_path).expect("canonical expected path");
+        assert_eq!(resolved_canonical, expected_canonical);
+    }
 }

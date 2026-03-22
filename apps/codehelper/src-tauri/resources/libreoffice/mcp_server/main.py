@@ -19,6 +19,7 @@ STARTUP_POLL_INTERVAL_SECONDS = 0.2
 SHUTDOWN_TIMEOUT_SECONDS = 5.0
 HELPER_AUTH_TOKEN_ENV = "SMOLPC_LIBREOFFICE_HELPER_AUTH_TOKEN"
 OFFICE_PATH_ENV = "SMOLPC_LIBREOFFICE_OFFICE_PATH"
+HELPER_PYTHON_PATH_ENV = "SMOLPC_LIBREOFFICE_HELPER_PYTHON_PATH"
 
 office_process: Optional[subprocess.Popen] = None
 helper_process: Optional[subprocess.Popen] = None
@@ -109,8 +110,52 @@ def get_office_path() -> str:
     )
 
 
-def get_python_path() -> str:
-    return sys.executable
+def get_python_path(soffice_path: str) -> str:
+    configured_python = os.environ.get(HELPER_PYTHON_PATH_ENV)
+    if configured_python:
+        if os.path.exists(configured_python):
+            logging.info(
+                "Using helper Python from %s: %s",
+                HELPER_PYTHON_PATH_ENV,
+                configured_python,
+            )
+            return configured_python
+        raise FileNotFoundError(
+            f"Configured helper Python from {HELPER_PYTHON_PATH_ENV} does not exist: {configured_python}"
+        )
+
+    office_program_dir = Path(soffice_path).resolve().parent
+    system = platform.system().lower()
+    candidate_paths = []
+
+    if system == "windows":
+        candidate_paths.append(office_program_dir / "python.exe")
+        for python_core_dir in office_program_dir.glob("python-core-*"):
+            candidate_paths.append(python_core_dir / "bin" / "python.exe")
+    else:
+        candidate_paths.append(office_program_dir / "python3")
+        candidate_paths.append(office_program_dir / "python")
+        for python_core_dir in office_program_dir.glob("python-core-*"):
+            candidate_paths.append(python_core_dir / "bin" / "python3")
+            candidate_paths.append(python_core_dir / "bin" / "python")
+        candidate_paths.append(office_program_dir.parent / "Resources" / "python")
+
+    for candidate_path in candidate_paths:
+        if candidate_path.is_file():
+            candidate = str(candidate_path)
+            logging.info(
+                "Using LibreOffice Python for helper startup: %s",
+                candidate,
+            )
+            return candidate
+
+    fallback = sys.executable
+    logging.warning(
+        "Unable to locate LibreOffice Python next to %s; falling back to runtime interpreter %s",
+        soffice_path,
+        fallback,
+    )
+    return fallback
 
 
 def is_port_in_use(port: int) -> bool:
@@ -119,12 +164,24 @@ def is_port_in_use(port: int) -> bool:
         return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
-def wait_for_port_ready(port: int, label: str) -> None:
+def wait_for_port_ready(
+    port: int,
+    label: str,
+    process: Optional[subprocess.Popen] = None,
+    failure_hint: Optional[str] = None,
+) -> None:
     deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         if is_port_in_use(port):
             logging.info("%s is ready on port %s", label, port)
             return
+        if process is not None:
+            return_code = process.poll()
+            if return_code is not None:
+                hint_suffix = f" {failure_hint}" if failure_hint else ""
+                raise RuntimeError(
+                    f"{label} exited before becoming ready on port {port} (exit code {return_code}).{hint_suffix}"
+                )
         time.sleep(STARTUP_POLL_INTERVAL_SECONDS)
     raise TimeoutError(f"{label} did not become ready on port {port}")
 
@@ -170,7 +227,7 @@ def start_helper(helper_token: str, port: int = HELPER_PORT) -> None:
         )
 
     helper_script = Path(__file__).with_name("helper.py")
-    python_path = get_python_path()
+    python_path = get_python_path(get_office_path())
     logging.info("Starting LibreOffice helper from %s", helper_script)
     helper_process = subprocess.Popen(
         [python_path, str(helper_script)],
@@ -179,7 +236,12 @@ def start_helper(helper_token: str, port: int = HELPER_PORT) -> None:
         stderr=subprocess.DEVNULL,
         env=build_child_env(helper_token),
     )
-    wait_for_port_ready(port, "LibreOffice helper socket")
+    wait_for_port_ready(
+        port,
+        "LibreOffice helper socket",
+        process=helper_process,
+        failure_hint="Check helper.log for UNO import errors.",
+    )
 
 
 def start_mcp_server(helper_token: str) -> int:
