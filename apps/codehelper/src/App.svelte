@@ -470,6 +470,20 @@ Teaching rules:
 		}
 	});
 
+	// Engine health polling — detect crashes within 10s
+	$effect(() => {
+		const intervalId = setInterval(async () => {
+			const wasHealthy = inferenceStore.engineHealthy;
+			const isHealthy = await inferenceStore.checkHealth();
+
+			if (!wasHealthy && isHealthy) {
+				await inferenceStore.syncStatus();
+			}
+		}, 10_000);
+
+		return () => clearInterval(intervalId);
+	});
+
 	$effect(() => {
 		const theme = settingsStore.theme;
 		applyTheme(theme);
@@ -514,6 +528,14 @@ Teaching rules:
 				/>
 			{/snippet}
 		</WorkspaceControls>
+
+		{#if !inferenceStore.engineHealthy}
+			<div
+				class="mx-4 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-200"
+			>
+				Engine disconnected — attempting to reconnect...
+			</div>
+		{/if}
 
 		{#if setupNeedsAttention}
 			<SetupBanner
