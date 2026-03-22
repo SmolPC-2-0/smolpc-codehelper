@@ -114,15 +114,24 @@ fn program_files_candidates() -> Vec<PathBuf> {
 
 fn standard_paths_for_gimp() -> Vec<PathBuf> {
     if cfg!(windows) {
-        program_files_candidates()
+        let mut paths: Vec<PathBuf> = program_files_candidates()
             .into_iter()
             .flat_map(|root| {
                 [
-                    root.join("GIMP 2").join("bin").join("gimp-2.10.exe"),
                     root.join("GIMP 3").join("bin").join("gimp-3.exe"),
+                    root.join("GIMP 2").join("bin").join("gimp-2.10.exe"),
                 ]
             })
-            .collect()
+            .collect();
+
+        // Per-user installs (GIMP NSIS installer defaults to %LOCALAPPDATA%\Programs)
+        if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
+            let local = PathBuf::from(local_app_data).join("Programs");
+            paths.push(local.join("GIMP 3").join("bin").join("gimp-3.exe"));
+            paths.push(local.join("GIMP 2").join("bin").join("gimp-2.10.exe"));
+        }
+
+        paths
     } else if cfg!(target_os = "macos") {
         vec![
             PathBuf::from("/Applications/GIMP.app/Contents/MacOS/gimp"),
@@ -138,22 +147,26 @@ fn standard_paths_for_gimp() -> Vec<PathBuf> {
 
 fn standard_paths_for_blender() -> Vec<PathBuf> {
     if cfg!(windows) {
-        program_files_candidates()
-            .into_iter()
-            .flat_map(|root| {
-                [
-                    root.join("Blender Foundation")
-                        .join("Blender 4.2")
-                        .join("blender.exe"),
-                    root.join("Blender Foundation")
-                        .join("Blender 4.1")
-                        .join("blender.exe"),
-                    root.join("Blender Foundation")
-                        .join("Blender 4.0")
-                        .join("blender.exe"),
-                ]
-            })
-            .collect()
+        let mut paths = Vec::new();
+        for root in program_files_candidates() {
+            let foundation = root.join("Blender Foundation");
+            if let Ok(entries) = std::fs::read_dir(&foundation) {
+                // Enumerate all "Blender *" directories, prefer newest version
+                let mut blender_dirs: Vec<PathBuf> = entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| {
+                        e.file_name()
+                            .to_string_lossy()
+                            .starts_with("Blender ")
+                    })
+                    .map(|e| e.path().join("blender.exe"))
+                    .collect();
+                blender_dirs.sort();
+                blender_dirs.reverse(); // newest version first
+                paths.extend(blender_dirs);
+            }
+        }
+        paths
     } else if cfg!(target_os = "macos") {
         vec![
             PathBuf::from("/Applications/Blender.app/Contents/MacOS/Blender"),
