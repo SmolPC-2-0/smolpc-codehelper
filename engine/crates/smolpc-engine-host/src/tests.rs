@@ -532,7 +532,6 @@ use chrono::Utc;
             }),
             directml_probe_failure_class: None,
             directml_probe_failure_message: None,
-            npu_hardware_detected: false,
         };
 
         let response =
@@ -639,7 +638,6 @@ use chrono::Utc;
             directml_probe_failure_message: Some(
                 "No DirectML-capable adapter detected".to_string(),
             ),
-            npu_hardware_detected: false,
         };
 
         let response =
@@ -698,10 +696,8 @@ use chrono::Utc;
             }),
             directml_probe_failure_class: None,
             directml_probe_failure_message: None,
-            npu_hardware_detected: true,
         };
         let openvino_probe = OpenVinoStartupProbeResult {
-            hardware_detected: true,
             startup_ready: true,
             device_visible: true,
             adapter_identity: Some("openvino:npu:intel_npu".to_string()),
@@ -787,10 +783,8 @@ use chrono::Utc;
             }),
             directml_probe_failure_class: None,
             directml_probe_failure_message: None,
-            npu_hardware_detected: true,
         };
         let openvino_probe = OpenVinoStartupProbeResult {
-            hardware_detected: true,
             startup_ready: true,
             device_visible: true,
             adapter_identity: Some("openvino:npu:intel_npu".to_string()),

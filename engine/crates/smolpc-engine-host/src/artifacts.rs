@@ -235,7 +235,7 @@ pub(crate) fn apply_openvino_startup_probe_status(
         return;
     };
 
-    status.lanes.openvino_npu.detected = probe.hardware_detected;
+    status.lanes.openvino_npu.detected = probe.device_visible;
     status.lanes.openvino_npu.device_name = probe.device_name.clone();
     status.lanes.openvino_npu.driver_version = probe.driver_version.clone();
     status.lanes.openvino_npu.device_id = None;
