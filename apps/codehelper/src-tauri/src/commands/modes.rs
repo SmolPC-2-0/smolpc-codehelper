@@ -4,7 +4,7 @@ use crate::modes::config::list_mode_configs;
 use crate::modes::registry::ModeProviderRegistry;
 use crate::setup::host_apps::{detect_blender, detect_gimp, detect_libreoffice, HostAppDetection};
 use crate::setup::launch::{
-    launch_blender_if_needed, launch_gimp_if_needed, launch_libreoffice_if_needed,
+    launch_blender_if_needed, launch_gimp_if_needed, launch_libreoffice_mode,
 };
 use smolpc_assistant_types::{AppMode, ModeConfigDto, ModeStatusDto, ProviderStateDto};
 
@@ -54,13 +54,31 @@ fn open_host_app_for_mode(mode: AppMode) -> Result<(), String> {
             launch_blender_if_needed(&path)?;
             Ok(())
         }
-        AppMode::Writer | AppMode::Calc | AppMode::Impress => {
+        AppMode::Writer => {
             let detection = detect_libreoffice(None);
             let path = detection
                 .path
                 .clone()
                 .ok_or_else(|| detection_error_detail(&detection))?;
-            launch_libreoffice_if_needed(&path)?;
+            launch_libreoffice_mode(&path, "--writer")?;
+            Ok(())
+        }
+        AppMode::Calc => {
+            let detection = detect_libreoffice(None);
+            let path = detection
+                .path
+                .clone()
+                .ok_or_else(|| detection_error_detail(&detection))?;
+            launch_libreoffice_mode(&path, "--calc")?;
+            Ok(())
+        }
+        AppMode::Impress => {
+            let detection = detect_libreoffice(None);
+            let path = detection
+                .path
+                .clone()
+                .ok_or_else(|| detection_error_detail(&detection))?;
+            launch_libreoffice_mode(&path, "--impress")?;
             Ok(())
         }
     }
