@@ -58,17 +58,11 @@ Master roadmap: issue #143
 
 ### 4) Unified frontend — remaining wiring work
 
-- Status: Open (PR #121 merged baseline; follow-up PRs needed)
-- Severity: Low (Code mode fully functional)
-- Context:
-  - Mode dropdown and setup panel are wired in and functional.
-  - GIMP/Blender/Writer mode handlers not yet routed in App.svelte's `handleSendMessage`.
-  - Per-mode chat sessions not yet implemented (using single-chat model from main).
-  - Setup "Prepare" button provisioning not yet tested end-to-end.
-- Next steps:
-  - Add mode routing to `handleSendMessage` (if gimp → `assistantSend`; if code → existing path).
-  - Test GIMP/Blender/LibreOffice MCP connectivity with host apps installed.
-  - Implement per-mode chat session switching.
+- Status: Mostly resolved
+- Mode routing: ✅ PR #150
+- Per-mode chat sessions: ✅ PR #151
+- Host app detection: ✅ PR (app-connectivity) — GIMP per-user paths, Blender dynamic glob, GIMP 3.2 profile
+- Remaining: end-to-end tool execution testing (GIMP bridge, Blender addon, LibreOffice UNO)
 
 ---
 
