@@ -15,6 +15,9 @@ const initialModeChats = loadFromStorage<Partial<Record<AppMode, string | null>>
 	MODE_CHAT_KEY,
 	legacySingle ? { code: legacySingle } : {}
 );
+if (legacySingle) {
+	try { localStorage.removeItem(CURRENT_CHAT_KEY); } catch { /* best-effort */ }
+}
 
 // Svelte 5 state using runes
 let chats = $state<Chat[]>(initialChats);
@@ -91,6 +94,9 @@ export const chatsStore = {
 		return newChat;
 	},
 
+	// Callers must ensure currentMode matches the chat's mode — the Sidebar
+	// already filters by mode so this is safe from the UI, but programmatic
+	// callers should call setMode() first if switching modes.
 	setCurrentChat(id: string) {
 		const chat = chats.find((c) => c.id === id);
 		if (chat) {
@@ -143,7 +149,7 @@ export const chatsStore = {
 			// If deleted was current for its mode, pick next in same mode
 			if (currentChatIdByMode[chatMode] === id) {
 				const next = chats.find(
-					(c) => c.id !== id && (c.mode ?? 'code') === chatMode && !c.archived
+					(c) => (c.mode ?? 'code') === chatMode && !c.archived
 				);
 				currentChatIdByMode = { ...currentChatIdByMode, [chatMode]: next?.id ?? null };
 				persistModeChats();

@@ -465,6 +465,8 @@ Teaching rules:
 		hardwareStore.getCached();
 		chatsStore.setMode(modeStore.activeMode);
 
+		// Bootstrap a Code chat for brand-new users (zero chats across all modes).
+		// When switching to a mode with no chats, handleSendMessage lazy-creates one.
 		if (hasNoChats) {
 			chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model', 'code');
 		}
