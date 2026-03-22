@@ -22,8 +22,8 @@ pub struct McpSession {
 
 #[derive(Debug)]
 enum SessionClient {
-    Tcp(TcpJsonRpcClient),
-    Stdio(StdioJsonRpcClient),
+    Tcp(Box<TcpJsonRpcClient>),
+    Stdio(Box<StdioJsonRpcClient>),
 }
 
 impl SessionClient {
@@ -66,7 +66,7 @@ impl McpSession {
         client_version: &str,
     ) -> Result<Self, McpClientError> {
         Self::initialize(
-            SessionClient::Tcp(TcpJsonRpcClient::connect(config).await?),
+            SessionClient::Tcp(Box::new(TcpJsonRpcClient::connect(config).await?)),
             client_name,
             client_version,
         )
@@ -79,7 +79,7 @@ impl McpSession {
         client_version: &str,
     ) -> Result<Self, McpClientError> {
         Self::initialize(
-            SessionClient::Stdio(StdioJsonRpcClient::connect(config).await?),
+            SessionClient::Stdio(Box::new(StdioJsonRpcClient::connect(config).await?)),
             client_name,
             client_version,
         )

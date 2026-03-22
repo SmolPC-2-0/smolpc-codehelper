@@ -362,10 +362,7 @@ impl ToolProvider for LibreOfficeProvider {
             return Err(FOUNDATION_PROVIDER_EXECUTION_NOT_IMPLEMENTED.to_string());
         }
 
-        if !allowed_tool_names(mode)
-            .iter()
-            .any(|candidate| *candidate == name)
-        {
+        if !allowed_tool_names(mode).contains(&name) {
             let profile = Self::profile_for_mode(mode)?;
             return Err(format!(
                 "{name} is not available in {} mode.",

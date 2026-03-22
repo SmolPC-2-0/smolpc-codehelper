@@ -336,7 +336,7 @@ impl BlenderProvider {
 
         let cached_blender_path = {
             let mut state = self.state.lock().await;
-            if let Err(_) = self.ensure_bridge_started(mode, &mut state).await {
+            if self.ensure_bridge_started(mode, &mut state).await.is_err() {
                 return Self::disconnected_state(mode, &state);
             }
             state.detected_blender_path.clone()

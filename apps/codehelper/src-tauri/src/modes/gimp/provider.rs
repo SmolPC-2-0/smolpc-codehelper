@@ -23,7 +23,7 @@ use tokio::time::{sleep, Duration};
 const GIMP_CONNECTION_RETRY_ATTEMPTS: usize = 24;
 const GIMP_CONNECTION_RETRY_DELAY_MS: u64 = 250;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct RuntimeState {
     session: Option<McpSession>,
     runtime_child: Option<Child>,
@@ -31,19 +31,6 @@ struct RuntimeState {
     last_error: Option<String>,
     ever_connected: bool,
     detected_gimp_path: Option<PathBuf>,
-}
-
-impl Default for RuntimeState {
-    fn default() -> Self {
-        Self {
-            session: None,
-            runtime_child: None,
-            tools: Vec::new(),
-            last_error: None,
-            ever_connected: false,
-            detected_gimp_path: None,
-        }
-    }
 }
 
 impl Drop for RuntimeState {
