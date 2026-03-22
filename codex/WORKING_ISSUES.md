@@ -63,6 +63,9 @@ Master roadmap: issue #143
 
 ## Recently Resolved
 
+- **Issue #156 LibreOffice helper startup timeout (Writer mode)** (2026-03-22)
+  - Status: Resolved (codex/issue-156-libreoffice-helper-timeout, commit 95df429)
+  - Scope: LibreOffice MCP runtime now resolves helper interpreter from the LibreOffice install (`program/python(.exe)`), with optional override and early-fail startup detection when helper exits before port 8765 is ready.
 - **Issue #142 state module split polish** (2026-03-22)
   - Status: Resolved (codex/issue-142-state-module-split, commit d3b5c26)
   - Scope: Split `state.rs` by extracting model loading flow (`model_loading.rs`), startup orchestration (`startup.rs`), and runtime adapter builders (`adapters.rs`) while preserving behavior and checks.
