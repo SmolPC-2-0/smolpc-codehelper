@@ -74,6 +74,9 @@ Master roadmap: issue #143
 
 ## Recently Resolved
 
+- **Student work persistence and crash recovery (P1)** (2026-03-22)
+  - Status: Resolved (codex/persistence-crash-safety, commit e6a6453)
+  - Scope: Crash-safe chat/model/mode persistence, draft autosave, stale-stream recovery, and setup host-detection cache persistence.
 - **Engine lifecycle robustness P0** (2026-03-22, PR #148): Graceful engine shutdown on app close (ExitRequested + PID fallback), cancel-on-mode-switch, 10s health polling with disconnected banner.
 - **Clippy zero warnings** (2026-03-22, PR #145): Fixed all 8 workspace warnings (Box enum variants, inlined format args, derive Default, contains, needless return).
 - **Engine module split** (2026-03-22, PR #141): main.rs 4,650→112 lines (10 modules), engine-client lib.rs 1,777→560 lines (4 modules), genai FFI split (2 new files each). 123 tests pass.
