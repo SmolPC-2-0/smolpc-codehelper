@@ -168,7 +168,7 @@ Teaching rules:
 
 		const chatLabel =
 			activeMode === 'code' ? (inferenceStore.currentModel ?? 'onnx-model') : activeMode;
-		const activeChat = currentChat ?? chatsStore.createChat(chatLabel);
+		const activeChat = currentChat ?? chatsStore.createChat(chatLabel, activeMode);
 		if (!activeChat) return;
 		const historyBeforeMessage = [...activeChat.messages];
 
@@ -379,6 +379,7 @@ Teaching rules:
 				await handleCancelGeneration();
 			}
 			modeStore.setActiveMode(mode);
+			chatsStore.setMode(mode);
 		} finally {
 			isSwitchingMode = false;
 		}
@@ -462,9 +463,12 @@ Teaching rules:
 		modeStore.initialize();
 		setupStore.initialize();
 		hardwareStore.getCached();
+		chatsStore.setMode(modeStore.activeMode);
 
+		// Bootstrap a Code chat for brand-new users (zero chats across all modes).
+		// When switching to a mode with no chats, handleSendMessage lazy-creates one.
 		if (hasNoChats) {
-			chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model');
+			chatsStore.createChat(inferenceStore.currentModel ?? 'onnx-model', 'code');
 		}
 
 		window.addEventListener('keydown', handleKeyDown);
