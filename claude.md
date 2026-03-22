@@ -69,6 +69,25 @@ cargo test -p smolpc-engine-core && cargo test -p smolpc-engine-host
 cd apps/codehelper && npm run check && npm run lint
 ```
 
+**Plugin and tool usage (mandatory):**
+
+*Code intelligence — always use LSP over grep:*
+- When tracing symbol usage: `LSP findReferences` (Rust) or TypeScript LSP (frontend)
+- When finding where something is defined: `LSP goToDefinition`
+- When checking what calls a function: `LSP incomingCalls`
+- When removing/renaming a field or function: `LSP findReferences` first to find ALL consumers
+- Subagents exploring the codebase MUST be instructed to use LSP
+
+*Superpowers plugin — invoke via Skill tool when the trigger matches:*
+- **Brainstorming** (`superpowers:brainstorming`): User says "let's brainstorm", "be creative", "what are our options", or asks to explore architectural decisions. Invoke BEFORE proposing solutions.
+- **Writing plans** (`superpowers:writing-plans`): When given specs/requirements for a multi-step task, before touching code. Use instead of ad-hoc plan files.
+- **Executing plans** (`superpowers:executing-plans`): When a written plan exists and is approved. Provides review checkpoints during implementation.
+- **Verification before completion** (`superpowers:verification-before-completion`): BEFORE claiming work is done, fixed, or passing. Run verification commands, confirm output, THEN claim success. Never say "should work" — prove it works.
+- **Receiving code review** (`superpowers:receiving-code-review`): When processing review feedback. Requires technical rigour — verify the reviewer's claims against the code before implementing fixes. Don't blindly agree.
+- **Systematic debugging** (`superpowers:systematic-debugging`): When encountering bugs, test failures, or unexpected behavior. Use before proposing fixes.
+- **Dispatching parallel agents** (`superpowers:dispatching-parallel-agents`): When facing 2+ independent tasks that can be parallelised.
+- **Code review** (`superpowers:requesting-code-review`): When completing major features or before merging — verify work meets requirements.
+
 ---
 
 ## Learnings
@@ -123,6 +142,7 @@ Corrections discovered during development. **When you correct a mistake, append 
 - When removing a dependency, trace every consumed field to its terminal behavior — a "hint" boolean can be a hard gate downstream (e.g., `npu_hardware_detected` gates the entire OpenVINO probe)
 - After replacing a hardware data source, verify all backend paths with live tests (`SMOLPC_FORCE_EP=openvino_npu` curl test) — unit tests don't catch hardware path regressions
 - DXGI adapter enumeration is 1000x faster than WMI for GPU detection — use `IDXGIFactory6::EnumAdapterByGpuPreference` with fallback to `IDXGIFactory1::EnumAdapters1`
+- Always use the LSP tool (`findReferences`, `incomingCalls`, `goToDefinition`) when tracing symbol usage — grep misses indirect consumers and caused the NPU regression. Subagents exploring the codebase must also be instructed to use LSP.
 
 ---
 
