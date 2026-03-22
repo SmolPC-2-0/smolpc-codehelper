@@ -44,6 +44,48 @@
 	const setupStatus = $derived(setupStore.status);
 	const setupError = $derived(setupStore.error);
 
+	// Availability gating: map setup item detection → mode availability.
+	// Static mapping — modes not listed here default to available.
+	const SETUP_ID_TO_MODES: Readonly<Record<string, string[]>> = {
+		host_gimp: ['gimp'],
+		host_blender: ['blender'],
+		host_libreoffice: ['writer', 'calc', 'impress']
+	};
+
+	const modeAvailability = $derived.by(() => {
+		const result: Record<string, boolean> = { code: true }; // Code always available
+		for (const item of setupStore.items) {
+			const modes = SETUP_ID_TO_MODES[item.id];
+			if (modes) {
+				const available = item.state === 'ready';
+				for (const mode of modes) {
+					result[mode] = available;
+				}
+			}
+		}
+		for (const mode of activeModeConfigs) {
+			if (!(mode.id in result)) result[mode.id] = true;
+		}
+		return result;
+	});
+
+	const unavailableReasons = $derived.by(() => {
+		const result: Record<string, string> = {};
+		for (const item of setupStore.items) {
+			const modes = SETUP_ID_TO_MODES[item.id];
+			if (modes && item.state !== 'ready') {
+				const reason =
+					item.state === 'missing'
+						? `Install ${item.label} to enable`
+						: (item.detail ?? `${item.label} not ready`);
+				for (const mode of modes) {
+					result[mode] = reason;
+				}
+			}
+		}
+		return result;
+	});
+
 	const currentChat = $derived(chatsStore.currentChat);
 	const messages = $derived(currentChat?.messages ?? []);
 	const hasNoChats = $derived(chatsStore.chats.length === 0);
@@ -425,6 +467,7 @@ Teaching rules:
 
 	async function handleModeChange(mode: AppMode) {
 		if (activeMode === mode || isSwitchingMode) return;
+		if (!modeAvailability[mode]) return;
 
 		isSwitchingMode = true;
 		try {
@@ -432,7 +475,10 @@ Teaching rules:
 			if (hasActiveStream || inferenceStore.isGenerating) {
 				await handleCancelGeneration();
 			}
-			await modeStore.setActiveMode(mode);
+			// Don't await setActiveMode — the status refresh can hang if a
+			// provider is slow to connect. The mode switch itself is synchronous
+			// (activeMode + storage); status refresh is fire-and-forget.
+			modeStore.setActiveMode(mode);
 			chatsStore.setMode(mode);
 		} finally {
 			isSwitchingMode = false;
@@ -624,7 +670,13 @@ Teaching rules:
 
 		<WorkspaceControls>
 			{#snippet modeSelector()}
-				<AppModeDropdown modes={activeModeConfigs} {activeMode} onChange={handleModeChange} />
+				<AppModeDropdown
+					modes={activeModeConfigs}
+					{activeMode}
+					onChange={handleModeChange}
+					{modeAvailability}
+					{unavailableReasons}
+				/>
 			{/snippet}
 		</WorkspaceControls>
 
