@@ -24,6 +24,8 @@
 
 <style>
 	.workspace-controls {
+		position: relative;
+		z-index: 10;
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
