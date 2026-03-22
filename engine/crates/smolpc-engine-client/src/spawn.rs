@@ -262,7 +262,9 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
 
     let child = cmd.spawn()?;
     let pid_path = options.shared_runtime_dir.join("engine.pid");
-    let _ = std::fs::write(&pid_path, child.id().to_string());
+    if let Err(e) = std::fs::write(&pid_path, child.id().to_string()) {
+        log::warn!("Failed to write engine PID file {}: {e}", pid_path.display());
+    }
     Ok(())
 }
 

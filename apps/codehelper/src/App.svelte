@@ -32,6 +32,7 @@
 	let bottomOffset = $state(0);
 	let showShortcutsOverlay = $state(false);
 	let showSetupPanel = $state(false);
+	let isSwitchingMode = $state(false);
 
 	// Unified mode state
 	const activeMode = $derived(modeStore.activeMode);
@@ -338,14 +339,18 @@ Teaching rules:
 	}
 
 	async function handleModeChange(mode: AppMode) {
-		if (activeMode === mode) return;
+		if (activeMode === mode || isSwitchingMode) return;
 
-		// Cancel any in-flight generation before switching modes
-		if (hasActiveStream || inferenceStore.isGenerating) {
-			await handleCancelGeneration();
+		isSwitchingMode = true;
+		try {
+			// Cancel any in-flight generation before switching modes
+			if (hasActiveStream || inferenceStore.isGenerating) {
+				await handleCancelGeneration();
+			}
+			modeStore.setActiveMode(mode);
+		} finally {
+			isSwitchingMode = false;
 		}
-
-		modeStore.setActiveMode(mode);
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {

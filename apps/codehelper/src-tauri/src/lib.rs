@@ -115,6 +115,9 @@ pub fn run() {
     });
 }
 
+/// Matches the write path in engine-client spawn.rs which uses
+/// `options.shared_runtime_dir.join("engine.pid")`, where shared_runtime_dir
+/// is set to `dirs::data_local_dir()/SmolPC/engine-runtime` in inference.rs:164.
 fn engine_pid_path() -> Option<std::path::PathBuf> {
     dirs::data_local_dir().map(|d| d.join("SmolPC").join("engine-runtime").join("engine.pid"))
 }
@@ -139,7 +142,13 @@ fn force_kill_engine() {
             .output();
         if let Ok(output) = check {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            if !stdout.contains("smolpc-engine-host") {
+            // tasklist /FO CSV outputs: "Image Name","PID",... — check first column only
+            let is_engine = stdout.lines().any(|line| {
+                line.split(',')
+                    .next()
+                    .is_some_and(|name| name.contains("smolpc-engine-host"))
+            });
+            if !is_engine {
                 log::warn!("PID {pid} is not an engine process, skipping force-kill");
                 let _ = std::fs::remove_file(&pid_path);
                 return;
