@@ -245,15 +245,15 @@ impl EngineClient {
         Ok(())
     }
 
+    /// Request graceful engine shutdown. No client-side timeout — caller owns the deadline.
     pub async fn shutdown(&self) -> Result<(), EngineClientError> {
         let response = self
             .http
             .post(self.url("/engine/shutdown"))
             .header(AUTHORIZATION, self.auth_header())
-            .timeout(Duration::from_secs(2))
             .send()
             .await?;
-        let _ = ensure_success(response, "/engine/shutdown").await?;
+        ensure_success(response, "/engine/shutdown").await?;
         Ok(())
     }
 

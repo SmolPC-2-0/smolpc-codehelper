@@ -97,7 +97,10 @@ pub fn run() {
                 )
                 .await
                 {
-                    Ok(Ok(_)) => log::info!("Engine shut down gracefully"),
+                    Ok(Ok(_)) => {
+                        log::info!("Engine shut down gracefully");
+                        cleanup_engine_pid();
+                    }
                     Ok(Err(e)) => {
                         log::warn!("Engine graceful shutdown failed: {e}");
                         force_kill_engine();
@@ -112,25 +115,47 @@ pub fn run() {
     });
 }
 
+fn engine_pid_path() -> Option<std::path::PathBuf> {
+    dirs::data_local_dir().map(|d| d.join("SmolPC").join("engine-runtime").join("engine.pid"))
+}
+
+fn cleanup_engine_pid() {
+    if let Some(path) = engine_pid_path() {
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
 fn force_kill_engine() {
-    let runtime_dir = dirs::data_local_dir()
-        .map(|d| d.join("SmolPC").join("engine-runtime"));
-    if let Some(dir) = runtime_dir {
-        let pid_path = dir.join("engine.pid");
-        if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
-            if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                log::info!("Force-killing engine process (PID {pid})");
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = std::process::Command::new("taskkill")
-                        .args(["/F", "/PID", &pid.to_string()])
-                        .output();
-                }
-                #[cfg(unix)]
-                {
-                    unsafe { libc::kill(pid as i32, libc::SIGKILL); }
-                }
+    let Some(pid_path) = engine_pid_path() else { return };
+    let Ok(pid_str) = std::fs::read_to_string(&pid_path) else { return };
+    let Ok(pid) = pid_str.trim().parse::<u32>() else { return };
+
+    // Verify the PID is still an engine process before killing
+    #[cfg(target_os = "windows")]
+    {
+        // Check if the process name matches before killing
+        let check = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .output();
+        if let Ok(output) = check {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if !stdout.contains("smolpc-engine-host") {
+                log::warn!("PID {pid} is not an engine process, skipping force-kill");
+                let _ = std::fs::remove_file(&pid_path);
+                return;
             }
         }
+        log::info!("Force-killing engine process (PID {pid})");
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .output();
     }
+    #[cfg(unix)]
+    {
+        // SIGKILL because the graceful path already failed — no point in SIGTERM
+        log::info!("Force-killing engine process (PID {pid})");
+        unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+    }
+
+    let _ = std::fs::remove_file(&pid_path);
 }

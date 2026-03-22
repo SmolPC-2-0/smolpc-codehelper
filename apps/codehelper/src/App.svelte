@@ -470,8 +470,10 @@ Teaching rules:
 		}
 	});
 
-	// Engine health polling — detect crashes within 10s
+	// Engine health polling — immediate check + 10s interval
 	$effect(() => {
+		inferenceStore.checkHealth(); // immediate first check
+
 		const intervalId = setInterval(async () => {
 			const wasHealthy = inferenceStore.engineHealthy;
 			const isHealthy = await inferenceStore.checkHealth();
