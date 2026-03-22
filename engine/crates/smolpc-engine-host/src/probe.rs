@@ -108,6 +108,16 @@ pub(crate) fn directml_unavailable_reason(
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/// Minimum dedicated VRAM (MB) to classify an adapter as discrete.
+/// Integrated GPUs report 0–128 MB of reserved system RAM as DedicatedVideoMemory.
+/// Discrete GPUs start at 1–2 GB. 512 MB is a conservative midpoint.
+const MIN_DISCRETE_VRAM_MB: u64 = 512;
+
+// ---------------------------------------------------------------------------
 // DXGI GPU enumeration (replaces WMI-based hardware_query, sub-5ms)
 // ---------------------------------------------------------------------------
 
@@ -170,7 +180,7 @@ fn enumerate_dxgi_gpus() -> Vec<DxgiGpuInfo> {
         let is_software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32) != 0;
         let vram_mb = desc.DedicatedVideoMemory as u64 / (1024 * 1024);
         // Discrete GPUs have dedicated VRAM > 512 MB and are not software adapters
-        let is_discrete = !is_software && vram_mb > 512;
+        let is_discrete = !is_software && vram_mb > MIN_DISCRETE_VRAM_MB;
 
         gpus.push(DxgiGpuInfo {
             name,
@@ -221,6 +231,10 @@ fn pick_best_dml_candidate(gpus: &[DxgiGpuInfo]) -> Option<DirectMlCandidate> {
         return None;
     }
 
+    // adapter_identity format: "0xVENDOR:0xDEVICE" (PCI IDs from DXGI).
+    // This differs from the old hardware_query format ("vendor:model:pci").
+    // The identity is used for backend decision caching — format changes
+    // invalidate cached decisions, which is the desired behavior.
     let vendor = format!("0x{:04x}", gpu.vendor_id);
     let device = format!("0x{:04x}", gpu.device_id);
 
@@ -238,8 +252,13 @@ pub(crate) fn probe_backend_capabilities() -> BackendProbeResult {
     let gpus = enumerate_dxgi_gpus();
     let directml_device_count = gpus.iter().filter(|gpu| !gpu.is_software).count();
 
+    // directml_device_count = non-software DXGI adapters. All WDDM hardware
+    // adapters support DirectML, so this is equivalent to the old
+    // hardware_query supports_directml() filter.
     let mut result = BackendProbeResult {
-        // NPU detection delegated to OpenVINO startup probe (independent)
+        // NPU detection is fully handled by the OpenVINO startup probe
+        // (probe_openvino_startup in startup.rs). This field is just a hint;
+        // setting it to false is safe — the OpenVINO probe does its own detection.
         npu_hardware_detected: false,
         directml_device_count,
         ..Default::default()
