@@ -7,7 +7,7 @@ use crate::setup::gimp::{
     ensure_gimp_plugin_runtime_prepared, validate_supported_gimp, GimpPluginRuntimePrepareOutcome,
 };
 use crate::setup::host_apps::{detect_gimp, HostAppDetection};
-use crate::setup::launch::{launch_gimp_if_needed, GimpLaunchOutcome};
+use crate::setup::launch::is_matching_gimp_process_running;
 use async_trait::async_trait;
 use serde_json::json;
 use smolpc_assistant_types::{
@@ -223,13 +223,6 @@ impl GimpProvider {
         }
     }
 
-    fn launch_note(outcome: GimpLaunchOutcome) -> &'static str {
-        match outcome {
-            GimpLaunchOutcome::AlreadyRunning => "Reused an already-running GIMP session.",
-            GimpLaunchOutcome::Launched => "GIMP was launched automatically.",
-        }
-    }
-
     fn connected_detail(
         runtime: &GimpRuntimeConfig,
         tools: &[ToolDefinitionDto],
@@ -244,20 +237,17 @@ impl GimpProvider {
         notes.join(" ")
     }
 
-    fn connection_retry_error(
-        gimp_path: &Path,
-        launch_outcome: GimpLaunchOutcome,
-        error: &str,
-    ) -> String {
-        match launch_outcome {
-            GimpLaunchOutcome::AlreadyRunning => format!(
+    fn connection_retry_error(gimp_path: &Path, is_gimp_running: bool, error: &str) -> String {
+        if is_gimp_running {
+            format!(
                 "Unable to connect to the bundled GIMP runtime for {}. If this GIMP session started before the bundled plugin was provisioned, reopen GIMP once and try again. {error}",
                 gimp_path.display()
-            ),
-            GimpLaunchOutcome::Launched => format!(
-                "Unable to connect to the bundled GIMP runtime for {} after launching GIMP automatically. {error}",
+            )
+        } else {
+            format!(
+                "Unable to connect to the bundled GIMP runtime for {} because GIMP is not running. Use Open App to launch GIMP, then try again. {error}",
                 gimp_path.display()
-            ),
+            )
         }
     }
 
@@ -305,8 +295,8 @@ impl GimpProvider {
         gimp_path: &Path,
         runtime: &GimpRuntimeConfig,
         prepare_outcome: &GimpPluginRuntimePrepareOutcome,
-        launch_outcome: GimpLaunchOutcome,
         runtime_note: Option<String>,
+        is_gimp_running: bool,
     ) -> Result<LiveSessionConnection, String> {
         let mut last_error = None;
 
@@ -326,7 +316,7 @@ impl GimpProvider {
                             if let Some(note) = Self::prepared_note(prepare_outcome) {
                                 notes.push(note.to_string());
                             }
-                            notes.push(Self::launch_note(launch_outcome).to_string());
+                            notes.push("Connected to a running GIMP session.".to_string());
                             let detail = Self::connected_detail(runtime, &tools, &notes);
                             return Ok(LiveSessionConnection {
                                 session,
@@ -351,7 +341,7 @@ impl GimpProvider {
 
         let detail = Self::connection_retry_error(
             gimp_path,
-            launch_outcome,
+            is_gimp_running,
             last_error
                 .as_deref()
                 .unwrap_or("Timed out waiting for the bundled GIMP runtime."),
@@ -450,27 +440,15 @@ impl GimpProvider {
             }
         };
 
-        let launch_outcome = match launch_gimp_if_needed(&gimp_path) {
-            Ok(outcome) => outcome,
-            Err(error) => {
-                let detail = format!(
-                    "The bundled GIMP plugin/runtime is provisioned, but the app could not launch GIMP at {}. {error}",
-                    gimp_path.display()
-                );
-                let mut state = self.state.lock().await;
-                state.detected_gimp_path = Some(gimp_path);
-                state.last_error = Some(detail.clone());
-                return provider_state(mode, "error", Some(detail.as_str()), true, true);
-            }
-        };
+        let is_gimp_running = is_matching_gimp_process_running(&gimp_path);
 
         match self
             .connect_live_session(
                 &gimp_path,
                 &runtime,
                 &prepare_outcome,
-                launch_outcome,
                 runtime_note,
+                is_gimp_running,
             )
             .await
         {

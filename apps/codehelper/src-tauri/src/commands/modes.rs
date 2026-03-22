@@ -2,6 +2,10 @@ use crate::commands::engine_client_adapter::engine_status;
 use crate::commands::inference::InferenceState;
 use crate::modes::config::list_mode_configs;
 use crate::modes::registry::ModeProviderRegistry;
+use crate::setup::host_apps::{detect_blender, detect_gimp, detect_libreoffice, HostAppDetection};
+use crate::setup::launch::{
+    launch_blender_if_needed, launch_gimp_if_needed, launch_libreoffice_if_needed,
+};
 use smolpc_assistant_types::{AppMode, ModeConfigDto, ModeStatusDto, ProviderStateDto};
 
 fn build_mode_status_dto(
@@ -17,6 +21,48 @@ fn build_mode_status_dto(
         provider_state,
         available_tools,
         last_error,
+    }
+}
+
+fn detection_error_detail(detection: &HostAppDetection) -> String {
+    detection.detail.clone().unwrap_or_else(|| {
+        format!(
+            "{} is not installed or could not be detected yet.",
+            detection.label
+        )
+    })
+}
+
+fn open_host_app_for_mode(mode: AppMode) -> Result<(), String> {
+    match mode {
+        AppMode::Code => Err("Code mode does not have a host app to open.".to_string()),
+        AppMode::Gimp => {
+            let detection = detect_gimp(None);
+            let path = detection
+                .path
+                .clone()
+                .ok_or_else(|| detection_error_detail(&detection))?;
+            launch_gimp_if_needed(&path)?;
+            Ok(())
+        }
+        AppMode::Blender => {
+            let detection = detect_blender(None);
+            let path = detection
+                .path
+                .clone()
+                .ok_or_else(|| detection_error_detail(&detection))?;
+            launch_blender_if_needed(&path)?;
+            Ok(())
+        }
+        AppMode::Writer | AppMode::Calc | AppMode::Impress => {
+            let detection = detect_libreoffice(None);
+            let path = detection
+                .path
+                .clone()
+                .ok_or_else(|| detection_error_detail(&detection))?;
+            launch_libreoffice_if_needed(&path)?;
+            Ok(())
+        }
     }
 }
 
@@ -86,6 +132,11 @@ pub async fn mode_refresh_tools(
     let _ = provider.disconnect_if_needed(mode).await;
     let _ = provider.connect_if_needed(mode).await;
     collect_mode_status(mode, app_handle, inference_state, registry).await
+}
+
+#[tauri::command]
+pub fn mode_open_host_app(mode: AppMode) -> Result<(), String> {
+    open_host_app_for_mode(mode)
 }
 
 #[cfg(test)]

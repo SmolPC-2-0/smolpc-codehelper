@@ -14,8 +14,14 @@ pub enum GimpLaunchOutcome {
     Launched,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LibreOfficeLaunchOutcome {
+    AlreadyRunning,
+    Launched,
+}
+
 pub fn setup_launch_detail() -> &'static str {
-    "Host-app launch remains mode-driven. Blender and GIMP may auto-launch on first use once their bundled assets are provisioned."
+    "Host-app launch is user-controlled. Use Open App when you want to start Blender, GIMP, or LibreOffice."
 }
 
 pub fn is_matching_blender_process_running(blender_path: &Path) -> bool {
@@ -58,6 +64,31 @@ pub fn launch_gimp_if_needed(gimp_path: &Path) -> Result<GimpLaunchOutcome, Stri
         .spawn()
         .map_err(|error| format!("Failed to launch GIMP at {}: {error}", gimp_path.display()))?;
     Ok(GimpLaunchOutcome::Launched)
+}
+
+pub fn is_matching_libreoffice_process_running(libreoffice_path: &Path) -> bool {
+    let mut system = System::new_all();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    system
+        .processes()
+        .values()
+        .any(|process| executable_matches(process.exe(), libreoffice_path))
+}
+
+pub fn launch_libreoffice_if_needed(
+    libreoffice_path: &Path,
+) -> Result<LibreOfficeLaunchOutcome, String> {
+    if is_matching_libreoffice_process_running(libreoffice_path) {
+        return Ok(LibreOfficeLaunchOutcome::AlreadyRunning);
+    }
+
+    Command::new(libreoffice_path).spawn().map_err(|error| {
+        format!(
+            "Failed to launch LibreOffice at {}: {error}",
+            libreoffice_path.display()
+        )
+    })?;
+    Ok(LibreOfficeLaunchOutcome::Launched)
 }
 
 fn maybe_launch_blender_with<F>(

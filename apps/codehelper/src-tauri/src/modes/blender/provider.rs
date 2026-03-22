@@ -5,7 +5,7 @@ use crate::assistant::MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION;
 use crate::modes::provider::{provider_state, ToolProvider};
 use crate::setup::blender::{ensure_blender_addon_prepared, BlenderAddonPrepareOutcome};
 use crate::setup::host_apps::{detect_blender, HostAppDetection};
-use crate::setup::launch::{launch_blender_if_needed, BlenderLaunchOutcome};
+use crate::setup::launch::is_matching_blender_process_running;
 use async_trait::async_trait;
 use serde_json::json;
 use smolpc_assistant_types::{
@@ -215,18 +215,11 @@ impl BlenderProvider {
         format!("Unable to provision the bundled Blender addon automatically. {error}")
     }
 
-    fn launch_error_detail(blender_path: &Path, error: &str) -> String {
-        format!(
-            "The Blender addon is provisioned, but the app could not launch Blender at {}. {error}",
-            blender_path.display()
-        )
-    }
-
     fn connection_note(
         snapshot: &SceneSnapshot,
         blender_path: &Path,
         prepare_outcome: &BlenderAddonPrepareOutcome,
-        launch_outcome: BlenderLaunchOutcome,
+        blender_running: bool,
     ) -> Option<String> {
         if snapshot.connected {
             return match prepare_outcome {
@@ -250,15 +243,16 @@ impl BlenderProvider {
             )),
         }
 
-        match launch_outcome {
-            BlenderLaunchOutcome::Launched => notes.push(
-                "Blender was launched automatically. Waiting for the addon to publish live scene data."
-                    .to_string(),
-            ),
-            BlenderLaunchOutcome::AlreadyRunning => notes.push(
+        if blender_running {
+            notes.push(
                 "Blender is already running. If this session started before the addon was provisioned, reopen Blender once so the addon can load."
                     .to_string(),
-            ),
+            );
+        } else {
+            notes.push(
+                "Blender is not running yet. Use Open App to launch Blender when you want live scene tools."
+                    .to_string(),
+            );
         }
 
         if notes.is_empty() {
@@ -366,18 +360,8 @@ impl BlenderProvider {
             }
         };
 
-        let launch_outcome = match launch_blender_if_needed(&blender_path) {
-            Ok(outcome) => outcome,
-            Err(error) => {
-                let detail = Self::launch_error_detail(&blender_path, &error);
-                let mut state = self.state.lock().await;
-                state.detected_blender_path = Some(blender_path);
-                state.last_error = Some(detail.clone());
-                return provider_state(mode, "error", Some(detail.as_str()), true, false);
-            }
-        };
-
         let snapshot = self.current_snapshot().await;
+        let blender_running = is_matching_blender_process_running(&blender_path);
         let rag_index = {
             let mut state = self.state.lock().await;
             state.detected_blender_path = Some(blender_path.clone());
@@ -387,7 +371,7 @@ impl BlenderProvider {
         };
 
         let note =
-            Self::connection_note(&snapshot, &blender_path, &prepare_outcome, launch_outcome);
+            Self::connection_note(&snapshot, &blender_path, &prepare_outcome, blender_running);
         Self::bridge_connected_state(mode, Self::detail_for_snapshot(&snapshot, &rag_index, note))
     }
 

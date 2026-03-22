@@ -128,7 +128,7 @@ fn host_detection_item(detection: HostAppDetection) -> SetupItemDto {
     let detail = match detection.path.as_ref() {
         Some(path) => Some(format!("{} detected at {}", detection.label, path.display())),
         None => Some(format!(
-            "{} is not installed or could not be detected yet. Setup reports host-app presence and provider-owned repair state; interactive launch remains mode-driven.",
+            "{} is not installed or could not be detected yet. Setup reports host-app presence and provider-owned repair state; interactive launch is user-controlled via Open App.",
             detection.label
         )),
     };

@@ -20,7 +20,7 @@ use commands::inference::{
     set_inference_runtime_mode, unload_model, InferenceState,
 };
 use commands::launcher::{launcher_launch_or_focus, launcher_list_apps};
-use commands::modes::{list_modes, mode_refresh_tools, mode_status};
+use commands::modes::{list_modes, mode_open_host_app, mode_refresh_tools, mode_status};
 use commands::setup::{setup_prepare, setup_status};
 use launcher::orchestrator::LauncherState;
 use modes::registry::ModeProviderRegistry;
@@ -223,6 +223,7 @@ pub fn run() {
             list_modes,
             mode_status,
             mode_refresh_tools,
+            mode_open_host_app,
             setup_status,
             setup_prepare
         ])

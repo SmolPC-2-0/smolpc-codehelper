@@ -21,6 +21,10 @@ export async function refreshModeTools(mode: AppMode): Promise<ModeStatusDto> {
 	return invoke<ModeStatusDto>('mode_refresh_tools', { mode });
 }
 
+export async function openModeHostApp(mode: AppMode): Promise<void> {
+	return invoke<void>('mode_open_host_app', { mode });
+}
+
 export async function assistantSend(
 	request: AssistantSendRequestDto,
 	onEvent: (event: AssistantStreamEvent) => void
