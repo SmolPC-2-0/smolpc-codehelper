@@ -351,6 +351,9 @@
 	}
 
 	:global(.code-copy-btn-frame) {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
 		padding: 0.2rem;
 		border: 0;
 		border-radius: var(--radius-sm);
@@ -362,6 +365,16 @@
 	:global(.code-copy-btn-frame:hover) {
 		background: color-mix(in srgb, var(--surface-hover) 80%, black);
 		color: var(--color-foreground);
+	}
+
+	:global(.code-copy-btn-label) {
+		font-size: 0.68rem;
+		font-weight: 650;
+		line-height: 1;
+	}
+
+	:global(.code-copy-btn-label--success) {
+		color: var(--color-success);
 	}
 
 	:global(.code-block-pre) {
@@ -388,6 +401,60 @@
 		text-decoration: underline;
 		text-decoration-thickness: 0.08em;
 		text-underline-offset: 0.12em;
+	}
+
+	:global(.markdown-table-wrapper) {
+		margin-top: 0.8rem;
+		margin-bottom: 0.8rem;
+		overflow-x: auto;
+		border: 1px solid var(--outline-soft);
+		border-radius: var(--radius-lg);
+		background: color-mix(in srgb, var(--surface-widget) 96%, black);
+	}
+
+	:global(.markdown-table) {
+		width: 100%;
+		min-width: 24rem;
+		border-collapse: collapse;
+		font-size: 0.8rem;
+		color: var(--color-foreground);
+	}
+
+	:global(.markdown-table__cell) {
+		padding: 0.55rem 0.7rem;
+		border-right: 1px solid var(--outline-soft);
+		border-bottom: 1px solid var(--outline-soft);
+		text-align: left;
+		vertical-align: top;
+	}
+
+	:global(.markdown-table thead .markdown-table__cell) {
+		font-weight: 700;
+		background: color-mix(in srgb, var(--surface-hover) 72%, black);
+	}
+
+	:global(.markdown-table tbody tr:nth-child(even)) {
+		background: color-mix(in srgb, var(--surface-subtle) 55%, transparent);
+	}
+
+	:global(.markdown-table tr > :last-child) {
+		border-right: 0;
+	}
+
+	:global(.markdown-table tbody tr:last-child .markdown-table__cell) {
+		border-bottom: 0;
+	}
+
+	:global(.markdown-table__cell--align-center) {
+		text-align: center;
+	}
+
+	:global(.markdown-table__cell--align-right) {
+		text-align: right;
+	}
+
+	:global(.markdown-plain-block) {
+		white-space: pre-wrap;
 	}
 
 	:global(.prose code) {

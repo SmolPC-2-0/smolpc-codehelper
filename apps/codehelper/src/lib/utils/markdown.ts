@@ -82,6 +82,160 @@ function formatCode(code: string): string {
 	return escapeHtml(code);
 }
 
+type TableAlignment = 'left' | 'center' | 'right';
+
+/**
+ * Split a potential markdown table row into cells.
+ * Supports optional leading/trailing pipes and requires at least two columns.
+ */
+function splitTableRow(line: string): string[] | null {
+	const trimmed = line.trim();
+	if (!trimmed.includes('|')) return null;
+
+	const normalized = trimmed.replace(/^\|/, '').replace(/\|$/, '');
+	const cells = normalized.split('|').map((cell) => cell.trim());
+
+	if (cells.length < 2) return null;
+
+	return cells;
+}
+
+/**
+ * Parse a markdown table delimiter row and extract alignments.
+ * Requires at least three dashes per column to avoid misparsing ordinary prose.
+ */
+function parseTableDelimiter(line: string, expectedColumns: number): TableAlignment[] | null {
+	const cells = splitTableRow(line);
+	if (!cells || cells.length !== expectedColumns) return null;
+
+	const alignments: TableAlignment[] = [];
+
+	for (const cell of cells) {
+		if (!/^:?-{3,}:?$/.test(cell)) return null;
+
+		if (cell.startsWith(':') && cell.endsWith(':')) {
+			alignments.push('center');
+		} else if (cell.endsWith(':')) {
+			alignments.push('right');
+		} else {
+			alignments.push('left');
+		}
+	}
+
+	return alignments;
+}
+
+/**
+ * Generate semantic HTML for a markdown table.
+ */
+function generateTableHTML(
+	headers: string[],
+	alignments: TableAlignment[],
+	rows: string[][]
+): string {
+	const renderCellClass = (alignment: TableAlignment) =>
+		`markdown-table__cell markdown-table__cell--align-${alignment}`;
+
+	const headerHtml = headers
+		.map(
+			(header, index) =>
+				`<th scope="col" class="${renderCellClass(alignments[index])}">${header}</th>`
+		)
+		.join('');
+
+	const bodyHtml = rows
+		.map(
+			(row) =>
+				`<tr>${row
+					.map((cell, index) => `<td class="${renderCellClass(alignments[index])}">${cell}</td>`)
+					.join('')}</tr>`
+		)
+		.join('');
+
+	return `<div class="markdown-table-wrapper">
+		<table class="markdown-table">
+			<thead><tr>${headerHtml}</tr></thead>
+			<tbody>${bodyHtml}</tbody>
+		</table>
+	</div>`;
+}
+
+/**
+ * Preserve line breaks for malformed table-like blocks so they degrade as readable plain text.
+ */
+function generatePlainPipeBlockHTML(lines: string[]): string {
+	const content = lines.join('\n');
+	return `<div class="markdown-plain-block">${content}</div>`;
+}
+
+/**
+ * Replace valid markdown pipe tables with HTML placeholders.
+ * Tables require a delimiter row and at least one body row.
+ * Invalid table-like blocks remain plain text with preserved line breaks.
+ */
+function replaceTables(text: string, tableBlocks: string[], plainPipeBlocks: string[]): string {
+	const lines = text.split('\n');
+	const output: string[] = [];
+
+	for (let i = 0; i < lines.length; i++) {
+		const headerCells = splitTableRow(lines[i]);
+		const nextRowCells = headerCells ? splitTableRow(lines[i + 1] ?? '') : null;
+		const delimiterCells =
+			headerCells && headerCells.some((cell) => cell.length > 0)
+				? parseTableDelimiter(lines[i + 1] ?? '', headerCells.length)
+				: null;
+
+		if (headerCells && nextRowCells && !delimiterCells) {
+			const plainLines = [lines[i], lines[i + 1]];
+			let rowIndex = i + 2;
+
+			while (rowIndex < lines.length) {
+				const rowCells = splitTableRow(lines[rowIndex]);
+				if (!rowCells || rowCells.length !== headerCells.length) break;
+				plainLines.push(lines[rowIndex]);
+				rowIndex++;
+			}
+
+			const placeholder = `___PIPEBLOCK${plainPipeBlocks.length}___`;
+			plainPipeBlocks.push(generatePlainPipeBlockHTML(plainLines));
+			output.push(placeholder);
+			i = rowIndex - 1;
+			continue;
+		}
+
+		if (!headerCells || !delimiterCells) {
+			output.push(lines[i]);
+			continue;
+		}
+
+		const bodyRows: string[][] = [];
+		let rowIndex = i + 2;
+
+		while (rowIndex < lines.length) {
+			const rowCells = splitTableRow(lines[rowIndex]);
+			if (!rowCells || rowCells.length !== headerCells.length) break;
+			bodyRows.push(rowCells);
+			rowIndex++;
+		}
+
+		// Leave malformed or incomplete tables untouched.
+		if (bodyRows.length === 0) {
+			const placeholder = `___PIPEBLOCK${plainPipeBlocks.length}___`;
+			plainPipeBlocks.push(generatePlainPipeBlockHTML([lines[i], lines[i + 1]]));
+			output.push(placeholder);
+			i = rowIndex - 1;
+			continue;
+		}
+
+		const placeholder = `___TABLE${tableBlocks.length}___`;
+		tableBlocks.push(generateTableHTML(headerCells, delimiterCells, bodyRows));
+		output.push(placeholder);
+		i = rowIndex - 1;
+	}
+
+	return output.join('\n');
+}
+
 /**
  * Modern Base64 encoding with proper Unicode support
  * Replaces deprecated unescape/escape functions
@@ -114,6 +268,7 @@ function generateCodeBlockHTML(
 				<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
 				</svg>
+				<span class="code-copy-btn-label">Copy</span>
 			</button>
 		</div>
 		<pre class="code-block-pre"><code class="code-block-code">${formattedCode}</code></pre>
@@ -126,6 +281,9 @@ function generateCodeBlockHTML(
 export function renderMarkdown(text: string): string {
 	// Step 1: Extract and process code blocks first (with placeholders)
 	const codeBlocks: string[] = [];
+	const inlineCodeBlocks: string[] = [];
+	const tableBlocks: string[] = [];
+	const plainPipeBlocks: string[] = [];
 
 	// Handle complete code blocks (with closing backticks)
 	let html = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
@@ -152,8 +310,12 @@ export function renderMarkdown(text: string): string {
 	// Step 2: Escape HTML in the remaining text (protects against XSS and preserves angle brackets)
 	html = escapeHtml(html);
 
-	// Step 3: Process inline code (backticks survived HTML escaping, content is already escaped)
-	html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+	// Step 3: Extract inline code before table parsing so pipes inside code spans do not split cells.
+	html = html.replace(/`([^`]+)`/g, (_, code) => {
+		const placeholder = `___INLINECODE${inlineCodeBlocks.length}___`;
+		inlineCodeBlocks.push(`<code class="inline-code">${code}</code>`);
+		return placeholder;
+	});
 
 	// Headers
 	html = html.replace(/^### (.*$)/gim, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
@@ -171,6 +333,9 @@ export function renderMarkdown(text: string): string {
 		const safeUrl = sanitizeUrl(url);
 		return `<a href="${safeUrl}" class="markdown-link" target="_blank" rel="noopener noreferrer">${text}</a>`;
 	});
+
+	// Tables (require header, delimiter, and at least one body row)
+	html = replaceTables(html, tableBlocks, plainPipeBlocks);
 
 	// Unordered lists (support both * and - markers)
 	html = html.replace(/^[*-] (.+)$/gim, '<li class="ml-6 list-disc">$1</li>');
@@ -196,14 +361,34 @@ export function renderMarkdown(text: string): string {
 	// Code blocks
 	html = html.replace(/<p class="my-2">(___CODEBLOCK\d+___)/g, '$1');
 	html = html.replace(/(___CODEBLOCK\d+___)<\/p>/g, '$1');
+	// Tables
+	html = html.replace(/<p class="my-2">(___TABLE\d+___)/g, '$1');
+	html = html.replace(/(___TABLE\d+___)<\/p>/g, '$1');
+	// Plain pipe blocks
+	html = html.replace(/<p class="my-2">(___PIPEBLOCK\d+___)/g, '$1');
+	html = html.replace(/(___PIPEBLOCK\d+___)<\/p>/g, '$1');
 
 	// Final step: Restore code blocks from placeholders
 	codeBlocks.forEach((block, i) => {
 		html = html.replace(`___CODEBLOCK${i}___`, block);
 	});
 
+	tableBlocks.forEach((block, i) => {
+		html = html.replace(`___TABLE${i}___`, block);
+	});
+
+	plainPipeBlocks.forEach((block, i) => {
+		html = html.replace(`___PIPEBLOCK${i}___`, block);
+	});
+
+	inlineCodeBlocks.forEach((block, i) => {
+		html = html.replace(`___INLINECODE${i}___`, block);
+	});
+
 	// Clean up any remaining paragraph tags around code blocks
 	html = html.replace(/<p class="my-2">(<div class="code-block)/g, '$1');
+	html = html.replace(/<p class="my-2">(<div class="markdown-table-wrapper)/g, '$1');
+	html = html.replace(/<p class="my-2">(<div class="markdown-plain-block)/g, '$1');
 	html = html.replace(/(<\/div>)<\/p>/g, '$1');
 
 	// Sanitize with DOMPurify to prevent XSS attacks
@@ -226,12 +411,19 @@ export function renderMarkdown(text: string): string {
 			'div',
 			'span',
 			'button',
+			'table',
+			'thead',
+			'tbody',
+			'tr',
+			'th',
+			'td',
 			'svg',
 			'path'
 		],
 		ALLOWED_ATTR: [
 			'href',
 			'class',
+			'scope',
 			'data-code',
 			'title',
 			'aria-label',
@@ -311,9 +503,7 @@ export function setupCodeCopyHandlers(container: HTMLElement): () => void {
 
 			// Show success feedback
 			const originalHTML = button.innerHTML;
-			button.innerHTML = `<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-			</svg>`;
+			button.innerHTML = `<span class="code-copy-btn-label code-copy-btn-label--success">Copied</span>`;
 
 			setTimeout(() => {
 				button.innerHTML = originalHTML;
