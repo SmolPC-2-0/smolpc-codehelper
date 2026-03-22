@@ -64,7 +64,7 @@ Master roadmap: issue #143
 ## Recently Resolved
 
 - **Host app launch should be manual in chat modes** (2026-03-22)
-  - Status: Resolved (codex/manual-host-app-launch, commit 02cd7a7)
+  - Status: Resolved (codex/manual-host-app-launch, commit 108f95a)
   - Scope: Removed automatic Blender/GIMP host-app startup from provider status/connect flows, added explicit `mode_open_host_app` command + UI button, and kept chat usable without forcing host apps to open.
 - **Issue #156 LibreOffice helper startup timeout (Writer mode)** (2026-03-22)
   - Status: Resolved (codex/issue-156-libreoffice-helper-timeout, commit 95df429)
