@@ -38,6 +38,7 @@ let availableModels = $state<AvailableModel[]>([]);
 let lastMetrics = $state<GenerationMetrics | null>(null);
 let backendStatus = $state<BackendStatus | null>(null);
 let runtimeMode = $state<InferenceRuntimeMode>('auto');
+let engineHealthy = $state(true);
 let cancelTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let cancelTimeoutSessionId: number | null = null;
 let generationSessionCounter = 0;
@@ -180,6 +181,9 @@ export const inferenceStore = {
 	get backendStatus() {
 		return backendStatus;
 	},
+	get engineHealthy() {
+		return engineHealthy;
+	},
 
 	// Get status object for display
 	get status(): InferenceStatus {
@@ -278,6 +282,20 @@ export const inferenceStore = {
 	async syncStatus(): Promise<void> {
 		await this.refreshReadiness();
 		await this.refreshBackendStatus();
+	},
+
+	/**
+	 * Lightweight health check — updates engineHealthy state.
+	 */
+	async checkHealth(): Promise<boolean> {
+		try {
+			await invoke('engine_status');
+			engineHealthy = true;
+			return true;
+		} catch {
+			engineHealthy = false;
+			return false;
+		}
 	},
 
 	/**
