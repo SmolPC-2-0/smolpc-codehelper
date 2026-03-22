@@ -1,0 +1,6 @@
+{
+  "version": "phase4-blender-addon-payload",
+  "source": "in-repo blender resources and addon snapshot",
+  "expectedPaths": ["README.md", "rag_system", "addon/blender_helper_http.py"],
+  "status": "tracked"
+}

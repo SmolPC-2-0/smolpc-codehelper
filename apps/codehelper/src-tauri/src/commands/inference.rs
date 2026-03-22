@@ -569,6 +569,21 @@ pub async fn is_generating(
     Ok(status.generating)
 }
 
+/// Resolve a client suitable for generation, ensuring the engine is started.
+/// Used by addon mode providers (GIMP, Blender, LibreOffice).
+pub(crate) async fn resolve_generation_client(
+    app_handle: &tauri::AppHandle,
+    state: &InferenceState,
+) -> Result<EngineClient, String> {
+    resolve_client(app_handle, state, false).await
+}
+
+/// Return the cached engine client (if any) without reconnection.
+/// Used by assistant_cancel to send cancel to an in-flight request.
+pub(crate) async fn cached_generation_client(state: &InferenceState) -> Option<EngineClient> {
+    state.client.lock().await.clone()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

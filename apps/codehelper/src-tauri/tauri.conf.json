@@ -38,7 +38,12 @@
 			"libs/": "libs/",
 			"binaries/": "binaries/",
 			"resources/launcher/": "launcher/",
-			"resources/model-installer/": "model-installer/"
+			"resources/model-installer/": "model-installer/",
+			"resources/gimp/": "gimp/",
+			"resources/blender/": "blender/",
+			"resources/libreoffice/": "libreoffice/",
+			"resources/python/": "python/",
+			"resources/models/": "models/"
 		},
 		"windows": {
 			"webviewInstallMode": {

@@ -1,0 +1,6 @@
+{
+  "version": "phase3-bundled-python-placeholder",
+  "source": "python.org embeddable CPython + Astral uv staging contract",
+  "expectedPaths": ["README.md", "payload"],
+  "status": "placeholder"
+}
