@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TextIO
 
 HELPER_PORT = 8765
 OFFICE_PORT = 2002
@@ -20,10 +20,13 @@ SHUTDOWN_TIMEOUT_SECONDS = 5.0
 HELPER_AUTH_TOKEN_ENV = "SMOLPC_LIBREOFFICE_HELPER_AUTH_TOKEN"
 OFFICE_PATH_ENV = "SMOLPC_LIBREOFFICE_OFFICE_PATH"
 HELPER_PYTHON_PATH_ENV = "SMOLPC_LIBREOFFICE_HELPER_PYTHON_PATH"
+MCP_LOG_DIR_ENV = "SMOLPC_MCP_LOG_DIR"
+HELPER_STDERR_LOG_FILENAME = "helper.stderr.log"
 
 office_process: Optional[subprocess.Popen] = None
 helper_process: Optional[subprocess.Popen] = None
 server_process: Optional[subprocess.Popen] = None
+helper_stderr_handle: Optional[TextIO] = None
 
 
 def configure_logging() -> None:
@@ -52,15 +55,22 @@ def stop_process(label: str, process: Optional[subprocess.Popen]) -> None:
 
 
 def cleanup_processes() -> None:
-    global office_process, helper_process, server_process
+    global office_process, helper_process, server_process, helper_stderr_handle
 
     stop_process("MCP server", server_process)
     stop_process("LibreOffice helper", helper_process)
     stop_process("LibreOffice office", office_process)
 
+    if helper_stderr_handle is not None:
+        try:
+            helper_stderr_handle.close()
+        except OSError:
+            logging.warning("Unable to close helper stderr log handle", exc_info=True)
+
     server_process = None
     helper_process = None
     office_process = None
+    helper_stderr_handle = None
 
 
 def signal_handler(signum, _frame) -> None:
@@ -158,6 +168,27 @@ def get_python_path(soffice_path: str) -> str:
     return fallback
 
 
+def resolve_log_path(filename: str) -> Path:
+    configured_dir = os.getenv(MCP_LOG_DIR_ENV)
+    if configured_dir:
+        try:
+            log_dir = Path(configured_dir).expanduser()
+            if not log_dir.is_absolute():
+                raise ValueError(f"{MCP_LOG_DIR_ENV} must be an absolute path")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            return log_dir.resolve(strict=True) / filename
+        except (OSError, RuntimeError, ValueError):
+            logging.warning(
+                "Unable to use %s=%s for log output; falling back to runtime directory",
+                MCP_LOG_DIR_ENV,
+                configured_dir,
+            )
+
+    module_dir = Path(__file__).resolve().parent
+    module_dir.mkdir(parents=True, exist_ok=True)
+    return module_dir / filename
+
+
 def is_port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.5)
@@ -219,7 +250,7 @@ def build_child_env(helper_token: str) -> dict:
 
 
 def start_helper(helper_token: str, port: int = HELPER_PORT) -> None:
-    global helper_process
+    global helper_process, helper_stderr_handle
 
     if is_port_in_use(port):
         raise RuntimeError(
@@ -229,18 +260,26 @@ def start_helper(helper_token: str, port: int = HELPER_PORT) -> None:
     helper_script = Path(__file__).with_name("helper.py")
     python_path = get_python_path(get_office_path())
     logging.info("Starting LibreOffice helper from %s", helper_script)
-    helper_process = subprocess.Popen(
-        [python_path, str(helper_script)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=build_child_env(helper_token),
-    )
+    helper_stderr_path = resolve_log_path(HELPER_STDERR_LOG_FILENAME)
+    logging.info("Capturing LibreOffice helper stderr to %s", helper_stderr_path)
+    helper_stderr_handle = open(helper_stderr_path, "a", encoding="utf-8", buffering=1)
+    try:
+        helper_process = subprocess.Popen(
+            [python_path, str(helper_script)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=helper_stderr_handle,
+            env=build_child_env(helper_token),
+        )
+    except Exception:
+        helper_stderr_handle.close()
+        helper_stderr_handle = None
+        raise
     wait_for_port_ready(
         port,
         "LibreOffice helper socket",
         process=helper_process,
-        failure_hint="Check helper.log for UNO import errors.",
+        failure_hint="Check helper.log and helper.stderr.log for UNO import errors.",
     )
 
 
