@@ -190,6 +190,14 @@ fn bytes_to_gb(bytes: u64) -> f64 {
 /// Main entry point for hardware detection using sysinfo crate
 /// Detects CPU, memory, and storage information offline without WMI/COM.
 pub async fn detect_all() -> Result<HardwareInfo, HardwareError> {
+    tokio::task::spawn_blocking(detect_all_sync)
+        .await
+        .map_err(|error| {
+            HardwareError::QueryFailed(format!("hardware detection task failed: {error}"))
+        })?
+}
+
+fn detect_all_sync() -> Result<HardwareInfo, HardwareError> {
     log::info!("Starting hardware detection using sysinfo");
 
     let mut system = System::new_with_specifics(
