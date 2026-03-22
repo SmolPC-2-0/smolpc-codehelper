@@ -110,13 +110,6 @@ where
 
     match selection.tool {
         SelectedTool::None => {
-            emit(AssistantStreamEventDto::Status {
-                phase: "connecting".to_string(),
-                detail: "Connecting to GIMP.".to_string(),
-            });
-            ensure_gimp_connected(&provider).await?;
-            ensure_not_cancelled(state)?;
-
             let reply = answer_without_tool(generator, &request.user_text).await?;
             let response = AssistantResponseDto {
                 reply,
@@ -514,15 +507,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gimp_request_returns_user_friendly_error_when_gimp_is_unreachable() {
+    async fn gimp_request_answers_without_connection_when_selector_chooses_none() {
         let provider = Arc::new(DisconnectedProvider);
         let generator = MockGenerator {
             responses: Mutex::new(VecDeque::from(vec![
+                "You can use Curves to remap tonal ranges in shadows, midtones, and highlights."
+                    .to_string(),
                 r#"{"tool":"none","reason":"No tool needed"}"#.to_string(),
             ])),
         };
 
-        let error = execute_gimp_request(
+        let response = execute_gimp_request(
             provider,
             &generator,
             &request("What can you do in GIMP?"),
@@ -530,7 +525,30 @@ mod tests {
             |_| {},
         )
         .await
-        .expect_err("request should fail when GIMP is unreachable");
+        .expect("none-tool request should not require a live GIMP connection");
+
+        assert!(response
+            .reply
+            .contains("remap tonal ranges in shadows, midtones, and highlights"));
+        assert!(!response.undoable);
+    }
+
+    #[tokio::test]
+    async fn gimp_request_returns_user_friendly_error_when_edit_requires_connection() {
+        let provider = Arc::new(DisconnectedProvider);
+        let generator = MockGenerator {
+            responses: Mutex::new(VecDeque::new()),
+        };
+
+        let error = execute_gimp_request(
+            provider,
+            &generator,
+            &request("Crop this image to a square"),
+            &AssistantState::default(),
+            |_| {},
+        )
+        .await
+        .expect_err("tool request should fail when GIMP is unreachable");
 
         assert!(error.contains("Could not connect to GIMP."));
         assert!(error.contains("plugin is installed."));
