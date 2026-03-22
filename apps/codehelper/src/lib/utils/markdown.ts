@@ -281,6 +281,7 @@ function generateCodeBlockHTML(
 export function renderMarkdown(text: string): string {
 	// Step 1: Extract and process code blocks first (with placeholders)
 	const codeBlocks: string[] = [];
+	const inlineCodeBlocks: string[] = [];
 	const tableBlocks: string[] = [];
 	const plainPipeBlocks: string[] = [];
 
@@ -309,8 +310,12 @@ export function renderMarkdown(text: string): string {
 	// Step 2: Escape HTML in the remaining text (protects against XSS and preserves angle brackets)
 	html = escapeHtml(html);
 
-	// Step 3: Process inline code (backticks survived HTML escaping, content is already escaped)
-	html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+	// Step 3: Extract inline code before table parsing so pipes inside code spans do not split cells.
+	html = html.replace(/`([^`]+)`/g, (_, code) => {
+		const placeholder = `___INLINECODE${inlineCodeBlocks.length}___`;
+		inlineCodeBlocks.push(`<code class="inline-code">${code}</code>`);
+		return placeholder;
+	});
 
 	// Headers
 	html = html.replace(/^### (.*$)/gim, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
@@ -374,6 +379,10 @@ export function renderMarkdown(text: string): string {
 
 	plainPipeBlocks.forEach((block, i) => {
 		html = html.replace(`___PIPEBLOCK${i}___`, block);
+	});
+
+	inlineCodeBlocks.forEach((block, i) => {
+		html = html.replace(`___INLINECODE${i}___`, block);
 	});
 
 	// Clean up any remaining paragraph tags around code blocks
