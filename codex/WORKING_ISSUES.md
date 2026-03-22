@@ -74,6 +74,9 @@ Master roadmap: issue #143
 
 ## Recently Resolved
 
+- **PR #158 follow-up review fixes** (2026-03-22)
+  - Status: Resolved (codex/pr158-crash-safety-followups-v2, commit 1db963d)
+  - Scope: Setup cache disk I/O moved off async worker threads, `prepare_setup` now persists only when `last_error` changes, and composer drafts are cleared when chats are archived/deleted.
 - **Student work persistence and crash recovery (P1)** (2026-03-22)
   - Status: Resolved (codex/persistence-crash-safety, commit e6a6453)
   - Scope: Crash-safe chat/model/mode persistence, draft autosave, stale-stream recovery, and setup host-detection cache persistence.
