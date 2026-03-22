@@ -24,7 +24,11 @@
 	import { assistantSend, assistantCancel } from '$lib/api/unified';
 	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
-	import type { GenerationConfig, InferenceChatMessage } from '$lib/types/inference';
+	import type {
+		GenerationConfig,
+		InferenceChatMessage,
+		MemoryPressureStatus
+	} from '$lib/types/inference';
 	import type { AppMode } from '$lib/types/mode';
 	import type { AssistantStreamEvent } from '$lib/types/assistant';
 
@@ -199,6 +203,10 @@ Teaching rules:
 		}
 	}
 
+	function memoryPressureNoticeKey(snapshot: MemoryPressureStatus): string {
+		return `${snapshot.level}:${snapshot.auto_unloaded ? '1' : '0'}:${snapshot.recommended_model_id ?? ''}`;
+	}
+
 	async function pollMemoryPressure() {
 		let appMinimized = false;
 		try {
@@ -226,7 +234,7 @@ Teaching rules:
 			return;
 		}
 
-		const noticeKey = `${snapshot.level}:${snapshot.auto_unloaded ? '1' : '0'}:${snapshot.recommended_model_id ?? ''}:${notice}`;
+		const noticeKey = memoryPressureNoticeKey(snapshot);
 		if (dismissedMemoryPressureKey === noticeKey) {
 			memoryPressureNotice = null;
 			return;
@@ -239,7 +247,7 @@ Teaching rules:
 		const snapshot = inferenceStore.memoryPressure;
 		const notice = memoryPressureNotice;
 		if (snapshot && notice) {
-			dismissedMemoryPressureKey = `${snapshot.level}:${snapshot.auto_unloaded ? '1' : '0'}:${snapshot.recommended_model_id ?? ''}:${notice}`;
+			dismissedMemoryPressureKey = memoryPressureNoticeKey(snapshot);
 		}
 		memoryPressureNotice = null;
 	}

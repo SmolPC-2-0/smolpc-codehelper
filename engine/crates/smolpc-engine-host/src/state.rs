@@ -51,8 +51,8 @@ use crate::types::{
     ReadinessPayload, ReadinessState, StartupError, StartupMode, StartupPolicy, StartupReadiness,
     TransitionGuard, CPU_PREFLIGHT_BUDGET, DIRECTML_PREFLIGHT_BUDGET, ENGINE_API_VERSION,
     OPENVINO_CHAT_MODE_STRUCTURED, OPENVINO_PREFLIGHT_BUDGET, OPENVINO_SELECTION_PROFILE,
-    OPENVINO_STARTUP_PROBE_WAIT, STARTUP_PROBE_RECOVERY_WAIT_MS, STARTUP_PROBE_TOTAL_WAIT_MS,
-    STARTUP_PROBE_WAIT_MS,
+    OPENVINO_STARTUP_PROBE_WAIT, STARTUP_DEFAULT_MODEL_INVALID, STARTUP_DML_REQUIRED_UNAVAILABLE,
+    STARTUP_PROBE_RECOVERY_WAIT_MS, STARTUP_PROBE_TOTAL_WAIT_MS, STARTUP_PROBE_WAIT_MS,
 };
 
 pub(crate) struct EngineState {
@@ -593,7 +593,7 @@ impl EngineState {
         if ModelRegistry::get_model(&default_model_id).is_none() {
             return Err(StartupError {
                 phase: ReadinessState::LoadingModel,
-                code: "STARTUP_DEFAULT_MODEL_INVALID",
+                code: STARTUP_DEFAULT_MODEL_INVALID,
                 message: format!("Unknown default model id '{default_model_id}'"),
                 retryable: false,
             });
@@ -609,7 +609,7 @@ impl EngineState {
         if mode.requires_directml() && !has_directml {
             return Err(StartupError {
                 phase: ReadinessState::Probing,
-                code: "STARTUP_DML_REQUIRED_UNAVAILABLE",
+                code: STARTUP_DML_REQUIRED_UNAVAILABLE,
                 message: "DirectML adapter is required but unavailable.".to_string(),
                 retryable: false,
             });

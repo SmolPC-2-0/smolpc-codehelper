@@ -6,7 +6,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::types::{
     ParsedArgs, ReadinessState, StartupError, StartupPolicy, ENGINE_DEFAULT_MODEL_ENV,
-    LEGACY_DEFAULT_MODEL_ENV,
+    LEGACY_DEFAULT_MODEL_ENV, STARTUP_DEFAULT_MODEL_INVALID, STARTUP_DML_REQUIRED_UNAVAILABLE,
+    STARTUP_MEMORY_PRESSURE, STARTUP_MODEL_ASSET_MISSING, STARTUP_MODEL_LOAD_FAILED,
 };
 const MEMORY_PRESSURE_HINT_SENTINEL: &str = "Memory pressure detected.";
 
@@ -91,7 +92,7 @@ pub(crate) fn resolve_default_model_id_with_sources(
     }
     Err(StartupError {
         phase: ReadinessState::ResolvingAssets,
-        code: "STARTUP_DEFAULT_MODEL_INVALID",
+        code: STARTUP_DEFAULT_MODEL_INVALID,
         message: "No default model is configured or registered".to_string(),
         retryable: false,
     })
@@ -112,7 +113,7 @@ pub(crate) fn classify_startup_model_error(error: &str) -> StartupError {
     if is_memory_pressure_error(error) {
         return StartupError {
             phase: ReadinessState::LoadingModel,
-            code: "STARTUP_MEMORY_PRESSURE",
+            code: STARTUP_MEMORY_PRESSURE,
             message: with_memory_pressure_hint(error, None),
             retryable: true,
         };
@@ -120,7 +121,7 @@ pub(crate) fn classify_startup_model_error(error: &str) -> StartupError {
     if lowered.contains("unknown model id") {
         return StartupError {
             phase: ReadinessState::LoadingModel,
-            code: "STARTUP_DEFAULT_MODEL_INVALID",
+            code: STARTUP_DEFAULT_MODEL_INVALID,
             message: error.to_string(),
             retryable: false,
         };
@@ -131,7 +132,7 @@ pub(crate) fn classify_startup_model_error(error: &str) -> StartupError {
     {
         return StartupError {
             phase: ReadinessState::LoadingModel,
-            code: "STARTUP_MODEL_ASSET_MISSING",
+            code: STARTUP_MODEL_ASSET_MISSING,
             message: error.to_string(),
             retryable: false,
         };
@@ -139,14 +140,14 @@ pub(crate) fn classify_startup_model_error(error: &str) -> StartupError {
     if lowered.contains("requires directml backend") || lowered.contains("directml") {
         return StartupError {
             phase: ReadinessState::LoadingModel,
-            code: "STARTUP_DML_REQUIRED_UNAVAILABLE",
+            code: STARTUP_DML_REQUIRED_UNAVAILABLE,
             message: error.to_string(),
             retryable: false,
         };
     }
     StartupError {
         phase: ReadinessState::LoadingModel,
-        code: "STARTUP_MODEL_LOAD_FAILED",
+        code: STARTUP_MODEL_LOAD_FAILED,
         message: error.to_string(),
         retryable: true,
     }

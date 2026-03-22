@@ -165,7 +165,10 @@ fn format_runtime_mode_switch_failure(
 
 fn sysinfo_memory_values_are_bytes(total_raw: u64) -> bool {
     // sysinfo may expose bytes (newer releases) or KiB (older releases).
-    // 1e9 safely separates common total-RAM values across the two units.
+    // This heuristic is intentionally scoped to supported SmolPC targets where
+    // model minimum RAM starts at 8 GB. In that range, KiB totals remain far
+    // below 1e9 while byte totals are above 1e9.
+    // Sub-1 GB machines are unsupported and may be misclassified.
     total_raw > 1_000_000_000
 }
 
@@ -207,6 +210,8 @@ fn normalize_mode_id(mode: Option<&str>) -> Option<String> {
 }
 
 fn is_heavy_host_mode(mode: Option<&str>) -> bool {
+    // Keep this list aligned with host-tool mode registration in
+    // apps/codehelper/src-tauri/src/modes/config.rs.
     matches!(normalize_mode_id(mode).as_deref(), Some("gimp" | "blender"))
 }
 
@@ -269,35 +274,34 @@ fn build_memory_pressure_message(
     }
 
     match level {
-        MemoryPressureLevel::Critical => {
-            return Some(format!(
-                "Available RAM is critically low ({:.1} GB). {}",
-                available_gb, recommendation
-            ));
-        }
+        MemoryPressureLevel::Critical => Some(format!(
+            "Available RAM is critically low ({:.1} GB). {}",
+            available_gb, recommendation
+        )),
         MemoryPressureLevel::Warning => {
             if model_switch_recommended {
-                return Some(format!(
+                Some(format!(
                     "Available RAM is low ({:.1} GB). {}",
                     available_gb, recommendation
-                ));
+                ))
+            } else {
+                Some(format!(
+                    "Available RAM is low ({:.1} GB). Close heavy apps to avoid generation failures.",
+                    available_gb
+                ))
             }
-            return Some(format!(
-                "Available RAM is low ({:.1} GB). Close heavy apps to avoid generation failures.",
-                available_gb
-            ));
         }
-        MemoryPressureLevel::Normal => {}
-    };
-
-    if heavy_mode_active && model_switch_recommended {
-        return Some(format!(
-            "Blender/GIMP mode is active with {:.1} GB free RAM. {}",
-            available_gb, recommendation
-        ));
+        MemoryPressureLevel::Normal => {
+            if heavy_mode_active && model_switch_recommended {
+                Some(format!(
+                    "Blender/GIMP mode is active with {:.1} GB free RAM. {}",
+                    available_gb, recommendation
+                ))
+            } else {
+                None
+            }
+        }
     }
-
-    None
 }
 
 pub(super) async fn resolve_client(
@@ -913,6 +917,13 @@ mod tests {
             desired_model_to_restore(Some("qwen2.5-1.5b-instruct"), Some("qwen2.5-1.5b-instruct")),
             None
         );
+    }
+
+    #[test]
+    fn sysinfo_memory_unit_heuristic_targets_supported_ram_range() {
+        assert!(!sysinfo_memory_values_are_bytes(8 * 1024 * 1024));
+        assert!(sysinfo_memory_values_are_bytes(8 * 1024 * 1024 * 1024));
+        assert!(!sysinfo_memory_values_are_bytes(999_999_488));
     }
 
     #[test]
