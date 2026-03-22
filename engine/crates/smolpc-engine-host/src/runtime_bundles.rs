@@ -38,15 +38,32 @@ pub fn resolve_runtime_bundles(resource_dir: Option<&Path>) -> ResolvedRuntimeBu
         RuntimeLoadMode::Production
     };
 
-    resolve_runtime_bundles_for_mode(resource_dir, mode)
+    resolve_runtime_bundles_for_mode_with_manifest(
+        resource_dir,
+        mode,
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    )
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_runtime_bundles_for_mode(
     resource_dir: Option<&Path>,
     mode: RuntimeLoadMode,
 ) -> ResolvedRuntimeBundles {
-    let ort_candidates = ort_bundle_candidates(resource_dir, mode);
-    let openvino_candidates = openvino_bundle_candidates(resource_dir, mode);
+    resolve_runtime_bundles_for_mode_with_manifest(
+        resource_dir,
+        mode,
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    )
+}
+
+fn resolve_runtime_bundles_for_mode_with_manifest(
+    resource_dir: Option<&Path>,
+    mode: RuntimeLoadMode,
+    manifest_dir: &Path,
+) -> ResolvedRuntimeBundles {
+    let ort_candidates = ort_bundle_candidates(resource_dir, mode, manifest_dir);
+    let openvino_candidates = openvino_bundle_candidates(resource_dir, mode, manifest_dir);
 
     let ort = select_best_ort_bundle(ort_candidates);
     let openvino = select_best_openvino_bundle(openvino_candidates);
@@ -58,7 +75,11 @@ pub(crate) fn resolve_runtime_bundles_for_mode(
     }
 }
 
-fn ort_bundle_candidates(resource_dir: Option<&Path>, mode: RuntimeLoadMode) -> Vec<PathBuf> {
+fn ort_bundle_candidates(
+    resource_dir: Option<&Path>,
+    mode: RuntimeLoadMode,
+    manifest_dir: &Path,
+) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
 
     if matches!(mode, RuntimeLoadMode::Development) {
@@ -72,13 +93,17 @@ fn ort_bundle_candidates(resource_dir: Option<&Path>, mode: RuntimeLoadMode) -> 
     }
 
     if matches!(mode, RuntimeLoadMode::Development) {
-        candidates.extend(dev_workspace_lib_roots());
+        candidates.extend(dev_workspace_lib_roots(manifest_dir));
     }
 
     dedupe_paths(candidates)
 }
 
-fn openvino_bundle_candidates(resource_dir: Option<&Path>, mode: RuntimeLoadMode) -> Vec<PathBuf> {
+fn openvino_bundle_candidates(
+    resource_dir: Option<&Path>,
+    mode: RuntimeLoadMode,
+    manifest_dir: &Path,
+) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
 
     if matches!(mode, RuntimeLoadMode::Development) {
@@ -93,7 +118,7 @@ fn openvino_bundle_candidates(resource_dir: Option<&Path>, mode: RuntimeLoadMode
 
     if matches!(mode, RuntimeLoadMode::Development) {
         candidates.extend(
-            dev_workspace_lib_roots()
+            dev_workspace_lib_roots(manifest_dir)
                 .into_iter()
                 .map(|root| root.join("openvino")),
         );
@@ -117,20 +142,28 @@ fn production_lib_root(resource_dir: Option<&Path>) -> Option<PathBuf> {
         .and_then(|path| path.parent().map(|parent| parent.join("libs")))
 }
 
-fn dev_workspace_lib_roots() -> Vec<PathBuf> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let Some(workspace_root) = manifest_dir.parent().and_then(|parent| parent.parent()) else {
-        return Vec::new();
-    };
+fn dev_workspace_lib_roots(manifest_dir: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
 
-    vec![
-        workspace_root
+    // Walk upward from the engine-host crate directory so source-dev staging
+    // still works when the host crate lives under nested monorepo zones.
+    for ancestor in manifest_dir.ancestors() {
+        let codehelper_root = ancestor
             .join("apps")
             .join("codehelper")
             .join("src-tauri")
-            .join("libs"),
-        workspace_root.join("src-tauri").join("libs"),
-    ]
+            .join("libs");
+        if codehelper_root.exists() {
+            candidates.push(codehelper_root);
+        }
+
+        let shared_root = ancestor.join("src-tauri").join("libs");
+        if shared_root.exists() {
+            candidates.push(shared_root);
+        }
+    }
+
+    dedupe_paths(candidates)
 }
 
 fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -478,7 +511,9 @@ fn missing_file(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_openvino_bundle, build_ort_bundle, resolve_runtime_bundles_for_mode, RuntimeLoadMode,
+        build_openvino_bundle, build_ort_bundle, dev_workspace_lib_roots,
+        resolve_runtime_bundles_for_mode, resolve_runtime_bundles_for_mode_with_manifest,
+        RuntimeLoadMode,
     };
     use std::ffi::{OsStr, OsString};
     use std::fs;
@@ -684,6 +719,97 @@ mod tests {
                 .join("openvino")
                 .canonicalize()
                 .expect("canonical openvino")
+        );
+    }
+
+    #[test]
+    fn dev_workspace_lib_roots_walks_ancestor_chain_to_repo_root() {
+        let temp = tempdir().expect("temp dir");
+        let repo_root = temp.path().join("repo");
+        let manifest_dir = repo_root
+            .join("engine")
+            .join("crates")
+            .join("smolpc-engine-host");
+        let codehelper_libs = repo_root
+            .join("apps")
+            .join("codehelper")
+            .join("src-tauri")
+            .join("libs");
+        let shared_libs = repo_root.join("src-tauri").join("libs");
+
+        fs::create_dir_all(&manifest_dir).expect("create manifest dir");
+        fs::create_dir_all(&codehelper_libs).expect("create codehelper libs");
+        fs::create_dir_all(&shared_libs).expect("create shared libs");
+
+        let roots = dev_workspace_lib_roots(&manifest_dir);
+
+        assert_eq!(roots, vec![codehelper_libs, shared_libs,]);
+    }
+
+    #[test]
+    fn dev_workspace_lib_roots_ignores_nonexistent_ancestor_candidates() {
+        let temp = tempdir().expect("temp dir");
+        let manifest_dir = temp
+            .path()
+            .join("repo")
+            .join("engine")
+            .join("crates")
+            .join("smolpc-engine-host");
+
+        fs::create_dir_all(&manifest_dir).expect("create manifest dir");
+
+        let roots = dev_workspace_lib_roots(&manifest_dir);
+
+        assert!(roots.is_empty());
+    }
+
+    #[test]
+    fn development_mode_prefers_discovered_dev_roots_over_missing_resource_roots() {
+        let _guard = lock_env();
+        let temp = tempdir().expect("temp dir");
+        let repo_root = temp.path().join("repo");
+        let manifest_dir = repo_root
+            .join("engine")
+            .join("crates")
+            .join("smolpc-engine-host");
+        let resource_dir = temp.path().join("resource");
+        let codehelper_libs = repo_root
+            .join("apps")
+            .join("codehelper")
+            .join("src-tauri")
+            .join("libs");
+        let openvino_root = codehelper_libs.join("openvino");
+
+        fs::create_dir_all(&manifest_dir).expect("create manifest dir");
+        fs::create_dir_all(&resource_dir).expect("create resource dir");
+        create_ort_files(
+            &codehelper_libs,
+            &[
+                "onnxruntime.dll",
+                "onnxruntime_providers_shared.dll",
+                "onnxruntime-genai.dll",
+                "DirectML.dll",
+            ],
+        );
+        create_openvino_files(&openvino_root);
+
+        let bundles = resolve_runtime_bundles_for_mode_with_manifest(
+            Some(&resource_dir),
+            RuntimeLoadMode::Development,
+            &manifest_dir,
+        );
+
+        assert_eq!(
+            bundles.ort.display_root(),
+            codehelper_libs
+                .canonicalize()
+                .expect("canonical codehelper libs")
+        );
+        assert_eq!(
+            bundles.openvino.display_root(),
+            openvino_root
+                .canonicalize()
+                .expect("canonical openvino root")
         );
     }
 
