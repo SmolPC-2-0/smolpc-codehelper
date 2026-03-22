@@ -959,7 +959,7 @@ use chrono::Utc;
     #[test]
     fn classify_startup_model_error_flags_unknown_model_as_non_retryable() {
         let classified = classify_startup_model_error("Unknown model ID: bad-model");
-        assert_eq!(classified.code, "STARTUP_DEFAULT_MODEL_INVALID");
+        assert_eq!(classified.code, STARTUP_DEFAULT_MODEL_INVALID);
         assert!(!classified.retryable);
     }
 
@@ -967,8 +967,31 @@ use chrono::Utc;
     fn classify_startup_model_error_flags_missing_assets_as_non_retryable() {
         let classified =
             classify_startup_model_error("Model file for backend 'cpu' not found: C:/models/x");
-        assert_eq!(classified.code, "STARTUP_MODEL_ASSET_MISSING");
+        assert_eq!(classified.code, STARTUP_MODEL_ASSET_MISSING);
         assert!(!classified.retryable);
+    }
+
+    #[test]
+    fn classify_startup_model_error_flags_memory_pressure() {
+        let classified = classify_startup_model_error("OpenVINO runtime failed: out of memory");
+        assert_eq!(classified.code, STARTUP_MEMORY_PRESSURE);
+        assert!(classified.retryable);
+        assert!(classified.message.contains("Memory pressure detected."));
+    }
+
+    #[test]
+    fn classify_startup_model_error_ignores_non_memory_substrings() {
+        let classified = classify_startup_model_error("Launcher window room resize failed");
+        assert_eq!(classified.code, STARTUP_MODEL_LOAD_FAILED);
+        assert!(!classified.message.contains("Memory pressure detected."));
+    }
+
+    #[test]
+    fn with_memory_pressure_hint_is_idempotent() {
+        let hinted =
+            with_memory_pressure_hint("generation failed: out of memory", Some("qwen3-4b"));
+        let hinted_twice = with_memory_pressure_hint(&hinted, Some("qwen3-4b"));
+        assert_eq!(hinted, hinted_twice);
     }
 
     #[test]
@@ -985,6 +1008,7 @@ use chrono::Utc;
                 size: "1.5B".to_string(),
                 disk_size_gb: 0.9,
                 min_ram_gb: 8.0,
+                estimated_runtime_ram_gb: 1.5,
                 directory: "small".to_string(),
                 description: "test".to_string(),
             },
@@ -994,6 +1018,7 @@ use chrono::Utc;
                 size: "4B".to_string(),
                 disk_size_gb: 2.5,
                 min_ram_gb: 16.0,
+                estimated_runtime_ram_gb: 4.0,
                 directory: "large".to_string(),
                 description: "test".to_string(),
             },

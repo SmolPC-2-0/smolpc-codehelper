@@ -68,6 +68,15 @@ Master roadmap: issue #143
 
 ## Recently Resolved
 
+- **Issue #137 memory-aware degradation (P1)** (2026-03-22)
+  - Status: Resolved (codex/issue-137-memory-pressure, commit ab63120)
+  - Scope: Added runtime memory-pressure polling with warnings, minimized-state critical auto-unload, memory-impact model labels, and explicit OOM fallback guidance toward smaller models.
+- **Issue #137 PR review follow-ups** (2026-03-22)
+  - Status: Resolved (codex/issue-137-memory-pressure, commit ea7b160)
+  - Scope: Stabilized memory-pressure banner dismiss keys, documented the sysinfo unit heuristic assumption, cross-referenced heavy host-mode checks to the mode registry, and centralized startup error-code constants.
+- **Issue #137 hardening follow-ups** (2026-03-22)
+  - Status: Resolved (codex/issue-137-memory-pressure, commit 8a3b988)
+  - Scope: Pinned sysinfo to 0.32.1, shifted auto-unload race handling to rely on host-side unload guards, and restored a legacy `path` alias in model list payloads for compatibility.
 - **PR #158 follow-up review fixes** (2026-03-22)
   - Status: Resolved (codex/pr158-crash-safety-followups-v2, commit 1db963d)
   - Scope: Setup cache disk I/O moved off async worker threads, `prepare_setup` now persists only when `last_error` changes, and composer drafts are cleared when chats are archived/deleted.

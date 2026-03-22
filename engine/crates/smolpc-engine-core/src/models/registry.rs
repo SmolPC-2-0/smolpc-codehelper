@@ -14,6 +14,8 @@ pub struct ModelDefinition {
     pub disk_size_gb: f32,
     /// Minimum RAM required in GB.
     pub min_ram_gb: f32,
+    /// Approximate RAM used while loaded for inference.
+    pub estimated_runtime_ram_gb: f32,
     /// Model directory name.
     pub directory: String,
     /// Description.
@@ -31,6 +33,7 @@ impl ModelRegistry {
                 size: "1.5B".to_string(),
                 disk_size_gb: 0.9,
                 min_ram_gb: 8.0,
+                estimated_runtime_ram_gb: 1.5,
                 directory: "qwen2.5-1.5b-instruct".to_string(),
                 description: "Default shared model with OpenVINO CPU/NPU and DirectML artifacts"
                     .to_string(),
@@ -41,6 +44,7 @@ impl ModelRegistry {
                 size: "4B".to_string(),
                 disk_size_gb: 2.5,
                 min_ram_gb: 16.0,
+                estimated_runtime_ram_gb: 4.0,
                 directory: "qwen3-4b".to_string(),
                 description:
                     "Higher-capability shared model with OpenVINO CPU/NPU and DirectML artifacts"

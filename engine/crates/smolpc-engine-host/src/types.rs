@@ -15,6 +15,11 @@ pub(crate) const ENGINE_PROTOCOL_VERSION: &str = "1.0.0";
 pub(crate) const ENGINE_API_VERSION: &str = "1.0.0";
 pub(crate) const ENGINE_DEFAULT_MODEL_ENV: &str = "SMOLPC_ENGINE_DEFAULT_MODEL_ID";
 pub(crate) const LEGACY_DEFAULT_MODEL_ENV: &str = "SMOLPC_DEFAULT_MODEL_ID";
+pub(crate) const STARTUP_DEFAULT_MODEL_INVALID: &str = "STARTUP_DEFAULT_MODEL_INVALID";
+pub(crate) const STARTUP_MEMORY_PRESSURE: &str = "STARTUP_MEMORY_PRESSURE";
+pub(crate) const STARTUP_MODEL_ASSET_MISSING: &str = "STARTUP_MODEL_ASSET_MISSING";
+pub(crate) const STARTUP_DML_REQUIRED_UNAVAILABLE: &str = "STARTUP_DML_REQUIRED_UNAVAILABLE";
+pub(crate) const STARTUP_MODEL_LOAD_FAILED: &str = "STARTUP_MODEL_LOAD_FAILED";
 
 pub(crate) const STARTUP_PROBE_WAIT_MS: u64 = 1_500;
 /// Extended probe budget for DirectML startup.

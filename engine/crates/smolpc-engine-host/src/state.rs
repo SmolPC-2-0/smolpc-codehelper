@@ -31,7 +31,7 @@ use crate::artifacts::{
 };
 use crate::config::{
     classify_startup_model_error, epoch_ms, parse_dml_device_id_env, parse_force_override,
-    resolve_default_model_id,
+    resolve_default_model_id, with_memory_pressure_hint,
 };
 use crate::openvino::{
     ensure_qwen3_nothink_template, is_blocking_openvino_probe_failure,
@@ -47,12 +47,12 @@ use crate::probe::{
 use crate::runtime_bundles::{resolve_runtime_bundles, ResolvedRuntimeBundles};
 use crate::selection::{choose_preferred_backend, should_release_current_adapter_for_load};
 use crate::types::{
-    EnsureStartedOutcome, GenerationPermit, LastStartupError, ParsedArgs, ReadinessPayload,
-    ReadinessState, StartupError, StartupMode, StartupPolicy, StartupReadiness, TransitionGuard,
-    lock_cancel, CPU_PREFLIGHT_BUDGET, DIRECTML_PREFLIGHT_BUDGET, ENGINE_API_VERSION,
+    lock_cancel, EnsureStartedOutcome, GenerationPermit, LastStartupError, ParsedArgs,
+    ReadinessPayload, ReadinessState, StartupError, StartupMode, StartupPolicy, StartupReadiness,
+    TransitionGuard, CPU_PREFLIGHT_BUDGET, DIRECTML_PREFLIGHT_BUDGET, ENGINE_API_VERSION,
     OPENVINO_CHAT_MODE_STRUCTURED, OPENVINO_PREFLIGHT_BUDGET, OPENVINO_SELECTION_PROFILE,
-    OPENVINO_STARTUP_PROBE_WAIT, STARTUP_PROBE_RECOVERY_WAIT_MS, STARTUP_PROBE_TOTAL_WAIT_MS,
-    STARTUP_PROBE_WAIT_MS,
+    OPENVINO_STARTUP_PROBE_WAIT, STARTUP_DEFAULT_MODEL_INVALID, STARTUP_DML_REQUIRED_UNAVAILABLE,
+    STARTUP_PROBE_RECOVERY_WAIT_MS, STARTUP_PROBE_TOTAL_WAIT_MS, STARTUP_PROBE_WAIT_MS,
 };
 
 pub(crate) struct EngineState {
@@ -162,7 +162,11 @@ impl EngineState {
             .is_some_and(InferenceRuntimeAdapter::is_openvino_genai)
     }
 
-    pub(crate) fn openvino_cache_dir(&self, model_id: &str, artifacts: &ModelLaneArtifacts) -> PathBuf {
+    pub(crate) fn openvino_cache_dir(
+        &self,
+        model_id: &str,
+        artifacts: &ModelLaneArtifacts,
+    ) -> PathBuf {
         let model_key = sanitize_cache_component(model_id);
         let artifact_key = artifacts
             .fingerprint
@@ -589,7 +593,7 @@ impl EngineState {
         if ModelRegistry::get_model(&default_model_id).is_none() {
             return Err(StartupError {
                 phase: ReadinessState::LoadingModel,
-                code: "STARTUP_DEFAULT_MODEL_INVALID",
+                code: STARTUP_DEFAULT_MODEL_INVALID,
                 message: format!("Unknown default model id '{default_model_id}'"),
                 retryable: false,
             });
@@ -605,7 +609,7 @@ impl EngineState {
         if mode.requires_directml() && !has_directml {
             return Err(StartupError {
                 phase: ReadinessState::Probing,
-                code: "STARTUP_DML_REQUIRED_UNAVAILABLE",
+                code: STARTUP_DML_REQUIRED_UNAVAILABLE,
                 message: "DirectML adapter is required but unavailable.".to_string(),
                 retryable: false,
             });
@@ -707,7 +711,11 @@ impl EngineState {
         ))
     }
 
-    pub(crate) async fn load_model(&self, model_id: String, startup_mode: StartupMode) -> Result<(), String> {
+    pub(crate) async fn load_model(
+        &self,
+        model_id: String,
+        startup_mode: StartupMode,
+    ) -> Result<(), String> {
         if self.generating.load(Ordering::SeqCst) {
             return Err("Cannot load or unload model while generation is in progress".to_string());
         }
@@ -1434,15 +1442,17 @@ impl EngineState {
         let metrics = match result {
             Ok(metrics) => metrics,
             Err(error) => {
+                let current_model = self.current_model.lock().await.clone();
+                let hinted_error = with_memory_pressure_hint(&error, current_model.as_deref());
                 let recovered = self
                     .try_runtime_fallback_after_directml_failure(&error)
                     .await;
                 if recovered {
                     return Err(format!(
-                        "{error} [DirectML failed; backend switched to CPU — retry your request]"
+                        "{hinted_error} [DirectML failed; backend switched to CPU — retry your request]"
                     ));
                 }
-                return Err(error);
+                return Err(hinted_error);
             }
         };
         if cancelled.load(Ordering::SeqCst) {
@@ -1473,15 +1483,17 @@ impl EngineState {
         let metrics = match result {
             Ok(metrics) => metrics,
             Err(error) => {
+                let current_model = self.current_model.lock().await.clone();
+                let hinted_error = with_memory_pressure_hint(&error, current_model.as_deref());
                 let recovered = self
                     .try_runtime_fallback_after_directml_failure(&error)
                     .await;
                 if recovered {
                     return Err(format!(
-                        "{error} [DirectML failed; backend switched to CPU — retry your request]"
+                        "{hinted_error} [DirectML failed; backend switched to CPU — retry your request]"
                     ));
                 }
-                return Err(error);
+                return Err(hinted_error);
             }
         };
         if cancelled.load(Ordering::SeqCst) {

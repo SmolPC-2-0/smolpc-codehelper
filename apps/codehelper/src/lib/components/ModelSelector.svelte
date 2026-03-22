@@ -10,6 +10,13 @@
 	let { busy = false }: Props = $props();
 	let isLoading = $state(false);
 
+	function formatApproxRam(gb: number | null | undefined): string {
+		if (typeof gb !== 'number' || !Number.isFinite(gb)) {
+			return 'unknown RAM';
+		}
+		return `~${gb.toFixed(1)} GB RAM`;
+	}
+
 	async function handleModelChange(event: Event) {
 		const target = event.target as HTMLSelectElement;
 		const modelId = target.value;
@@ -48,7 +55,7 @@
 		{#if inferenceStore.availableModels.length > 0}
 			{#each inferenceStore.availableModels as model (model.id)}
 				<option value={model.id}>
-					{model.name} ({model.size})
+					{model.name} ({model.size}, uses {formatApproxRam(model.estimated_runtime_ram_gb)})
 				</option>
 			{/each}
 		{:else}

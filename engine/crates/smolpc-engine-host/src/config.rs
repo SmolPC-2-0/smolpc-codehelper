@@ -5,9 +5,11 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::types::{
-    ENGINE_DEFAULT_MODEL_ENV, LEGACY_DEFAULT_MODEL_ENV, ParsedArgs, ReadinessState, StartupError,
-    StartupPolicy,
+    ParsedArgs, ReadinessState, StartupError, StartupPolicy, ENGINE_DEFAULT_MODEL_ENV,
+    LEGACY_DEFAULT_MODEL_ENV, STARTUP_DEFAULT_MODEL_INVALID, STARTUP_DML_REQUIRED_UNAVAILABLE,
+    STARTUP_MEMORY_PRESSURE, STARTUP_MODEL_ASSET_MISSING, STARTUP_MODEL_LOAD_FAILED,
 };
+const MEMORY_PRESSURE_HINT_SENTINEL: &str = "Memory pressure detected.";
 
 pub(crate) fn epoch_ms() -> u64 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -90,7 +92,7 @@ pub(crate) fn resolve_default_model_id_with_sources(
     }
     Err(StartupError {
         phase: ReadinessState::ResolvingAssets,
-        code: "STARTUP_DEFAULT_MODEL_INVALID",
+        code: STARTUP_DEFAULT_MODEL_INVALID,
         message: "No default model is configured or registered".to_string(),
         retryable: false,
     })
@@ -108,10 +110,18 @@ pub(crate) fn resolve_default_model_id(
 
 pub(crate) fn classify_startup_model_error(error: &str) -> StartupError {
     let lowered = error.to_ascii_lowercase();
+    if is_memory_pressure_error(error) {
+        return StartupError {
+            phase: ReadinessState::LoadingModel,
+            code: STARTUP_MEMORY_PRESSURE,
+            message: with_memory_pressure_hint(error, None),
+            retryable: true,
+        };
+    }
     if lowered.contains("unknown model id") {
         return StartupError {
             phase: ReadinessState::LoadingModel,
-            code: "STARTUP_DEFAULT_MODEL_INVALID",
+            code: STARTUP_DEFAULT_MODEL_INVALID,
             message: error.to_string(),
             retryable: false,
         };
@@ -122,7 +132,7 @@ pub(crate) fn classify_startup_model_error(error: &str) -> StartupError {
     {
         return StartupError {
             phase: ReadinessState::LoadingModel,
-            code: "STARTUP_MODEL_ASSET_MISSING",
+            code: STARTUP_MODEL_ASSET_MISSING,
             message: error.to_string(),
             retryable: false,
         };
@@ -130,17 +140,62 @@ pub(crate) fn classify_startup_model_error(error: &str) -> StartupError {
     if lowered.contains("requires directml backend") || lowered.contains("directml") {
         return StartupError {
             phase: ReadinessState::LoadingModel,
-            code: "STARTUP_DML_REQUIRED_UNAVAILABLE",
+            code: STARTUP_DML_REQUIRED_UNAVAILABLE,
             message: error.to_string(),
             retryable: false,
         };
     }
     StartupError {
         phase: ReadinessState::LoadingModel,
-        code: "STARTUP_MODEL_LOAD_FAILED",
+        code: STARTUP_MODEL_LOAD_FAILED,
         message: error.to_string(),
         retryable: true,
     }
+}
+
+pub(crate) fn is_memory_pressure_error(error: &str) -> bool {
+    let lowered = error.to_ascii_lowercase();
+    [
+        "out of memory",
+        "not enough memory",
+        "insufficient memory",
+        "memory allocation",
+        "failed to allocate",
+        "cannot allocate memory",
+        "std::bad_alloc",
+        "bad alloc",
+        "e_outofmemory",
+        "resource exhausted",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
+}
+
+pub(crate) fn with_memory_pressure_hint(error: &str, current_model_id: Option<&str>) -> String {
+    if !is_memory_pressure_error(error) {
+        return error.to_string();
+    }
+    if error.contains(MEMORY_PRESSURE_HINT_SENTINEL) {
+        return error.to_string();
+    }
+
+    let suggested_model = ModelRegistry::available_models()
+        .into_iter()
+        .min_by(|a, b| {
+            a.estimated_runtime_ram_gb
+                .partial_cmp(&b.estimated_runtime_ram_gb)
+                .unwrap_or(CmpOrdering::Equal)
+        })
+        .filter(|model| current_model_id.is_none_or(|current| model.id != current))
+        .map(|model| model.id);
+
+    let suggestion = if let Some(model_id) = suggested_model {
+        format!("Try switching to '{model_id}' or close other heavy apps and retry.")
+    } else {
+        "Close other heavy apps and retry.".to_string()
+    };
+
+    format!("{error} [{MEMORY_PRESSURE_HINT_SENTINEL} {suggestion}]")
 }
 
 pub(crate) fn parse_args() -> ParsedArgs {

@@ -14,9 +14,10 @@ use commands::default::{read, save_code, write};
 use commands::engine_client_adapter::{engine_ensure_started, engine_status};
 use commands::hardware::{detect_hardware, get_cached_hardware, HardwareCache};
 use commands::inference::{
-    check_model_exists, check_model_readiness, get_current_model, get_inference_backend_status,
-    inference_cancel, inference_generate, inference_generate_messages, is_generating, list_models,
-    load_model, set_inference_runtime_mode, unload_model, InferenceState,
+    check_model_exists, check_model_readiness, evaluate_memory_pressure, get_current_model,
+    get_inference_backend_status, inference_cancel, inference_generate,
+    inference_generate_messages, is_generating, list_models, load_model,
+    set_inference_runtime_mode, unload_model, InferenceState,
 };
 use commands::launcher::{launcher_launch_or_focus, launcher_list_apps};
 use commands::modes::{list_modes, mode_refresh_tools, mode_status};
@@ -67,6 +68,7 @@ pub fn run() {
             inference_generate_messages,
             inference_cancel,
             is_generating,
+            evaluate_memory_pressure,
             list_models,
             get_current_model,
             check_model_readiness,

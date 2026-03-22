@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import BenchmarkPanel from '$lib/components/BenchmarkPanel.svelte';
 	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
@@ -23,7 +24,11 @@
 	import { assistantSend, assistantCancel } from '$lib/api/unified';
 	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
-	import type { GenerationConfig, InferenceChatMessage } from '$lib/types/inference';
+	import type {
+		GenerationConfig,
+		InferenceChatMessage,
+		MemoryPressureStatus
+	} from '$lib/types/inference';
 	import type { AppMode } from '$lib/types/mode';
 	import type { AssistantStreamEvent } from '$lib/types/assistant';
 
@@ -36,6 +41,8 @@
 	let showSetupPanel = $state(false);
 	let isSwitchingMode = $state(false);
 	let reconnectingEngineSession = $state(false);
+	let memoryPressureNotice = $state<string | null>(null);
+	let dismissedMemoryPressureKey = $state<string | null>(null);
 
 	// Unified mode state
 	const activeMode = $derived(modeStore.activeMode);
@@ -236,6 +243,55 @@ Teaching rules:
 		if (inferenceStore.currentModel) {
 			settingsStore.setModel(inferenceStore.currentModel);
 		}
+	}
+
+	function memoryPressureNoticeKey(snapshot: MemoryPressureStatus): string {
+		return `${snapshot.level}:${snapshot.auto_unloaded ? '1' : '0'}:${snapshot.recommended_model_id ?? ''}`;
+	}
+
+	async function pollMemoryPressure() {
+		let appMinimized = false;
+		try {
+			appMinimized = await getCurrentWindow().isMinimized();
+		} catch {
+			appMinimized = false;
+		}
+
+		const snapshot = await inferenceStore.evaluateMemoryPressure({
+			activeMode: modeStore.activeMode,
+			appMinimized
+		});
+		if (!snapshot) {
+			return;
+		}
+
+		if (snapshot.auto_unloaded) {
+			await inferenceStore.syncStatus();
+		}
+
+		const notice = snapshot.message;
+		if (!notice) {
+			memoryPressureNotice = null;
+			dismissedMemoryPressureKey = null;
+			return;
+		}
+
+		const noticeKey = memoryPressureNoticeKey(snapshot);
+		if (dismissedMemoryPressureKey === noticeKey) {
+			memoryPressureNotice = null;
+			return;
+		}
+
+		memoryPressureNotice = notice;
+	}
+
+	function dismissMemoryPressureNotice() {
+		const snapshot = inferenceStore.memoryPressure;
+		const notice = memoryPressureNotice;
+		if (snapshot && notice) {
+			dismissedMemoryPressureKey = memoryPressureNoticeKey(snapshot);
+		}
+		memoryPressureNotice = null;
 	}
 
 	function finalizeActiveStreamingMessage(fallbackContent: string) {
@@ -480,6 +536,7 @@ Teaching rules:
 			// (activeMode + storage); status refresh is fire-and-forget.
 			modeStore.setActiveMode(mode);
 			chatsStore.setMode(mode);
+			await pollMemoryPressure();
 		} finally {
 			isSwitchingMode = false;
 		}
@@ -545,6 +602,7 @@ Teaching rules:
 			try {
 				await inferenceStore.listModels();
 				await reestablishEngineSession();
+				await pollMemoryPressure();
 			} catch (error) {
 				console.error('Failed to initialize inference session:', error);
 			}
@@ -613,15 +671,18 @@ Teaching rules:
 	// Engine health polling — immediate check + 10s interval
 	$effect(() => {
 		inferenceStore.checkHealth(); // immediate first check
+		void pollMemoryPressure();
 
 		const intervalId = setInterval(async () => {
 			const wasHealthy = inferenceStore.engineHealthy;
 			const isHealthy = await inferenceStore.checkHealth();
+			await pollMemoryPressure();
 
 			if (!wasHealthy && isHealthy && !reconnectingEngineSession) {
 				reconnectingEngineSession = true;
 				try {
 					await reestablishEngineSession();
+					await pollMemoryPressure();
 				} catch (error) {
 					console.error('Failed to restore engine session after reconnect:', error);
 				} finally {
@@ -685,6 +746,28 @@ Teaching rules:
 				class="mx-4 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-200"
 			>
 				Engine disconnected — restoring session state...
+			</div>
+		{/if}
+
+		{#if memoryPressureNotice}
+			<div
+				class={`mx-4 mt-2 rounded-lg border px-4 py-2 text-sm ${
+					inferenceStore.memoryPressure?.level === 'critical'
+						? 'border-rose-500/35 bg-rose-500/10 text-rose-200'
+						: 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+				}`}
+			>
+				<div class="flex items-start justify-between gap-3">
+					<span>{memoryPressureNotice}</span>
+					<button
+						type="button"
+						class="shrink-0 rounded border border-current/40 px-2 py-0.5 text-xs opacity-80 hover:opacity-100"
+						onclick={dismissMemoryPressureNotice}
+						aria-label="Dismiss memory warning"
+					>
+						Dismiss
+					</button>
+				</div>
 			</div>
 		{/if}
 

@@ -44,11 +44,26 @@ export interface AvailableModel {
 	/** Model ID (directory name) */
 	id: string;
 
-	/** Path to model files */
-	path: string;
-
 	/** Size category (e.g., "1.5B", "0.5B") */
 	size: string;
+
+	/** Approximate disk footprint */
+	disk_size_gb: number;
+
+	/** Minimum system RAM requirement */
+	min_ram_gb: number;
+
+	/** Approximate runtime RAM while loaded */
+	estimated_runtime_ram_gb: number;
+
+	/** Model artifact directory */
+	directory: string;
+
+	/** @deprecated Legacy alias for directory kept for compatibility */
+	path: string;
+
+	/** Human-readable summary */
+	description: string;
 }
 
 /**
@@ -244,6 +259,26 @@ export interface CheckModelResponse {
 		directml: ModelLaneReadiness;
 		cpu: ModelLaneReadiness;
 	};
+}
+
+export interface MemoryPressureRequest {
+	activeMode?: string | null;
+	appMinimized?: boolean;
+}
+
+export interface MemoryPressureStatus {
+	total_gb: number;
+	available_gb: number;
+	level: 'normal' | 'warning' | 'critical';
+	threshold_warning_gb: number;
+	threshold_critical_gb: number;
+	current_model_id: string | null;
+	current_model_estimated_ram_gb: number | null;
+	recommended_model_id: string | null;
+	model_switch_recommended: boolean;
+	heavy_mode_active: boolean;
+	auto_unloaded: boolean;
+	message: string | null;
 }
 
 /**
