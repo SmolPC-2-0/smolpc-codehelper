@@ -1,8 +1,9 @@
 # Working Issues
 
 Last updated: 2026-03-22
-Base branch: `main` (includes unified frontend from PR #121)
+Base branch: `main` (unified frontend PR #121 + engine module split PR #141 + clippy fixes PR #145)
 Stable baseline tag: `stable/codehelper-v2.2.0`
+Master roadmap: issue #143
 
 ---
 
@@ -73,6 +74,9 @@ Stable baseline tag: `stable/codehelper-v2.2.0`
 
 ## Recently Resolved
 
+- **Engine lifecycle robustness P0** (2026-03-22, PR #148): Graceful engine shutdown on app close (ExitRequested + PID fallback), cancel-on-mode-switch, 10s health polling with disconnected banner.
+- **Clippy zero warnings** (2026-03-22, PR #145): Fixed all 8 workspace warnings (Box enum variants, inlined format args, derive Default, contains, needless return).
+- **Engine module split** (2026-03-22, PR #141): main.rs 4,650→112 lines (10 modules), engine-client lib.rs 1,777→560 lines (4 modules), genai FFI split (2 new files each). 123 tests pass.
 - **Unified frontend reconciliation v2** (2026-03-22, PR #121): Additive merge of unified mode shell onto main's stable engine. 5 commits, ~110 new files, 2 existing files modified (57 lines added). Code mode fully preserved. Pre-merge inference test matrix (all via direct engine curl, same path as frontend):
   - CPU + qwen2.5-1.5b: PASS (TTFT 112ms, 41 TPS)
   - CPU + qwen3-4b: PASS (TTFT 1194ms, 12.8 TPS)

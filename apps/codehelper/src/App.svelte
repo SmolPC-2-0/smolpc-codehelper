@@ -32,6 +32,7 @@
 	let bottomOffset = $state(0);
 	let showShortcutsOverlay = $state(false);
 	let showSetupPanel = $state(false);
+	let isSwitchingMode = $state(false);
 
 	// Unified mode state
 	const activeMode = $derived(modeStore.activeMode);
@@ -337,8 +338,19 @@ Teaching rules:
 		}
 	}
 
-	function handleModeChange(mode: AppMode) {
-		modeStore.setActiveMode(mode);
+	async function handleModeChange(mode: AppMode) {
+		if (activeMode === mode || isSwitchingMode) return;
+
+		isSwitchingMode = true;
+		try {
+			// Cancel any in-flight generation before switching modes
+			if (hasActiveStream || inferenceStore.isGenerating) {
+				await handleCancelGeneration();
+			}
+			modeStore.setActiveMode(mode);
+		} finally {
+			isSwitchingMode = false;
+		}
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
@@ -463,6 +475,22 @@ Teaching rules:
 		}
 	});
 
+	// Engine health polling — immediate check + 10s interval
+	$effect(() => {
+		inferenceStore.checkHealth(); // immediate first check
+
+		const intervalId = setInterval(async () => {
+			const wasHealthy = inferenceStore.engineHealthy;
+			const isHealthy = await inferenceStore.checkHealth();
+
+			if (!wasHealthy && isHealthy) {
+				await inferenceStore.syncStatus();
+			}
+		}, 10_000);
+
+		return () => clearInterval(intervalId);
+	});
+
 	$effect(() => {
 		const theme = settingsStore.theme;
 		applyTheme(theme);
@@ -507,6 +535,14 @@ Teaching rules:
 				/>
 			{/snippet}
 		</WorkspaceControls>
+
+		{#if !inferenceStore.engineHealthy}
+			<div
+				class="mx-4 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-200"
+			>
+				Engine disconnected — attempting to reconnect...
+			</div>
+		{/if}
 
 		{#if setupNeedsAttention}
 			<SetupBanner
