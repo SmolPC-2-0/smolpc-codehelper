@@ -511,9 +511,9 @@ mod tests {
         let provider = Arc::new(DisconnectedProvider);
         let generator = MockGenerator {
             responses: Mutex::new(VecDeque::from(vec![
+                r#"{"tool":"none","reason":"No tool needed"}"#.to_string(),
                 "You can use Curves to remap tonal ranges in shadows, midtones, and highlights."
                     .to_string(),
-                r#"{"tool":"none","reason":"No tool needed"}"#.to_string(),
             ])),
         };
 
