@@ -123,7 +123,7 @@ def get_office_path() -> str:
 def get_python_path(soffice_path: str) -> str:
     configured_python = os.environ.get(HELPER_PYTHON_PATH_ENV)
     if configured_python:
-        if os.path.exists(configured_python):
+        if os.path.isfile(configured_python):
             logging.info(
                 "Using helper Python from %s: %s",
                 HELPER_PYTHON_PATH_ENV,
@@ -131,7 +131,7 @@ def get_python_path(soffice_path: str) -> str:
             )
             return configured_python
         raise FileNotFoundError(
-            f"Configured helper Python from {HELPER_PYTHON_PATH_ENV} does not exist: {configured_python}"
+            f"Configured helper Python from {HELPER_PYTHON_PATH_ENV} is not a file: {configured_python}"
         )
 
     office_program_dir = Path(soffice_path).resolve().parent

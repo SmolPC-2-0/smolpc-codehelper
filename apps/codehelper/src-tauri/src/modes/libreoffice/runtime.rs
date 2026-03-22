@@ -933,4 +933,66 @@ sys.stdout.write(json.dumps({{"resolved": resolved, "expected": sys.executable}}
         let expected_canonical = fs::canonicalize(expected).expect("canonical expected path");
         assert_eq!(resolved_canonical, expected_canonical);
     }
+
+    #[test]
+    fn main_runtime_rejects_directory_override_for_helper_python() {
+        let tempdir = tempdir().expect("tempdir");
+        let office_program_dir = tempdir.path().join("office").join("program");
+        fs::create_dir_all(&office_program_dir).expect("create office program dir");
+        let invalid_override = tempdir.path().join("not-a-python-file");
+        fs::create_dir_all(&invalid_override).expect("create invalid override dir");
+
+        #[cfg(windows)]
+        let soffice_path = office_program_dir.join("soffice.exe");
+        #[cfg(not(windows))]
+        let soffice_path = office_program_dir.join("soffice");
+        write_file(&soffice_path, "");
+
+        let runner_path = tempdir.path().join("reject_helper_python_directory.py");
+        write_file(
+            &runner_path,
+            &format!(
+                r#"
+import importlib.util
+import json
+import os
+import sys
+
+spec = importlib.util.spec_from_file_location("smolpc_main_runtime", r"{path}")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+os.environ["SMOLPC_LIBREOFFICE_OFFICE_PATH"] = r"{soffice_path}"
+os.environ["SMOLPC_LIBREOFFICE_HELPER_PYTHON_PATH"] = r"{invalid_override}"
+try:
+    module.get_python_path(module.get_office_path())
+except Exception as error:
+    sys.stdout.write(json.dumps({{"rejected": True, "error": str(error)}}))
+else:
+    sys.stdout.write(json.dumps({{"rejected": False}}))
+"#,
+                path = main_script_path().display(),
+                soffice_path = soffice_path.display(),
+                invalid_override = invalid_override.display(),
+            ),
+        );
+
+        let output = Command::new(python_command())
+            .arg(&runner_path)
+            .output()
+            .expect("run helper python directory override rejection checker");
+        assert!(
+            output.status.success(),
+            "helper python directory override checker failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let payload: Value =
+            serde_json::from_slice(&output.stdout).expect("parse directory override payload");
+        assert_eq!(payload["rejected"], json!(true));
+        assert!(payload["error"]
+            .as_str()
+            .expect("directory override error")
+            .contains("is not a file"));
+    }
 }
