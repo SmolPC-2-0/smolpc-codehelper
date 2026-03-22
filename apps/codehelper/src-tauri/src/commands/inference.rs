@@ -56,6 +56,18 @@ impl Default for InferenceState {
     }
 }
 
+impl InferenceState {
+    /// Attempt graceful engine shutdown via the cached client.
+    pub async fn shutdown_engine(&self) -> Result<(), String> {
+        let guard = self.client.lock().await;
+        if let Some(client) = guard.as_ref() {
+            client.shutdown().await.map_err(|e| e.to_string())
+        } else {
+            Ok(()) // no client — engine wasn't started by us
+        }
+    }
+}
+
 fn parse_runtime_mode(mode: &str) -> Result<RuntimeModePreference, String> {
     match mode.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok(RuntimeModePreference::Auto),
