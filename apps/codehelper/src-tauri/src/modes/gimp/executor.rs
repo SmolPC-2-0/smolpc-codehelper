@@ -11,6 +11,8 @@ use smolpc_assistant_types::{
 use std::sync::Arc;
 
 const ASSISTANT_CANCELLED: &str = "ASSISTANT_CANCELLED";
+const GIMP_CONNECT_ERROR_HINT: &str =
+    "Could not connect to GIMP. Make sure GIMP is running and the plugin is installed.";
 
 fn ensure_not_cancelled(state: &AssistantState) -> Result<(), String> {
     if state.is_cancelled() {
@@ -18,6 +20,28 @@ fn ensure_not_cancelled(state: &AssistantState) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+fn format_gimp_connection_error(detail: Option<&str>) -> String {
+    match detail.map(str::trim).filter(|detail| !detail.is_empty()) {
+        Some(detail) if detail.contains(GIMP_CONNECT_ERROR_HINT) => detail.to_string(),
+        Some(detail) => format!("{GIMP_CONNECT_ERROR_HINT} {detail}"),
+        None => GIMP_CONNECT_ERROR_HINT.to_string(),
+    }
+}
+
+async fn ensure_gimp_connected(provider: &Arc<dyn ToolProvider>) -> Result<(), String> {
+    let connection_state = provider
+        .connect_if_needed(AppMode::Gimp)
+        .await
+        .map_err(|error| format_gimp_connection_error(Some(&error)))?;
+    if connection_state.state == "connected" {
+        return Ok(());
+    }
+
+    Err(format_gimp_connection_error(
+        connection_state.detail.as_deref(),
+    ))
 }
 
 pub async fn execute_gimp_request<F>(
@@ -41,7 +65,7 @@ where
             phase: "connecting".to_string(),
             detail: "Connecting to GIMP.".to_string(),
         });
-        provider.connect_if_needed(AppMode::Gimp).await?;
+        ensure_gimp_connected(&provider).await?;
         ensure_not_cancelled(state)?;
 
         emit(AssistantStreamEventDto::ToolCall {
@@ -86,6 +110,13 @@ where
 
     match selection.tool {
         SelectedTool::None => {
+            emit(AssistantStreamEventDto::Status {
+                phase: "connecting".to_string(),
+                detail: "Connecting to GIMP.".to_string(),
+            });
+            ensure_gimp_connected(&provider).await?;
+            ensure_not_cancelled(state)?;
+
             let reply = answer_without_tool(generator, &request.user_text).await?;
             let response = AssistantResponseDto {
                 reply,
@@ -124,7 +155,7 @@ where
                 phase: "connecting".to_string(),
                 detail: "Connecting to GIMP.".to_string(),
             });
-            provider.connect_if_needed(AppMode::Gimp).await?;
+            ensure_gimp_connected(&provider).await?;
 
             let mut tool_results = Vec::new();
             for step in plan
@@ -203,7 +234,7 @@ where
         phase: "connecting".to_string(),
         detail: "Connecting to GIMP.".to_string(),
     });
-    provider.connect_if_needed(AppMode::Gimp).await?;
+    ensure_gimp_connected(&provider).await?;
     ensure_not_cancelled(state)?;
 
     let (tool_name, thought) = match tool {
@@ -274,6 +305,8 @@ mod tests {
         results: Mutex<VecDeque<ToolExecutionResultDto>>,
     }
 
+    struct DisconnectedProvider;
+
     #[async_trait]
     impl ToolProvider for MockProvider {
         async fn connect_if_needed(&self, mode: AppMode) -> Result<ProviderStateDto, String> {
@@ -303,6 +336,50 @@ mod tests {
                     result
                 })
                 .ok_or_else(|| "no mock result".to_string())
+        }
+
+        async fn undo_last_action(&self, _mode: AppMode) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn disconnect_if_needed(&self, _mode: AppMode) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl ToolProvider for DisconnectedProvider {
+        async fn connect_if_needed(&self, mode: AppMode) -> Result<ProviderStateDto, String> {
+            Ok(provider_state(
+                mode,
+                "error",
+                Some("Unable to reach the GIMP MCP bridge on 127.0.0.1:10008."),
+                true,
+                true,
+            ))
+        }
+
+        async fn status(&self, mode: AppMode) -> Result<ProviderStateDto, String> {
+            Ok(provider_state(
+                mode,
+                "error",
+                Some("Unable to reach the GIMP MCP bridge on 127.0.0.1:10008."),
+                true,
+                true,
+            ))
+        }
+
+        async fn list_tools(&self, _mode: AppMode) -> Result<Vec<ToolDefinitionDto>, String> {
+            Ok(Vec::new())
+        }
+
+        async fn execute_tool(
+            &self,
+            _mode: AppMode,
+            _name: &str,
+            _arguments: serde_json::Value,
+        ) -> Result<ToolExecutionResultDto, String> {
+            Err("execute_tool should not be called when disconnected".to_string())
         }
 
         async fn undo_last_action(&self, _mode: AppMode) -> Result<(), String> {
@@ -434,5 +511,29 @@ mod tests {
 
         assert!(response.reply.contains("Rotate"));
         assert!(response.undoable);
+    }
+
+    #[tokio::test]
+    async fn gimp_request_returns_user_friendly_error_when_gimp_is_unreachable() {
+        let provider = Arc::new(DisconnectedProvider);
+        let generator = MockGenerator {
+            responses: Mutex::new(VecDeque::from(vec![
+                r#"{"tool":"none","reason":"No tool needed"}"#.to_string(),
+            ])),
+        };
+
+        let error = execute_gimp_request(
+            provider,
+            &generator,
+            &request("What can you do in GIMP?"),
+            &AssistantState::default(),
+            |_| {},
+        )
+        .await
+        .expect_err("request should fail when GIMP is unreachable");
+
+        assert!(error.contains("Could not connect to GIMP."));
+        assert!(error.contains("plugin is installed."));
+        assert!(error.contains("Unable to reach the GIMP MCP bridge"));
     }
 }
