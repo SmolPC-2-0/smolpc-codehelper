@@ -1,0 +1,438 @@
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::IntoResponse;
+use axum::Json;
+use chrono::Utc;
+use smolpc_engine_core::models::ModelRegistry;
+use std::convert::Infallible;
+use std::sync::atomic::Ordering;
+use tokio::sync::mpsc;
+use tokio::time::timeout;
+
+use crate::artifacts::build_check_model_response;
+use crate::auth::auth;
+use crate::chat::{
+    is_preformatted_chatml_single_user_message, model_has_thinking_mode, openvino_request_defaults,
+    request_to_config, request_to_prompt, request_to_structured_messages,
+    should_use_openvino_structured_messages, stream_error_code, ThinkingFilter,
+};
+use crate::config::epoch_ms;
+use crate::state::AppState;
+use crate::types::{
+    ApiError, CancelOnDrop, ChatCompletionRequest, CheckModelRequest, CompletionInput,
+    EnsureStartedOutcome, EnsureStartedRequest, ErrorResponse, LoadRequest, ReadinessState,
+    StartupError, StartupMode, StreamMessage, UnloadRequest, ENGINE_API_VERSION,
+    ENGINE_PROTOCOL_VERSION, OPENVINO_CHAT_MODE_LEGACY_PROMPT, OPENVINO_CHAT_MODE_STRUCTURED,
+};
+
+pub(crate) async fn health(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+    let readiness = state.engine.readiness.lock().await;
+    let state_name = format!("{:?}", readiness.state).to_ascii_lowercase();
+    if matches!(readiness.state, ReadinessState::Failed) {
+        Ok((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"ok": false, "state": state_name})),
+        ))
+    } else {
+        Ok((
+            StatusCode::OK,
+            Json(serde_json::json!({"ok": true, "state": state_name})),
+        ))
+    }
+}
+
+pub(crate) async fn meta(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "protocol_version": ENGINE_PROTOCOL_VERSION,
+        "engine_api_version": ENGINE_API_VERSION,
+        "engine_version": env!("CARGO_PKG_VERSION"),
+        "pid": std::process::id(),
+        "busy": state.engine.generating.load(Ordering::SeqCst),
+    })))
+}
+
+pub(crate) async fn status(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+    let payload = state.engine.current_readiness_payload(true, None).await;
+    Ok(Json(serde_json::json!(payload)))
+}
+
+pub(crate) async fn ensure_started(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<EnsureStartedRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+
+    let outcome = state
+        .engine
+        .ensure_started(req.mode, req.startup_policy.clone())
+        .await;
+    let (http_status, ok, override_error) = match outcome {
+        EnsureStartedOutcome::Ready => (StatusCode::OK, true, None),
+        EnsureStartedOutcome::Failed => (StatusCode::SERVICE_UNAVAILABLE, false, None),
+        EnsureStartedOutcome::Conflict => (
+            StatusCode::CONFLICT,
+            false,
+            Some(StartupError {
+                phase: ReadinessState::Ready,
+                code: "STARTUP_POLICY_CONFLICT",
+                message: "Engine is already ready under a different startup mode/policy. Perform explicit shutdown and restart.".to_string(),
+                retryable: false,
+            }),
+        ),
+    };
+    let payload = state
+        .engine
+        .current_readiness_payload(ok, override_error)
+        .await;
+    Ok((http_status, Json(payload)).into_response())
+}
+
+pub(crate) async fn load(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<LoadRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+    state
+        .engine
+        .load_model(req.model_id.clone(), StartupMode::Auto)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: e }),
+            )
+        })?;
+    state
+        .engine
+        .mark_ready_after_external_load(req.model_id)
+        .await;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+pub(crate) async fn unload(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<UnloadRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+    state
+        .engine
+        .unload_model(req.force.unwrap_or(false))
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: e }),
+            )
+        })?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+pub(crate) async fn cancel(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+    state.engine.cancel();
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+pub(crate) async fn shutdown(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+    state.shutdown.notify_waiters();
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+pub(crate) async fn check_model(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<CheckModelRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+    let startup_probe = state.engine.startup_probe.lock().await.clone();
+    let openvino_probe = state.engine.openvino_startup_probe.lock().await.clone();
+    let readiness = build_check_model_response(
+        &req.model_id,
+        state.engine.runtime_bundles(),
+        startup_probe.as_ref(),
+        openvino_probe.as_ref(),
+    );
+    match serde_json::to_value(readiness) {
+        Ok(value) => Ok(Json(value)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Failed to serialize check-model response: {e}"),
+            }),
+        )),
+    }
+}
+
+pub(crate) async fn v1_models(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+    let data = ModelRegistry::available_models()
+        .into_iter()
+        .map(|m| serde_json::json!({"id": m.id, "object": "model", "owned_by": "smolpc"}))
+        .collect::<Vec<_>>();
+    Ok(Json(serde_json::json!({"object": "list", "data": data})))
+}
+
+pub(crate) async fn v1_chat_completions(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<ChatCompletionRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+
+    let queue_permit = state
+        .queue_semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ErrorResponse {
+                    error: "Engine queue is full".to_string(),
+                }),
+            )
+        })?;
+
+    let gen_permit = timeout(
+        state.queue_timeout,
+        state.generation_semaphore.clone().acquire_owned(),
+    )
+    .await
+    .map_err(|_| {
+        (
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(ErrorResponse {
+                error: "Queued request timed out".to_string(),
+            }),
+        )
+    })
+    .and_then(|r| {
+        r.map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Generation semaphore closed".to_string(),
+                }),
+            )
+        })
+    })?;
+
+    drop(queue_permit);
+
+    let current_model_id = state.engine.current_model.lock().await.clone();
+    let openvino_runtime_loaded = state.engine.uses_openvino_genai_runtime().await;
+    let config = request_to_config(
+        &req,
+        openvino_request_defaults(current_model_id.as_deref(), openvino_runtime_loaded),
+    )
+    .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
+    let disable_thinking = current_model_id
+        .as_deref()
+        .is_some_and(model_has_thinking_mode);
+    let use_legacy_prompt = is_preformatted_chatml_single_user_message(&req.messages);
+    let use_structured_messages =
+        should_use_openvino_structured_messages(openvino_runtime_loaded, use_legacy_prompt);
+    let completion_input = if use_structured_messages {
+        let messages = request_to_structured_messages(&req.messages)
+            .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
+        (
+            OPENVINO_CHAT_MODE_STRUCTURED,
+            CompletionInput::Messages(messages),
+        )
+    } else {
+        let prompt = request_to_prompt(&req.messages, disable_thinking)
+            .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
+        let mode = if use_legacy_prompt {
+            OPENVINO_CHAT_MODE_LEGACY_PROMPT
+        } else {
+            OPENVINO_CHAT_MODE_STRUCTURED
+        };
+        (mode, CompletionInput::Prompt(prompt))
+    };
+    if openvino_runtime_loaded {
+        let mut backend_status = state.engine.backend_status.lock().await;
+        backend_status.openvino_message_mode = Some(completion_input.0.to_string());
+    }
+    let completion_input = completion_input.1;
+    let model_name = req.model.unwrap_or_else(|| "smolpc-engine".to_string());
+    let request_id = format!("chatcmpl-{}", Utc::now().timestamp_millis());
+    let created = Utc::now().timestamp();
+
+    if req.stream.unwrap_or(false) {
+        let (tx, mut rx) = mpsc::unbounded_channel::<StreamMessage>();
+        let engine = state.engine.clone();
+        let activity = state.last_activity_ms.clone();
+        let input = completion_input;
+        tokio::spawn(async move {
+            let _permit = gen_permit;
+            let result = match input {
+                CompletionInput::Prompt(prompt) => {
+                    engine
+                        .generate_stream(&prompt, config, |t| {
+                            let _ = tx.send(StreamMessage::Token(t));
+                        })
+                        .await
+                }
+                CompletionInput::Messages(messages) => {
+                    engine
+                        .generate_stream_messages(&messages, config, |t| {
+                            let _ = tx.send(StreamMessage::Token(t));
+                        })
+                        .await
+                }
+            };
+            match result {
+                Ok(metrics) => {
+                    let _ = tx.send(StreamMessage::Metrics(metrics));
+                    let _ = tx.send(StreamMessage::Done);
+                }
+                Err(e) => {
+                    let _ = tx.send(StreamMessage::Error {
+                        code: stream_error_code(&e),
+                        message: e,
+                    });
+                    let _ = tx.send(StreamMessage::Done);
+                }
+            }
+            activity.store(epoch_ms(), Ordering::SeqCst);
+        });
+
+        let stream = async_stream::stream! {
+            let _cancel_guard = CancelOnDrop { engine: state.engine.clone() };
+            let mut think_filter = if disable_thinking {
+                Some(ThinkingFilter::new())
+            } else {
+                None
+            };
+            let start = serde_json::json!({
+                "id": request_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model_name,
+                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": serde_json::Value::Null}],
+            });
+            yield Ok::<Event, Infallible>(Event::default().data(start.to_string()));
+
+            while let Some(item) = rx.recv().await {
+                match item {
+                    StreamMessage::Token(token) => {
+                        let filtered = if let Some(ref mut filter) = think_filter {
+                            filter.push(&token)
+                        } else {
+                            Some(token)
+                        };
+                        if let Some(text) = filtered {
+                            let chunk = serde_json::json!({
+                                "id": request_id,
+                                "object": "chat.completion.chunk",
+                                "created": created,
+                                "model": model_name,
+                                "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": serde_json::Value::Null}],
+                            });
+                            yield Ok(Event::default().data(chunk.to_string()));
+                        }
+                    }
+                    StreamMessage::Metrics(metrics) => {
+                        let metrics_event = serde_json::json!({
+                            "id": request_id,
+                            "object": "chat.completion.metrics",
+                            "created": created,
+                            "model": model_name,
+                            "smolpc_metrics": metrics,
+                        });
+                        yield Ok(Event::default().data(metrics_event.to_string()));
+                    }
+                    StreamMessage::Error { message, code } => {
+                        let error_type = if code == "INFERENCE_GENERATION_CANCELLED" {
+                            "cancelled"
+                        } else {
+                            "runtime_error"
+                        };
+                        let error_event = serde_json::json!({
+                            "error": {
+                                "message": message,
+                                "code": code,
+                                "type": error_type
+                            }
+                        });
+                        yield Ok(Event::default().data(error_event.to_string()));
+                    }
+                    StreamMessage::Done => {
+                        // Flush any remaining buffered text from the thinking filter.
+                        if let Some(ref mut filter) = think_filter {
+                            if let Some(tail) = filter.finish() {
+                                let chunk = serde_json::json!({
+                                    "id": request_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created,
+                                    "model": model_name,
+                                    "choices": [{"index": 0, "delta": {"content": tail}, "finish_reason": serde_json::Value::Null}],
+                                });
+                                yield Ok(Event::default().data(chunk.to_string()));
+                            }
+                        }
+                        let done = serde_json::json!({
+                            "id": request_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": model_name,
+                            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                        });
+                        yield Ok(Event::default().data(done.to_string()));
+                        yield Ok(Event::default().data("[DONE]"));
+                        break;
+                    }
+                }
+            }
+        };
+
+        Ok(Sse::new(stream)
+            .keep_alive(KeepAlive::default())
+            .into_response())
+    } else {
+        Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Non-streaming completions are not supported. Set \"stream\": true."
+                    .to_string(),
+            }),
+        ))
+    }
+}
