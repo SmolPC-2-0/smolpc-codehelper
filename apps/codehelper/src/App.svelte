@@ -337,7 +337,14 @@ Teaching rules:
 		}
 	}
 
-	function handleModeChange(mode: AppMode) {
+	async function handleModeChange(mode: AppMode) {
+		if (activeMode === mode) return;
+
+		// Cancel any in-flight generation before switching modes
+		if (hasActiveStream || inferenceStore.isGenerating) {
+			await handleCancelGeneration();
+		}
+
 		modeStore.setActiveMode(mode);
 	}
 
