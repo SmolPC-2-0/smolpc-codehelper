@@ -842,6 +842,8 @@ spec = importlib.util.spec_from_file_location("smolpc_main_runtime", r"{path}")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
+# get_office_path reads os.environ at call time, so setting this after import
+# keeps the test setup explicit and local to this runner.
 os.environ["SMOLPC_LIBREOFFICE_OFFICE_PATH"] = r"{soffice_path}"
 resolved = module.get_python_path(module.get_office_path())
 sys.stdout.write(resolved)
@@ -865,6 +867,70 @@ sys.stdout.write(resolved)
         let resolved_canonical = fs::canonicalize(resolved).expect("canonical resolved path");
         let expected_canonical =
             fs::canonicalize(office_python_path).expect("canonical expected path");
+        assert_eq!(resolved_canonical, expected_canonical);
+    }
+
+    #[test]
+    fn main_runtime_falls_back_to_runtime_python_when_office_python_missing() {
+        let tempdir = tempdir().expect("tempdir");
+        let office_program_dir = tempdir.path().join("office").join("program");
+        fs::create_dir_all(&office_program_dir).expect("create office program dir");
+
+        #[cfg(windows)]
+        let soffice_path = office_program_dir.join("soffice.exe");
+        #[cfg(not(windows))]
+        let soffice_path = office_program_dir.join("soffice");
+
+        write_file(&soffice_path, "");
+
+        let runner_path = tempdir.path().join("resolve_helper_python_fallback.py");
+        write_file(
+            &runner_path,
+            &format!(
+                r#"
+import importlib.util
+import json
+import os
+import sys
+
+spec = importlib.util.spec_from_file_location("smolpc_main_runtime", r"{path}")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+os.environ["SMOLPC_LIBREOFFICE_OFFICE_PATH"] = r"{soffice_path}"
+resolved = module.get_python_path(module.get_office_path())
+sys.stdout.write(json.dumps({{"resolved": resolved, "expected": sys.executable}}))
+"#,
+                path = main_script_path().display(),
+                soffice_path = soffice_path.display(),
+            ),
+        );
+
+        let output = Command::new(python_command())
+            .arg(&runner_path)
+            .output()
+            .expect("run helper python fallback resolver");
+        assert!(
+            output.status.success(),
+            "helper python fallback resolver failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let payload: Value =
+            serde_json::from_slice(&output.stdout).expect("parse helper python fallback payload");
+        let resolved = PathBuf::from(
+            payload["resolved"]
+                .as_str()
+                .expect("resolved helper python path"),
+        );
+        let expected = PathBuf::from(
+            payload["expected"]
+                .as_str()
+                .expect("runtime python executable path"),
+        );
+
+        let resolved_canonical = fs::canonicalize(resolved).expect("canonical resolved path");
+        let expected_canonical = fs::canonicalize(expected).expect("canonical expected path");
         assert_eq!(resolved_canonical, expected_canonical);
     }
 }

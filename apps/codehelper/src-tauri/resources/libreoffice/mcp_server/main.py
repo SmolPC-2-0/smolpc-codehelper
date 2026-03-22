@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional, TextIO
+from typing import IO, Optional
 
 HELPER_PORT = 8765
 OFFICE_PORT = 2002
@@ -26,7 +26,7 @@ HELPER_STDERR_LOG_FILENAME = "helper.stderr.log"
 office_process: Optional[subprocess.Popen] = None
 helper_process: Optional[subprocess.Popen] = None
 server_process: Optional[subprocess.Popen] = None
-helper_stderr_handle: Optional[TextIO] = None
+helper_stderr_handle: Optional[IO[str]] = None
 
 
 def configure_logging() -> None:
@@ -140,12 +140,16 @@ def get_python_path(soffice_path: str) -> str:
 
     if system == "windows":
         candidate_paths.append(office_program_dir / "python.exe")
-        for python_core_dir in office_program_dir.glob("python-core-*"):
+        for python_core_dir in sorted(
+            office_program_dir.glob("python-core-*"), reverse=True
+        ):
             candidate_paths.append(python_core_dir / "bin" / "python.exe")
     else:
         candidate_paths.append(office_program_dir / "python3")
         candidate_paths.append(office_program_dir / "python")
-        for python_core_dir in office_program_dir.glob("python-core-*"):
+        for python_core_dir in sorted(
+            office_program_dir.glob("python-core-*"), reverse=True
+        ):
             candidate_paths.append(python_core_dir / "bin" / "python3")
             candidate_paths.append(python_core_dir / "bin" / "python")
         candidate_paths.append(office_program_dir.parent / "Resources" / "python")
@@ -161,9 +165,10 @@ def get_python_path(soffice_path: str) -> str:
 
     fallback = sys.executable
     logging.warning(
-        "Unable to locate LibreOffice Python next to %s; falling back to runtime interpreter %s",
+        "Unable to locate LibreOffice Python next to %s; falling back to runtime interpreter %s. Set %s to override.",
         soffice_path,
         fallback,
+        HELPER_PYTHON_PATH_ENV,
     )
     return fallback
 
@@ -177,7 +182,7 @@ def resolve_log_path(filename: str) -> Path:
                 raise ValueError(f"{MCP_LOG_DIR_ENV} must be an absolute path")
             log_dir.mkdir(parents=True, exist_ok=True)
             return log_dir.resolve(strict=True) / filename
-        except (OSError, RuntimeError, ValueError):
+        except (OSError, ValueError):
             logging.warning(
                 "Unable to use %s=%s for log output; falling back to runtime directory",
                 MCP_LOG_DIR_ENV,
@@ -185,7 +190,6 @@ def resolve_log_path(filename: str) -> Path:
             )
 
     module_dir = Path(__file__).resolve().parent
-    module_dir.mkdir(parents=True, exist_ok=True)
     return module_dir / filename
 
 
