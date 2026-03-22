@@ -4538,7 +4538,6 @@ dependencies = [
  "dirs",
  "futures-util",
  "half",
- "hardware-query",
  "libloading 0.8.9",
  "log",
  "ndarray",

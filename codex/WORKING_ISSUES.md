@@ -11,17 +11,12 @@ Master roadmap: issue #143
 
 ### 1) Intermittent hardware detection failure (WMI hang)
 
-- Status: Open
+- Status: Resolved (codex/issue-123-hardware-query-hang, commit 37c79b3)
 - Severity: Medium (non-blocking — retry works)
 - Context:
-  - `hardware_query::HardwareInfo::query()` uses WMI which intermittently hangs on `CoSetProxyBlanket` in async contexts.
-  - The Tauri app's detector has a `spawn_blocking` + timeout wrapper, but the hang can still occur.
-  - Engine host has its own 9.5s probe timeout guard.
-  - When it fails, the hardware panel shows no data and backend probing may be incomplete.
-  - Subsequent app restarts usually succeed.
-- Next steps:
-  - Consider replacing WMI-based detection with `sysinfo` for the Tauri app (same fix applied to the benchmark CLI).
-  - Investigate COM apartment model conflicts with tokio runtime.
+  - Tauri hardware detection no longer calls `hardware_query::HardwareInfo::query()` or WMI/COM paths.
+  - Detection now uses `sysinfo` for CPU, memory, and storage and returns safe GPU/NPU fallbacks.
+  - Engine host retains its independent 9.5s probe timeout guard for startup probing.
 
 ### 2) NPU (OpenVINO) — qwen2.5 works, qwen3-4b fails
 
@@ -68,6 +63,9 @@ Master roadmap: issue #143
 
 ## Recently Resolved
 
+- **Issue #142 state module split polish** (2026-03-22)
+  - Status: Resolved (codex/issue-142-state-module-split, commit d3b5c26)
+  - Scope: Split `state.rs` by extracting model loading flow (`model_loading.rs`), startup orchestration (`startup.rs`), and runtime adapter builders (`adapters.rs`) while preserving behavior and checks.
 - **Issue #137 memory-aware degradation (P1)** (2026-03-22)
   - Status: Resolved (codex/issue-137-memory-pressure, commit ab63120)
   - Scope: Added runtime memory-pressure polling with warnings, minimized-state critical auto-unload, memory-impact model labels, and explicit OOM fallback guidance toward smaller models.

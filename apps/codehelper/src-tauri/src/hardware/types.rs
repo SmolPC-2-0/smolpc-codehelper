@@ -1,8 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-// Re-export hardware-query's CPUFeature for direct use
-pub use hardware_query::CPUFeature;
-
 /// Complete hardware information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HardwareInfo {
@@ -23,7 +20,7 @@ pub struct CpuInfo {
     pub cores_physical: usize,
     pub cores_logical: usize,
     pub frequency_mhz: Option<u32>,
-    pub features: Vec<CPUFeature>,
+    pub features: Vec<String>,
     pub cache_l1_kb: Option<u32>,
     pub cache_l2_kb: Option<u32>,
     pub cache_l3_kb: Option<u32>,

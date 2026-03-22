@@ -1,12 +1,15 @@
+mod adapters;
 mod artifacts;
 mod auth;
 mod chat;
 mod config;
+mod model_loading;
 mod openvino;
 mod probe;
-mod runtime_bundles;
 mod routes;
+mod runtime_bundles;
 mod selection;
+mod startup;
 mod state;
 mod types;
 
