@@ -82,7 +82,7 @@ pub fn build_local_fallback_summary(tool_result: &ToolExecutionResultDto) -> Str
             );
         }
 
-        return format!("Found {} document(s).", doc_count);
+        return format!("Found {doc_count} document(s).");
     }
 
     if text.len() <= 280 {

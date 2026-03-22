@@ -143,8 +143,7 @@ fn build_summary_messages(
         EngineChatMessage {
             role: "system".to_string(),
             content: format!(
-                "You are the unified LibreOffice {} assistant. A document tool has already run successfully. Summarize the result for the user in 2 or 3 short sentences. Plain text only. Do not suggest replaying the action. Do not mention undo.",
-                label
+                "You are the unified LibreOffice {label} assistant. A document tool has already run successfully. Summarize the result for the user in 2 or 3 short sentences. Plain text only. Do not suggest replaying the action. Do not mention undo."
             ),
         },
         EngineChatMessage {

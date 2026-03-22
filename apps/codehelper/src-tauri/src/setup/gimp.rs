@@ -390,11 +390,11 @@ fn resolve_gimp_plugin_target_dir(_gimp_path: &Path) -> Result<PathBuf, String> 
             .ok_or_else(|| {
                 "APPDATA is unavailable, so the GIMP profile root cannot be resolved.".to_string()
             })?;
-        return Ok(appdata
+        Ok(appdata
             .join("GIMP")
             .join("3.0")
             .join("plug-ins")
-            .join("gimp-mcp-plugin"));
+            .join("gimp-mcp-plugin"))
     }
 
     #[cfg(target_os = "macos")]
