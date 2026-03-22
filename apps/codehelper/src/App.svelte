@@ -396,9 +396,18 @@ Teaching rules:
 								content: `Error: ${event.message}`
 							});
 							break;
-						case 'complete':
+						case 'complete': {
+							handledByEventStream = true;
+							const activeMessage = chatsStore.chats
+								.find((chat) => chat.id === chatId)
+								?.messages.find((message) => message.id === messageId);
+							const reply = event.response.reply.trim();
+							chatsStore.updateMessage(chatId, messageId, {
+								content: reply || activeMessage?.content || 'Done.'
+							});
 							// TODO: wire up event.response.undoable for undo support (#132)
 							break;
+						}
 					}
 				});
 			}
