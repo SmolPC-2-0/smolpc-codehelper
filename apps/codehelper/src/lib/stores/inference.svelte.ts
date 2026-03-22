@@ -14,6 +14,8 @@ import type {
 	InferenceCancelState,
 	InferenceChatMessage,
 	InferenceBackend,
+	MemoryPressureRequest,
+	MemoryPressureStatus,
 	InferenceRuntimeMode,
 	InferenceStatus,
 	StartupModeDto
@@ -39,6 +41,7 @@ let lastMetrics = $state<GenerationMetrics | null>(null);
 let backendStatus = $state<BackendStatus | null>(null);
 let runtimeMode = $state<InferenceRuntimeMode>('auto');
 let engineHealthy = $state(true);
+let memoryPressure = $state<MemoryPressureStatus | null>(null);
 let cancelTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let cancelTimeoutSessionId: number | null = null;
 let generationSessionCounter = 0;
@@ -184,6 +187,9 @@ export const inferenceStore = {
 	get engineHealthy() {
 		return engineHealthy;
 	},
+	get memoryPressure() {
+		return memoryPressure;
+	},
 
 	// Get status object for display
 	get status(): InferenceStatus {
@@ -295,6 +301,24 @@ export const inferenceStore = {
 		} catch {
 			engineHealthy = false;
 			return false;
+		}
+	},
+
+	async evaluateMemoryPressure(
+		request: MemoryPressureRequest = {}
+	): Promise<MemoryPressureStatus | null> {
+		try {
+			const payload = await invoke<MemoryPressureStatus>('evaluate_memory_pressure', {
+				request: {
+					activeMode: request.activeMode ?? null,
+					appMinimized: Boolean(request.appMinimized)
+				}
+			});
+			memoryPressure = payload;
+			return payload;
+		} catch (e) {
+			console.warn('Failed to evaluate memory pressure:', e);
+			return null;
 		}
 	},
 

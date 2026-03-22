@@ -3,11 +3,12 @@ use smolpc_engine_client::{
     EngineConnectOptions, RuntimeModePreference,
 };
 use smolpc_engine_core::inference::backend::{BackendStatus, CheckModelResponse};
-use smolpc_engine_core::models::registry::ModelDefinition;
+use smolpc_engine_core::models::registry::{ModelDefinition, ModelRegistry};
 use smolpc_engine_core::{GenerationConfig, GenerationMetrics};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
+use sysinfo::System;
 use tauri::ipc::Channel;
 use tauri::Manager;
 use tokio::sync::Mutex;
@@ -15,6 +16,9 @@ use tokio::sync::Mutex;
 const DEFAULT_ENGINE_PORT: u16 = 19432;
 const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
 const SHARED_MODELS_DIR: &str = "models";
+const MEMORY_WARNING_THRESHOLD_GB: f64 = 1.0;
+const MEMORY_CRITICAL_THRESHOLD_GB: f64 = 0.6;
+const HEAVY_MODE_ADVISORY_THRESHOLD_GB: f64 = 2.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RuntimeClientConfig {
@@ -43,6 +47,29 @@ pub struct InferenceState {
 pub struct ChatMessageInput {
     pub role: String,
     pub content: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct MemoryPressureRequest {
+    pub active_mode: Option<String>,
+    pub app_minimized: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct MemoryPressureStatus {
+    pub total_gb: f64,
+    pub available_gb: f64,
+    pub level: String,
+    pub threshold_warning_gb: f64,
+    pub threshold_critical_gb: f64,
+    pub current_model_id: Option<String>,
+    pub current_model_estimated_ram_gb: Option<f32>,
+    pub recommended_model_id: Option<String>,
+    pub model_switch_recommended: bool,
+    pub heavy_mode_active: bool,
+    pub auto_unloaded: bool,
+    pub message: Option<String>,
 }
 
 impl Default for InferenceState {
@@ -126,6 +153,139 @@ fn format_runtime_mode_switch_failure(
         ),
         None => format!("Runtime mode switch failed: {switch_error}"),
     }
+}
+
+fn sysinfo_memory_values_are_bytes(total_raw: u64) -> bool {
+    // sysinfo may expose bytes (newer releases) or KiB (older releases).
+    // 1e9 safely separates common total-RAM values across the two units.
+    total_raw > 1_000_000_000
+}
+
+fn raw_memory_to_gb(raw: u64, values_are_bytes: bool) -> f64 {
+    if values_are_bytes {
+        raw as f64 / (1024.0 * 1024.0 * 1024.0)
+    } else {
+        raw as f64 / (1024.0 * 1024.0)
+    }
+}
+
+fn sample_system_memory_gb() -> (f64, f64) {
+    let mut system = System::new();
+    system.refresh_memory();
+    let total_raw = system.total_memory();
+    let available_raw = system.available_memory();
+    let values_are_bytes = sysinfo_memory_values_are_bytes(total_raw);
+    (
+        raw_memory_to_gb(total_raw, values_are_bytes),
+        raw_memory_to_gb(available_raw, values_are_bytes),
+    )
+}
+
+fn classify_memory_level(available_gb: f64) -> &'static str {
+    if available_gb < MEMORY_CRITICAL_THRESHOLD_GB {
+        "critical"
+    } else if available_gb < MEMORY_WARNING_THRESHOLD_GB {
+        "warning"
+    } else {
+        "normal"
+    }
+}
+
+fn normalize_mode_id(mode: Option<&str>) -> Option<String> {
+    mode.and_then(|value| {
+        let trimmed = value.trim().to_ascii_lowercase();
+        (!trimmed.is_empty()).then_some(trimmed)
+    })
+}
+
+fn is_heavy_host_mode(mode: Option<&str>) -> bool {
+    matches!(normalize_mode_id(mode).as_deref(), Some("gimp" | "blender"))
+}
+
+fn smallest_model_id() -> Option<String> {
+    ModelRegistry::available_models()
+        .into_iter()
+        .min_by(|a, b| {
+            a.estimated_runtime_ram_gb
+                .partial_cmp(&b.estimated_runtime_ram_gb)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|model| model.id)
+}
+
+fn current_model_estimated_ram_gb(current_model_id: Option<&str>) -> Option<f32> {
+    current_model_id
+        .and_then(ModelRegistry::get_model)
+        .map(|model| model.estimated_runtime_ram_gb)
+}
+
+fn should_recommend_model_switch(
+    level: &str,
+    available_gb: f64,
+    current_model_id: Option<&str>,
+    recommended_model_id: Option<&str>,
+    heavy_mode_active: bool,
+) -> bool {
+    let Some(recommended_model_id) = recommended_model_id else {
+        return false;
+    };
+    let Some(current_model_id) = current_model_id else {
+        return false;
+    };
+    if current_model_id == recommended_model_id {
+        return false;
+    }
+
+    level != "normal" || (heavy_mode_active && available_gb < HEAVY_MODE_ADVISORY_THRESHOLD_GB)
+}
+
+fn build_memory_pressure_message(
+    available_gb: f64,
+    level: &str,
+    recommended_model_id: Option<&str>,
+    model_switch_recommended: bool,
+    heavy_mode_active: bool,
+    auto_unloaded: bool,
+) -> Option<String> {
+    let recommendation = recommended_model_id
+        .map(|model_id| format!("Switch to '{model_id}' for lower memory usage."))
+        .unwrap_or_else(|| "Close other heavy apps and retry.".to_string());
+
+    if auto_unloaded {
+        return Some(format!(
+            "Available RAM is {:.1} GB and the app was minimized, so the model was unloaded to avoid instability. {}",
+            available_gb, recommendation
+        ));
+    }
+
+    if level == "critical" {
+        return Some(format!(
+            "Available RAM is critically low ({:.1} GB). {}",
+            available_gb, recommendation
+        ));
+    }
+
+    if level == "warning" {
+        if model_switch_recommended {
+            return Some(format!(
+                "Available RAM is low ({:.1} GB). {}",
+                available_gb, recommendation
+            ));
+        }
+        return Some(format!(
+            "Available RAM is low ({:.1} GB). Close heavy apps to avoid generation failures.",
+            available_gb
+        ));
+    }
+
+    if heavy_mode_active && model_switch_recommended {
+        return Some(format!(
+            "Blender/GIMP mode is active with {:.1} GB free RAM. {}",
+            available_gb, recommendation
+        ));
+    }
+
+    None
 }
 
 pub(super) async fn resolve_client(
@@ -581,6 +741,79 @@ pub async fn is_generating(
     Ok(status.generating)
 }
 
+#[tauri::command]
+pub async fn evaluate_memory_pressure(
+    request: MemoryPressureRequest,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, InferenceState>,
+) -> Result<MemoryPressureStatus, String> {
+    let (total_gb, available_gb) = sample_system_memory_gb();
+    let level = classify_memory_level(available_gb).to_string();
+    let heavy_mode_active = is_heavy_host_mode(request.active_mode.as_deref());
+
+    let mut current_model_id = None;
+    let mut generating = false;
+    if let Ok(client) = resolve_client(&app_handle, &state, false).await {
+        if let Ok(status) = client.status().await {
+            generating = status.generating;
+            current_model_id = status.current_model;
+        }
+    }
+
+    let recommended_model_id = smallest_model_id();
+    let model_switch_recommended = should_recommend_model_switch(
+        &level,
+        available_gb,
+        current_model_id.as_deref(),
+        recommended_model_id.as_deref(),
+        heavy_mode_active,
+    );
+
+    let mut auto_unloaded = false;
+    if request.app_minimized && level == "critical" && !generating && current_model_id.is_some() {
+        if let Ok(client) = resolve_client(&app_handle, &state, false).await {
+            match client.unload_model(false).await {
+                Ok(()) => {
+                    *state.desired_model.lock().await = None;
+                    current_model_id = None;
+                    auto_unloaded = true;
+                }
+                Err(error) => {
+                    log::warn!(
+                        "Failed to auto-unload model during critical memory pressure: {error}"
+                    );
+                }
+            }
+        }
+    }
+
+    let current_model_estimated_ram_gb =
+        current_model_estimated_ram_gb(current_model_id.as_deref());
+    let message = build_memory_pressure_message(
+        available_gb,
+        &level,
+        recommended_model_id.as_deref(),
+        model_switch_recommended,
+        heavy_mode_active,
+        auto_unloaded,
+    );
+
+    Ok(MemoryPressureStatus {
+        total_gb,
+        available_gb,
+        level,
+        threshold_warning_gb: MEMORY_WARNING_THRESHOLD_GB,
+        threshold_critical_gb: MEMORY_CRITICAL_THRESHOLD_GB,
+        current_model_id,
+        current_model_estimated_ram_gb,
+        recommended_model_id,
+        model_switch_recommended,
+        heavy_mode_active,
+        auto_unloaded,
+        message,
+    })
+}
+
 /// Resolve a client suitable for generation, ensuring the engine is started.
 /// Used by addon mode providers (GIMP, Blender, LibreOffice).
 pub(crate) async fn resolve_generation_client(
@@ -663,5 +896,43 @@ mod tests {
             desired_model_to_restore(Some("qwen2.5-1.5b-instruct"), Some("qwen2.5-1.5b-instruct")),
             None
         );
+    }
+
+    #[test]
+    fn classify_memory_level_uses_warning_and_critical_thresholds() {
+        assert_eq!(
+            classify_memory_level(MEMORY_WARNING_THRESHOLD_GB + 0.01),
+            "normal"
+        );
+        assert_eq!(
+            classify_memory_level(MEMORY_WARNING_THRESHOLD_GB - 0.01),
+            "warning"
+        );
+        assert_eq!(
+            classify_memory_level(MEMORY_CRITICAL_THRESHOLD_GB - 0.01),
+            "critical"
+        );
+    }
+
+    #[test]
+    fn heavy_mode_detection_flags_blender_and_gimp() {
+        assert!(is_heavy_host_mode(Some("blender")));
+        assert!(is_heavy_host_mode(Some("  GIMP ")));
+        assert!(!is_heavy_host_mode(Some("code")));
+    }
+
+    #[test]
+    fn memory_message_reports_auto_unload_when_triggered() {
+        let message = build_memory_pressure_message(
+            0.4,
+            "critical",
+            Some("qwen2.5-1.5b-instruct"),
+            true,
+            false,
+            true,
+        )
+        .expect("auto-unload message");
+        assert!(message.contains("was minimized"));
+        assert!(message.contains("qwen2.5-1.5b-instruct"));
     }
 }

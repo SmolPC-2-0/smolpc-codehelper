@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import BenchmarkPanel from '$lib/components/BenchmarkPanel.svelte';
 	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
@@ -36,6 +37,7 @@
 	let showSetupPanel = $state(false);
 	let isSwitchingMode = $state(false);
 	let reconnectingEngineSession = $state(false);
+	let memoryPressureNotice = $state<string | null>(null);
 
 	// Unified mode state
 	const activeMode = $derived(modeStore.activeMode);
@@ -194,6 +196,32 @@ Teaching rules:
 		if (inferenceStore.currentModel) {
 			settingsStore.setModel(inferenceStore.currentModel);
 		}
+	}
+
+	async function pollMemoryPressure() {
+		let appMinimized = false;
+		try {
+			appMinimized = await getCurrentWindow().isMinimized();
+		} catch {
+			appMinimized = false;
+		}
+
+		const snapshot = await inferenceStore.evaluateMemoryPressure({
+			activeMode: modeStore.activeMode,
+			appMinimized
+		});
+		if (!snapshot) {
+			return;
+		}
+
+		if (snapshot.auto_unloaded) {
+			if (snapshot.recommended_model_id) {
+				settingsStore.setModel(snapshot.recommended_model_id);
+			}
+			await inferenceStore.syncStatus();
+		}
+
+		memoryPressureNotice = snapshot.message;
 	}
 
 	function finalizeActiveStreamingMessage(fallbackContent: string) {
@@ -434,6 +462,7 @@ Teaching rules:
 			}
 			await modeStore.setActiveMode(mode);
 			chatsStore.setMode(mode);
+			await pollMemoryPressure();
 		} finally {
 			isSwitchingMode = false;
 		}
@@ -499,6 +528,7 @@ Teaching rules:
 			try {
 				await inferenceStore.listModels();
 				await reestablishEngineSession();
+				await pollMemoryPressure();
 			} catch (error) {
 				console.error('Failed to initialize inference session:', error);
 			}
@@ -567,15 +597,18 @@ Teaching rules:
 	// Engine health polling — immediate check + 10s interval
 	$effect(() => {
 		inferenceStore.checkHealth(); // immediate first check
+		void pollMemoryPressure();
 
 		const intervalId = setInterval(async () => {
 			const wasHealthy = inferenceStore.engineHealthy;
 			const isHealthy = await inferenceStore.checkHealth();
+			await pollMemoryPressure();
 
 			if (!wasHealthy && isHealthy && !reconnectingEngineSession) {
 				reconnectingEngineSession = true;
 				try {
 					await reestablishEngineSession();
+					await pollMemoryPressure();
 				} catch (error) {
 					console.error('Failed to restore engine session after reconnect:', error);
 				} finally {
@@ -633,6 +666,18 @@ Teaching rules:
 				class="mx-4 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-200"
 			>
 				Engine disconnected — restoring session state...
+			</div>
+		{/if}
+
+		{#if memoryPressureNotice}
+			<div
+				class={`mx-4 mt-2 rounded-lg border px-4 py-2 text-sm ${
+					inferenceStore.memoryPressure?.level === 'critical'
+						? 'border-rose-500/35 bg-rose-500/10 text-rose-200'
+						: 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+				}`}
+			>
+				{memoryPressureNotice}
 			</div>
 		{/if}
 

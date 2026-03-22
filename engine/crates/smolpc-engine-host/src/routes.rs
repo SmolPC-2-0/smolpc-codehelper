@@ -17,7 +17,7 @@ use crate::chat::{
     request_to_config, request_to_prompt, request_to_structured_messages,
     should_use_openvino_structured_messages, stream_error_code, ThinkingFilter,
 };
-use crate::config::epoch_ms;
+use crate::config::{epoch_ms, with_memory_pressure_hint};
 use crate::state::AppState;
 use crate::types::{
     ApiError, CancelOnDrop, ChatCompletionRequest, CheckModelRequest, CompletionInput,
@@ -120,7 +120,9 @@ pub(crate) async fn load(
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse { error: e }),
+                Json(ErrorResponse {
+                    error: with_memory_pressure_hint(&e, Some(&req.model_id)),
+                }),
             )
         })?;
     state
@@ -204,7 +206,15 @@ pub(crate) async fn v1_models(
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
     let data = ModelRegistry::available_models()
         .into_iter()
-        .map(|m| serde_json::json!({"id": m.id, "object": "model", "owned_by": "smolpc"}))
+        .map(|m| {
+            serde_json::json!({
+                "id": m.id,
+                "object": "model",
+                "owned_by": "smolpc",
+                "min_ram_gb": m.min_ram_gb,
+                "estimated_runtime_ram_gb": m.estimated_runtime_ram_gb,
+            })
+        })
         .collect::<Vec<_>>();
     Ok(Json(serde_json::json!({"object": "list", "data": data})))
 }
