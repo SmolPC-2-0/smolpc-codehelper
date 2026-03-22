@@ -38,6 +38,7 @@
 	let isSwitchingMode = $state(false);
 	let reconnectingEngineSession = $state(false);
 	let memoryPressureNotice = $state<string | null>(null);
+	let dismissedMemoryPressureKey = $state<string | null>(null);
 
 	// Unified mode state
 	const activeMode = $derived(modeStore.activeMode);
@@ -215,13 +216,32 @@ Teaching rules:
 		}
 
 		if (snapshot.auto_unloaded) {
-			if (snapshot.recommended_model_id) {
-				settingsStore.setModel(snapshot.recommended_model_id);
-			}
 			await inferenceStore.syncStatus();
 		}
 
-		memoryPressureNotice = snapshot.message;
+		const notice = snapshot.message;
+		if (!notice) {
+			memoryPressureNotice = null;
+			dismissedMemoryPressureKey = null;
+			return;
+		}
+
+		const noticeKey = `${snapshot.level}:${snapshot.auto_unloaded ? '1' : '0'}:${snapshot.recommended_model_id ?? ''}:${notice}`;
+		if (dismissedMemoryPressureKey === noticeKey) {
+			memoryPressureNotice = null;
+			return;
+		}
+
+		memoryPressureNotice = notice;
+	}
+
+	function dismissMemoryPressureNotice() {
+		const snapshot = inferenceStore.memoryPressure;
+		const notice = memoryPressureNotice;
+		if (snapshot && notice) {
+			dismissedMemoryPressureKey = `${snapshot.level}:${snapshot.auto_unloaded ? '1' : '0'}:${snapshot.recommended_model_id ?? ''}:${notice}`;
+		}
+		memoryPressureNotice = null;
 	}
 
 	function finalizeActiveStreamingMessage(fallbackContent: string) {
@@ -677,7 +697,17 @@ Teaching rules:
 						: 'border-amber-500/30 bg-amber-500/10 text-amber-200'
 				}`}
 			>
-				{memoryPressureNotice}
+				<div class="flex items-start justify-between gap-3">
+					<span>{memoryPressureNotice}</span>
+					<button
+						type="button"
+						class="shrink-0 rounded border border-current/40 px-2 py-0.5 text-xs opacity-80 hover:opacity-100"
+						onclick={dismissMemoryPressureNotice}
+						aria-label="Dismiss memory warning"
+					>
+						Dismiss
+					</button>
+				</div>
 			</div>
 		{/if}
 

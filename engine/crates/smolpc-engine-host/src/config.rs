@@ -165,7 +165,6 @@ pub(crate) fn is_memory_pressure_error(error: &str) -> bool {
         "bad alloc",
         "e_outofmemory",
         "resource exhausted",
-        "oom",
     ]
     .iter()
     .any(|needle| lowered.contains(needle))

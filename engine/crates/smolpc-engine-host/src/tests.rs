@@ -980,6 +980,13 @@ use chrono::Utc;
     }
 
     #[test]
+    fn classify_startup_model_error_ignores_non_memory_substrings() {
+        let classified = classify_startup_model_error("Launcher window room resize failed");
+        assert_eq!(classified.code, "STARTUP_MODEL_LOAD_FAILED");
+        assert!(!classified.message.contains("Memory pressure detected."));
+    }
+
+    #[test]
     fn with_memory_pressure_hint_is_idempotent() {
         let hinted =
             with_memory_pressure_hint("generation failed: out of memory", Some("qwen3-4b"));

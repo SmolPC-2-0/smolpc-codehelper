@@ -56,11 +56,19 @@ pub struct MemoryPressureRequest {
     pub app_minimized: bool,
 }
 
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryPressureLevel {
+    Normal,
+    Warning,
+    Critical,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct MemoryPressureStatus {
     pub total_gb: f64,
     pub available_gb: f64,
-    pub level: String,
+    pub level: MemoryPressureLevel,
     pub threshold_warning_gb: f64,
     pub threshold_critical_gb: f64,
     pub current_model_id: Option<String>,
@@ -181,13 +189,13 @@ fn sample_system_memory_gb() -> (f64, f64) {
     )
 }
 
-fn classify_memory_level(available_gb: f64) -> &'static str {
+fn classify_memory_level(available_gb: f64) -> MemoryPressureLevel {
     if available_gb < MEMORY_CRITICAL_THRESHOLD_GB {
-        "critical"
+        MemoryPressureLevel::Critical
     } else if available_gb < MEMORY_WARNING_THRESHOLD_GB {
-        "warning"
+        MemoryPressureLevel::Warning
     } else {
-        "normal"
+        MemoryPressureLevel::Normal
     }
 }
 
@@ -203,6 +211,7 @@ fn is_heavy_host_mode(mode: Option<&str>) -> bool {
 }
 
 fn smallest_model_id() -> Option<String> {
+    // Recommendations are constrained to the static registry IDs.
     ModelRegistry::available_models()
         .into_iter()
         .min_by(|a, b| {
@@ -220,7 +229,7 @@ fn current_model_estimated_ram_gb(current_model_id: Option<&str>) -> Option<f32>
 }
 
 fn should_recommend_model_switch(
-    level: &str,
+    level: MemoryPressureLevel,
     available_gb: f64,
     current_model_id: Option<&str>,
     recommended_model_id: Option<&str>,
@@ -236,12 +245,13 @@ fn should_recommend_model_switch(
         return false;
     }
 
-    level != "normal" || (heavy_mode_active && available_gb < HEAVY_MODE_ADVISORY_THRESHOLD_GB)
+    !matches!(level, MemoryPressureLevel::Normal)
+        || (heavy_mode_active && available_gb < HEAVY_MODE_ADVISORY_THRESHOLD_GB)
 }
 
 fn build_memory_pressure_message(
     available_gb: f64,
-    level: &str,
+    level: MemoryPressureLevel,
     recommended_model_id: Option<&str>,
     model_switch_recommended: bool,
     heavy_mode_active: bool,
@@ -258,25 +268,27 @@ fn build_memory_pressure_message(
         ));
     }
 
-    if level == "critical" {
-        return Some(format!(
-            "Available RAM is critically low ({:.1} GB). {}",
-            available_gb, recommendation
-        ));
-    }
-
-    if level == "warning" {
-        if model_switch_recommended {
+    match level {
+        MemoryPressureLevel::Critical => {
             return Some(format!(
-                "Available RAM is low ({:.1} GB). {}",
+                "Available RAM is critically low ({:.1} GB). {}",
                 available_gb, recommendation
             ));
         }
-        return Some(format!(
-            "Available RAM is low ({:.1} GB). Close heavy apps to avoid generation failures.",
-            available_gb
-        ));
-    }
+        MemoryPressureLevel::Warning => {
+            if model_switch_recommended {
+                return Some(format!(
+                    "Available RAM is low ({:.1} GB). {}",
+                    available_gb, recommendation
+                ));
+            }
+            return Some(format!(
+                "Available RAM is low ({:.1} GB). Close heavy apps to avoid generation failures.",
+                available_gb
+            ));
+        }
+        MemoryPressureLevel::Normal => {}
+    };
 
     if heavy_mode_active && model_switch_recommended {
         return Some(format!(
@@ -748,12 +760,13 @@ pub async fn evaluate_memory_pressure(
     state: tauri::State<'_, InferenceState>,
 ) -> Result<MemoryPressureStatus, String> {
     let (total_gb, available_gb) = sample_system_memory_gb();
-    let level = classify_memory_level(available_gb).to_string();
+    let level = classify_memory_level(available_gb);
     let heavy_mode_active = is_heavy_host_mode(request.active_mode.as_deref());
 
+    let client = resolve_client(&app_handle, &state, false).await.ok();
     let mut current_model_id = None;
     let mut generating = false;
-    if let Ok(client) = resolve_client(&app_handle, &state, false).await {
+    if let Some(client) = client.as_ref() {
         if let Ok(status) = client.status().await {
             generating = status.generating;
             current_model_id = status.current_model;
@@ -762,7 +775,7 @@ pub async fn evaluate_memory_pressure(
 
     let recommended_model_id = smallest_model_id();
     let model_switch_recommended = should_recommend_model_switch(
-        &level,
+        level,
         available_gb,
         current_model_id.as_deref(),
         recommended_model_id.as_deref(),
@@ -770,8 +783,12 @@ pub async fn evaluate_memory_pressure(
     );
 
     let mut auto_unloaded = false;
-    if request.app_minimized && level == "critical" && !generating && current_model_id.is_some() {
-        if let Ok(client) = resolve_client(&app_handle, &state, false).await {
+    if request.app_minimized
+        && level == MemoryPressureLevel::Critical
+        && !generating
+        && current_model_id.is_some()
+    {
+        if let Some(client) = client.as_ref() {
             match client.unload_model(false).await {
                 Ok(()) => {
                     *state.desired_model.lock().await = None;
@@ -791,7 +808,7 @@ pub async fn evaluate_memory_pressure(
         current_model_estimated_ram_gb(current_model_id.as_deref());
     let message = build_memory_pressure_message(
         available_gb,
-        &level,
+        level,
         recommended_model_id.as_deref(),
         model_switch_recommended,
         heavy_mode_active,
@@ -902,16 +919,45 @@ mod tests {
     fn classify_memory_level_uses_warning_and_critical_thresholds() {
         assert_eq!(
             classify_memory_level(MEMORY_WARNING_THRESHOLD_GB + 0.01),
-            "normal"
+            MemoryPressureLevel::Normal
         );
         assert_eq!(
             classify_memory_level(MEMORY_WARNING_THRESHOLD_GB - 0.01),
-            "warning"
+            MemoryPressureLevel::Warning
         );
         assert_eq!(
             classify_memory_level(MEMORY_CRITICAL_THRESHOLD_GB - 0.01),
-            "critical"
+            MemoryPressureLevel::Critical
         );
+    }
+
+    #[test]
+    fn recommend_switch_returns_false_when_current_model_is_already_recommended() {
+        assert!(!should_recommend_model_switch(
+            MemoryPressureLevel::Warning,
+            0.8,
+            Some("qwen2.5-1.5b-instruct"),
+            Some("qwen2.5-1.5b-instruct"),
+            false,
+        ));
+    }
+
+    #[test]
+    fn recommend_switch_triggers_for_heavy_mode_even_when_level_is_normal() {
+        assert!(should_recommend_model_switch(
+            MemoryPressureLevel::Normal,
+            HEAVY_MODE_ADVISORY_THRESHOLD_GB - 0.1,
+            Some("qwen3-4b"),
+            Some("qwen2.5-1.5b-instruct"),
+            true,
+        ));
+        assert!(!should_recommend_model_switch(
+            MemoryPressureLevel::Normal,
+            HEAVY_MODE_ADVISORY_THRESHOLD_GB + 0.1,
+            Some("qwen3-4b"),
+            Some("qwen2.5-1.5b-instruct"),
+            true,
+        ));
     }
 
     #[test]
@@ -925,7 +971,7 @@ mod tests {
     fn memory_message_reports_auto_unload_when_triggered() {
         let message = build_memory_pressure_message(
             0.4,
-            "critical",
+            MemoryPressureLevel::Critical,
             Some("qwen2.5-1.5b-instruct"),
             true,
             false,
