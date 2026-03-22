@@ -181,10 +181,22 @@ impl SetupState {
             }
         }
 
-        let loaded = self
-            .host_cache_path()
-            .as_deref()
-            .and_then(Self::read_persisted_cache);
+        let loaded = match self.host_cache_path() {
+            Some(path) => {
+                match tokio::task::spawn_blocking(move || {
+                    Self::read_persisted_cache(path.as_path())
+                })
+                .await
+                {
+                    Ok(loaded) => loaded,
+                    Err(error) => {
+                        log::warn!("Failed to join setup host cache read task: {error}");
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
 
         let mut cache = self.cache.lock().await;
         if cache.loaded_from_disk {
@@ -226,8 +238,14 @@ impl SetupState {
             }
         };
 
-        if let Err(error) = Self::write_persisted_cache(&path, &snapshot) {
-            log::warn!("{error}");
+        match tokio::task::spawn_blocking(move || {
+            Self::write_persisted_cache(path.as_path(), &snapshot)
+        })
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => log::warn!("{error}"),
+            Err(error) => log::warn!("Failed to join setup host cache write task: {error}"),
         }
     }
 }

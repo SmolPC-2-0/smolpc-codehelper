@@ -1,5 +1,6 @@
 import type { Chat, Message } from '$lib/types/chat';
 import type { AppMode } from '$lib/types/mode';
+import { composerDraftStore } from '$lib/stores/composerDraft.svelte';
 import { saveToStorage, loadFromStorage } from '$lib/utils/storage';
 
 const STORAGE_KEY = 'smolpc_chats';
@@ -51,6 +52,10 @@ function cloneChat(chat: Chat): Chat {
 
 function persistModeChats() {
 	saveToStorage(MODE_CHAT_KEY, currentChatIdByMode);
+}
+
+function draftKeyForChat(chat: Chat): string {
+	return `${chat.mode ?? 'code'}:${chat.id}`;
 }
 
 // Store object with methods
@@ -147,6 +152,7 @@ export const chatsStore = {
 				index,
 				wasCurrent: currentChatIdByMode[chatMode] === id
 			};
+			composerDraftStore.clearDraft(draftKeyForChat(chatToDelete));
 
 			chats = chats.filter((chat) => chat.id !== id);
 
@@ -217,6 +223,9 @@ export const chatsStore = {
 			currentChatIdByMode = { ...currentChatIdByMode, [chatMode]: nextChat?.id ?? null };
 			persistModeChats();
 		}
+		if (chat.archived) {
+			composerDraftStore.clearDraft(draftKeyForChat(chat));
+		}
 
 		this.persist();
 	},
@@ -250,6 +259,9 @@ export const chatsStore = {
 	},
 
 	clearAllChats() {
+		for (const chat of chats) {
+			composerDraftStore.clearDraft(draftKeyForChat(chat));
+		}
 		chats = [];
 		currentChatIdByMode = {};
 		persistModeChats();

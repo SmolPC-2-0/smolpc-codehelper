@@ -18,8 +18,7 @@ export const composerDraftStore = {
 	},
 
 	setDraft(key: string, value: string): void {
-		const nextValue = value;
-		if (!nextValue) {
+		if (!value) {
 			if (!(key in draftsByKey)) {
 				return;
 			}
@@ -30,13 +29,13 @@ export const composerDraftStore = {
 			return;
 		}
 
-		if (draftsByKey[key] === nextValue) {
+		if (draftsByKey[key] === value) {
 			return;
 		}
 
 		draftsByKey = {
 			...draftsByKey,
-			[key]: nextValue
+			[key]: value
 		};
 		persist();
 	},
