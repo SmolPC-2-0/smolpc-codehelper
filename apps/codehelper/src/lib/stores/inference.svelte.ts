@@ -609,5 +609,16 @@ export const inferenceStore = {
 	 */
 	clearError(): void {
 		error = null;
+	},
+
+	/**
+	 * Force-reset all generation state. Called when engine dies to ensure
+	 * the UI is never stuck in a "generating" state with a dead engine.
+	 */
+	forceResetGenerationState(): void {
+		clearCancelTimeout();
+		isGenerating = false;
+		cancelState = 'idle';
+		activeGenerationSessionId = 0;
 	}
 };

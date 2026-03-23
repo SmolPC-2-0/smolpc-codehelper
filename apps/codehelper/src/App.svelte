@@ -777,16 +777,19 @@ Teaching rules:
 		finalizeActiveStreamingMessage('Generation interrupted after cancel timeout.');
 	});
 
+	// When engine dies, immediately clear all generation state so the UI
+	// is never stuck. This fires before any reconnection attempt.
 	$effect(() => {
 		if (inferenceStore.engineHealthy) {
 			return;
 		}
 
-		if (!currentStreamingChatId || !currentStreamingMessageId) {
-			return;
-		}
+		// Engine is down — nothing can be generating. Clear stale state immediately.
+		inferenceStore.forceResetGenerationState();
 
-		finalizeActiveStreamingMessage('Generation interrupted while reconnecting to the engine.');
+		if (currentStreamingChatId && currentStreamingMessageId) {
+			finalizeActiveStreamingMessage('Generation interrupted — engine disconnected.');
+		}
 	});
 
 	// Startup loading screen — dismiss when engine is ready
