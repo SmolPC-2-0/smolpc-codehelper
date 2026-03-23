@@ -23,7 +23,7 @@ use crate::artifacts::{
 use crate::config::{parse_dml_device_id_env, parse_force_override};
 use crate::openvino::{
     is_blocking_openvino_probe_failure, resolve_openvino_npu_tuning, run_openvino_preflight,
-    OpenVinoPreflightResult, OpenVinoStartupProbeResult,
+    OpenVinoPreflightReady, OpenVinoPreflightResult, OpenVinoStartupProbeResult,
 };
 use crate::probe::{
     current_openvino_tuning_status, directml_required_error, directml_unavailable_reason,
@@ -36,6 +36,40 @@ use crate::types::{
     OPENVINO_CHAT_MODE_STRUCTURED, OPENVINO_PREFLIGHT_BUDGET, OPENVINO_SELECTION_PROFILE,
     OPENVINO_STARTUP_PROBE_WAIT, STARTUP_PROBE_WAIT_MS,
 };
+
+/// Outcome of evaluating the OpenVINO NPU lane for model loading.
+/// Captures all state that load_model needs from the evaluation.
+pub(crate) struct OpenVinoLaneOutcome {
+    pub preflight_state: LanePreflightState,
+    pub failure_class: Option<String>,
+    pub failure_message: Option<String>,
+    pub ready: Option<OpenVinoPreflightReady>,
+    pub reason_override: Option<DecisionReason>,
+    /// If true, a timeout or pending probe means we should NOT persist
+    /// this as a negative decision — it's a temporary fallback.
+    pub suppress_store_update: bool,
+    /// Updated persistence state if the evaluation changed it
+    /// (e.g., TemporaryFallback on timeout).
+    pub persistence_state_override: Option<DecisionPersistenceState>,
+    /// Updated selection state if the evaluation changed it
+    /// (e.g., Fallback on timeout or failure).
+    pub selection_state_override: Option<BackendSelectionState>,
+}
+
+/// Outcome of running the DirectML preflight (just the preflight, not fallback logic).
+pub(crate) enum DirectMLPreflightOutcome {
+    /// Preflight succeeded — adapter is ready.
+    Success {
+        adapter: InferenceRuntimeAdapter,
+    },
+    /// Preflight failed or timed out.
+    Failed {
+        failure_class: DirectMLFailureStage,
+        error: String,
+    },
+    /// No DirectML artifact exists for this model.
+    ArtifactMissing,
+}
 
 impl EngineState {
     pub(crate) fn openvino_cache_dir(
