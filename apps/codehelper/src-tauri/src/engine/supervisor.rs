@@ -219,6 +219,9 @@ impl<R: Runtime> EngineSupervisor<R> {
                 "Supervisor: mode switch to {mode:?} failed, reverting to {old_mode:?}"
             );
             self.runtime_config.runtime_mode = old_mode;
+            return Err(format!(
+                "Failed to switch runtime mode to {mode:?} — engine did not reach Running state"
+            ));
         }
 
         Ok(())
