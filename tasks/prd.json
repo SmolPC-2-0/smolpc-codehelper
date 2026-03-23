@@ -19,7 +19,7 @@
         "cargo check --workspace clean"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "File: engine/crates/smolpc-engine-client/src/spawn.rs. Keep all existing tests passing. The primitives must be pub so the supervisor can call them directly."
     },
     {
