@@ -253,15 +253,17 @@ Teaching rules:
 
 	async function reestablishEngineSession() {
 		const preferredModelId = resolvePreferredModelId();
+		const preferredRuntimeMode = settingsStore.runtimeModePreference;
+
+		// Pass the runtime mode preference in the startup request so the engine
+		// starts on the preferred backend in a single startup. Previously this
+		// was applied AFTER startup via setRuntimeMode which force-restarted
+		// the engine — causing double startup (#173) and stuck UI on failure (#196).
 		await inferenceStore.ensureStarted({
 			mode: 'auto',
-			startup_policy: preferredModelId ? { default_model_id: preferredModelId } : null
+			startup_policy: preferredModelId ? { default_model_id: preferredModelId } : null,
+			runtime_mode_preference: preferredRuntimeMode !== 'auto' ? preferredRuntimeMode : null
 		});
-
-		const preferredRuntimeMode = settingsStore.runtimeModePreference;
-		if (preferredRuntimeMode !== 'auto' && preferredRuntimeMode !== inferenceStore.runtimeMode) {
-			await inferenceStore.setRuntimeMode(preferredRuntimeMode, preferredModelId);
-		}
 
 		await inferenceStore.syncStatus();
 		if (inferenceStore.currentModel) {
