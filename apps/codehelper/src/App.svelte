@@ -573,16 +573,25 @@ Teaching rules:
 	async function handleOpenHostApp() {
 		if (!activeHostLaunchLabel || launchingHostApp || !canOpenHostApp) return;
 
+		const mode = activeMode;
+		let launchFailed = false;
 		hostAppLaunchError = null;
 		launchingHostApp = true;
 		try {
-			await openModeHostApp(activeMode);
-			await modeStore.refreshModeStatus(activeMode);
+			await openModeHostApp(mode);
 		} catch (error) {
+			launchFailed = true;
 			hostAppLaunchError = errorMessage(error);
 		} finally {
 			launchingHostApp = false;
 		}
+
+		if (launchFailed) return;
+
+		// Status refresh can hang for slow providers; keep the button responsive.
+		void modeStore.refreshModeStatus(mode).catch((error) => {
+			console.warn(`Failed to refresh mode status after opening ${mode}:`, error);
+		});
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
