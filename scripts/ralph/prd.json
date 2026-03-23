@@ -95,7 +95,7 @@
         "cargo check --workspace clean"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Token path: shared_runtime_dir/engine-token.txt. PID file: shared_runtime_dir/engine.pid. Spawn log: shared_runtime_dir/engine-spawn.log. Use DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP on Windows."
     },
     {
