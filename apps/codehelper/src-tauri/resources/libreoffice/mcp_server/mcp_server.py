@@ -713,7 +713,7 @@ def _odt_search_replace(file_path: str, search_text: str, replace_text: str) -> 
     for para in body.get_paragraphs():
         text = para.get_formatted_text()
         if search_text in text:
-            para.set_text(text.replace(search_text, replace_text))
+            para.text = text.replace(search_text, replace_text)
             count += 1
     if count == 0:
         raise ValueError(f"Text '{search_text}' not found in document")

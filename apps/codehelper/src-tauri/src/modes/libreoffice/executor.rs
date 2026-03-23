@@ -88,6 +88,40 @@ fn first_line_description(description: &str) -> &str {
         .unwrap_or(description.trim())
 }
 
+/// Strip optional properties from a JSON Schema `inputSchema` so the planner
+/// prompt only shows required parameters.  The small LLM struggles with many
+/// optional empty-string fields and often garbles the JSON syntax.
+fn strip_optional_properties(schema: &Value) -> Value {
+    let Some(obj) = schema.as_object() else {
+        return schema.clone();
+    };
+    let required: Vec<String> = obj
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if required.is_empty() {
+        return schema.clone();
+    }
+
+    let mut out = obj.clone();
+    if let Some(props) = obj.get("properties").and_then(Value::as_object) {
+        let filtered: serde_json::Map<String, Value> = props
+            .iter()
+            .filter(|(key, _)| required.contains(key))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        out.insert("properties".to_string(), Value::Object(filtered));
+    }
+    Value::Object(out)
+}
+
 /// Keyword-based tool pre-filter. Small models can't reliably pick from 18+
 /// tools — narrow the catalog to the best matches so the LLM only chooses
 /// between 1-4 tools.  Falls back to the full catalog when nothing matches.
@@ -203,7 +237,7 @@ fn build_planner_messages(
                 "- {}: {} inputSchema: {}",
                 tool.name,
                 first_line_description(&tool.description),
-                tool.input_schema
+                strip_optional_properties(&tool.input_schema)
             )
         })
         .collect::<Vec<_>>()
@@ -434,11 +468,82 @@ fn extract_json_candidates(raw_text: &str) -> Vec<String> {
     candidates
 }
 
+/// Attempt light repairs on common small-LLM JSON mistakes.
+/// e.g. `"title","value"` → `"title":"value"` (comma used instead of colon
+/// between key and value).
+fn repair_json(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+    while i < len {
+        // Inside a string literal, copy verbatim until closing quote.
+        if chars[i] == '"' {
+            out.push('"');
+            i += 1;
+            while i < len && chars[i] != '"' {
+                if chars[i] == '\\' && i + 1 < len {
+                    out.push(chars[i]);
+                    out.push(chars[i + 1]);
+                    i += 2;
+                } else {
+                    out.push(chars[i]);
+                    i += 1;
+                }
+            }
+            if i < len {
+                out.push('"'); // closing quote
+                i += 1;
+                // If the next non-whitespace char is `"` but we expect `:`,
+                // the LLM used `,"` or just `"` where `:` was needed.
+                let mut j = i;
+                while j < len && chars[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if j < len && chars[j] == ',' {
+                    // Peek past the comma — if the next token is `"`, this
+                    // is likely a key,value pair with comma instead of colon.
+                    let mut k = j + 1;
+                    while k < len && chars[k].is_ascii_whitespace() {
+                        k += 1;
+                    }
+                    if k < len && chars[k] == '"' {
+                        // Check if this looks like a key-value pair: the value
+                        // after the comma-separated quote should be followed by
+                        // another comma or `}`.  Heuristic: if the string after
+                        // the comma is short (empty or short value) and followed
+                        // by `,` or `}`, treat this as a `:` replacement.
+                        out.push(':');
+                        i = j + 1; // skip the comma
+                        continue;
+                    }
+                }
+            }
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 fn extract_tool_call(raw_text: &str) -> Option<ToolCall> {
     for candidate in extract_json_candidates(raw_text) {
         if let Ok(parsed) = serde_json::from_str::<Value>(&candidate) {
             if let Some(tool_call) = normalize_tool_calls(&parsed).into_iter().next() {
                 return Some(tool_call);
+            }
+        }
+    }
+
+    // Last resort: try repairing common JSON mistakes (e.g. comma-for-colon).
+    let repaired = repair_json(raw_text);
+    if repaired != raw_text {
+        for candidate in extract_json_candidates(&repaired) {
+            if let Ok(parsed) = serde_json::from_str::<Value>(&candidate) {
+                if let Some(tool_call) = normalize_tool_calls(&parsed).into_iter().next() {
+                    return Some(tool_call);
+                }
             }
         }
     }
@@ -869,6 +974,16 @@ I hope this helps!"#;
         let tool_call = extract_tool_call(raw).expect("should recover from trailing text");
         assert_eq!(tool_call.name, "add_heading");
         assert_eq!(tool_call.arguments["text"], json!("Hello"));
+    }
+
+    #[test]
+    fn extract_tool_call_repairs_comma_used_as_colon() {
+        // Exact failure from E2E: LLM used commas instead of colons for some
+        // key-value pairs in the arguments object.
+        let raw = r#"{"tool_call":{"name":"create_blank_presentation","arguments":{"filename":"test.odp","author":"","title","","keywords","","subject":""}}}"#;
+        let tool_call = extract_tool_call(raw).expect("should repair comma-for-colon");
+        assert_eq!(tool_call.name, "create_blank_presentation");
+        assert_eq!(tool_call.arguments["filename"], json!("test.odp"));
     }
 
     #[tokio::test]
