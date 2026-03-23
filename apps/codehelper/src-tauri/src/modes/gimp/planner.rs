@@ -91,7 +91,16 @@ User request: {user_text}
     );
 
     let raw = generator.generate(&prompt).await?;
-    let value = extract_json_object(&raw)?;
+    let value = match extract_json_object(&raw) {
+        Ok(value) => value,
+        Err(_) => {
+            return Ok(ToolSelection {
+                tool: fallback_selected_tool(user_text),
+                reason: "Planner output was not valid JSON. Used deterministic fallback."
+                    .to_string(),
+            });
+        }
+    };
     let tool = match value.get("tool").and_then(Value::as_str).unwrap_or("none") {
         "get_gimp_info" => SelectedTool::GetGimpInfo,
         "get_image_metadata" => SelectedTool::GetImageMetadata,
@@ -166,7 +175,22 @@ Rules:
     );
 
     let raw = generator.generate(&prompt).await?;
-    let mut plan = extract_json_object(&raw)?;
+    let mut plan = match extract_json_object(&raw) {
+        Ok(plan) => plan,
+        Err(primary_error) => {
+            let retry_prompt = format!(
+                r#"{prompt}
+
+Your previous response could not be parsed as JSON.
+Return ONLY a valid JSON object in the required format, with no prose or markdown.
+"#
+            );
+            let retry_raw = generator.generate(&retry_prompt).await?;
+            extract_json_object(&retry_raw).map_err(|secondary_error| {
+                format!("{primary_error}\nPlanner retry also failed: {secondary_error}")
+            })?
+        }
+    };
     validate_call_api_plan(&plan)?;
     if let Value::Object(ref mut object) = plan {
         object.insert("planner".to_string(), json!("engine"));
@@ -175,18 +199,145 @@ Rules:
 }
 
 fn extract_json_object(raw: &str) -> Result<Value, String> {
-    let start = raw
-        .find('{')
-        .ok_or_else(|| format!("Planner output did not contain JSON: {raw}"))?;
-    let suffix = &raw[start..];
-    let end = suffix
-        .rfind('}')
-        .map(|index| index + 1)
-        .ok_or_else(|| format!("Planner output did not contain a closing brace: {raw}"))?;
-    let json = &suffix[..end];
-    serde_json::from_str(json).map_err(|error| {
-        format!("Failed to parse planner JSON: {error}\nPlanner output was:\n{raw}")
-    })
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("Planner output was empty".to_string());
+    }
+
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        if let Some(object) = value_into_object(value) {
+            return Ok(object);
+        }
+    }
+
+    if let Some(object) = extract_first_json_object_substring(trimmed) {
+        return Ok(object);
+    }
+
+    let preview = trimmed.lines().next().unwrap_or_default();
+    Err(format!(
+        "Planner output did not contain a valid JSON object. First line: {}",
+        truncate_for_error(preview, 160)
+    ))
+}
+
+fn value_into_object(value: Value) -> Option<Value> {
+    match value {
+        Value::Object(_) => Some(value),
+        Value::Array(mut values) if values.len() == 1 && values[0].is_object() => {
+            Some(values.remove(0))
+        }
+        _ => None,
+    }
+}
+
+fn extract_first_json_object_substring(raw: &str) -> Option<Value> {
+    let mut starts = Vec::new();
+    for (index, character) in raw.char_indices() {
+        if character == '{' {
+            starts.push(index);
+        }
+    }
+
+    for start in starts {
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
+
+        for (offset, character) in raw[start..].char_indices() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                if character == '\\' {
+                    escaped = true;
+                } else if character == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+
+            match character {
+                '"' => in_string = true,
+                '{' => depth += 1,
+                '}' => {
+                    if depth == 0 {
+                        break;
+                    }
+                    depth -= 1;
+                    if depth == 0 {
+                        let end = start + offset + character.len_utf8();
+                        let candidate = &raw[start..end];
+                        if let Ok(value) = serde_json::from_str::<Value>(candidate) {
+                            if let Some(object) = value_into_object(value) {
+                                return Some(object);
+                            }
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    None
+}
+
+fn truncate_for_error(text: &str, max_chars: usize) -> String {
+    let mut truncated = String::new();
+    for (count, character) in text.chars().enumerate() {
+        if count >= max_chars {
+            truncated.push_str("...");
+            return truncated;
+        }
+        truncated.push(character);
+    }
+    truncated
+}
+
+fn fallback_selected_tool(user_text: &str) -> SelectedTool {
+    let lower = user_text.to_lowercase();
+
+    if (lower.contains("gimp") && (lower.contains("version") || lower.contains("platform")))
+        || lower.contains("what version of gimp")
+        || lower.contains("gimp info")
+    {
+        return SelectedTool::GetGimpInfo;
+    }
+
+    if lower.contains("describe") && lower.contains("image")
+        || lower.contains("what image is open")
+        || lower.contains("image metadata")
+        || lower.contains("current image")
+        || lower.contains("layers")
+    {
+        return SelectedTool::GetImageMetadata;
+    }
+
+    let edit_keywords = [
+        "draw",
+        "add",
+        "paint",
+        "resize",
+        "crop",
+        "rotate",
+        "flip",
+        "blur",
+        "sharpen",
+        "brightness",
+        "contrast",
+        "color",
+        "filter",
+        "erase",
+        "fill",
+    ];
+    if edit_keywords.iter().any(|keyword| lower.contains(keyword)) {
+        return SelectedTool::CallApi;
+    }
+
+    SelectedTool::None
 }
 
 fn validate_call_api_plan(plan: &Value) -> Result<(), String> {
@@ -242,6 +393,7 @@ fn validate_call_api_plan(plan: &Value) -> Result<(), String> {
 mod tests {
     use super::{plan_call_api, select_tool, SelectedTool, TextGenerator};
     use async_trait::async_trait;
+    use serde_json::Value;
     use std::sync::Mutex;
 
     struct MockGenerator {
@@ -286,5 +438,56 @@ mod tests {
             .await
             .expect_err("invalid plan");
         assert!(error.contains("must use the call_api tool"));
+    }
+
+    #[tokio::test]
+    async fn tool_selection_parses_json_inside_code_fence() {
+        let generator = MockGenerator {
+            responses: Mutex::new(vec![
+                "```json\n{\"tool\":\"get_image_metadata\",\"reason\":\"Need active image details\"}\n```"
+                    .to_string(),
+            ]),
+        };
+
+        let selection = select_tool(&generator, "Which image is open?")
+            .await
+            .expect("selection");
+        assert_eq!(selection.tool, SelectedTool::GetImageMetadata);
+    }
+
+    #[tokio::test]
+    async fn tool_selection_falls_back_when_output_is_not_json() {
+        let generator = MockGenerator {
+            responses: Mutex::new(vec![
+                "Use get_image_metadata because this asks about the current image.".to_string(),
+            ]),
+        };
+
+        let selection = select_tool(&generator, "What image is open right now?")
+            .await
+            .expect("selection");
+        assert_eq!(selection.tool, SelectedTool::GetImageMetadata);
+        assert!(selection.reason.contains("deterministic fallback"));
+    }
+
+    #[tokio::test]
+    async fn call_api_plan_retries_once_when_first_output_is_not_json() {
+        let generator = MockGenerator {
+            responses: Mutex::new(vec![
+                r#"{"thought":"Rotate the image 90 degrees clockwise.","explain":"To do this yourself in GIMP: open Image → Transform → Rotate 90° clockwise.","steps":[{"tool":"call_api","arguments":{"api_path":"exec","args":["pyGObject-console",["from gi.repository import Gimp, Gegl","image = Gimp.get_images()[0]","layer = image.flatten()","w = image.get_width()","h = image.get_height()","drawable = layer","image.rotate(Gimp.RotationType.DEGREES90)","Gimp.displays_flush()"]],"kwargs":{}}}]}"#.to_string(),
+                "I will rotate the image by 90 degrees.".to_string(),
+            ]),
+        };
+
+        let plan = plan_call_api(&generator, "Rotate the image 90 degrees clockwise")
+            .await
+            .expect("plan");
+        assert_eq!(plan.get("planner").and_then(Value::as_str), Some("engine"));
+        assert_eq!(
+            plan.get("steps")
+                .and_then(Value::as_array)
+                .map(|steps| steps.len()),
+            Some(1)
+        );
     }
 }
