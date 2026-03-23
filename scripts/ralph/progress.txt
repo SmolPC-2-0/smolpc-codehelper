@@ -1,0 +1,222 @@
+# Ralph Progress Log
+Started: Mon Mar 23 19:22:03 GMTST 2026
+---
+
+## Codebase Patterns
+- spawn.rs composable primitives: spawn_engine, wait_for_healthy, check_running_policy, shutdown_and_wait, kill_stale_processes, with_spawn_lock
+- RunningHostPolicyDecision has 4 variants: Reuse, Restart, SpawnNeeded, Reject(String) — SpawnNeeded means no engine is running
+- connect_or_spawn is now a convenience wrapper calling the primitives — supervisor will call them directly
+- resolve_host_binary is pub(crate) — accessible within the crate for the supervisor's spawn logic
+- EngineClient::new is pub(crate), token management via load_or_create_token in crate::token
+- EngineConnectOptions is the spawn config struct — supervisor will construct this from its own StartupConfig
+- Spawn lock (acquire_spawn_lock) is private; use with_spawn_lock for the public API
+- smolpc-engine-host has a pre-existing test failure (dev_workspace_lib_roots path mismatch) — not a regression gate
+- EngineLifecycleState lives in apps/codehelper/src-tauri/src/engine/mod.rs — tagged enum with serde(tag="state", rename_all="snake_case")
+- EngineCommand uses oneshot::Sender<Result<(), String>> for request-response pattern
+- StartupConfig wraps RuntimeModePreference, StartupMode from smolpc_engine_client
+- smolpc-code-helper lib tests have pre-existing compilation errors (missing tower crate) — not a regression gate
+- EngineSupervisorHandle uses mpsc::Sender + watch::Receiver + Arc<Mutex<Option<EngineClient>>> for cached client
+- Handle methods use oneshot channels for request-response (ensure_started, set_runtime_mode, shutdown)
+- refresh_status() is fire-and-forget (no oneshot response)
+- spawn_client_cache_watcher() must be called after handle creation to keep cached_client in sync
+- EngineSupervisor is generic over R: Runtime — needs AppHandle<R> for Tauri event emission
+- Supervisor broadcasts state via watch::Sender AND emits Tauri events via app_handle.emit("engine-state-changed", &state)
+- Supervisor uses a separate watch::Sender<Option<EngineClient>> (client_tx) to feed handle's cached_client watcher
+- PID check uses Windows API (OpenProcess/GetExitCodeProcess) — no external crate needed
+- Restart policy: 3 restarts within 5 minutes with backoff [1s, 2s, 4s] → Failed after limit
+- EngineClient::new is now pub (was pub(crate)) — supervisor constructs clients directly
+- load_or_create_token is now pub and re-exported from smolpc_engine_client — supervisor uses it for token regeneration
+- do_spawn_sequence resolves paths via app_handle.path() + env vars, same fallback chain as resolve_client in inference.rs
+- Supervisor path resolution uses crate::app_paths for bundled resource dir normalization
+- resolve_host_binary_path and resolve_models_dir are duplicated in supervisor.rs (from inference.rs) — future cleanup candidate
+- Supervisor is wired in Builder::setup() with tokio::spawn(supervisor.run()) — app.manage(handle) registers it as Tauri state
+- Exit handler: supervisor.shutdown() is primary, InferenceState.shutdown_engine() is fallback during migration
+- Both InferenceState and EngineSupervisorHandle coexist as managed state until US-009 deletes InferenceState
+- When calling a Tauri command function directly (not via invoke), you can't pass tauri::State — use &EngineSupervisorHandle directly instead
+- For non-blocking engine access (cancel, memory pressure), use supervisor.get_client_if_ready() — never wait 60s for a cancel operation
+- After US-009: InferenceState is deleted — all engine access goes through EngineSupervisorHandle exclusively
+- Exit shutdown path: supervisor.shutdown() → force_kill_engine() (no more InferenceState fallback)
+- EngineLifecycleState TS type is a discriminated union on `state` field — use `state.state` switch for exhaustive handling
+- updateLifecycleState() maps supervisor events to existing readiness/engineHealthy/error fields — new consumers can use lifecycleState directly
+- Use `eslint-disable-next-line svelte/prefer-svelte-reactivity` for non-reactive Date usage in .svelte.ts files
+- Frontend receives supervisor state via `listen('engine-state-changed')` in App.svelte onMount — no health polling
+- Banner display uses `inferenceStore.lifecycleState.state` discriminated union (crashed/failed), not engineHealthy boolean
+
+## 2026-03-23 - US-001
+- Extracted 6 pub composable primitives from monolithic connect_or_spawn
+- Made RunningHostPolicyDecision and decide_running_host_policy pub, added SpawnNeeded variant
+- Rewrote connect_or_spawn as convenience wrapper using the new primitives
+- Updated lib.rs to re-export all new public symbols
+- Files changed: engine/crates/smolpc-engine-client/src/spawn.rs, engine/crates/smolpc-engine-client/src/lib.rs
+- **Learnings for future iterations:**
+  - spawn_host was renamed to spawn_engine and now returns Ok(pid) instead of Ok(())
+  - The health wait loop had a spawn_log hint in the error message — preserved via map_err in connect_or_spawn
+  - enforce_running_host_policy combined policy decision + shutdown action; new check_running_policy separates them
+  - Tests import RunningHostPolicyDecision from crate root now (was pub(crate) before)
+  - kill_stale_engine_processes renamed to kill_stale_processes (shorter, pub)
+---
+
+## 2026-03-23 - US-002
+- Created engine/mod.rs with EngineLifecycleState enum, EngineCommand enum, StartupConfig struct
+- Added `mod engine;` to lib.rs
+- EngineLifecycleState: 6 variants (Idle, Starting, WaitingForHealth, Running, Crashed, Failed)
+- Methods: is_running(), is_terminal(), can_transition_to()
+- Tests: state transitions, serialization format, helper methods
+- Files changed: apps/codehelper/src-tauri/src/engine/mod.rs (new), apps/codehelper/src-tauri/src/lib.rs
+- **Learnings for future iterations:**
+  - Dead code warnings are expected for US-002 types — they become consumed in US-003/004
+  - smolpc-code-helper lib test compilation has pre-existing errors (tower crate missing) — use `cargo check` not `cargo test` for validation
+  - Tauri app Cargo.toml already has tokio with full features and serde — no new deps needed for the engine module
+  - can_transition_to() encodes the full valid transition graph from the spec — update it if new transitions are added
+---
+
+## 2026-03-23 - US-003
+- Created EngineSupervisorHandle in engine/handle.rs with full public API
+- Methods: new(), spawn_client_cache_watcher(), current_state(), get_client(timeout), get_client_if_ready(), ensure_started(config), set_runtime_mode(mode), shutdown(), refresh_status(), subscribe()
+- Handle is Clone: mpsc::Sender + watch::Receiver + Arc<Mutex<Option<EngineClient>>>
+- Background client cache watcher task keeps cached_client in sync via a separate watch::Receiver<Option<EngineClient>>
+- Updated engine/mod.rs to add `pub mod handle` and re-export EngineSupervisorHandle
+- Files changed: apps/codehelper/src-tauri/src/engine/handle.rs (new), apps/codehelper/src-tauri/src/engine/mod.rs
+- **Learnings for future iterations:**
+  - get_client() has fast path (check cached_client) and slow path (wait on watch::Receiver::changed())
+  - get_client() returns early with error if state is terminal (Failed) — prevents infinite wait
+  - The supervisor will need a separate watch::Sender<Option<EngineClient>> to feed the handle's client cache watcher
+  - Dead code warnings continue for US-003 types — consumed in US-004 (supervisor) and US-006 (wiring)
+  - Prettier formatting check fails pre-existing — eslint passes independently
+---
+
+## 2026-03-23 - US-004
+- Created EngineSupervisor in engine/supervisor.rs with full core loop
+- Core loop: tokio::select! with 3 arms — cmd_rx.recv(), health_interval.tick() (10s), conditional sleep(restart_delay)
+- Health check: PID alive (Windows OpenProcess API) + client.health() HTTP call
+- On health failure: transition to Crashed, clear client, schedule restart with backoff
+- Command handling: Start (updates config, begins spawn), SetRuntimeMode (shuts down + restarts), SetDesiredModel, RefreshStatus, Shutdown
+- Restart policy: max 3 restarts in 5 minutes, backoff [1s, 2s, 4s], then Failed
+- State transitions broadcast via watch::Sender + app_handle.emit("engine-state-changed")
+- do_spawn_sequence is stubbed (transitions to WaitingForHealth, awaits US-005 for real spawn)
+- Updated engine/mod.rs: added `pub mod supervisor` and `pub use supervisor::EngineSupervisor`
+- Files changed: apps/codehelper/src-tauri/src/engine/supervisor.rs (new), apps/codehelper/src-tauri/src/engine/mod.rs
+- **Learnings for future iterations:**
+  - EngineSupervisor is generic over R: Runtime because AppHandle<R> requires it for emit()
+  - Windows PID check uses extern "system" { OpenProcess, GetExitCodeProcess, CloseHandle } — no windows crate dependency needed
+  - The supervisor needs a separate watch::Sender<Option<EngineClient>> (client_tx) to feed the handle's client cache watcher — confirmed from US-003 prediction
+  - health_interval first tick completes immediately — consume it before entering the select loop to avoid a spurious health check
+  - Dead code warnings persist (supervisor not wired into Tauri managed state yet — that's US-006)
+  - handle_set_runtime_mode resets restart_count since it's user-initiated, not a crash recovery
+---
+
+## 2026-03-23 - US-005
+- Replaced stubbed do_spawn_sequence with full spawn lifecycle implementation
+- Made EngineClient::new pub (was pub(crate)) so supervisor can construct clients
+- Made load_or_create_token pub and re-exported from smolpc_engine_client
+- Implemented resolve_paths() helper using app_handle.path() + env vars (same fallback chain as resolve_client)
+- Spawn sequence: delete old token → regenerate → kill stale processes → spawn_engine → wait_for_healthy → transition to Running → restore desired_model
+- Added SpawnPaths struct and resolve_models_dir/resolve_host_binary_path helpers (duplicated from inference.rs)
+- Files changed: apps/codehelper/src-tauri/src/engine/supervisor.rs, engine/crates/smolpc-engine-client/src/client.rs, engine/crates/smolpc-engine-client/src/lib.rs, engine/crates/smolpc-engine-client/src/token.rs
+- **Learnings for future iterations:**
+  - EngineClient::new was pub(crate) — needed to be made pub for supervisor to construct clients with fresh tokens
+  - load_or_create_token was pub(crate) — needed pub + re-export for supervisor's token regeneration
+  - resolve_host_binary_path and resolve_models_dir are now duplicated between inference.rs and supervisor.rs — consolidate when InferenceState is deleted in US-009
+  - Supervisor uses app_handle.path() for Tauri path resolution — needs `use tauri::Manager` for the .path() method
+  - The spawn_engine primitive handles PID file writing internally — supervisor just stores the returned PID
+  - wait_for_healthy timeout is 30s (same as connect_or_spawn) — on failure, transition to Crashed and schedule restart
+  - Model restoration after restart is best-effort — failure leaves Running { model_id: None }
+---
+
+## 2026-03-23 - US-006
+- Wired EngineSupervisor into Tauri Builder::setup(): create mpsc(16), watch(Idle), watch(None) channels, spawn supervisor task, manage handle
+- Updated RunEvent::ExitRequested to shut down via supervisor handle (primary), with fallback to old InferenceState during migration
+- Both InferenceState and EngineSupervisorHandle coexist as Tauri managed state
+- Files changed: apps/codehelper/src-tauri/src/lib.rs
+- **Learnings for future iterations:**
+  - tokio::spawn works inside Builder::setup() closure — the Tauri async runtime is already running
+  - Supervisor needs AppHandle<R> which requires app.handle().clone() in setup
+  - Exit handler uses tauri::async_runtime::block_on for async shutdown in sync RunEvent callback
+  - fallback_shutdown_via_inference_state is generic over R: Runtime to match the run() callback signature
+  - During migration (US-006..US-009), both shutdown paths exist — supervisor is primary, InferenceState is fallback
+  - Dead code warnings for handle methods are expected until commands migrate (US-007/008)
+- Migrated commands use supervisor.get_client(60s) + set_desired_model + refresh_status pattern
+- set_desired_model() is fire-and-forget on the handle (like refresh_status)
+---
+
+## 2026-03-23 - US-007
+- Migrated 4 state-mutating Tauri commands to supervisor (Group A):
+  - engine_ensure_started: supervisor.ensure_started(config) + get_client for engine API call
+  - set_inference_runtime_mode: supervisor.set_runtime_mode() replaces complex rollback logic
+  - load_model: supervisor.get_client() + set_desired_model + refresh_status
+  - unload_model: supervisor.get_client() + set_desired_model(None) + refresh_status
+- Added set_desired_model() method to EngineSupervisorHandle (fire-and-forget)
+- Files changed: apps/codehelper/src-tauri/src/commands/engine_client_adapter.rs, apps/codehelper/src-tauri/src/commands/inference.rs, apps/codehelper/src-tauri/src/engine/handle.rs
+- **Learnings for future iterations:**
+  - engine_status still uses resolve_client (read-only, Group B for US-008) — keep the import in engine_client_adapter.rs
+  - set_inference_runtime_mode had complex rollback logic (save config, try mode, rollback on failure) — supervisor handles this internally, simplifying the command to ~20 lines
+  - load_model and unload_model used state.desired_model.lock() Mutex — replaced by supervisor.set_desired_model() fire-and-forget command
+  - engine_ensure_started still calls client.ensure_started() on the engine HTTP API after supervisor.ensure_started() — supervisor ensures engine is running, then the command tells the engine to load the model via its HTTP API
+  - Tauri commands can take multiple State<> parameters — migrated commands take State<EngineSupervisorHandle> while engine_status still takes State<InferenceState>
+---
+
+## 2026-03-23 - US-008
+- Migrated all remaining engine-touching commands to supervisor (Groups B+C+D):
+  - Group B (read-only): engine_status, list_models, get_current_model, get_inference_backend_status, check_model_readiness, check_model_exists, is_generating
+  - Group C (generation): inference_generate, inference_generate_messages, inference_cancel
+  - Group D (special): evaluate_memory_pressure (uses get_client_if_ready for non-blocking)
+  - assistant_send (3 match arms) and assistant_cancel migrated
+  - modes.rs (mode_status, mode_refresh_tools) migrated — collect_mode_status inlines engine readiness check
+- All commands now take State<EngineSupervisorHandle> instead of State<InferenceState>
+- resolve_generation_client and cached_generation_client are now unused (dead code warnings expected until US-009 deletes them)
+- ensure_desired_model_loaded is now unused — supervisor handles model restoration on restart
+- Files changed: apps/codehelper/src-tauri/src/commands/engine_client_adapter.rs, apps/codehelper/src-tauri/src/commands/inference.rs, apps/codehelper/src-tauri/src/commands/assistant.rs, apps/codehelper/src-tauri/src/commands/modes.rs
+- **Learnings for future iterations:**
+  - modes.rs called engine_status() directly (not via Tauri invoke) — can't pass tauri::State across functions, so inline the supervisor + status check instead
+  - evaluate_memory_pressure uses get_client_if_ready() (non-blocking) + set_desired_model() for auto-unload — no Mutex needed
+  - assistant_cancel uses get_client_if_ready() for non-blocking cancel — don't wait 60s to cancel
+  - After US-008, the only consumers of InferenceState are: lib.rs managed state registration, fallback shutdown handler, and the unused resolve_client/resolve_generation_client/cached_generation_client functions — all deleted in US-009
+  - Prettier lint failure is pre-existing (69 files) — not a regression gate for Rust-only changes
+---
+
+## 2026-03-23 - US-009
+- Deleted InferenceState struct and all Mutex-based engine lifecycle code from inference.rs
+- Deleted: InferenceState, RuntimeClientConfig, resolve_client, resolve_generation_client, cached_generation_client, ensure_desired_model_loaded, apply_runtime_mode_preference, apply_runtime_mode_rollback, format_runtime_mode_switch_failure, resolve_models_dir, select_models_dir, resolve_host_binary_path, desired_model_to_restore, log_host_binary_resolution, and related tests
+- Removed InferenceState managed state registration from Builder in lib.rs
+- Removed fallback_shutdown_via_inference_state — supervisor is now the sole shutdown path, with force_kill_engine as the fallback
+- engine_health_only was never implemented as a Rust command (only referenced in spec) — no migration needed
+- Files changed: apps/codehelper/src-tauri/src/commands/inference.rs, apps/codehelper/src-tauri/src/lib.rs
+- Net deletion: 456 lines removed, 5 lines added
+- **Learnings for future iterations:**
+  - engine_health_only was in the spec but never existed as a Tauri command — always verify command existence before planning migration
+  - After US-009, the only engine lifecycle path is the supervisor — no more Mutex contention possible
+  - resolve_models_dir and resolve_host_binary_path still exist in supervisor.rs (duplicated from deleted inference.rs code) — consolidation is a future cleanup candidate
+  - Dead code warnings remain for handle.current_state(), handle.subscribe(), and can_transition_to() — these are consumed by US-010/011 (frontend migration)
+  - The startup_mode field warning in StartupConfig is expected — it's read by the supervisor internally but rustc can't see through the mpsc channel
+---
+
+## 2026-03-23 - US-010
+- Added EngineLifecycleState TypeScript discriminated union type to inference.ts (6 variants matching Rust enum)
+- Added updateLifecycleState(state) method to inference.svelte.ts store
+- Added lifecycleState reactive field and getter to inference store
+- Added forceResetGenerationState() helper — clears generation UI state on crash/fail
+- Mapping: running(model_id) → ready, running(no model) → loading_model, crashed/failed → error, starting/waiting_for_health → starting
+- Files changed: apps/codehelper/src/lib/types/inference.ts, apps/codehelper/src/lib/stores/inference.svelte.ts
+- **Learnings for future iterations:**
+  - Svelte eslint rule `svelte/prefer-svelte-reactivity` catches `new Date()` in .svelte.ts files — use `eslint-disable-next-line` for non-reactive timestamps
+  - EngineLifecycleState.backend is `string | null` from Rust (Option<String>) but EngineReadinessDto.active_backend is `InferenceBackend | null` — normalize with normalizeBackendName()
+  - When creating synthetic EngineReadinessDto objects in updateLifecycleState, spread existing readiness if available to preserve attempt_id and other fields
+  - Prettier failures (69 files) are pre-existing — not a regression gate for this branch
+  - The EngineLifecycleState type is used by US-011 (Tauri event listener) — it's exported from inference.ts
+---
+
+## 2026-03-23 - US-011
+- Replaced health polling $effect (setTimeout chain + checkHealth + reestablishEngineSession) with Tauri event listener
+- Added `listen('engine-state-changed')` in onMount calling `inferenceStore.updateLifecycleState()`
+- Deleted `reconnectingEngineSession` state variable
+- Renamed `reestablishEngineSession()` to `performStartup()` (only used for initial startup + retry, no longer for reconnection)
+- Updated banner: shows "crashed" (amber) or "failed" (rose) based on lifecycleState instead of `!engineHealthy`
+- Memory pressure polling separated into standalone $effect (30s interval) — no longer tied to health polling
+- Files changed: apps/codehelper/src/App.svelte
+- **Learnings for future iterations:**
+  - `listen()` from `@tauri-apps/api/event` returns a Promise<UnlistenFn> — store the unlisten fn and call in cleanup
+  - Memory pressure polling was coupled to health polling — needs its own interval when health polling is removed
+  - `reestablishEngineSession` was shared between init and reconnection; once reconnection is removed (supervisor handles it), the function simplifies to just initial startup
+  - Banner now uses `inferenceStore.lifecycleState.state` discriminated union — no more boolean `engineHealthy` for banner display
+  - StartupLoadingScreen works unchanged because `updateLifecycleState()` already maps supervisor events to `readiness` fields
+---
