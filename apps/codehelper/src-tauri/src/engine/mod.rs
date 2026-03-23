@@ -61,6 +61,7 @@ impl EngineLifecycleState {
                 | (Self::Starting, Self::Failed { .. })
                 | (Self::WaitingForHealth, Self::Running { .. })
                 | (Self::WaitingForHealth, Self::Crashed { .. })
+                | (Self::Running { .. }, Self::Starting) // user-initiated restart (mode change)
                 | (Self::Running { .. }, Self::Running { .. })
                 | (Self::Running { .. }, Self::Crashed { .. })
                 | (Self::Crashed { .. }, Self::Starting)
@@ -182,6 +183,7 @@ mod tests {
         assert!(starting.can_transition_to(&failed));
         assert!(waiting.can_transition_to(&running));
         assert!(waiting.can_transition_to(&crashed));
+        assert!(running.can_transition_to(&starting));
         assert!(running.can_transition_to(&running));
         assert!(running.can_transition_to(&crashed));
         assert!(crashed.can_transition_to(&starting));

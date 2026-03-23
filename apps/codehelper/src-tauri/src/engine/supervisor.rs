@@ -551,6 +551,14 @@ impl<R: Runtime> EngineSupervisor<R> {
         if self.state == new_state {
             return;
         }
+        if !self.state.can_transition_to(&new_state) {
+            log::error!(
+                "Supervisor: invalid state transition {:?} -> {:?}, ignoring",
+                self.state,
+                new_state
+            );
+            return;
+        }
         log::info!(
             "Supervisor: state transition {:?} -> {:?}",
             self.state,
