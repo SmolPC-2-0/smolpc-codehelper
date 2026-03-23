@@ -822,7 +822,7 @@ mod tests {
         std::env::remove_var("SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN");
 
         let tuning = resolve_openvino_npu_tuning().expect("default tuning");
-        assert_eq!(tuning.max_prompt_len, 512);
+        assert_eq!(tuning.max_prompt_len, 1024);
         assert_eq!(tuning.min_response_len, 1024);
     }
 

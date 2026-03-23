@@ -13,9 +13,10 @@ use tokio::time::timeout;
 use crate::artifacts::build_check_model_response;
 use crate::auth::auth;
 use crate::chat::{
-    is_preformatted_chatml_single_user_message, model_has_thinking_mode, openvino_request_defaults,
-    request_to_config, request_to_prompt, request_to_structured_messages,
-    should_use_openvino_structured_messages, stream_error_code, ThinkingFilter,
+    humanize_generation_error, is_preformatted_chatml_single_user_message,
+    model_has_thinking_mode, openvino_request_defaults, request_to_config, request_to_prompt,
+    request_to_structured_messages, should_use_openvino_structured_messages, stream_error_code,
+    ThinkingFilter,
 };
 use crate::config::{epoch_ms, with_memory_pressure_hint};
 use crate::state::AppState;
@@ -336,7 +337,7 @@ pub(crate) async fn v1_chat_completions(
                 Err(e) => {
                     let _ = tx.send(StreamMessage::Error {
                         code: stream_error_code(&e),
-                        message: e,
+                        message: humanize_generation_error(&e),
                     });
                     let _ = tx.send(StreamMessage::Done);
                 }
