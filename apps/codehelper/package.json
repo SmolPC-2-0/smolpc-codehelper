@@ -19,6 +19,7 @@
 		"tauri:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-tauri-dev.ps1",
 		"tauri:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-tauri-dml.ps1",
 		"runtime:setup:openvino": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-openvino-runtime.ps1",
+		"runtime:setup:python": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-bundled-python-runtime.ps1",
 		"model:export:dml": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/export-dml-model.ps1",
 		"model:setup:qwen25-instruct": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-qwen25-instruct-model.ps1",
 		"model:setup:qwen3-4b": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-qwen3-4b-model.ps1",
