@@ -20,52 +20,26 @@ use tokio::sync::{mpsc, oneshot, watch};
 pub struct EngineSupervisorHandle {
     cmd_tx: mpsc::Sender<EngineCommand>,
     state_rx: watch::Receiver<EngineLifecycleState>,
-    /// Cached clone of the current EngineClient, updated by a background
-    /// watcher task whenever the supervisor broadcasts a new Running state.
-    /// This allows get_client_if_ready() to be synchronous.
-    cached_client: Arc<std::sync::Mutex<Option<EngineClient>>>,
+    /// Watch receiver for the current EngineClient, broadcast by the supervisor.
+    /// Wrapped in a sync Mutex so `get_client_if_ready()` can borrow it from `&self`.
+    /// The supervisor always sends the client via `client_tx` BEFORE broadcasting
+    /// the Running state via `state_tx`, so this receiver is guaranteed to have the
+    /// client available by the time `get_client()` observes Running.
+    client_rx: Arc<std::sync::Mutex<watch::Receiver<Option<EngineClient>>>>,
 }
 
 impl EngineSupervisorHandle {
     /// Create a new handle from the supervisor's channel endpoints.
-    ///
-    /// The caller must also spawn the background client-cache watcher via
-    /// [`Self::spawn_client_cache_watcher`].
     pub fn new(
         cmd_tx: mpsc::Sender<EngineCommand>,
         state_rx: watch::Receiver<EngineLifecycleState>,
+        client_rx: watch::Receiver<Option<EngineClient>>,
     ) -> Self {
         Self {
             cmd_tx,
             state_rx,
-            cached_client: Arc::new(std::sync::Mutex::new(None)),
+            client_rx: Arc::new(std::sync::Mutex::new(client_rx)),
         }
-    }
-
-    /// Spawn a background task that watches the state channel and updates
-    /// `cached_client` when the supervisor broadcasts a Running state with
-    /// a live EngineClient.
-    ///
-    /// This task exits when the watch sender is dropped (supervisor shutdown).
-    /// The `client_source` watch receiver carries the EngineClient that the
-    /// supervisor publishes alongside Running state transitions.
-    pub fn spawn_client_cache_watcher(
-        &self,
-        mut client_rx: watch::Receiver<Option<EngineClient>>,
-    ) {
-        let cached = Arc::clone(&self.cached_client);
-        tauri::async_runtime::spawn(async move {
-            loop {
-                if client_rx.changed().await.is_err() {
-                    // Sender dropped — supervisor shut down.
-                    break;
-                }
-                let new_client = client_rx.borrow().clone();
-                if let Ok(mut guard) = cached.lock() {
-                    *guard = new_client;
-                }
-            }
-        });
     }
 
     // --- Public API ---
@@ -77,20 +51,29 @@ impl EngineSupervisorHandle {
 
     /// Wait until engine reaches Running state or timeout.
     /// Returns a clone of EngineClient (Arc-based, cheap to clone).
+    ///
+    /// Watches both the state channel and the client channel via `tokio::select!`
+    /// to avoid a race where Running is observed before the client cache is populated.
     pub async fn get_client(&self, timeout: Duration) -> Result<EngineClient, String> {
         // Fast path: already running and client cached.
         if let Some(client) = self.get_client_if_ready() {
             return Ok(client);
         }
 
-        let mut rx = self.state_rx.clone();
+        let mut state_rx = self.state_rx.clone();
+        let mut client_rx = self
+            .client_rx
+            .lock()
+            .map_err(|_| "Client receiver lock poisoned".to_string())?
+            .clone();
+
         let result = tokio::time::timeout(timeout, async {
             loop {
-                // Check current state first.
+                // Check current state and client.
                 {
-                    let state = rx.borrow().clone();
+                    let state = state_rx.borrow().clone();
                     if state.is_running() {
-                        if let Some(client) = self.get_client_if_ready() {
+                        if let Some(client) = client_rx.borrow().clone() {
                             return Ok(client);
                         }
                     }
@@ -98,9 +81,18 @@ impl EngineSupervisorHandle {
                         return Err(format!("Engine is in terminal state: {state:?}"));
                     }
                 }
-                // Wait for the next state change.
-                if rx.changed().await.is_err() {
-                    return Err("Supervisor shut down while waiting for engine".to_string());
+                // Wait for either a state change or a client broadcast.
+                tokio::select! {
+                    result = state_rx.changed() => {
+                        if result.is_err() {
+                            return Err("Supervisor shut down while waiting for engine".to_string());
+                        }
+                    }
+                    result = client_rx.changed() => {
+                        if result.is_err() {
+                            return Err("Supervisor shut down while waiting for engine".to_string());
+                        }
+                    }
                 }
             }
         })
@@ -114,9 +106,9 @@ impl EngineSupervisorHandle {
         }
     }
 
-    /// Non-blocking: return client clone only if engine is currently Running.
+    /// Non-blocking: return client clone only if the supervisor has broadcast one.
     pub fn get_client_if_ready(&self) -> Option<EngineClient> {
-        self.cached_client.lock().ok()?.clone()
+        self.client_rx.lock().ok()?.borrow().clone()
     }
 
     /// Request engine startup with config. Waits for the supervisor's response.
@@ -183,27 +175,37 @@ impl EngineSupervisorHandle {
 mod tests {
     use super::*;
 
+    /// Helper: create a handle with default channels for testing.
+    fn make_handle(
+        initial_state: EngineLifecycleState,
+    ) -> (
+        EngineSupervisorHandle,
+        mpsc::Receiver<EngineCommand>,
+        watch::Sender<EngineLifecycleState>,
+        watch::Sender<Option<EngineClient>>,
+    ) {
+        let (cmd_tx, cmd_rx) = mpsc::channel(16);
+        let (state_tx, state_rx) = watch::channel(initial_state);
+        let (client_tx, client_rx) = watch::channel::<Option<EngineClient>>(None);
+        let handle = EngineSupervisorHandle::new(cmd_tx, state_rx, client_rx);
+        (handle, cmd_rx, state_tx, client_tx)
+    }
+
     #[test]
     fn handle_is_clone() {
-        let (cmd_tx, _cmd_rx) = mpsc::channel(16);
-        let (_state_tx, state_rx) = watch::channel(EngineLifecycleState::Idle);
-        let handle = EngineSupervisorHandle::new(cmd_tx, state_rx);
+        let (handle, ..) = make_handle(EngineLifecycleState::Idle);
         let _cloned = handle.clone();
     }
 
     #[test]
     fn current_state_returns_initial_state() {
-        let (cmd_tx, _cmd_rx) = mpsc::channel(16);
-        let (_state_tx, state_rx) = watch::channel(EngineLifecycleState::Idle);
-        let handle = EngineSupervisorHandle::new(cmd_tx, state_rx);
+        let (handle, ..) = make_handle(EngineLifecycleState::Idle);
         assert_eq!(handle.current_state(), EngineLifecycleState::Idle);
     }
 
     #[test]
     fn current_state_reflects_broadcast() {
-        let (cmd_tx, _cmd_rx) = mpsc::channel(16);
-        let (state_tx, state_rx) = watch::channel(EngineLifecycleState::Idle);
-        let handle = EngineSupervisorHandle::new(cmd_tx, state_rx);
+        let (handle, _cmd_rx, state_tx, _client_tx) = make_handle(EngineLifecycleState::Idle);
 
         state_tx
             .send(EngineLifecycleState::Running {
@@ -217,17 +219,21 @@ mod tests {
 
     #[test]
     fn get_client_if_ready_returns_none_when_no_client() {
-        let (cmd_tx, _cmd_rx) = mpsc::channel(16);
-        let (_state_tx, state_rx) = watch::channel(EngineLifecycleState::Idle);
-        let handle = EngineSupervisorHandle::new(cmd_tx, state_rx);
+        let (handle, ..) = make_handle(EngineLifecycleState::Idle);
         assert!(handle.get_client_if_ready().is_none());
+    }
+
+    #[test]
+    fn get_client_if_ready_returns_client_after_broadcast() {
+        let (handle, _cmd_rx, _state_tx, client_tx) = make_handle(EngineLifecycleState::Idle);
+        let client = EngineClient::new("http://127.0.0.1:19432".to_string(), "tok".to_string());
+        client_tx.send(Some(client)).expect("send client");
+        assert!(handle.get_client_if_ready().is_some());
     }
 
     #[tokio::test]
     async fn get_client_times_out_when_not_running() {
-        let (cmd_tx, _cmd_rx) = mpsc::channel(16);
-        let (_state_tx, state_rx) = watch::channel(EngineLifecycleState::Idle);
-        let handle = EngineSupervisorHandle::new(cmd_tx, state_rx);
+        let (handle, ..) = make_handle(EngineLifecycleState::Idle);
 
         let result = handle.get_client(Duration::from_millis(50)).await;
         assert!(result.is_err());
@@ -236,11 +242,9 @@ mod tests {
 
     #[tokio::test]
     async fn get_client_returns_error_on_terminal_state() {
-        let (cmd_tx, _cmd_rx) = mpsc::channel(16);
-        let (_state_tx, state_rx) = watch::channel(EngineLifecycleState::Failed {
+        let (handle, ..) = make_handle(EngineLifecycleState::Failed {
             message: "fatal".into(),
         });
-        let handle = EngineSupervisorHandle::new(cmd_tx, state_rx);
 
         let result = handle.get_client(Duration::from_secs(5)).await;
         assert!(result.is_err());
@@ -248,10 +252,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_client_returns_client_when_broadcast_before_state() {
+        let (handle, _cmd_rx, state_tx, client_tx) = make_handle(EngineLifecycleState::Idle);
+
+        // Simulate the supervisor: broadcast client BEFORE Running state.
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            let client =
+                EngineClient::new("http://127.0.0.1:19432".to_string(), "tok".to_string());
+            client_tx.send(Some(client)).expect("send client");
+            state_tx
+                .send(EngineLifecycleState::Running {
+                    backend: None,
+                    model_id: None,
+                })
+                .expect("send state");
+        });
+
+        let result = handle.get_client(Duration::from_secs(5)).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
     async fn ensure_started_sends_command() {
-        let (cmd_tx, mut cmd_rx) = mpsc::channel(16);
-        let (_state_tx, state_rx) = watch::channel(EngineLifecycleState::Idle);
-        let handle = EngineSupervisorHandle::new(cmd_tx, state_rx);
+        let (handle, mut cmd_rx, _state_tx, _client_tx) = make_handle(EngineLifecycleState::Idle);
 
         // Spawn a task to respond to the command.
         tokio::spawn(async move {
@@ -273,9 +297,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_sends_command() {
-        let (cmd_tx, mut cmd_rx) = mpsc::channel(16);
-        let (_state_tx, state_rx) = watch::channel(EngineLifecycleState::Idle);
-        let handle = EngineSupervisorHandle::new(cmd_tx, state_rx);
+        let (handle, mut cmd_rx, _state_tx, _client_tx) = make_handle(EngineLifecycleState::Idle);
 
         tokio::spawn(async move {
             if let Some(EngineCommand::Shutdown { respond_to }) = cmd_rx.recv().await {
@@ -289,9 +311,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_status_is_fire_and_forget() {
-        let (cmd_tx, mut cmd_rx) = mpsc::channel(16);
-        let (_state_tx, state_rx) = watch::channel(EngineLifecycleState::Idle);
-        let handle = EngineSupervisorHandle::new(cmd_tx, state_rx);
+        let (handle, mut cmd_rx, _state_tx, _client_tx) = make_handle(EngineLifecycleState::Idle);
 
         handle.refresh_status().await;
 
@@ -301,9 +321,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_runtime_mode_sends_command() {
-        let (cmd_tx, mut cmd_rx) = mpsc::channel(16);
-        let (_state_tx, state_rx) = watch::channel(EngineLifecycleState::Idle);
-        let handle = EngineSupervisorHandle::new(cmd_tx, state_rx);
+        let (handle, mut cmd_rx, _state_tx, _client_tx) = make_handle(EngineLifecycleState::Idle);
 
         tokio::spawn(async move {
             if let Some(EngineCommand::SetRuntimeMode { respond_to, .. }) = cmd_rx.recv().await {

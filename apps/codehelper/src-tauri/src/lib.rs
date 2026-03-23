@@ -253,8 +253,7 @@ pub fn run() {
             let (client_tx, client_rx) =
                 tokio::sync::watch::channel::<Option<EngineClient>>(None);
 
-            let handle = EngineSupervisorHandle::new(cmd_tx, state_rx);
-            handle.spawn_client_cache_watcher(client_rx);
+            let handle = EngineSupervisorHandle::new(cmd_tx, state_rx, client_rx);
 
             let supervisor = EngineSupervisor::new(
                 cmd_rx,
