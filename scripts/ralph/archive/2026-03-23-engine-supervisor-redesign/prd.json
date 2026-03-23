@@ -1,0 +1,220 @@
+{
+  "project": "SmolPC Code Helper",
+  "branchName": "ralph/engine-supervisor-redesign",
+  "description": "Replace broken resolve_client + 4-Mutex InferenceState with single-owner supervisor task using actor/handle pattern. Eliminates deadlock on engine death, fixes double-spawn at startup, adds auto-restart with backoff.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Split connect_or_spawn into composable primitives",
+      "description": "As the supervisor, I need composable spawn/health/policy primitives so I can orchestrate the engine lifecycle with fine-grained control instead of calling the monolithic connect_or_spawn.",
+      "acceptanceCriteria": [
+        "Extract spawn_engine(options) -> Result<u32> from spawn_host — spawns detached process, returns PID, does NOT wait for health",
+        "Extract wait_for_healthy(client, timeout) -> Result<()> from the health poll loop in connect_or_spawn",
+        "Extract check_running_policy(client, force_override, force_respawn) -> Result<RunningHostPolicyDecision> from enforce_running_host_policy",
+        "Extract shutdown_and_wait(client, timeout) -> Result<()> from request_engine_shutdown + wait_for_engine_down",
+        "Extract kill_stale_processes() from kill_stale_engine_processes (make pub)",
+        "Extract with_spawn_lock(dir, f) -> Result<T> wrapper around acquire_spawn_lock",
+        "connect_or_spawn still exists as convenience wrapper calling these primitives — no behavior change",
+        "cargo test -p smolpc-engine-client passes",
+        "cargo check --workspace clean"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "File: engine/crates/smolpc-engine-client/src/spawn.rs. Keep all existing tests passing. The primitives must be pub so the supervisor can call them directly."
+    },
+    {
+      "id": "US-002",
+      "title": "Create EngineLifecycleState enum and EngineCommand types",
+      "description": "As a developer, I need the state machine types so the supervisor can model lifecycle transitions explicitly.",
+      "acceptanceCriteria": [
+        "EngineLifecycleState enum with variants: Idle, Starting, WaitingForHealth, Running { backend: Option<String>, model_id: Option<String> }, Crashed { message: String, restart_count: u32 }, Failed { message: String }",
+        "Derive serde::Serialize with #[serde(tag = \"state\", rename_all = \"snake_case\")] for Tauri event emission",
+        "Derive Debug, Clone, PartialEq",
+        "Add is_running(), is_terminal(), can_transition_to(&self, next) -> bool methods",
+        "EngineCommand enum: Start { config, respond_to }, SetRuntimeMode { mode, respond_to }, SetDesiredModel { model_id }, RefreshStatus, Shutdown { respond_to }",
+        "StartupConfig struct: runtime_mode, dml_device_id, default_model_id, startup_mode",
+        "New file: apps/codehelper/src-tauri/src/engine/mod.rs (add mod engine to lib.rs)",
+        "cargo check --workspace clean"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Use tokio::sync::oneshot::Sender for respond_to fields. Import RuntimeModePreference and StartupMode from smolpc_engine_client."
+    },
+    {
+      "id": "US-003",
+      "title": "Build EngineSupervisorHandle with get_client and state access",
+      "description": "As a Tauri command handler, I need a Clone-able handle to communicate with the supervisor without any Mutex access.",
+      "acceptanceCriteria": [
+        "EngineSupervisorHandle struct with mpsc::Sender<EngineCommand> and watch::Receiver<EngineLifecycleState>",
+        "current_state() -> EngineLifecycleState — reads watch channel borrow, instant, no lock",
+        "get_client(timeout) -> Result<EngineClient, String> — waits on watch::Receiver::changed() until Running state, returns clone of cached client",
+        "get_client_if_ready() -> Option<EngineClient> — non-blocking, returns cached client only if Running",
+        "ensure_started(config) -> Result<(), String> — sends Start command via mpsc, receives response via oneshot",
+        "set_runtime_mode(mode) -> Result<(), String> — sends SetRuntimeMode command, receives response via oneshot",
+        "shutdown() -> Result<(), String> — sends Shutdown command, receives response via oneshot",
+        "refresh_status() — sends RefreshStatus command (fire-and-forget, no response needed)",
+        "Handle is Clone (mpsc::Sender and watch::Receiver are both Clone)",
+        "New file: apps/codehelper/src-tauri/src/engine/handle.rs",
+        "cargo check --workspace clean"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "EngineClient is #[derive(Clone)] with Arc-based reqwest::Client — cloning is cheap. The handle stores a cached_client: Arc<std::sync::Mutex<Option<EngineClient>>> updated by a background watcher when Running state is broadcast."
+    },
+    {
+      "id": "US-004",
+      "title": "Build EngineSupervisor core loop with health monitoring",
+      "description": "As the app, I need the supervisor background task that owns the engine lifecycle — the core select! loop with health checking and command handling.",
+      "acceptanceCriteria": [
+        "Supervisor struct owns: client (Option<EngineClient>), runtime_config, desired_model, engine_pid (Option<u32>), restart_count, last_restart_window_start",
+        "Core loop uses tokio::select! with three arms: cmd_rx.recv(), health_interval.tick() (10s), conditional sleep(restart_delay)",
+        "Health check arm: if Running state, check PID alive (OS-level) + client.health() HTTP call",
+        "On health failure: transition to Crashed, broadcast state, schedule restart",
+        "Command handling: Start, SetRuntimeMode, SetDesiredModel, RefreshStatus, Shutdown",
+        "Broadcasts state via watch::Sender after every transition",
+        "Emits Tauri events via app_handle.emit(\"engine-state-changed\", &state)",
+        "New file: apps/codehelper/src-tauri/src/engine/supervisor.rs",
+        "cargo check --workspace clean"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Use the Phase 0 primitives (spawn_engine, wait_for_healthy, etc.) from smolpc-engine-client. The supervisor task is spawned but NOT yet wired into Tauri managed state — that comes in US-006."
+    },
+    {
+      "id": "US-005",
+      "title": "Add spawn and restart logic to supervisor",
+      "description": "As the supervisor, I need to spawn the engine process, handle restarts with exponential backoff, and regenerate tokens on death.",
+      "acceptanceCriteria": [
+        "do_spawn_sequence(): resolves binary path, builds EngineConnectOptions, calls spawn_engine + wait_for_healthy using Phase 0 primitives",
+        "On Crashed -> Starting: delete old token file, regenerate via load_or_create_token, construct new EngineClient with fresh token, kill stale processes, spawn",
+        "Exponential backoff: restart delays of 1s, 2s, 4s for consecutive crashes",
+        "Max 3 restarts within 5 minutes — after limit, transition to Failed",
+        "On reaching Running: if desired_model is set, call client.load_model() to restore it",
+        "On RefreshStatus command: call client.status() and update Running state fields (backend, model_id)",
+        "Binary resolution uses same fallback chain as current resolve_host_binary_path() — works in dev and production",
+        "cargo check --workspace clean"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Token path: shared_runtime_dir/engine-token.txt. PID file: shared_runtime_dir/engine.pid. Spawn log: shared_runtime_dir/engine-spawn.log. Use DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP on Windows."
+    },
+    {
+      "id": "US-006",
+      "title": "Wire supervisor into Tauri Builder::setup and manage state",
+      "description": "As the app, I need the supervisor to start on app launch and be available as Tauri managed state alongside the existing InferenceState.",
+      "acceptanceCriteria": [
+        "In Builder::setup(): create mpsc channel (buffer=16), create watch channel (initial=Idle), spawn supervisor task, app.manage(EngineSupervisorHandle)",
+        "Supervisor receives app_handle clone for event emission and path resolution",
+        "Both InferenceState AND EngineSupervisorHandle are registered as managed state (coexist during migration)",
+        "On RunEvent::ExitRequested: send Shutdown command to supervisor (via handle or by dropping cmd_tx)",
+        "App starts, supervisor logs lifecycle transitions, engine spawns via supervisor",
+        "cargo check --workspace clean"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "File: apps/codehelper/src-tauri/src/lib.rs. The supervisor runs ALONGSIDE existing InferenceState during migration phases. Both are available to Tauri commands."
+    },
+    {
+      "id": "US-007",
+      "title": "Migrate state-mutating Tauri commands to supervisor (Group A)",
+      "description": "As the app, I need state-mutating commands to go through the supervisor first so the old resolve_client path can't kill supervisor-managed engines.",
+      "acceptanceCriteria": [
+        "engine_ensure_started: use supervisor.ensure_started(config).await instead of apply_runtime_mode_preference + resolve_client",
+        "set_inference_runtime_mode: use supervisor.set_runtime_mode(mode).await instead of resolve_client(true) + rollback",
+        "load_model: use supervisor.get_client(60s).await then client.load_model(), call supervisor.refresh_status() after",
+        "unload_model: use supervisor.get_client(60s).await then client.unload_model(), call supervisor.refresh_status() after",
+        "All four commands take State<EngineSupervisorHandle> instead of State<InferenceState>",
+        "cargo check --workspace clean",
+        "cargo clippy --workspace clean"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "These MUST migrate before read-only commands to prevent the old path from killing supervisor-managed engines. File: apps/codehelper/src-tauri/src/commands/engine_client_adapter.rs and inference.rs."
+    },
+    {
+      "id": "US-008",
+      "title": "Migrate read-only and generation Tauri commands to supervisor (Groups B+C)",
+      "description": "As the app, I need all remaining engine-touching commands to use the supervisor handle.",
+      "acceptanceCriteria": [
+        "list_models, get_current_model, get_inference_backend_status, engine_status: use supervisor.get_client(60s).await",
+        "check_model_readiness, check_model_exists, is_generating: use supervisor.get_client(60s).await",
+        "inference_generate, inference_generate_messages, inference_cancel: use supervisor.get_client(60s).await",
+        "assistant_send (3 match arms): use supervisor.get_client(60s).await",
+        "assistant_cancel: use supervisor.get_client_if_ready() (non-blocking)",
+        "All commands take State<EngineSupervisorHandle>",
+        "cargo check --workspace clean"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Files: inference.rs, engine_client_adapter.rs, assistant.rs. Remove resolve_generation_client and cached_generation_client usages."
+    },
+    {
+      "id": "US-009",
+      "title": "Migrate special-case commands and delete old InferenceState",
+      "description": "As a developer, I need the health/memory commands migrated and all old Mutex-based code removed.",
+      "acceptanceCriteria": [
+        "engine_health_only: use supervisor.current_state().is_running() — instant, no HTTP",
+        "evaluate_memory_pressure: use supervisor.get_client_if_ready() — non-blocking",
+        "Delete InferenceState struct and all methods (check_health, cached_healthy_client, shutdown_engine)",
+        "Delete resolve_client, resolve_generation_client, cached_generation_client functions",
+        "Delete ensure_desired_model_loaded, apply_runtime_mode_preference functions",
+        "Clean up all Arc<Mutex<>> imports from inference.rs",
+        "cargo check --workspace clean",
+        "cargo clippy --workspace clean — no dead code warnings"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "This is the point of no return — after this, only the supervisor pattern exists. Verify thoroughly."
+    },
+    {
+      "id": "US-010",
+      "title": "Add EngineLifecycleState TypeScript type and store update method",
+      "description": "As the frontend, I need the TypeScript type for lifecycle events and a store method to map them to existing reactive state.",
+      "acceptanceCriteria": [
+        "TypeScript type EngineLifecycleState defined in src/lib/types/inference.ts with all 6 variants (idle, starting, waiting_for_health, running, crashed, failed)",
+        "inferenceStore.updateLifecycleState(state) method added to inference.svelte.ts",
+        "Method maps: running(model_id=some) -> engineHealthy=true, isReady=true; crashed/failed -> engineHealthy=false, error=message; starting -> engineHealthy=false",
+        "forceResetGenerationState() called when transitioning to crashed or failed",
+        "svelte-check 0 errors"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Keep existing EngineReadinessDto — it's still used by engine_status and engine_ensure_started return values. The lifecycle state is a higher-level abstraction."
+    },
+    {
+      "id": "US-011",
+      "title": "Replace frontend health polling with Tauri event listener",
+      "description": "As a student, I want the UI to reactively reflect engine state changes without polling delays.",
+      "acceptanceCriteria": [
+        "Health polling $effect (setTimeout chain) deleted from App.svelte",
+        "reestablishEngineSession() function deleted",
+        "reconnectingEngineSession state variable deleted",
+        "checkHealth() invoke removed from health polling (supervisor handles it)",
+        "Tauri event listener added in onMount: listen('engine-state-changed', handler) calling inferenceStore.updateLifecycleState()",
+        "unlisten called in cleanup/onDestroy",
+        "Banner condition updated: show when lifecycleState is crashed or failed",
+        "StartupLoadingScreen shows for starting, waiting_for_health, running(model_id=null)",
+        "svelte-check 0 errors",
+        "eslint 0 errors on changed files"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Use @tauri-apps/api/event listen() function. Import EngineLifecycleState type. The initInference() function should still call ensureStarted() — it now just waits on the supervisor internally."
+    },
+    {
+      "id": "US-012",
+      "title": "Migrate launcher to shared supervisor handle",
+      "description": "As the launcher, I need to share the same engine supervisor instead of maintaining a duplicate client cache.",
+      "acceptanceCriteria": [
+        "resolve_engine_client() in orchestrator.rs replaced with supervisor.get_client(60s).await",
+        "Launcher's separate EngineClient cache deleted",
+        "Launcher's separate connect lock and runtime config deleted",
+        "LauncherState takes State<EngineSupervisorHandle> instead of managing its own client",
+        "cargo check --workspace clean"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "File: apps/codehelper/src-tauri/src/launcher/orchestrator.rs. Simple replacement — launcher is a read-only consumer."
+    }
+  ]
+}

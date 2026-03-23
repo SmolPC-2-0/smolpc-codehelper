@@ -54,7 +54,7 @@ impl EngineSupervisorHandle {
         mut client_rx: watch::Receiver<Option<EngineClient>>,
     ) {
         let cached = Arc::clone(&self.cached_client);
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             loop {
                 if client_rx.changed().await.is_err() {
                     // Sender dropped — supervisor shut down.

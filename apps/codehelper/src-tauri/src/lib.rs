@@ -262,7 +262,7 @@ pub fn run() {
                 client_tx,
                 app.handle().clone(),
             );
-            tokio::spawn(supervisor.run());
+            tauri::async_runtime::spawn(supervisor.run());
             log::info!("Engine supervisor spawned");
 
             app.manage(handle);
