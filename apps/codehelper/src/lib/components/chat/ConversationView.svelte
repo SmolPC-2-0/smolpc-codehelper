@@ -85,7 +85,15 @@
 >
 	<div class="conversation-view__inner">
 		{#if messages.length === 0}
-			<WelcomeState {mode} {modeLabel} {modeSubtitle} {suggestions} {showQuickExamples} {onSelectExample} {onToggleExamples} />
+			<WelcomeState
+				{mode}
+				{modeLabel}
+				{modeSubtitle}
+				{suggestions}
+				{showQuickExamples}
+				{onSelectExample}
+				{onToggleExamples}
+			/>
 		{:else}
 			<div class="conversation-view__messages">
 				{#each messages as message (message.id)}

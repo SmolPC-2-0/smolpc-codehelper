@@ -121,11 +121,7 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 		icon: 'table',
 		providerKind: 'mcp',
 		systemPromptKey: 'mode.calc.default',
-		suggestions: [
-			'Spreadsheet tools are planned, but this mode is not active yet.',
-			'For documents, switch to Writer.',
-			'For formulas or logic questions, Code mode may still help.'
-		],
+		suggestions: [],
 		capabilities: {
 			supportsTools: true,
 			supportsUndo: false,

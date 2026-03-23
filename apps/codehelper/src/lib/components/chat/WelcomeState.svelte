@@ -13,7 +13,15 @@
 		onToggleExamples: (show: boolean) => void;
 	}
 
-	let { mode, modeLabel, modeSubtitle, suggestions, showQuickExamples, onSelectExample, onToggleExamples }: Props = $props();
+	let {
+		mode,
+		modeLabel,
+		modeSubtitle,
+		suggestions,
+		showQuickExamples,
+		onSelectExample,
+		onToggleExamples
+	}: Props = $props();
 
 	const MODE_COPY: Record<AppMode, { chip: string; headline: string; description: string }> = {
 		code: {
@@ -56,7 +64,7 @@
 
 	function buildExampleTitle(prompt: string): string {
 		const trimmed = prompt.trim();
-		const firstClause = trimmed.split(/[.!?]/)[0]?.trim() ?? trimmed;
+		const firstClause = trimmed.split(/[.!?]/)[0]?.trim() || trimmed;
 		if (firstClause.length <= 30) {
 			return firstClause;
 		}
@@ -72,6 +80,7 @@
 			prompt
 		}))
 	);
+	const hasExamples = $derived(examples.length > 0);
 </script>
 
 <div class="welcome-state">
@@ -84,13 +93,15 @@
 		<p class="welcome-state__subtitle">{modeLabel} · {modeSubtitle}</p>
 	</div>
 
-	<div class="welcome-state__examples">
-		{#if showQuickExamples}
-			<QuickExamples {examples} {onSelectExample} onClose={() => onToggleExamples(false)} />
-		{:else}
-			<Button variant="outline" onclick={() => onToggleExamples(true)}>Try an example</Button>
-		{/if}
-	</div>
+	{#if hasExamples}
+		<div class="welcome-state__examples">
+			{#if showQuickExamples}
+				<QuickExamples {examples} {onSelectExample} onClose={() => onToggleExamples(false)} />
+			{:else}
+				<Button variant="outline" onclick={() => onToggleExamples(true)}>Try an example</Button>
+			{/if}
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -139,7 +150,7 @@
 	}
 
 	.welcome-state__subtitle {
-		color: var(--color-foreground);
+		color: var(--color-muted-foreground);
 		font-size: 0.88rem;
 	}
 
