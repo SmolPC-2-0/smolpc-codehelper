@@ -5,14 +5,14 @@
 //! `EngineClient`, runtime configuration, and restart policy — no other code
 //! touches the engine process directly.
 
+use super::{EngineCommand, EngineLifecycleState, StartupConfig};
 use crate::app_paths::{
     bundled_resource_dir_path, default_dev_bundled_resource_dir,
     select_bundled_resource_dir_resolution,
 };
-use super::{EngineCommand, EngineLifecycleState, StartupConfig};
 use smolpc_engine_client::{
-    EngineClient, EngineConnectOptions, RuntimeModePreference,
-    kill_stale_processes, load_or_create_token, spawn_engine, wait_for_healthy,
+    kill_stale_processes, load_or_create_token, spawn_engine, wait_for_healthy, EngineClient,
+    EngineConnectOptions, RuntimeModePreference,
 };
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -141,17 +141,11 @@ impl<R: Runtime> EngineSupervisor<R> {
 
     async fn handle_command(&mut self, cmd: EngineCommand) {
         match cmd {
-            EngineCommand::Start {
-                config,
-                respond_to,
-            } => {
+            EngineCommand::Start { config, respond_to } => {
                 let result = self.handle_start(config).await;
                 let _ = respond_to.send(result);
             }
-            EngineCommand::SetRuntimeMode {
-                mode,
-                respond_to,
-            } => {
+            EngineCommand::SetRuntimeMode { mode, respond_to } => {
                 let result = self.handle_set_runtime_mode(mode).await;
                 let _ = respond_to.send(result);
             }
@@ -195,10 +189,7 @@ impl<R: Runtime> EngineSupervisor<R> {
         Ok(())
     }
 
-    async fn handle_set_runtime_mode(
-        &mut self,
-        mode: RuntimeModePreference,
-    ) -> Result<(), String> {
+    async fn handle_set_runtime_mode(&mut self, mode: RuntimeModePreference) -> Result<(), String> {
         let old_mode = self.runtime_config.runtime_mode;
         self.runtime_config.runtime_mode = mode;
 
@@ -210,11 +201,8 @@ impl<R: Runtime> EngineSupervisor<R> {
         if self.state.is_running() {
             // Gracefully shut down first.
             if let Some(client) = &self.client {
-                let _ = smolpc_engine_client::shutdown_and_wait(
-                    client,
-                    Duration::from_secs(5),
-                )
-                .await;
+                let _ =
+                    smolpc_engine_client::shutdown_and_wait(client, Duration::from_secs(5)).await;
             }
         }
 
@@ -406,9 +394,7 @@ impl<R: Runtime> EngineSupervisor<R> {
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     match client.load_model(&model_id).await {
                         Ok(_) => {
-                            log::info!(
-                                "Supervisor: model {model_id} loaded successfully on retry"
-                            );
+                            log::info!("Supervisor: model {model_id} loaded successfully on retry");
                             self.refresh_running_status().await;
                         }
                         Err(e2) => {
@@ -498,9 +484,7 @@ impl<R: Runtime> EngineSupervisor<R> {
     fn schedule_restart(&mut self) {
         // Check if we're within the restart window.
         let now = Instant::now();
-        let window_start = self
-            .last_restart_window_start
-            .get_or_insert(now);
+        let window_start = self.last_restart_window_start.get_or_insert(now);
 
         if now.duration_since(*window_start) > RESTART_WINDOW {
             // Reset the window.
@@ -666,7 +650,11 @@ fn is_pid_alive(pid: u32) -> bool {
 #[cfg(target_os = "windows")]
 #[allow(dead_code)] // Used by is_pid_alive; warning is a cfg artifact.
 extern "system" {
-    fn OpenProcess(desired_access: u32, inherit_handle: i32, process_id: u32) -> *mut std::ffi::c_void;
+    fn OpenProcess(
+        desired_access: u32,
+        inherit_handle: i32,
+        process_id: u32,
+    ) -> *mut std::ffi::c_void;
     fn GetExitCodeProcess(process: *mut std::ffi::c_void, exit_code: *mut u32) -> i32;
     fn CloseHandle(object: *mut std::ffi::c_void) -> i32;
 }

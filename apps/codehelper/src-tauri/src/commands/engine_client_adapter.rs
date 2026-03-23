@@ -107,7 +107,9 @@ fn startup_mode_to_runtime_mode_with_auto_preference(
     }
 }
 
-fn runtime_mode_preference_dto_to_runtime_mode(dto: &RuntimeModePreferenceDto) -> RuntimeModePreference {
+fn runtime_mode_preference_dto_to_runtime_mode(
+    dto: &RuntimeModePreferenceDto,
+) -> RuntimeModePreference {
     match dto {
         RuntimeModePreferenceDto::Auto => RuntimeModePreference::Auto,
         RuntimeModePreferenceDto::Cpu => RuntimeModePreference::Cpu,
@@ -225,9 +227,7 @@ fn map_engine_status_to_readiness(status: &EngineStatus) -> EngineReadinessDto {
 pub async fn engine_status(
     supervisor: tauri::State<'_, EngineSupervisorHandle>,
 ) -> Result<EngineReadinessDto, String> {
-    let client = supervisor
-        .get_client(Duration::from_secs(60))
-        .await?;
+    let client = supervisor.get_client(Duration::from_secs(60)).await?;
     let status = client
         .status()
         .await
@@ -259,9 +259,7 @@ pub async fn engine_ensure_started(
 
     supervisor.ensure_started(config).await?;
 
-    let client = supervisor
-        .get_client(Duration::from_secs(60))
-        .await?;
+    let client = supervisor.get_client(Duration::from_secs(60)).await?;
 
     match client.ensure_started(startup_mode, startup_policy).await {
         Ok(status) => Ok(map_engine_status_to_readiness(&status)),

@@ -427,7 +427,10 @@ fn resolve_gimp_plugin_target_dir(_gimp_path: &Path) -> Result<PathBuf, String> 
         let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
             "HOME is unavailable, so the GIMP profile root cannot be resolved.".to_string()
         })?;
-        let gimp_root = home.join("Library").join("Application Support").join("GIMP");
+        let gimp_root = home
+            .join("Library")
+            .join("Application Support")
+            .join("GIMP");
         let version = resolve_gimp_profile_version(&gimp_root);
         return Ok(gimp_root
             .join(version)

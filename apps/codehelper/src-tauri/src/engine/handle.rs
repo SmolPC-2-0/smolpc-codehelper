@@ -159,7 +159,6 @@ impl EngineSupervisorHandle {
             .send(EngineCommand::SetDesiredModel { model_id })
             .await;
     }
-
 }
 
 #[cfg(test)]
@@ -229,8 +228,7 @@ mod tests {
         // Simulate the supervisor: broadcast client BEFORE Running state.
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(10)).await;
-            let client =
-                EngineClient::new("http://127.0.0.1:19432".to_string(), "tok".to_string());
+            let client = EngineClient::new("http://127.0.0.1:19432".to_string(), "tok".to_string());
             client_tx.send(Some(client)).expect("send client");
             state_tx
                 .send(EngineLifecycleState::Running {

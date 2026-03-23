@@ -252,38 +252,49 @@ export const inferenceStore = {
 		const timestamp = new Date().toISOString();
 
 		switch (state.state) {
-			case 'running': {
-				engineHealthy = true;
-				error = null;
-				const backend = normalizeBackendName(state.backend);
-				if (state.model_id) {
-					readiness = readiness
-						? { ...readiness, state: 'ready', active_model_id: state.model_id, active_backend: backend }
-						: {
-								attempt_id: '',
-								state: 'ready',
-								state_since: timestamp,
-								active_backend: backend,
-								active_model_id: state.model_id,
-								error_code: null,
-								error_message: null,
-								retryable: false
-							};
-				} else {
-					readiness = readiness
-						? { ...readiness, state: 'loading_model', active_model_id: null, active_backend: backend }
-						: {
-								attempt_id: '',
-								state: 'loading_model',
-								state_since: timestamp,
-								active_backend: backend,
-								active_model_id: null,
-								error_code: null,
-								error_message: null,
-								retryable: false
-							};
+			case 'running':
+				{
+					engineHealthy = true;
+					error = null;
+					const backend = normalizeBackendName(state.backend);
+					if (state.model_id) {
+						readiness = readiness
+							? {
+									...readiness,
+									state: 'ready',
+									active_model_id: state.model_id,
+									active_backend: backend
+								}
+							: {
+									attempt_id: '',
+									state: 'ready',
+									state_since: timestamp,
+									active_backend: backend,
+									active_model_id: state.model_id,
+									error_code: null,
+									error_message: null,
+									retryable: false
+								};
+					} else {
+						readiness = readiness
+							? {
+									...readiness,
+									state: 'loading_model',
+									active_model_id: null,
+									active_backend: backend
+								}
+							: {
+									attempt_id: '',
+									state: 'loading_model',
+									state_since: timestamp,
+									active_backend: backend,
+									active_model_id: null,
+									error_code: null,
+									error_message: null,
+									retryable: false
+								};
+					}
 				}
-			}
 				break;
 
 			case 'crashed':
@@ -291,7 +302,12 @@ export const inferenceStore = {
 				engineHealthy = false;
 				error = state.message;
 				readiness = readiness
-					? { ...readiness, state: 'failed', error_message: state.message, retryable: state.state === 'failed' }
+					? {
+							...readiness,
+							state: 'failed',
+							error_message: state.message,
+							retryable: state.state === 'failed'
+						}
 					: {
 							attempt_id: '',
 							state: 'failed',

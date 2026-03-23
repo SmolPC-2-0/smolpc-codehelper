@@ -1,12 +1,12 @@
 use crate::engine::EngineSupervisorHandle;
 use crate::modes::config::list_mode_configs;
 use crate::modes::registry::ModeProviderRegistry;
-use std::time::Duration;
 use crate::setup::host_apps::{detect_blender, detect_gimp, detect_libreoffice, HostAppDetection};
 use crate::setup::launch::{
     launch_blender_if_needed, launch_gimp_if_needed, launch_libreoffice_mode,
 };
 use smolpc_assistant_types::{AppMode, ModeConfigDto, ModeStatusDto, ProviderStateDto};
+use std::time::Duration;
 
 fn build_mode_status_dto(
     mode: AppMode,
@@ -93,22 +93,21 @@ async fn collect_mode_status(
     let provider_state = provider.status(mode).await?;
     let available_tools = provider.list_tools(mode).await?;
 
-    let (engine_ready, last_error) =
-        match supervisor.get_client(Duration::from_secs(60)).await {
-            Ok(client) => match client.status().await {
-                Ok(status) => {
-                    let ready = status.ready || status.current_model.is_some();
-                    let error = if !ready {
-                        status.error_message.or(status.error_code)
-                    } else {
-                        None
-                    };
-                    (ready, error)
-                }
-                Err(e) => (false, Some(format!("Failed to query engine status: {e}"))),
-            },
-            Err(error) => (false, Some(error)),
-        };
+    let (engine_ready, last_error) = match supervisor.get_client(Duration::from_secs(60)).await {
+        Ok(client) => match client.status().await {
+            Ok(status) => {
+                let ready = status.ready || status.current_model.is_some();
+                let error = if !ready {
+                    status.error_message.or(status.error_code)
+                } else {
+                    None
+                };
+                (ready, error)
+            }
+            Err(e) => (false, Some(format!("Failed to query engine status: {e}"))),
+        },
+        Err(error) => (false, Some(error)),
+    };
 
     let merged_last_error = last_error.or_else(|| {
         if matches!(provider_state.state.as_str(), "disconnected" | "error") {

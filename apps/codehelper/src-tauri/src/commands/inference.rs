@@ -341,7 +341,9 @@ pub async fn set_inference_runtime_mode(
                 .load_model(model_id)
                 .await
                 .map_err(|e| format!("Failed to load model after mode switch: {e}"))?;
-            supervisor.set_desired_model(Some(model_id.to_string())).await;
+            supervisor
+                .set_desired_model(Some(model_id.to_string()))
+                .await;
             supervisor.refresh_status().await;
         }
     }

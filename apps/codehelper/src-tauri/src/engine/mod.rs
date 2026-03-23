@@ -33,10 +33,7 @@ pub enum EngineLifecycleState {
         model_id: Option<String>,
     },
     /// Engine process died unexpectedly. Will auto-restart if under limit.
-    Crashed {
-        message: String,
-        restart_count: u32,
-    },
+    Crashed { message: String, restart_count: u32 },
     /// Too many crashes or unrecoverable error. User must click Retry.
     Failed { message: String },
 }
@@ -126,37 +123,29 @@ mod tests {
         assert!(!EngineLifecycleState::Idle.is_running());
         assert!(!EngineLifecycleState::Starting.is_running());
         assert!(!EngineLifecycleState::WaitingForHealth.is_running());
-        assert!(
-            !EngineLifecycleState::Crashed {
-                message: "oops".into(),
-                restart_count: 1,
-            }
-            .is_running()
-        );
-        assert!(
-            !EngineLifecycleState::Failed {
-                message: "done".into(),
-            }
-            .is_running()
-        );
+        assert!(!EngineLifecycleState::Crashed {
+            message: "oops".into(),
+            restart_count: 1,
+        }
+        .is_running());
+        assert!(!EngineLifecycleState::Failed {
+            message: "done".into(),
+        }
+        .is_running());
     }
 
     #[test]
     fn is_terminal_only_for_failed() {
-        assert!(
-            EngineLifecycleState::Failed {
-                message: "fatal".into(),
-            }
-            .is_terminal()
-        );
+        assert!(EngineLifecycleState::Failed {
+            message: "fatal".into(),
+        }
+        .is_terminal());
         assert!(!EngineLifecycleState::Idle.is_terminal());
-        assert!(
-            !EngineLifecycleState::Crashed {
-                message: "oops".into(),
-                restart_count: 1,
-            }
-            .is_terminal()
-        );
+        assert!(!EngineLifecycleState::Crashed {
+            message: "oops".into(),
+            restart_count: 1,
+        }
+        .is_terminal());
     }
 
     #[test]

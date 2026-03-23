@@ -28,7 +28,7 @@ use commands::inference::{
 use commands::launcher::{launcher_launch_or_focus, launcher_list_apps};
 use commands::modes::{list_modes, mode_open_host_app, mode_refresh_tools, mode_status};
 use commands::setup::{setup_prepare, setup_status};
-use engine::{EngineSupervisor, EngineSupervisorHandle, EngineLifecycleState};
+use engine::{EngineLifecycleState, EngineSupervisor, EngineSupervisorHandle};
 use launcher::orchestrator::LauncherState;
 use modes::registry::ModeProviderRegistry;
 use setup::SetupState;
@@ -248,17 +248,12 @@ pub fn run() {
             // --- Engine Supervisor Setup ---
             let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(16);
             let (state_tx, state_rx) = tokio::sync::watch::channel(EngineLifecycleState::Idle);
-            let (client_tx, client_rx) =
-                tokio::sync::watch::channel::<Option<EngineClient>>(None);
+            let (client_tx, client_rx) = tokio::sync::watch::channel::<Option<EngineClient>>(None);
 
             let handle = EngineSupervisorHandle::new(cmd_tx, state_rx, client_rx);
 
-            let supervisor = EngineSupervisor::new(
-                cmd_rx,
-                state_tx,
-                client_tx,
-                app.handle().clone(),
-            );
+            let supervisor =
+                EngineSupervisor::new(cmd_rx, state_tx, client_tx, app.handle().clone());
             tauri::async_runtime::spawn(supervisor.run());
             log::info!("Engine supervisor spawned");
 
