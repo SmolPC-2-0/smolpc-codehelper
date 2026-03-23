@@ -16,7 +16,7 @@
         "svelte-check 0 errors"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "File: apps/codehelper/src/App.svelte lines 714-718. Bug: listModels() at line 716 calls supervisor.get_client(60s) before ensureStarted(). Fix: swap the order so performStartup() runs first."
     },
     {
