@@ -111,7 +111,7 @@
         "cargo check --workspace clean"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "File: apps/codehelper/src-tauri/src/lib.rs. The supervisor runs ALONGSIDE existing InferenceState during migration phases. Both are available to Tauri commands."
     },
     {
