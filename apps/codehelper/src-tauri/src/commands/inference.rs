@@ -1,3 +1,7 @@
+use crate::app_paths::{
+    bundled_resource_dir_path, default_dev_bundled_resource_dir,
+    select_bundled_resource_dir_resolution,
+};
 use smolpc_engine_client::{
     connect_or_spawn, read_runtime_env_overrides, EngineChatMessage, EngineClient,
     EngineConnectOptions, RuntimeModePreference,
@@ -5,6 +9,7 @@ use smolpc_engine_client::{
 use smolpc_engine_core::inference::backend::{BackendStatus, CheckModelResponse};
 use smolpc_engine_core::models::registry::{ModelDefinition, ModelRegistry};
 use smolpc_engine_core::{GenerationConfig, GenerationMetrics};
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
@@ -372,7 +377,16 @@ pub(super) async fn resolve_client(
         .resource_dir()
         .ok()
         .or_else(|| Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))));
-    let models_dir = resolve_models_dir(resource_dir.as_ref());
+    let bundled_resource_dir = select_bundled_resource_dir_resolution(
+        app_handle
+            .path()
+            .resource_dir()
+            .map_err(|error| error.to_string()),
+        cfg!(debug_assertions),
+        Some(default_dev_bundled_resource_dir()),
+    )
+    .map(|resolution| bundled_resource_dir_path(&resolution).to_path_buf());
+    let models_dir = resolve_models_dir(bundled_resource_dir.as_deref());
     let host_binary = resolve_host_binary_path();
     log_host_binary_resolution(host_binary.as_ref());
 
@@ -410,34 +424,27 @@ pub(super) async fn resolve_client(
     Ok(client)
 }
 
-fn resolve_models_dir(resource_dir: Option<&PathBuf>) -> Option<PathBuf> {
-    if let Ok(override_dir) = std::env::var("SMOLPC_MODELS_DIR") {
-        let path = PathBuf::from(override_dir);
-        if path.exists() {
-            return Some(path);
-        }
-    }
+fn resolve_models_dir(resource_dir: Option<&Path>) -> Option<PathBuf> {
+    let override_dir = std::env::var("SMOLPC_MODELS_DIR").ok().map(PathBuf::from);
+    let shared_dir = dirs::data_local_dir()
+        .map(|base| base.join(SHARED_MODELS_VENDOR_DIR).join(SHARED_MODELS_DIR));
 
-    if let Some(base) = dirs::data_local_dir() {
-        let shared = base.join(SHARED_MODELS_VENDOR_DIR).join(SHARED_MODELS_DIR);
-        if shared.exists() {
-            return Some(shared);
-        }
-    }
+    select_models_dir(override_dir, shared_dir, resource_dir)
+}
 
-    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models");
-    if dev_path.exists() {
-        return Some(dev_path);
-    }
-
-    if let Some(res_dir) = resource_dir {
-        let bundled = res_dir.join("models");
-        if bundled.exists() {
-            return Some(bundled);
-        }
-    }
-
-    None
+fn select_models_dir(
+    override_dir: Option<PathBuf>,
+    shared_dir: Option<PathBuf>,
+    resource_dir: Option<&Path>,
+) -> Option<PathBuf> {
+    override_dir
+        .filter(|path| path.exists())
+        .or_else(|| shared_dir.filter(|path| path.exists()))
+        .or_else(|| {
+            resource_dir
+                .map(|res_dir| res_dir.join("models"))
+                .filter(|path| path.exists())
+        })
 }
 
 fn resolve_host_binary_path() -> Option<PathBuf> {
@@ -880,6 +887,7 @@ pub(crate) async fn cached_generation_client(state: &InferenceState) -> Option<E
 mod tests {
     use super::*;
     use smolpc_engine_client::test_utils::with_runtime_env;
+    use tempfile::TempDir;
 
     #[test]
     fn apply_runtime_mode_rollback_restores_previous_config_and_clears_client() {
@@ -1039,5 +1047,36 @@ mod tests {
         .expect("auto-unload message");
         assert!(message.contains("was minimized"));
         assert!(message.contains("qwen2.5-1.5b-instruct"));
+    }
+
+    #[test]
+    fn select_models_dir_prefers_override_over_shared_and_bundled() {
+        let override_temp = TempDir::new().expect("override temp");
+        let shared_temp = TempDir::new().expect("shared temp");
+        let resource_temp = TempDir::new().expect("resource temp");
+        std::fs::create_dir_all(override_temp.path()).expect("override dir");
+        std::fs::create_dir_all(shared_temp.path()).expect("shared dir");
+        std::fs::create_dir_all(resource_temp.path().join("models")).expect("bundled models");
+
+        let selected = select_models_dir(
+            Some(override_temp.path().to_path_buf()),
+            Some(shared_temp.path().to_path_buf()),
+            Some(resource_temp.path()),
+        )
+        .expect("selected models dir");
+
+        assert_eq!(selected, override_temp.path());
+    }
+
+    #[test]
+    fn select_models_dir_uses_bundled_models_from_normalized_resource_root() {
+        let resource_temp = TempDir::new().expect("resource temp");
+        let bundled_models = resource_temp.path().join("models");
+        std::fs::create_dir_all(&bundled_models).expect("bundled models");
+
+        let selected = select_models_dir(None, None, Some(resource_temp.path()))
+            .expect("selected bundled models");
+
+        assert_eq!(selected, bundled_models);
     }
 }
