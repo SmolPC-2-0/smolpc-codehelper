@@ -464,6 +464,14 @@ impl EngineState {
             ModelArtifactBackend::DirectML,
         );
 
+        if !cpu_model_dir.exists() {
+            return Err(format!(
+                "Model directory not found for '{}': {}",
+                model_id,
+                cpu_model_dir.display()
+            ));
+        }
+
         let force_override = parse_force_override();
         let forced_device_id = parse_dml_device_id_env();
         let probe = self
@@ -828,7 +836,10 @@ impl EngineState {
 
                             let adapter = self
                                 .run_cpu_preflight_with_timeout(&model_id, &cpu_model_dir)
-                                .await?;
+                                .await
+                                .map_err(|cpu_err| format!(
+                                    "DirectML failed: {error}; CPU fallback also failed: {cpu_err}"
+                                ))?;
                             active_model_path = cpu_model_dir.display().to_string();
                             adapter
                         }
@@ -859,7 +870,10 @@ impl EngineState {
                     }
                     let adapter = self
                         .run_cpu_preflight_with_timeout(&model_id, &cpu_model_dir)
-                        .await?;
+                        .await
+                        .map_err(|cpu_err| format!(
+                            "DirectML artifact missing; CPU fallback also failed: {cpu_err}"
+                        ))?;
                     active_backend = InferenceBackend::Cpu;
                     if !matches!(
                         active_reason,
