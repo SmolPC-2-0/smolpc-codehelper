@@ -59,9 +59,7 @@ pub(crate) struct OpenVinoLaneOutcome {
 /// Outcome of running the DirectML preflight (just the preflight, not fallback logic).
 pub(crate) enum DirectMLPreflightOutcome {
     /// Preflight succeeded — adapter is ready.
-    Success {
-        adapter: InferenceRuntimeAdapter,
-    },
+    Success { adapter: InferenceRuntimeAdapter },
     /// Preflight failed or timed out.
     Failed {
         failure_class: DirectMLFailureStage,
@@ -376,8 +374,7 @@ impl EngineState {
             reason_override = Some(DecisionReason::NoOpenVinoCandidate);
         } else if openvino_probe.is_none() {
             failure_class = Some("openvino_startup_probe_pending".to_string());
-            failure_message =
-                Some("OpenVINO startup probe is still running".to_string());
+            failure_message = Some("OpenVINO startup probe is still running".to_string());
             suppress_store_update = true;
             persistence_state_override = Some(DecisionPersistenceState::TemporaryFallback);
             selection_state_override = Some(BackendSelectionState::Fallback);
@@ -387,8 +384,7 @@ impl EngineState {
             .filter(|class| is_blocking_openvino_probe_failure(class))
         {
             failure_class = Some(class.to_string());
-            failure_message = openvino_probe
-                .and_then(|probe| probe.failure_message.clone());
+            failure_message = openvino_probe.and_then(|probe| probe.failure_message.clone());
             reason_override = Some(DecisionReason::NoOpenVinoCandidate);
         } else if let Some(probe) = openvino_probe {
             match self
@@ -422,8 +418,7 @@ impl EngineState {
         } else {
             log::error!("OpenVINO startup probe missing unexpectedly after readiness checks");
             failure_class = Some("openvino_startup_probe_missing".to_string());
-            failure_message =
-                Some("OpenVINO startup probe was not available".to_string());
+            failure_message = Some("OpenVINO startup probe was not available".to_string());
             reason_override = Some(DecisionReason::NoOpenVinoCandidate);
         }
 
@@ -628,7 +623,13 @@ impl EngineState {
         let mut openvino_ready = None;
 
         let openvino_outcome = if should_attempt_openvino {
-            self.evaluate_openvino_lane(&model_id, &artifacts, openvino_probe.as_ref(), openvino_bundle_ready).await
+            self.evaluate_openvino_lane(
+                &model_id,
+                &artifacts,
+                openvino_probe.as_ref(),
+                openvino_bundle_ready,
+            )
+            .await
         } else {
             OpenVinoLaneOutcome {
                 preflight_state: LanePreflightState::NotStarted,
@@ -757,7 +758,9 @@ impl EngineState {
         } else if preferred_backend == InferenceBackend::DirectML {
             match dml_model_path.as_deref() {
                 Some(dml_path) => {
-                    let dml_outcome = self.run_directml_preflight(dml_path, selected_device_id).await;
+                    let dml_outcome = self
+                        .run_directml_preflight(dml_path, selected_device_id)
+                        .await;
                     match dml_outcome {
                         DirectMLPreflightOutcome::Success { adapter } => {
                             failure_counters.record_directml_success();
@@ -776,7 +779,10 @@ impl EngineState {
                             active_model_path = dml_path.display().to_string();
                             adapter
                         }
-                        DirectMLPreflightOutcome::Failed { failure_class: _, error } => {
+                        DirectMLPreflightOutcome::Failed {
+                            failure_class: _,
+                            error,
+                        } => {
                             if force_override == Some(InferenceBackend::DirectML)
                                 || directml_required
                             {
@@ -837,9 +843,11 @@ impl EngineState {
                             let adapter = self
                                 .run_cpu_preflight_with_timeout(&model_id, &cpu_model_dir)
                                 .await
-                                .map_err(|cpu_err| format!(
+                                .map_err(|cpu_err| {
+                                    format!(
                                     "DirectML failed: {error}; CPU fallback also failed: {cpu_err}"
-                                ))?;
+                                )
+                                })?;
                             active_model_path = cpu_model_dir.display().to_string();
                             adapter
                         }
@@ -871,9 +879,11 @@ impl EngineState {
                     let adapter = self
                         .run_cpu_preflight_with_timeout(&model_id, &cpu_model_dir)
                         .await
-                        .map_err(|cpu_err| format!(
-                            "DirectML artifact missing; CPU fallback also failed: {cpu_err}"
-                        ))?;
+                        .map_err(|cpu_err| {
+                            format!(
+                                "DirectML artifact missing; CPU fallback also failed: {cpu_err}"
+                            )
+                        })?;
                     active_backend = InferenceBackend::Cpu;
                     if !matches!(
                         active_reason,
