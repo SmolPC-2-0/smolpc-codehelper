@@ -2,6 +2,7 @@ mod app_paths;
 mod assistant;
 mod benchmark;
 mod commands;
+mod engine;
 mod hardware;
 mod launcher;
 mod modes;
