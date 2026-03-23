@@ -37,7 +37,7 @@
         "cargo check --workspace clean"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Use tokio::sync::oneshot::Sender for respond_to fields. Import RuntimeModePreference and StartupMode from smolpc_engine_client."
     },
     {
