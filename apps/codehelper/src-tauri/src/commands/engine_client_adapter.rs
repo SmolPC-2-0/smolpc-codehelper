@@ -29,9 +29,23 @@ pub struct StartupPolicyDto {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeModePreferenceDto {
+    #[default]
+    Auto,
+    Cpu,
+    Dml,
+    Npu,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct EnsureStartedRequestDto {
     pub mode: StartupModeDto,
     pub startup_policy: Option<StartupPolicyDto>,
+    /// Runtime mode preference from user settings. When set, overrides `mode`
+    /// for backend selection so the engine spawns on the preferred backend
+    /// in a single spawn (no double-spawn).
+    pub runtime_mode_preference: Option<RuntimeModePreferenceDto>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -90,6 +104,15 @@ fn startup_mode_to_runtime_mode_with_auto_preference(
     match mode {
         StartupModeDto::Auto => auto_preference,
         StartupModeDto::DirectmlRequired => RuntimeModePreference::Dml,
+    }
+}
+
+fn runtime_mode_preference_dto_to_runtime_mode(dto: &RuntimeModePreferenceDto) -> RuntimeModePreference {
+    match dto {
+        RuntimeModePreferenceDto::Auto => RuntimeModePreference::Auto,
+        RuntimeModePreferenceDto::Cpu => RuntimeModePreference::Cpu,
+        RuntimeModePreferenceDto::Dml => RuntimeModePreference::Dml,
+        RuntimeModePreferenceDto::Npu => RuntimeModePreference::Npu,
     }
 }
 
@@ -217,7 +240,14 @@ pub async fn engine_ensure_started(
     request: EnsureStartedRequestDto,
     supervisor: tauri::State<'_, EngineSupervisorHandle>,
 ) -> Result<EngineReadinessDto, String> {
-    let runtime_mode = startup_mode_to_runtime_mode(request.mode.clone());
+    // runtime_mode_preference (from user settings) takes priority over the
+    // legacy `mode` field.  This lets the frontend pass the user's preferred
+    // backend in the initial Start command so the engine spawns once on the
+    // correct backend — no double-spawn.
+    let runtime_mode = match &request.runtime_mode_preference {
+        Some(pref) => runtime_mode_preference_dto_to_runtime_mode(pref),
+        None => startup_mode_to_runtime_mode(request.mode.clone()),
+    };
     let startup_mode = startup_mode_to_engine_mode(request.mode.clone());
     let startup_policy = normalize_startup_policy(&request);
 

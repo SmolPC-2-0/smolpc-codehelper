@@ -254,15 +254,12 @@ Teaching rules:
 
 	async function performStartup() {
 		const preferredModelId = resolvePreferredModelId();
+		const preferredRuntimeMode = settingsStore.runtimeModePreference;
 		await inferenceStore.ensureStarted({
 			mode: 'auto',
-			startup_policy: preferredModelId ? { default_model_id: preferredModelId } : null
+			startup_policy: preferredModelId ? { default_model_id: preferredModelId } : null,
+			runtime_mode_preference: preferredRuntimeMode ?? 'auto'
 		});
-
-		const preferredRuntimeMode = settingsStore.runtimeModePreference;
-		if (preferredRuntimeMode !== 'auto' && preferredRuntimeMode !== inferenceStore.runtimeMode) {
-			await inferenceStore.setRuntimeMode(preferredRuntimeMode, preferredModelId);
-		}
 
 		await inferenceStore.syncStatus();
 		if (inferenceStore.currentModel) {
