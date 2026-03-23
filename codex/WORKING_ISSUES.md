@@ -1,6 +1,6 @@
 # Working Issues
 
-Last updated: 2026-03-22
+Last updated: 2026-03-23
 Base branch: `main` (unified frontend PR #121 + engine module split PR #141 + clippy fixes PR #145)
 Stable baseline tag: `stable/codehelper-v2.2.0`
 Master roadmap: issue #143
@@ -63,6 +63,9 @@ Master roadmap: issue #143
 
 ## Recently Resolved
 
+- **Issue #182 GIMP tool-path connection refused on port 9877** (2026-03-23)
+  - Status: Resolved (codex/issue-182-gimp-bridge, commit c2a64d4)
+  - Scope: Fixed the bundled GIMP persistent procedure callback signature to match `Gimp.RunFunc`, added startup init-procedure registration, hardened signal-handler setup, and bumped the GIMP resource manifest version so existing installs reprovision the patched plugin.
 - **Host app launch should be manual in chat modes** (2026-03-22)
   - Status: Resolved (codex/manual-host-app-launch, commit e593eb0)
   - Scope: Removed automatic Blender/GIMP host-app startup from provider status/connect flows, added explicit `mode_open_host_app` command + UI button, ensured LibreOffice opens the selected app mode, and kept the Open App button responsive even when status refresh is slow.
