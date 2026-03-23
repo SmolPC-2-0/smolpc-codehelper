@@ -34,7 +34,7 @@
         "svelte-check 0 errors"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Three-layer fix: (1) Frontend: App.svelte performStartup() passes preference, removes setRuntimeMode call. (2) Adapter: engine_client_adapter.rs extracts preference into StartupConfig. (3) Supervisor: handle_start applies mode before spawn. Currently performStartup calls ensureStarted(mode:auto) then setRuntimeMode(npu) — kills and respawns."
     },
     {
