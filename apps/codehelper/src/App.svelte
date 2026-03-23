@@ -22,7 +22,7 @@
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { modeStore } from '$lib/stores/mode.svelte';
 	import { setupStore } from '$lib/stores/setup.svelte';
-	import { assistantSend, assistantCancel } from '$lib/api/unified';
+	import { assistantSend, assistantCancel, openModeHostApp } from '$lib/api/unified';
 	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
 	import type {
@@ -42,9 +42,11 @@
 	let showSetupPanel = $state(false);
 	let startupComplete = $state(false);
 	let isSwitchingMode = $state(false);
+	let launchingHostApp = $state(false);
 	let reconnectingEngineSession = $state(false);
 	let memoryPressureNotice = $state<string | null>(null);
 	let dismissedMemoryPressureKey = $state<string | null>(null);
+	let hostAppLaunchError = $state<string | null>(null);
 
 	// Unified mode state
 	const activeMode = $derived(modeStore.activeMode);
@@ -59,6 +61,13 @@
 		host_gimp: ['gimp'],
 		host_blender: ['blender'],
 		host_libreoffice: ['writer', 'calc', 'impress']
+	};
+	const HOST_LAUNCH_LABELS: Partial<Record<AppMode, string>> = {
+		gimp: 'Open GIMP',
+		blender: 'Open Blender',
+		writer: 'Open LibreOffice',
+		calc: 'Open LibreOffice',
+		impress: 'Open LibreOffice'
 	};
 
 	const modeAvailability = $derived.by(() => {
@@ -94,6 +103,10 @@
 		}
 		return result;
 	});
+	const activeHostLaunchLabel = $derived(HOST_LAUNCH_LABELS[activeMode] ?? null);
+	const canOpenHostApp = $derived(
+		activeHostLaunchLabel !== null && (modeAvailability[activeMode] ?? false)
+	);
 
 	const currentChat = $derived(chatsStore.currentChat);
 	const messages = $derived(currentChat?.messages ?? []);
@@ -203,6 +216,10 @@ Teaching rules:
 		return (
 			target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.tagName === 'SELECT'
 		);
+	}
+
+	function errorMessage(cause: unknown): string {
+		return cause instanceof Error ? cause.message : String(cause);
 	}
 
 	function appendToken(chatId: string, messageId: string, sessionId: string, token: string) {
@@ -553,6 +570,30 @@ Teaching rules:
 		}
 	}
 
+	async function handleOpenHostApp() {
+		if (!activeHostLaunchLabel || launchingHostApp || !canOpenHostApp) return;
+
+		const mode = activeMode;
+		let launchFailed = false;
+		hostAppLaunchError = null;
+		launchingHostApp = true;
+		try {
+			await openModeHostApp(mode);
+		} catch (error) {
+			launchFailed = true;
+			hostAppLaunchError = errorMessage(error);
+		} finally {
+			launchingHostApp = false;
+		}
+
+		if (launchFailed) return;
+
+		// Status refresh can hang for slow providers; keep the button responsive.
+		void modeStore.refreshModeStatus(mode).catch((error) => {
+			console.warn(`Failed to refresh mode status after opening ${mode}:`, error);
+		});
+	}
+
 	function handleKeyDown(event: KeyboardEvent) {
 		const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 		const modifierKey = isMac ? event.metaKey : event.ctrlKey;
@@ -643,6 +684,13 @@ Teaching rules:
 
 	$effect(() => {
 		chatsStore.setMode(activeMode);
+	});
+
+	$effect(() => {
+		const mode = activeMode;
+		if (mode) {
+			hostAppLaunchError = null;
+		}
 	});
 
 	$effect(() => {
@@ -757,13 +805,28 @@ Teaching rules:
 
 		<WorkspaceControls>
 			{#snippet modeSelector()}
-				<AppModeDropdown
-					modes={activeModeConfigs}
-					{activeMode}
-					onChange={handleModeChange}
-					{modeAvailability}
-					{unavailableReasons}
-				/>
+				<div class="mode-selector-group">
+					<AppModeDropdown
+						modes={activeModeConfigs}
+						{activeMode}
+						onChange={handleModeChange}
+						{modeAvailability}
+						{unavailableReasons}
+					/>
+					{#if activeHostLaunchLabel}
+						<button
+							type="button"
+							class="mode-launch-button"
+							onclick={handleOpenHostApp}
+							disabled={!canOpenHostApp || launchingHostApp}
+							title={canOpenHostApp
+								? activeHostLaunchLabel
+								: (unavailableReasons[activeMode] ?? `${activeHostLaunchLabel} unavailable`)}
+						>
+							{launchingHostApp ? 'Opening...' : activeHostLaunchLabel}
+						</button>
+					{/if}
+				</div>
 			{/snippet}
 		</WorkspaceControls>
 
@@ -794,6 +857,14 @@ Teaching rules:
 						Dismiss
 					</button>
 				</div>
+			</div>
+		{/if}
+
+		{#if hostAppLaunchError}
+			<div
+				class="mx-4 mt-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-4 py-2 text-sm text-rose-200"
+			>
+				{hostAppLaunchError}
 			</div>
 		{/if}
 
@@ -960,6 +1031,36 @@ Teaching rules:
 		background: linear-gradient(180deg, rgb(255 255 255 / 4%), transparent 30%);
 	}
 
+	.mode-selector-group {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+	}
+
+	.mode-launch-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.45rem 0.72rem;
+		border-radius: var(--radius-xl);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-widget) 95%, black);
+		color: var(--color-foreground);
+		font-size: 0.78rem;
+		line-height: 1.25;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.mode-launch-button:hover:enabled {
+		background: color-mix(in srgb, var(--surface-widget) 82%, var(--color-foreground) 18%);
+	}
+
+	.mode-launch-button:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
+
 	@media (max-width: 900px) {
 		.app-shell {
 			padding: 0.35rem;
@@ -972,6 +1073,15 @@ Teaching rules:
 
 		.sidebar-stage {
 			width: min(17.5rem, 86vw);
+		}
+
+		.mode-selector-group {
+			display: flex;
+			width: 100%;
+		}
+
+		.mode-launch-button {
+			flex: 0 0 auto;
 		}
 	}
 </style>

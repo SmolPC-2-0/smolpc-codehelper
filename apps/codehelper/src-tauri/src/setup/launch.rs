@@ -15,7 +15,7 @@ pub enum GimpLaunchOutcome {
 }
 
 pub fn setup_launch_detail() -> &'static str {
-    "Host-app launch remains mode-driven. Blender and GIMP may auto-launch on first use once their bundled assets are provisioned."
+    "Host-app launch is user-controlled. Use Open App when you want to start Blender, GIMP, or LibreOffice."
 }
 
 pub fn is_matching_blender_process_running(blender_path: &Path) -> bool {
@@ -60,6 +60,20 @@ pub fn launch_gimp_if_needed(gimp_path: &Path) -> Result<GimpLaunchOutcome, Stri
     Ok(GimpLaunchOutcome::Launched)
 }
 
+pub fn launch_libreoffice_mode(libreoffice_path: &Path, mode_flag: &str) -> Result<(), String> {
+    Command::new(libreoffice_path)
+        .arg(mode_flag)
+        .spawn()
+        .map_err(|error| {
+            format!(
+                "Failed to launch LibreOffice mode '{}' at {}: {error}",
+                mode_flag,
+                libreoffice_path.display()
+            )
+        })?;
+    Ok(())
+}
+
 fn maybe_launch_blender_with<F>(
     blender_path: &Path,
     already_running: bool,
@@ -95,7 +109,8 @@ fn path_identity(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        executable_matches, launch_gimp_if_needed, maybe_launch_blender_with, BlenderLaunchOutcome,
+        executable_matches, launch_gimp_if_needed, launch_libreoffice_mode,
+        maybe_launch_blender_with, BlenderLaunchOutcome,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -142,5 +157,12 @@ mod tests {
         let error =
             launch_gimp_if_needed(Path::new("/missing/gimp-3")).expect_err("launch should fail");
         assert!(error.contains("Failed to launch GIMP"));
+    }
+
+    #[test]
+    fn launch_libreoffice_mode_errors_for_missing_executable() {
+        let error = launch_libreoffice_mode(Path::new("/missing/soffice"), "--writer")
+            .expect_err("launch should fail");
+        assert!(error.contains("Failed to launch LibreOffice mode '--writer'"));
     }
 }
