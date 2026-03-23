@@ -1,34 +1,25 @@
 use super::catalog;
 use super::types::{EngineApiGateInfo, LaunchAction, LauncherLaunchResult, LauncherManifestApp};
+use crate::engine::EngineSupervisorHandle;
 use smolpc_engine_client::{
-    connect_or_spawn, engine_api_major_compatible, read_runtime_env_overrides, version_major,
-    EngineClient, EngineConnectOptions, EngineMeta, EngineStatus, StartupMode, StartupPolicy,
-    WaitReadyOptions,
+    engine_api_major_compatible, version_major, EngineMeta, EngineStatus, StartupMode,
+    StartupPolicy, WaitReadyOptions,
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
-use std::sync::Arc;
 use sysinfo::System;
-use tauri::Manager;
 use tokio::sync::Mutex;
 
-const DEFAULT_ENGINE_PORT: u16 = 19432;
-const SHARED_RUNTIME_VENDOR_DIR: &str = "SmolPC";
-const SHARED_RUNTIME_DIR: &str = "engine-runtime";
-const HOST_DATA_DIR: &str = "host-data";
-
+/// Launcher state — only holds a launch lock to prevent concurrent app launches.
+/// Engine client access is delegated to the shared [`EngineSupervisorHandle`].
 pub struct LauncherState {
-    client: Arc<Mutex<Option<EngineClient>>>,
-    connect_lock: Arc<Mutex<()>>,
-    launch_lock: Arc<Mutex<()>>,
+    launch_lock: Mutex<()>,
 }
 
 impl Default for LauncherState {
     fn default() -> Self {
         Self {
-            client: Arc::new(Mutex::new(None)),
-            connect_lock: Arc::new(Mutex::new(())),
-            launch_lock: Arc::new(Mutex::new(())),
+            launch_lock: Mutex::new(()),
         }
     }
 }
@@ -37,11 +28,16 @@ pub async fn launch_or_focus(
     app_id: &str,
     app_handle: &tauri::AppHandle,
     state: &LauncherState,
+    supervisor: &EngineSupervisorHandle,
 ) -> Result<LauncherLaunchResult, String> {
     let _launch_guard = state.launch_lock.lock().await;
     let manifest = catalog::load_manifest(app_handle)?;
     let app = catalog::find_app(&manifest, app_id)?;
-    let client = resolve_engine_client(app_handle, state).await?;
+
+    // Use the shared supervisor handle — no separate client cache needed.
+    let client = supervisor
+        .get_client(std::time::Duration::from_secs(60))
+        .await?;
 
     client
         .ensure_started(StartupMode::Auto, StartupPolicy::default())
@@ -83,66 +79,6 @@ pub async fn launch_or_focus(
         readiness_attempt_id: Some(ready_status.attempt_id),
         engine_api_gate: gate,
     })
-}
-
-async fn resolve_engine_client(
-    app_handle: &tauri::AppHandle,
-    state: &LauncherState,
-) -> Result<EngineClient, String> {
-    if let Some(client) = state.client.lock().await.clone() {
-        if client.health().await.unwrap_or(false) {
-            return Ok(client);
-        }
-        *state.client.lock().await = None;
-    }
-
-    let _guard = state.connect_lock.lock().await;
-    if let Some(client) = state.client.lock().await.clone() {
-        if client.health().await.unwrap_or(false) {
-            return Ok(client);
-        }
-        *state.client.lock().await = None;
-    }
-
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
-    let shared_runtime_dir = dirs::data_local_dir()
-        .map(|base| {
-            base.join(SHARED_RUNTIME_VENDOR_DIR)
-                .join(SHARED_RUNTIME_DIR)
-        })
-        .unwrap_or_else(|| app_data_dir.join(SHARED_RUNTIME_DIR));
-    let data_dir = shared_runtime_dir.join(HOST_DATA_DIR);
-
-    let resource_dir = app_handle
-        .path()
-        .resource_dir()
-        .ok()
-        .or_else(|| Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))));
-    let runtime_overrides = read_runtime_env_overrides();
-    let options = EngineConnectOptions {
-        port: std::env::var("SMOLPC_ENGINE_PORT")
-            .ok()
-            .and_then(|value| value.parse::<u16>().ok())
-            .unwrap_or(DEFAULT_ENGINE_PORT),
-        app_version: app_handle.package_info().version.to_string(),
-        shared_runtime_dir,
-        data_dir,
-        resource_dir,
-        models_dir: None,
-        host_binary: resolve_host_binary_path(),
-        runtime_mode: runtime_overrides.runtime_mode,
-        dml_device_id: runtime_overrides.dml_device_id,
-        force_respawn: false,
-    };
-
-    let client = connect_or_spawn(options)
-        .await
-        .map_err(|error| format!("Failed to connect or spawn engine host: {error}"))?;
-    *state.client.lock().await = Some(client.clone());
-    Ok(client)
 }
 
 fn evaluate_engine_api_gate(
@@ -276,33 +212,6 @@ fn launch_app_process(app: &LauncherManifestApp) -> Result<(), String> {
     })?;
 
     Ok(())
-}
-
-fn resolve_host_binary_path() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("SMOLPC_ENGINE_HOST_BIN") {
-        let path = PathBuf::from(path);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-
-    let workspace_target = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("target")
-        .join(if cfg!(debug_assertions) {
-            "debug"
-        } else {
-            "release"
-        })
-        .join(format!(
-            "smolpc-engine-host{}",
-            std::env::consts::EXE_SUFFIX
-        ));
-    if workspace_target.exists() {
-        return Some(workspace_target);
-    }
-
-    None
 }
 
 #[cfg(test)]
