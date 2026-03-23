@@ -1,38 +1,114 @@
-# Ralph Iteration: Engine Supervisor Redesign
+# Ralph Agent Instructions
 
-You are implementing the Engine Supervisor redesign for SmolPC Code Helper. Each iteration you complete ONE user story from the PRD.
+You are an autonomous coding agent working on the SmolPC Code Helper engine supervisor redesign.
 
-## Instructions
+## Your Task
 
-1. Read `scripts/ralph/prd.json` — find the FIRST story with `"passes": false`
-2. Read the full design spec at `docs/superpowers/specs/2026-03-23-engine-supervisor-redesign.md`
-3. Read `CLAUDE.md` (project root) for conventions
-4. Read `PROMPT.md` for detailed implementation guidance per phase
-5. Implement the story — follow its acceptance criteria exactly
-6. Verify ALL acceptance criteria (run the commands listed, check output)
-7. Commit with conventional commit format: `feat(engine): US-XXX — <title>`
-8. Update `scripts/ralph/prd.json` — set the completed story's `"passes": true`
-9. Also update `tasks/prd.json` to keep it in sync
-10. Commit the prd.json update: `chore: mark US-XXX complete in prd.json`
-11. Push: `git push`
+1. Read the PRD at `scripts/ralph/prd.json`
+2. Read the progress log at `scripts/ralph/progress.txt` (check Codebase Patterns section first)
+3. Check you're on the correct branch `ralph/engine-supervisor-redesign`. If not, check it out.
+4. Pick the **highest priority** user story where `passes: false`
+5. Read the full design spec at `docs/superpowers/specs/2026-03-23-engine-supervisor-redesign.md`
+6. Read `PROMPT.md` (project root) for detailed per-phase implementation guidance
+7. Read `CLAUDE.md` (project root) for project conventions and learnings
+8. Implement that single user story
+9. Run quality checks (see Project Quality Checks below)
+10. Update CLAUDE.md files if you discover reusable patterns (see below)
+11. If checks pass, commit ALL changes with message: `feat(engine): US-XXX — [Story Title]`
+12. Update `scripts/ralph/prd.json` to set `passes: true` for the completed story
+13. Also update `tasks/prd.json` to keep it in sync
+14. Commit prd.json updates: `chore: mark US-XXX complete in prd.json`
+15. Push: `git push`
+16. Append your progress to `scripts/ralph/progress.txt`
 
-## Completion Check
+## Project Quality Checks
 
-After marking a story complete, check if ALL stories have `"passes": true`. If yes:
+Run these before committing:
 
+```bash
+# Rust
+cargo check --workspace
+cargo clippy --workspace
+cargo test -p smolpc-engine-core
+cargo test -p smolpc-engine-host
+
+# Frontend (from apps/codehelper/)
+cd apps/codehelper && npm run check && npm run lint
+```
+
+## Project-Specific Rules
+
+- **Svelte 5 runes only** — `$state`, `$derived`, `$effect`. No `writable`/`readable`.
+- **Tailwind 4** — utility classes only, no `@apply`.
+- **Tauri Channels for streaming** — `tauri::ipc::Channel<T>`, not global Events (except the supervisor's lifecycle events which use `app_handle.emit()`).
+- **EngineClient is Clone** — Arc-based `reqwest::Client`. `get_client()` returns cheap clones.
+- **Tauri managed state already wraps in Arc** — do NOT add redundant `Arc` inside the handle.
+- **Windows DETACHED_PROCESS** — `child.wait()` doesn't work. Use HTTP health + PID checks.
+- **Token regeneration on restart is CRITICAL** — stale tokens cause "unhealthy after idle".
+- **Use LSP** (findReferences, goToDefinition) when tracing symbol usage, not grep.
+- **Migration ordering** — State-mutating commands (Group A: US-007) must migrate before read-only (Group B: US-008).
+
+## Progress Report Format
+
+APPEND to `scripts/ralph/progress.txt` (never replace, always append):
+```
+## [Date/Time] - [Story ID]
+- What was implemented
+- Files changed
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+  - Useful context (e.g., "the supervisor state machine is in engine/mod.rs")
+---
+```
+
+The learnings section is critical — it helps future iterations avoid repeating mistakes and understand the codebase better.
+
+## Consolidate Patterns
+
+If you discover a **reusable pattern** that future iterations should know, add it to the `## Codebase Patterns` section at the TOP of `scripts/ralph/progress.txt` (create it if it doesn't exist). This section should consolidate the most important learnings:
+
+```
+## Codebase Patterns
+- Example: Supervisor handle methods use oneshot channels for request-response
+- Example: Always call supervisor.refresh_status() after load_model/unload_model
+- Example: The EngineLifecycleState enum must derive serde::Serialize with tag="state"
+```
+
+Only add patterns that are **general and reusable**, not story-specific details.
+
+## Update CLAUDE.md Files
+
+Before committing, check if any edited files have learnings worth preserving in nearby CLAUDE.md files:
+
+1. **Identify directories with edited files** — Look at which directories you modified
+2. **Check for existing CLAUDE.md** — Look for CLAUDE.md in those directories or parent directories
+3. **Add valuable learnings** — If you discovered something future developers/agents should know
+
+**Do NOT add:**
+- Story-specific implementation details
+- Temporary debugging notes
+- Information already in progress.txt
+
+## Quality Requirements
+
+- ALL commits must pass project quality checks (cargo check, clippy, svelte-check, lint)
+- Do NOT commit broken code
+- Keep changes focused and minimal
+- Follow existing code patterns in the codebase
+
+## Stop Condition
+
+After completing a user story, check if ALL stories have `passes: true`.
+
+If ALL stories are complete and passing, reply with:
 <promise>COMPLETE</promise>
 
-If not, exit normally. Ralph will call you again for the next story.
+If there are still stories with `passes: false`, end your response normally (another iteration will pick up the next story).
 
-## Critical Rules
+## Important
 
-- ONE story per iteration. Do not attempt multiple.
-- Run verification commands from the acceptance criteria BEFORE marking passes:true.
-- If a story depends on previous stories' code, it should already exist (stories are ordered by dependency).
-- Do NOT modify the design spec or PROMPT.md.
-- Do NOT skip acceptance criteria — every checkbox must be verified.
-- Use LSP (findReferences, goToDefinition) when tracing symbol usage, not grep.
-- EngineClient is Clone (Arc-based). get_client() returns cheap clones.
-- Tauri already wraps managed state in Arc — do NOT add redundant Arc inside the handle.
-- On Windows, DETACHED_PROCESS means child.wait() doesn't work. Use HTTP health + PID checks.
-- Token regeneration on restart is CRITICAL — stale tokens cause "unhealthy after idle".
+- Work on ONE story per iteration
+- Commit frequently
+- Keep CI green
+- Read the Codebase Patterns section in progress.txt before starting
