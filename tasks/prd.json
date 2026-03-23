@@ -82,7 +82,7 @@
         "svelte-check 0 errors"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "File: inference.svelte.ts updateLifecycleState(). Currently crashed/failed only set engineHealthy=false but do NOT update readiness."
     },
     {
