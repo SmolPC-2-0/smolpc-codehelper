@@ -77,37 +77,146 @@ fn ensure_not_cancelled(state: &AssistantState) -> Result<(), String> {
     }
 }
 
+/// Strip a multi-line MCP tool description to just the first non-empty line.
+/// This removes the redundant `Args:` section that duplicates `inputSchema`,
+/// keeping the planner prompt compact for the small local LLM.
+fn first_line_description(description: &str) -> &str {
+    description
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or(description.trim())
+}
+
+/// Keyword-based tool pre-filter. Small models can't reliably pick from 18+
+/// tools — narrow the catalog to the best matches so the LLM only chooses
+/// between 1-4 tools.  Falls back to the full catalog when nothing matches.
+fn filter_tools_by_intent<'a>(
+    user_text: &str,
+    tools: &'a [ToolDefinitionDto],
+) -> Vec<&'a ToolDefinitionDto> {
+    let lower = user_text.to_ascii_lowercase();
+
+    // Keyword → tool name mapping, checked in order (first match wins).
+    let routing: &[(&[&str], &[&str])] = &[
+        (
+            &["open", "launch", "view in libre", "view in office"],
+            &["open_in_libreoffice"],
+        ),
+        (
+            &["list", "show all", "what documents", "what files"],
+            &["list_documents"],
+        ),
+        (
+            &["read", "show content", "what does it say", "contents of"],
+            &["read_text_document", "read_presentation"],
+        ),
+        (
+            &["properties", "info", "metadata", "word count", "stats"],
+            &["get_document_properties"],
+        ),
+        (
+            &["copy", "duplicate"],
+            &["copy_document"],
+        ),
+        (
+            &["create", "new", "blank", "make"],
+            &["create_blank_document", "create_blank_presentation"],
+        ),
+        (
+            &["heading"],
+            &["add_heading"],
+        ),
+        (
+            &["table"],
+            &["add_table", "format_table"],
+        ),
+        (
+            &["slide"],
+            &["add_slide", "edit_slide_content", "edit_slide_title", "delete_slide"],
+        ),
+        (
+            &["image", "picture", "photo"],
+            &["insert_image", "insert_slide_image"],
+        ),
+        (
+            &["page break"],
+            &["insert_page_break"],
+        ),
+        (
+            &["format", "bold", "italic", "font", "style", "color"],
+            &[
+                "format_text",
+                "format_table",
+                "format_slide_content",
+                "format_slide_title",
+                "apply_document_style",
+                "apply_presentation_template",
+            ],
+        ),
+        (
+            &["search", "replace", "find"],
+            &["search_replace_text"],
+        ),
+        (
+            &["delete", "remove"],
+            &["delete_text", "delete_paragraph", "delete_slide"],
+        ),
+        (
+            &["paragraph", "text"],
+            &["add_paragraph", "add_text"],
+        ),
+    ];
+
+    for (keywords, tool_names) in routing {
+        if keywords.iter().any(|kw| lower.contains(kw)) {
+            let matched: Vec<&ToolDefinitionDto> = tools
+                .iter()
+                .filter(|t| tool_names.contains(&t.name.as_str()))
+                .collect();
+            if !matched.is_empty() {
+                return matched;
+            }
+        }
+    }
+
+    // No keyword match — return all tools.
+    tools.iter().collect()
+}
+
 fn build_planner_messages(
     mode: AppMode,
     request: &AssistantSendRequestDto,
     tools: &[ToolDefinitionDto],
 ) -> Vec<EngineChatMessage> {
-    let (label, allowed_tools) = libreoffice_profile(mode)
-        .map(|profile| (profile.label, profile.allowed_tools))
-        .unwrap_or(("LibreOffice", &[]));
-    let tool_catalog = tools
+    let label = libreoffice_profile(mode)
+        .map(|profile| profile.label)
+        .unwrap_or("LibreOffice");
+
+    // Pre-filter the tool catalog to 1-4 tools based on user intent keywords.
+    // The small LLM can't reliably pick from 18 tools but handles 1-4 well.
+    let filtered = filter_tools_by_intent(&request.user_text, tools);
+    let tool_catalog = filtered
         .iter()
         .map(|tool| {
             format!(
-                "- {}: {}\n  inputSchema: {}",
-                tool.name, tool.description, tool.input_schema
+                "- {}: {} inputSchema: {}",
+                tool.name,
+                first_line_description(&tool.description),
+                tool.input_schema
             )
         })
         .collect::<Vec<_>>()
         .join("\n");
 
     let system_prompt = format!(
-        "You are the unified LibreOffice {} assistant.\n\
-Choose at most one tool call for the user's latest request.\n\
-Return JSON only when a tool call is required, using exactly this shape:\n\
+        "You are the LibreOffice {} assistant.\n\
+Reply with a JSON tool call. Use this shape:\n\
 {{\"tool_call\":{{\"name\":\"<tool_name>\",\"arguments\":{{...}}}}}}\n\
-Do not use markdown fences.\n\
-If no tool call is needed, return the final user-facing answer as plain text.\n\
-Only use tools from this allowlist:\n{}\n\
-Tool catalog:\n{}",
-        label,
-        allowed_tools.join(", "),
-        tool_catalog
+No markdown. No natural language. JSON only.\n\
+If the user refers to a file from earlier in the conversation, use that file path.\n\
+Available tools:\n{}",
+        label, tool_catalog
     );
 
     let mut messages = vec![EngineChatMessage {
@@ -115,19 +224,58 @@ Tool catalog:\n{}",
         content: system_prompt,
     }];
 
-    if request.messages.is_empty() {
-        messages.push(EngineChatMessage {
-            role: "user".to_string(),
-            content: request.user_text.clone(),
-        });
-        return messages;
+    // Only send the current user message to the planner — conversation history
+    // contains natural-language summaries that prime the small model to respond
+    // in natural language instead of JSON.  File references like "that document"
+    // are handled by scanning the history for the most recent file path.
+    let user_content = enrich_user_text_with_file_context(
+        &request.user_text,
+        &request.messages,
+    );
+    messages.push(EngineChatMessage {
+        role: "user".to_string(),
+        content: user_content,
+    });
+    messages
+}
+
+/// If the user message references a file implicitly ("it", "that document",
+/// "the document", or a bare filename without a path), scan the conversation
+/// history for the most recently mentioned absolute file path and append it
+/// as context so the planner can fill in the `file_path` argument.
+fn enrich_user_text_with_file_context(
+    user_text: &str,
+    history: &[smolpc_assistant_types::AssistantMessageDto],
+) -> String {
+    // Only enrich if the user didn't already provide a full path.
+    if user_text.contains('\\') || user_text.contains('/') {
+        return user_text.to_string();
     }
 
-    messages.extend(request.messages.iter().map(|message| EngineChatMessage {
-        role: message.role.clone(),
-        content: message.content.clone(),
-    }));
-    messages
+    // Scan history (newest first) for an absolute file path.
+    let path = history
+        .iter()
+        .rev()
+        .filter(|m| m.role == "assistant")
+        .find_map(|m| extract_file_path_from_text(&m.content));
+
+    match path {
+        Some(p) => format!("{user_text}\n(Context: the most recent file is {p})"),
+        None => user_text.to_string(),
+    }
+}
+
+fn extract_file_path_from_text(text: &str) -> Option<String> {
+    // Match Windows absolute paths (C:\...) or Unix absolute paths (/...).
+    for word in text.split_whitespace() {
+        let cleaned = word.trim_matches(|c: char| c == '.' || c == ',' || c == ':' || c == '"');
+        if (cleaned.len() > 3 && cleaned.chars().nth(1) == Some(':') && cleaned.chars().nth(2) == Some('\\'))
+            || cleaned.starts_with('/')
+        {
+            return Some(cleaned.to_string());
+        }
+    }
+    None
 }
 
 fn build_summary_messages(
@@ -211,14 +359,55 @@ fn normalize_tool_calls(value: &Value) -> Vec<ToolCall> {
     parse_single_tool_call(value).into_iter().collect()
 }
 
+/// Find the substring from the first `{` to the matching closing `}` by
+/// tracking brace depth.  Small LLMs sometimes emit trailing garbage (extra
+/// `}`, whitespace, or stray characters) after otherwise valid JSON — this
+/// recovers the balanced object without relying on serde accepting the whole
+/// input.
+fn extract_balanced_braces(text: &str) -> Option<&str> {
+    let start = text.find('{')?;
+    let bytes = text.as_bytes();
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut escape_next = false;
+    for (i, &byte) in bytes.iter().enumerate().skip(start) {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+        match byte {
+            b'\\' if in_string => escape_next = true,
+            b'"' => in_string = !in_string,
+            b'{' if !in_string => depth += 1,
+            b'}' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&text[start..=i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 fn extract_json_candidates(raw_text: &str) -> Vec<String> {
     let trimmed = raw_text.trim();
-    let mut candidates = if trimmed.is_empty() {
-        Vec::new()
-    } else {
-        vec![trimmed.to_string()]
-    };
+    let mut candidates = Vec::new();
 
+    // First try the full trimmed text (handles the common case cleanly).
+    if !trimmed.is_empty() {
+        candidates.push(trimmed.to_string());
+    }
+
+    // Then try the balanced-brace substring to handle trailing garbage.
+    if let Some(balanced) = extract_balanced_braces(trimmed) {
+        if balanced != trimmed {
+            candidates.push(balanced.to_string());
+        }
+    }
+
+    // Finally extract from markdown code fences.
     let mut remaining = raw_text;
     while let Some(start) = remaining.find("```") {
         remaining = &remaining[start + 3..];
@@ -229,6 +418,12 @@ fn extract_json_candidates(raw_text: &str) -> Vec<String> {
             let candidate = remaining[..end].trim();
             if !candidate.is_empty() {
                 candidates.push(candidate.to_string());
+                // Also try balanced extraction within the fence.
+                if let Some(balanced) = extract_balanced_braces(candidate) {
+                    if balanced != candidate {
+                        candidates.push(balanced.to_string());
+                    }
+                }
             }
             remaining = &remaining[end + 3..];
         } else {
@@ -654,6 +849,24 @@ mod tests {
         )
         .expect("tool call");
 
+        assert_eq!(tool_call.name, "add_heading");
+        assert_eq!(tool_call.arguments["text"], json!("Hello"));
+    }
+
+    #[test]
+    fn extract_tool_call_recovers_from_trailing_brace_garbage() {
+        // Exact failure observed in E2E: LLM emits an extra closing brace.
+        let raw = r#"{"tool_call":{"name":"create_blank_presentation","arguments":{"filename":"demo-pitch.odp","author":"","keywords":"","subject":"","title":""}}}}"#;
+        let tool_call = extract_tool_call(raw).expect("should recover from trailing brace");
+        assert_eq!(tool_call.name, "create_blank_presentation");
+        assert_eq!(tool_call.arguments["filename"], json!("demo-pitch.odp"));
+    }
+
+    #[test]
+    fn extract_tool_call_recovers_from_trailing_whitespace_and_text() {
+        let raw = r#"{"tool_call":{"name":"add_heading","arguments":{"text":"Hello"}}}
+I hope this helps!"#;
+        let tool_call = extract_tool_call(raw).expect("should recover from trailing text");
         assert_eq!(tool_call.name, "add_heading");
         assert_eq!(tool_call.arguments["text"], json!("Hello"));
     }

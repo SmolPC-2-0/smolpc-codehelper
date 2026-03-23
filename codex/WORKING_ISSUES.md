@@ -59,6 +59,27 @@ Master roadmap: issue #143
 - Host app detection: ✅ PR (app-connectivity) — GIMP per-user paths, Blender dynamic glob, GIMP 3.2 profile
 - Remaining: end-to-end tool execution testing (GIMP bridge, Blender addon, LibreOffice UNO)
 
+### 5) LibreOffice Writer/Slides Tauri UI click-through instability
+
+- Status: Open
+- Severity: High (phase-6B live modes blocked for reliable UX)
+- Verified 2026-03-23 (automated real Tauri UI click-through via WebView2 CDP):
+  - Mode switch + composer send path works for both Writer and Slides.
+  - MCP runtime connects and serves `ListToolsRequest`.
+  - Real `CallToolRequest` is issued from UI path, but execution fails intermittently with runtime/bridge errors:
+    - `Connection to helper timed out`
+    - `Binary URP bridge disposed during call`
+    - `Failed to connect to LibreOffice desktop`
+    - `LibreOffice helper socket did not become ready on port 8765`
+  - Stale helper/office processes on ports `8765`/`2002` increase failure frequency, but clean relaunch does not eliminate failures.
+- Context:
+  - Logs captured in `%LOCALAPPDATA%\\com.smolpc.codehelper\\libreoffice\\logs\\libre.log` and `helper.log`.
+  - UI evidence artifacts captured under `apps/codehelper/.tmp/` (`writer-*`, `slides-*` screenshots + JSON results).
+- Next steps:
+  - Harden shared-runtime ownership/lifecycle for helper + office processes (single owner, stale-process cleanup, reconnect semantics).
+  - Add deterministic health gate before tool execution (desktop/UNO ready check, not only port-ready).
+  - Add a targeted regression test path for Writer/Slides that asserts `CallToolRequest` + successful tool result, not just planner/text reply.
+
 ---
 
 ## Recently Resolved

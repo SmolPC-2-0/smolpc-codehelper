@@ -291,9 +291,7 @@ pub fn inspect_openvino_artifact(manifest_path: &Path) -> OpenVinoArtifactCheck 
 /// the actual runtime, driver, and device. If there's no NPU, it reports
 /// failure gracefully. The gate on `hardware_detected` was removed because
 /// it created a fragile dependency on the upstream probe providing a hint.
-pub fn probe_openvino_startup(
-    bundle: &OpenVinoRuntimeBundle,
-) -> OpenVinoStartupProbeResult {
+pub fn probe_openvino_startup(bundle: &OpenVinoRuntimeBundle) -> OpenVinoStartupProbeResult {
     log::info!("Starting OpenVINO NPU probe (authoritative)");
 
     if let Some(code) = bundle.npu_failure_code() {
@@ -312,7 +310,7 @@ pub fn probe_openvino_startup(
             let npu_device_name = device_probe.npu_device_name.clone();
             if npu_device_name.is_none() {
                 return OpenVinoStartupProbeResult {
-                            failure_class: Some("openvino_npu_driver_missing".to_string()),
+                    failure_class: Some("openvino_npu_driver_missing".to_string()),
                     failure_message: Some(
                         "NPU hardware was detected, but OpenVINO did not expose an NPU device"
                             .to_string(),

@@ -19,11 +19,8 @@ impl Default for ResourceResolutionOptions {
 pub struct LibreOfficeResourceLayout {
     pub mcp_server_dir: PathBuf,
     pub readme_path: PathBuf,
-    pub main_py_path: PathBuf,
-    pub libre_py_path: PathBuf,
-    pub helper_py_path: PathBuf,
-    pub helper_utils_py_path: PathBuf,
-    pub helper_test_functions_py_path: PathBuf,
+    pub mcp_server_py_path: PathBuf,
+    pub test_functions_py_path: PathBuf,
 }
 
 fn resource_candidates(
@@ -33,13 +30,13 @@ fn resource_candidates(
     let mut candidates = Vec::new();
 
     if let Some(resource_dir) = resource_dir {
+        candidates.push(resource_dir.join("libreoffice").join("mcp_server"));
         candidates.push(
             resource_dir
                 .join("resources")
                 .join("libreoffice")
                 .join("mcp_server"),
         );
-        candidates.push(resource_dir.join("libreoffice").join("mcp_server"));
     }
 
     if options.allow_dev_fallback {
@@ -71,23 +68,17 @@ pub fn resolve_mcp_server_layout(
         }
 
         let readme_path = candidate.join("README.md");
-        let main_py_path = candidate.join("main.py");
-        let libre_py_path = candidate.join("libre.py");
-        let helper_py_path = candidate.join("helper.py");
-        let helper_utils_py_path = candidate.join("helper_utils.py");
-        let helper_test_functions_py_path = candidate.join("helper_test_functions.py");
+        let mcp_server_py_path = candidate.join("mcp_server.py");
+        let test_functions_py_path = candidate.join("test_functions.py");
 
         for (required_path, label) in [
             (&readme_path, "README.md"),
-            (&main_py_path, "main.py"),
-            (&libre_py_path, "libre.py"),
-            (&helper_py_path, "helper.py"),
-            (&helper_utils_py_path, "helper_utils.py"),
-            (&helper_test_functions_py_path, "helper_test_functions.py"),
+            (&mcp_server_py_path, "mcp_server.py"),
+            (&test_functions_py_path, "test_functions.py"),
         ] {
             if !required_path.is_file() {
                 return Err(format!(
-                    "LibreOffice MCP resource directory exists at {} but {} is missing.",
+                    "LibreOffice MCP resource candidate {} is missing required file {}.",
                     candidate.display(),
                     label
                 ));
@@ -97,15 +88,12 @@ pub fn resolve_mcp_server_layout(
         return Ok(LibreOfficeResourceLayout {
             mcp_server_dir: candidate,
             readme_path,
-            main_py_path,
-            libre_py_path,
-            helper_py_path,
-            helper_utils_py_path,
-            helper_test_functions_py_path,
+            mcp_server_py_path,
+            test_functions_py_path,
         });
     }
 
-    Err("LibreOffice MCP runtime resources are not bundled yet. Expected README.md, main.py, libre.py, helper.py, helper_utils.py, and helper_test_functions.py under resources/libreoffice/mcp_server.".to_string())
+    Err("LibreOffice MCP runtime resources are not bundled yet. Expected README.md, mcp_server.py, and test_functions.py under resources/libreoffice/mcp_server.".to_string())
 }
 
 #[cfg(test)]
@@ -114,25 +102,23 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    fn write_runtime_assets(root: &std::path::Path) {
+        fs::create_dir_all(root).expect("create staged dir");
+        fs::write(root.join("README.md"), "placeholder").expect("write readme");
+        fs::write(root.join("mcp_server.py"), "print('mcp_server')").expect("write mcp_server");
+        fs::write(root.join("test_functions.py"), "print('test_functions')")
+            .expect("write test_functions");
+    }
+
     #[test]
-    fn resolves_staged_resource_layout() {
+    fn falls_back_to_nested_when_direct_missing() {
         let tempdir = tempdir().expect("tempdir");
-        let staged_dir = tempdir
+        let nested_dir = tempdir
             .path()
             .join("resources")
             .join("libreoffice")
             .join("mcp_server");
-        fs::create_dir_all(&staged_dir).expect("create staged dir");
-        fs::write(staged_dir.join("README.md"), "placeholder").expect("write readme");
-        fs::write(staged_dir.join("main.py"), "print('main')").expect("write main");
-        fs::write(staged_dir.join("libre.py"), "print('libre')").expect("write libre");
-        fs::write(staged_dir.join("helper.py"), "print('helper')").expect("write helper");
-        fs::write(staged_dir.join("helper_utils.py"), "print('utils')").expect("write utils");
-        fs::write(
-            staged_dir.join("helper_test_functions.py"),
-            "print('tests')",
-        )
-        .expect("write helper tests");
+        write_runtime_assets(&nested_dir);
 
         let layout = resolve_mcp_server_layout(
             Some(tempdir.path()),
@@ -143,23 +129,41 @@ mod tests {
         )
         .expect("resolve layout");
 
-        assert_eq!(layout.mcp_server_dir, staged_dir);
+        assert_eq!(layout.mcp_server_dir, nested_dir);
         assert!(layout.readme_path.ends_with("README.md"));
-        assert!(layout.main_py_path.ends_with("main.py"));
-        assert!(layout.libre_py_path.ends_with("libre.py"));
+        assert!(layout.mcp_server_py_path.ends_with("mcp_server.py"));
     }
 
     #[test]
-    fn missing_runtime_asset_is_reported_as_an_error() {
+    fn prefers_direct_candidate_when_direct_and_nested_both_exist() {
         let tempdir = tempdir().expect("tempdir");
-        let staged_dir = tempdir
+        let direct_dir = tempdir.path().join("libreoffice").join("mcp_server");
+        let nested_dir = tempdir
             .path()
             .join("resources")
             .join("libreoffice")
             .join("mcp_server");
-        fs::create_dir_all(&staged_dir).expect("create staged dir");
-        fs::write(staged_dir.join("README.md"), "placeholder").expect("write readme");
-        fs::write(staged_dir.join("main.py"), "print('main')").expect("write main");
+        write_runtime_assets(&direct_dir);
+        write_runtime_assets(&nested_dir);
+
+        let layout = resolve_mcp_server_layout(
+            Some(tempdir.path()),
+            ResourceResolutionOptions {
+                allow_dev_fallback: false,
+                allow_system_python_fallback: true,
+            },
+        )
+        .expect("resolve layout");
+
+        assert_eq!(layout.mcp_server_dir, direct_dir);
+    }
+
+    #[test]
+    fn still_reports_missing_required_asset_with_candidate_path_context() {
+        let tempdir = tempdir().expect("tempdir");
+        let direct_dir = tempdir.path().join("libreoffice").join("mcp_server");
+        fs::create_dir_all(&direct_dir).expect("create staged dir");
+        fs::write(direct_dir.join("README.md"), "placeholder").expect("write readme");
 
         let error = resolve_mcp_server_layout(
             Some(tempdir.path()),
@@ -168,9 +172,10 @@ mod tests {
                 allow_system_python_fallback: true,
             },
         )
-        .expect_err("missing readme should fail");
+        .expect_err("missing mcp_server.py should fail");
 
-        assert!(error.contains("libre.py is missing"));
+        assert!(error.contains("mcp_server.py is missing"));
+        assert!(error.contains(direct_dir.to_string_lossy().as_ref()));
     }
 
     #[test]
@@ -178,7 +183,6 @@ mod tests {
         let layout = resolve_mcp_server_layout(None, ResourceResolutionOptions::default())
             .expect("resolve repo layout");
 
-        assert!(layout.main_py_path.ends_with("main.py"));
-        assert!(layout.helper_py_path.ends_with("helper.py"));
+        assert!(layout.mcp_server_py_path.ends_with("mcp_server.py"));
     }
 }

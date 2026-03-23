@@ -7,7 +7,6 @@ use crate::assistant::MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION;
 use crate::modes::provider::{
     provider_state, ToolProvider, FOUNDATION_PROVIDER_EXECUTION_NOT_IMPLEMENTED,
 };
-use crate::setup::host_apps::detect_libreoffice;
 use async_trait::async_trait;
 use smolpc_assistant_types::{
     AppMode, ProviderStateDto, ToolDefinitionDto, ToolExecutionResultDto,
@@ -17,16 +16,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-const RETRYABLE_RUNTIME_FAILURE_MARKERS: [&str; 9] = [
-    "binary urp bridge disposed",
-    "failed to connect to libreoffice desktop",
-    "connection to helper timed out",
-    "request timed out in queue",
-    "connection refused",
-    "helper socket did not become ready on port 8765",
+const RETRYABLE_RUNTIME_FAILURE_MARKERS: [&str; 4] = [
     "broken pipe",
     "channel closed",
     "connection reset",
+    "process exited",
 ];
 
 #[derive(Debug)]
@@ -114,18 +108,18 @@ impl LibreOfficeProvider {
     fn friendly_runtime_error(error: &str) -> String {
         if error.contains("Bundled Python is not prepared yet") {
             return format!(
-                "LibreOffice runtime is not ready yet. Prepare bundled Python from the setup panel before using Writer or Slides. {error}"
+                "Document runtime is not ready yet. Prepare bundled Python from the setup panel before using Writer or Slides. {error}"
             );
         }
 
         if error.contains("spawn stdio MCP command") {
             return format!(
-                "Unable to start the LibreOffice MCP runtime. Bundled Python should be prepared first, and LibreOffice or Collabora must be installed. {error}"
+                "Unable to start the document MCP server. Bundled Python should be prepared first. {error}"
             );
         }
 
         format!(
-            "LibreOffice runtime failed. Make sure bundled Python is prepared and LibreOffice or Collabora is installed. {error}"
+            "Document runtime failed. Make sure bundled Python is prepared. {error}"
         )
     }
 
@@ -193,11 +187,10 @@ impl LibreOfficeProvider {
         tools: &[ToolDefinitionDto],
     ) -> String {
         format!(
-            "{} is connected through the shared LibreOffice stdio MCP runtime. {} Runtime scaffold: {}. Runtime entrypoint: {}. {} tool(s) available in this mode.",
+            "{} is connected through the document MCP server. {} Scaffold: {}. {} tool(s) available in this mode.",
             profile.label,
             runtime.summary(),
             layout.mcp_server_dir.display(),
-            runtime.entrypoint.display(),
             tools.len()
         )
     }
@@ -242,26 +235,16 @@ impl LibreOfficeProvider {
     > {
         let layout =
             resolve_mcp_server_layout(self.resource_dir.as_deref(), self.resolution_options)?;
-        let office_detection = detect_libreoffice(None);
-        let office_path = office_detection.path.ok_or_else(|| {
-            "LibreOffice or Collabora is not installed or could not be detected yet.".to_string()
-        })?;
         let runtime = LibreOfficeRuntimeConfig::from_layout(
             &layout,
             self.app_local_data_dir.as_deref(),
             self.resolution_options.allow_system_python_fallback,
-            Some(office_path),
         )?;
         log::debug!(
-            "Resolved LibreOffice runtime prerequisites: scaffold_dir={}, entrypoint={}, python_command={}, office_path={}",
+            "Resolved document runtime prerequisites: scaffold_dir={}, entrypoint={}, python_command={}",
             layout.mcp_server_dir.display(),
-            layout.main_py_path.display(),
+            layout.mcp_server_py_path.display(),
             runtime.python_command,
-            runtime
-                .office_path
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "auto-detected LibreOffice".to_string())
         );
         Ok((layout, runtime))
     }
@@ -596,7 +579,7 @@ for line in sys.stdin:
         send({"jsonrpc": "2.0", "id": payload["id"], "result": {"content": [{"type": "text", "text": f"{name} completed"}]}})
 "#;
 
-    fn staged_runtime_root(main_py: &str) -> tempfile::TempDir {
+    fn staged_runtime_root(mcp_server_py: &str) -> tempfile::TempDir {
         let tempdir = tempdir().expect("tempdir");
         let staged_dir = tempdir
             .path()
@@ -605,12 +588,9 @@ for line in sys.stdin:
             .join("mcp_server");
         fs::create_dir_all(&staged_dir).expect("create staged dir");
         fs::write(staged_dir.join("README.md"), "placeholder").expect("write readme");
-        fs::write(staged_dir.join("main.py"), main_py).expect("write main");
-        fs::write(staged_dir.join("libre.py"), "placeholder").expect("write libre");
-        fs::write(staged_dir.join("helper.py"), "placeholder").expect("write helper");
-        fs::write(staged_dir.join("helper_utils.py"), "placeholder").expect("write helper utils");
-        fs::write(staged_dir.join("helper_test_functions.py"), "placeholder")
-            .expect("write helper tests");
+        fs::write(staged_dir.join("mcp_server.py"), mcp_server_py).expect("write mcp_server");
+        fs::write(staged_dir.join("test_functions.py"), "placeholder")
+            .expect("write test_functions");
         tempdir
     }
 
@@ -696,7 +676,7 @@ for line in sys.stdin:
         assert!(state
             .detail
             .expect("detail")
-            .contains("LibreOffice runtime failed"));
+            .contains("Document runtime failed"));
     }
 
     #[tokio::test]
@@ -759,13 +739,16 @@ for line in sys.stdin:
     #[test]
     fn retryable_runtime_failure_detection_matches_known_messages() {
         assert!(LibreOfficeProvider::is_retryable_runtime_failure(
-            "Error: Failed to connect to LibreOffice desktop"
+            "Error: broken pipe"
         ));
         assert!(LibreOfficeProvider::is_retryable_runtime_failure(
-            "Error: Error in create_document: Binary URP bridge disposed during call"
+            "Error: channel closed unexpectedly"
         ));
         assert!(LibreOfficeProvider::is_retryable_runtime_failure(
-            "Connection to helper timed out"
+            "connection reset by peer"
+        ));
+        assert!(LibreOfficeProvider::is_retryable_runtime_failure(
+            "process exited with code 1"
         ));
         assert!(!LibreOfficeProvider::is_retryable_runtime_failure(
             "Mode is unavailable in this build"

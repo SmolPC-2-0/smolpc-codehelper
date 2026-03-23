@@ -79,9 +79,8 @@ impl EngineState {
             engine.startup_probe_ready.notify_waiters();
 
             let openvino_bundle = engine.runtime_bundles().openvino.clone();
-            let openvino_probe_task = tokio::task::spawn_blocking(move || {
-                probe_openvino_startup(&openvino_bundle)
-            });
+            let openvino_probe_task =
+                tokio::task::spawn_blocking(move || probe_openvino_startup(&openvino_bundle));
             let openvino_probe =
                 match timeout(OPENVINO_STARTUP_PROBE_WAIT, openvino_probe_task).await {
                     Ok(Ok(result)) => result,

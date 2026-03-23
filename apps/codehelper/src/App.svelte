@@ -401,11 +401,47 @@ Teaching rules:
 					userText: content
 				};
 
+				let summaryTokensStarted = false;
 				await assistantSend(request, (event: AssistantStreamEvent) => {
 					if (activeStreamSessionId !== streamSessionId) return;
 					switch (event.kind) {
+						case 'status':
+							if (!summaryTokensStarted) {
+								chatsStore.updateMessage(chatId, messageId, {
+									content: event.detail
+								});
+								if (currentChat?.id === chatId) scrollToBottom();
+							}
+							break;
+						case 'tool_call':
+							if (!summaryTokensStarted) {
+								const label = event.name.replaceAll('_', ' ');
+								chatsStore.updateMessage(chatId, messageId, {
+									content: `Running ${label}...`
+								});
+								if (currentChat?.id === chatId) scrollToBottom();
+							}
+							break;
+						case 'tool_result':
+							if (!summaryTokensStarted && event.result.ok) {
+								chatsStore.updateMessage(chatId, messageId, {
+									content: `${event.result.summary}
+
+Generating summary...`
+								});
+								if (currentChat?.id === chatId) scrollToBottom();
+							}
+							break;
 						case 'token':
-							appendToken(chatId, messageId, streamSessionId, event.token);
+							if (!summaryTokensStarted) {
+								summaryTokensStarted = true;
+								chatsStore.updateMessage(chatId, messageId, {
+									content: event.token
+								});
+							} else {
+								appendToken(chatId, messageId, streamSessionId, event.token);
+							}
+							if (currentChat?.id === chatId) scrollToBottom();
 							break;
 						case 'error':
 							handledByEventStream = true;

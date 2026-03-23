@@ -27,6 +27,7 @@ pub const WRITER_ALLOWED_TOOLS: &[&str] = &[
     "format_table",
     "delete_paragraph",
     "apply_document_style",
+    "open_in_libreoffice",
 ];
 
 pub const IMPRESS_ALLOWED_TOOLS: &[&str] = &[
@@ -43,6 +44,7 @@ pub const IMPRESS_ALLOWED_TOOLS: &[&str] = &[
     "format_slide_content",
     "format_slide_title",
     "insert_slide_image",
+    "open_in_libreoffice",
 ];
 
 pub const CALC_ALLOWED_TOOLS: &[&str] = &[];
@@ -70,7 +72,7 @@ pub fn libreoffice_profile(mode: AppMode) -> Option<LibreOfficeModeProfile> {
             composer_placeholder: WRITER_COMPOSER_PLACEHOLDER,
             source_coverage:
                 "Writer already has meaningful source coverage on codex/libreoffice-port-track-a.",
-            future_runtime_family: "Shared LibreOffice MCP runtime over stdio",
+            future_runtime_family: "Document MCP server over stdio (python-docx/python-pptx/odfdo)",
             live_in_phase_6b: true,
             suggestions: &[
                 "Create a blank document called lesson-plan.odt",
@@ -87,7 +89,7 @@ pub fn libreoffice_profile(mode: AppMode) -> Option<LibreOfficeModeProfile> {
             composer_placeholder: CALC_COMPOSER_PLACEHOLDER,
             source_coverage:
                 "Calc is not yet at parity on codex/libreoffice-port-track-a and remains scaffold-target only.",
-            future_runtime_family: "Shared LibreOffice MCP runtime over stdio",
+            future_runtime_family: "Document MCP server over stdio (python-docx/python-pptx/odfdo)",
             live_in_phase_6b: false,
             suggestions: &[
                 "LibreOffice Calc activation is planned next",
@@ -104,7 +106,7 @@ pub fn libreoffice_profile(mode: AppMode) -> Option<LibreOfficeModeProfile> {
             composer_placeholder: SLIDES_COMPOSER_PLACEHOLDER,
             source_coverage:
                 "Slides already has meaningful source coverage on codex/libreoffice-port-track-a.",
-            future_runtime_family: "Shared LibreOffice MCP runtime over stdio",
+            future_runtime_family: "Document MCP server over stdio (python-docx/python-pptx/odfdo)",
             live_in_phase_6b: true,
             suggestions: &[
                 "Create a blank presentation called demo-pitch.odp",
