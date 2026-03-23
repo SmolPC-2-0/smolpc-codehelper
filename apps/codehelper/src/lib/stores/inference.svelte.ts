@@ -290,14 +290,27 @@ export const inferenceStore = {
 			case 'failed':
 				engineHealthy = false;
 				error = state.message;
+				readiness = readiness
+					? { ...readiness, state: 'failed', error_message: state.message, retryable: state.state === 'failed' }
+					: {
+							attempt_id: '',
+							state: 'failed',
+							state_since: timestamp,
+							active_backend: null,
+							active_model_id: null,
+							error_code: null,
+							error_message: state.message,
+							retryable: state.state === 'failed'
+						};
 				forceResetGenerationState();
 				break;
 
 			case 'starting':
 			case 'waiting_for_health':
 				engineHealthy = false;
+				error = null;
 				readiness = readiness
-					? { ...readiness, state: 'starting' }
+					? { ...readiness, state: 'starting', error_message: null, error_code: null }
 					: {
 							attempt_id: '',
 							state: 'starting',
@@ -312,6 +325,17 @@ export const inferenceStore = {
 
 			case 'idle':
 				engineHealthy = false;
+				error = null;
+				readiness = {
+					attempt_id: '',
+					state: 'idle',
+					state_since: timestamp,
+					active_backend: null,
+					active_model_id: null,
+					error_code: null,
+					error_message: null,
+					retryable: false
+				};
 				break;
 		}
 	},
