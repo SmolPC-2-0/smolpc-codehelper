@@ -228,10 +228,22 @@ fn resolve_bundled_resource_dir<R: tauri::Runtime>(app: &tauri::App<R>) -> Optio
 pub fn run() {
     let app = tauri::Builder::default()
         .setup(|app| {
-            if cfg!(debug_assertions) {
+            {
+                let log_level = if cfg!(debug_assertions) {
+                    log::LevelFilter::Debug
+                } else {
+                    log::LevelFilter::Info
+                };
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Debug)
+                        .level(log_level)
+                        .level_for("hyper_util", log::LevelFilter::Warn)
+                        .level_for("reqwest", log::LevelFilter::Warn)
+                        .level_for("hyper", log::LevelFilter::Warn)
+                        .level_for("tungstenite", log::LevelFilter::Warn)
+                        .level_for("tokio_tungstenite", log::LevelFilter::Warn)
+                        .level_for("h2", log::LevelFilter::Warn)
+                        .level_for("rustls", log::LevelFilter::Warn)
                         .build(),
                 )?;
             }
