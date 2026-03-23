@@ -1,24 +1,25 @@
 {
-  "name": "smolpc-platform-migration",
-  "private": true,
-  "version": "1.0.0",
-  "workspaces": [
-    "apps/codehelper"
-  ],
-  "scripts": {
-    "dev": "npm run dev --workspace apps/codehelper",
-    "build": "npm run build --workspace apps/codehelper",
-    "preview": "npm run preview --workspace apps/codehelper",
-    "check": "npm run check --workspace apps/codehelper",
-    "format": "npm run format --workspace apps/codehelper",
-    "lint": "npm run lint --workspace apps/codehelper",
-    "tauri": "npm run tauri --workspace apps/codehelper",
-    "tauri:dev": "npm run tauri:dev --workspace apps/codehelper",
-    "tauri:dml": "npm run tauri:dml --workspace apps/codehelper",
-    "runtime:setup:openvino": "npm run runtime:setup:openvino --workspace apps/codehelper",
-    "model:export:dml": "npm run model:export:dml --workspace apps/codehelper",
-    "model:setup:qwen25-instruct": "npm run model:setup:qwen25-instruct --workspace apps/codehelper",
-    "model:setup:qwen3-4b": "npm run model:setup:qwen3-4b --workspace apps/codehelper",
-    "boundary:check": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-boundaries.ps1"
-  }
+	"name": "smolpc-platform-migration",
+	"private": true,
+	"version": "1.0.0",
+	"workspaces": [
+		"apps/codehelper"
+	],
+	"scripts": {
+		"dev": "npm run dev --workspace apps/codehelper",
+		"build": "npm run build --workspace apps/codehelper",
+		"preview": "npm run preview --workspace apps/codehelper",
+		"check": "npm run check --workspace apps/codehelper",
+		"format": "npm run format --workspace apps/codehelper",
+		"lint": "npm run lint --workspace apps/codehelper",
+		"tauri": "npm run tauri --workspace apps/codehelper",
+		"tauri:dev": "npm run tauri:dev --workspace apps/codehelper",
+		"tauri:dml": "npm run tauri:dml --workspace apps/codehelper",
+		"runtime:setup:openvino": "npm run runtime:setup:openvino --workspace apps/codehelper",
+		"runtime:setup:python": "npm run runtime:setup:python --workspace apps/codehelper",
+		"model:export:dml": "npm run model:export:dml --workspace apps/codehelper",
+		"model:setup:qwen25-instruct": "npm run model:setup:qwen25-instruct --workspace apps/codehelper",
+		"model:setup:qwen3-4b": "npm run model:setup:qwen3-4b --workspace apps/codehelper",
+		"boundary:check": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-boundaries.ps1"
+	}
 }

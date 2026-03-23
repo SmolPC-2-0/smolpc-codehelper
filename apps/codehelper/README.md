@@ -10,6 +10,8 @@ CodeHelper frontend and Tauri app shell.
 
 ## Commands (from repo root)
 
+- `npm run runtime:setup:openvino`
+- `npm run runtime:setup:python`
 - `npm run tauri:dev`
 - `npm run tauri:dml`
 - `npm run check`

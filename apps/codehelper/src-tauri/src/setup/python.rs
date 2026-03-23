@@ -221,7 +221,59 @@ fn copy_path_recursively(source: &Path, target: &Path) -> Result<(), String> {
 mod tests {
     use super::{bundled_python_item, prepare_bundled_python, resolve_prepared_python_command};
     use smolpc_assistant_types::SetupItemStateDto;
+    use std::path::{Path, PathBuf};
     use tempfile::TempDir;
+
+    fn write_python_manifest(root: &Path, version: &str, expected_paths: &[&str], status: &str) {
+        let expected = expected_paths
+            .iter()
+            .map(|path| format!(r#""{}""#, path))
+            .collect::<Vec<_>>()
+            .join(", ");
+        std::fs::write(
+            root.join("manifest.json"),
+            format!(
+                r#"{{
+              "version": "{version}",
+              "source": "tests",
+              "expectedPaths": [{expected}],
+              "status": "{status}"
+            }}"#
+            ),
+        )
+        .expect("manifest");
+    }
+
+    fn write_file(path: &Path, contents: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent dirs");
+        }
+        std::fs::write(path, contents).expect("write file");
+    }
+
+    fn staged_payload_python_path(root: &Path) -> PathBuf {
+        root.join("payload").join("python.exe")
+    }
+
+    fn staged_payload_uv_path(root: &Path) -> PathBuf {
+        root.join("payload").join("uv.exe")
+    }
+
+    fn staged_payload_uvx_path(root: &Path) -> PathBuf {
+        root.join("payload").join("uvx.exe")
+    }
+
+    fn prepared_python_candidate_path(root: &Path) -> PathBuf {
+        #[cfg(windows)]
+        {
+            root.join("payload").join("python.exe")
+        }
+
+        #[cfg(not(windows))]
+        {
+            root.join("payload").join("bin").join("python3")
+        }
+    }
 
     #[test]
     fn bundled_python_item_reports_not_prepared_when_payload_missing() {
@@ -229,19 +281,52 @@ mod tests {
         let root = temp.path().join("python");
         std::fs::create_dir_all(&root).expect("python root");
         std::fs::write(root.join("README.md"), "placeholder").expect("readme");
-        std::fs::write(
-            root.join("manifest.json"),
-            r#"{
-              "version": "phase2",
-              "source": "tests",
-              "expectedPaths": ["README.md", "payload"],
-              "status": "placeholder"
-            }"#,
-        )
-        .expect("manifest");
+        write_python_manifest(
+            &root,
+            "phase2",
+            &[
+                "README.md",
+                "payload/python.exe",
+                "payload/uv.exe",
+                "payload/uvx.exe",
+            ],
+            "placeholder",
+        );
 
         let item = bundled_python_item(Some(temp.path()), Some(temp.path()));
         assert_eq!(item.state, SetupItemStateDto::NotPrepared);
+        assert!(!item.can_prepare);
+        assert!(item
+            .detail
+            .expect("detail")
+            .contains("payload/python.exe, payload/uv.exe, payload/uvx.exe"));
+    }
+
+    #[test]
+    fn bundled_python_item_reports_staged_payload_can_prepare() {
+        let temp = TempDir::new().expect("temp dir");
+        let root = temp.path().join("python");
+        std::fs::create_dir_all(root.join("payload")).expect("payload root");
+        std::fs::write(root.join("README.md"), "placeholder").expect("readme");
+        write_file(&staged_payload_python_path(&root), "python");
+        write_file(&staged_payload_uv_path(&root), "uv");
+        write_file(&staged_payload_uvx_path(&root), "uvx");
+        write_python_manifest(
+            &root,
+            "phase2",
+            &[
+                "README.md",
+                "payload/python.exe",
+                "payload/uv.exe",
+                "payload/uvx.exe",
+            ],
+            "staged",
+        );
+
+        let item = bundled_python_item(Some(temp.path()), Some(temp.path()));
+        assert_eq!(item.state, SetupItemStateDto::NotPrepared);
+        assert!(item.can_prepare);
+        assert!(item.detail.expect("detail").contains("payload is staged"));
     }
 
     #[test]
@@ -249,27 +334,33 @@ mod tests {
         let resource_temp = TempDir::new().expect("resource temp");
         let app_temp = TempDir::new().expect("app temp");
         let root = resource_temp.path().join("python");
-        std::fs::create_dir_all(root.join("payload").join("bin")).expect("payload");
+        std::fs::create_dir_all(root.join("payload")).expect("payload");
         std::fs::write(root.join("README.md"), "placeholder").expect("readme");
-        std::fs::write(root.join("payload").join("bin").join("python"), "python").expect("binary");
-        std::fs::write(
-            root.join("manifest.json"),
-            r#"{
-              "version": "phase2",
-              "source": "tests",
-              "expectedPaths": ["README.md", "payload"],
-              "status": "staged"
-            }"#,
-        )
-        .expect("manifest");
+        write_file(&staged_payload_python_path(&root), "python");
+        write_file(&staged_payload_uv_path(&root), "uv");
+        write_file(&staged_payload_uvx_path(&root), "uvx");
+        write_file(&root.join("payload").join("runtime-marker.txt"), "payload");
+        write_python_manifest(
+            &root,
+            "phase2",
+            &[
+                "README.md",
+                "payload/python.exe",
+                "payload/uv.exe",
+                "payload/uvx.exe",
+            ],
+            "staged",
+        );
 
         prepare_bundled_python(Some(resource_temp.path()), Some(app_temp.path())).expect("prepare");
 
         let prepared_root = app_temp.path().join("setup").join("python");
+        assert!(prepared_root.join("payload").join("python.exe").exists());
+        assert!(prepared_root.join("payload").join("uv.exe").exists());
+        assert!(prepared_root.join("payload").join("uvx.exe").exists());
         assert!(prepared_root
             .join("payload")
-            .join("bin")
-            .join("python")
+            .join("runtime-marker.txt")
             .exists());
         assert!(prepared_root.join(".prepared-version").exists());
     }
@@ -277,13 +368,13 @@ mod tests {
     #[test]
     fn resolve_prepared_python_command_detects_prepared_runtime() {
         let app_temp = TempDir::new().expect("app temp");
-        let prepared_root = app_temp.path().join("setup").join("python").join("payload");
-        std::fs::create_dir_all(prepared_root.join("bin")).expect("python payload");
-        std::fs::write(prepared_root.join("bin").join("python3"), "python").expect("runtime");
+        let prepared_root = app_temp.path().join("setup").join("python");
+        let prepared_python = prepared_python_candidate_path(&prepared_root);
+        write_file(&prepared_python, "python");
 
         let command =
             resolve_prepared_python_command(Some(app_temp.path())).expect("prepared python");
 
-        assert!(command.ends_with("python3"));
+        assert_eq!(command, prepared_python.to_string_lossy().to_string());
     }
 }

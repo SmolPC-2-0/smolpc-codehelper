@@ -3,16 +3,25 @@
 This directory defines the packaged resource contract for the app-private
 Python runtime used by the self-contained line.
 
-Phase 3 locks the delivery source to:
+The dev and packaging contract is pinned to:
 
-- the official Windows x64 CPython embeddable distribution from `python.org`
-- a pinned `uv` Windows binary from Astral
-- provider-owned wheel/runtime inputs staged into `payload/`
+- the official Windows x64 CPython 3.12.9 embeddable distribution from `python.org`
+- the pinned `uv` 0.10.12 Windows binary from Astral
+- staged runtime files under `payload/`
 
-The final large runtime payload still stays out of git history. Packaging-stage
-scripts populate `payload/` at build time.
+The staged payload stays out of git history. Developers should populate it with:
 
-Expected future staged contents:
+```powershell
+npm run runtime:setup:python
+```
 
-- `payload/`
-- runtime wheels or environment inputs needed for bundled execution
+That command stages the pinned embeddable Python runtime plus `uv.exe` and
+`uvx.exe` into this directory so `Prepare` can copy the payload into app-local
+setup state during `npm run tauri:dev`.
+
+Expected staged contents:
+
+- `payload/python.exe`
+- `payload/uv.exe`
+- `payload/uvx.exe`
+- the rest of the embeddable CPython runtime files extracted alongside them
