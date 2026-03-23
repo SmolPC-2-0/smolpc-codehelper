@@ -4,11 +4,13 @@
 //! configuration, and the supervisor handle for the engine supervisor actor pattern.
 
 pub mod handle;
+pub mod supervisor;
 
 use smolpc_engine_client::{RuntimeModePreference, StartupMode};
 use tokio::sync::oneshot;
 
 pub use handle::EngineSupervisorHandle;
+pub use supervisor::EngineSupervisor;
 
 // --- Lifecycle State Machine ---
 
