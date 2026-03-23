@@ -77,7 +77,7 @@
         "cargo check --workspace clean"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Use the Phase 0 primitives (spawn_engine, wait_for_healthy, etc.) from smolpc-engine-client. The supervisor task is spawned but NOT yet wired into Tauri managed state — that comes in US-006."
     },
     {
