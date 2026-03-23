@@ -291,13 +291,15 @@ export const inferenceStore = {
 	},
 
 	/**
-	 * Lightweight health check — updates engineHealthy state.
+	 * Lightweight health check — pings the cached engine client without
+	 * triggering reconnection or spawning. Returns false immediately when
+	 * engine is dead, allowing the UI to react (show banner, clear state).
 	 */
 	async checkHealth(): Promise<boolean> {
 		try {
-			await invoke('engine_status');
-			engineHealthy = true;
-			return true;
+			const healthy = await invoke<boolean>('engine_health_only');
+			engineHealthy = healthy;
+			return healthy;
 		} catch {
 			engineHealthy = false;
 			return false;

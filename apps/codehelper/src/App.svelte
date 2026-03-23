@@ -801,7 +801,9 @@ Teaching rules:
 		}
 	});
 
-	// Engine health polling — immediate check + 10s interval
+	// Engine health polling — lightweight check every 10s.
+	// checkHealth uses engine_health_only (no reconnection side effects).
+	// When engine is down, actively attempts reconnection.
 	$effect(() => {
 		inferenceStore.checkHealth(); // immediate first check
 		void pollMemoryPressure();
@@ -811,13 +813,27 @@ Teaching rules:
 			const isHealthy = await inferenceStore.checkHealth();
 			await pollMemoryPressure();
 
-			if (!wasHealthy && isHealthy && !reconnectingEngineSession) {
+			if (!isHealthy && !reconnectingEngineSession) {
+				// Engine is down — attempt reconnection
 				reconnectingEngineSession = true;
 				try {
 					await reestablishEngineSession();
 					await pollMemoryPressure();
 				} catch (error) {
-					console.error('Failed to restore engine session after reconnect:', error);
+					console.error('Failed to reconnect engine session:', error);
+				} finally {
+					reconnectingEngineSession = false;
+				}
+			} else if (!wasHealthy && isHealthy && !reconnectingEngineSession) {
+				// Engine came back externally — sync session state
+				reconnectingEngineSession = true;
+				try {
+					await inferenceStore.syncStatus();
+					if (inferenceStore.currentModel) {
+						settingsStore.setModel(inferenceStore.currentModel);
+					}
+				} catch (error) {
+					console.error('Failed to sync after external recovery:', error);
 				} finally {
 					reconnectingEngineSession = false;
 				}

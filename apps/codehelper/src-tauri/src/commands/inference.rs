@@ -123,6 +123,15 @@ impl InferenceState {
             Ok(()) // no client — engine wasn't started by us
         }
     }
+
+    /// Lightweight health check — pings the cached client without reconnecting.
+    pub(crate) async fn check_health(&self) -> bool {
+        let guard = self.client.lock().await;
+        match guard.as_ref() {
+            Some(client) => client.health().await.unwrap_or(false),
+            None => false,
+        }
+    }
 }
 
 pub(super) fn parse_runtime_mode(mode: &str) -> Result<RuntimeModePreference, String> {

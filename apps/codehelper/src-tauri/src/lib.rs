@@ -16,7 +16,7 @@ use assistant::state::AssistantState;
 use commands::assistant::{assistant_cancel, assistant_send, mode_undo};
 use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_benchmark};
 use commands::default::{read, save_code, write};
-use commands::engine_client_adapter::{engine_ensure_started, engine_status};
+use commands::engine_client_adapter::{engine_ensure_started, engine_health_only, engine_status};
 use commands::hardware::{detect_hardware, get_cached_hardware, HardwareCache};
 use commands::inference::{
     check_model_exists, check_model_readiness, evaluate_memory_pressure, get_current_model,
@@ -273,6 +273,7 @@ pub fn run() {
             get_inference_backend_status,
             set_inference_runtime_mode,
             engine_ensure_started,
+            engine_health_only,
             engine_status,
             launcher_list_apps,
             launcher_launch_or_focus,

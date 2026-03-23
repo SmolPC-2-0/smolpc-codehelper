@@ -216,6 +216,16 @@ pub async fn engine_status(
     Ok(map_engine_status_to_readiness(&status))
 }
 
+/// Lightweight health check — pings the cached engine client without triggering
+/// reconnection or spawning. Returns false if engine is dead or no client cached.
+/// Used by the frontend's 10s health poll to detect engine death immediately.
+#[tauri::command]
+pub async fn engine_health_only(
+    state: tauri::State<'_, InferenceState>,
+) -> Result<bool, String> {
+    Ok(state.check_health().await)
+}
+
 #[tauri::command]
 pub async fn engine_ensure_started(
     request: EnsureStartedRequestDto,
