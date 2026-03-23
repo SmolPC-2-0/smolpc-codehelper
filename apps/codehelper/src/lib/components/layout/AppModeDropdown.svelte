@@ -1,13 +1,5 @@
 <script lang="ts">
-	import {
-		ChevronDown,
-		Code,
-		Image,
-		Box,
-		FileText,
-		Table,
-		Presentation
-	} from '@lucide/svelte';
+	import { ChevronDown, Code, Image, Box, FileText, Table, Presentation } from '@lucide/svelte';
 	import type { AppMode, ModeConfigDto } from '$lib/types/mode';
 	import type { Component } from 'svelte';
 
@@ -142,11 +134,9 @@
 				disabled={disabled || !available}
 				aria-pressed={mode.id === activeMode}
 				onclick={() => selectMode(mode.id as AppMode)}
-				title={
-					available
-						? `${mode.label}: ${mode.subtitle}`
-						: unavailableReasons[mode.id] ?? `${mode.label} is not ready yet`
-				}
+				title={available
+					? `${mode.label}: ${mode.subtitle}`
+					: (unavailableReasons[mode.id] ?? `${mode.label} is not ready yet`)}
 			>
 				{#if IconComponent}
 					<span class="mode-switcher__tab-icon">
@@ -212,9 +202,7 @@
 							<span class="mode-switcher__option-label">{mode.label}</span>
 							<span class="mode-switcher__option-subtitle">{mode.subtitle}</span>
 							{#if !available && unavailableReasons[mode.id]}
-								<span class="mode-switcher__option-reason"
-									>{unavailableReasons[mode.id]}</span
-								>
+								<span class="mode-switcher__option-reason">{unavailableReasons[mode.id]}</span>
 							{/if}
 						</span>
 					</div>
