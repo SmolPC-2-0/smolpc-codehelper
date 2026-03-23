@@ -406,7 +406,7 @@ export const inferenceStore = {
 
 			error = message;
 			console.error('Streaming generation failed:', e);
-			return null;
+			throw e;
 		} finally {
 			clearCancelTimeout(sessionId);
 			if (isActiveGenerationSession(sessionId)) {
@@ -468,7 +468,7 @@ export const inferenceStore = {
 
 			error = message;
 			console.error('Streaming generation failed:', e);
-			return null;
+			throw e;
 		} finally {
 			clearCancelTimeout(sessionId);
 			if (isActiveGenerationSession(sessionId)) {
