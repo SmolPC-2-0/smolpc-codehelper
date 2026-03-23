@@ -6,7 +6,10 @@ use std::path::Path;
 /// Check the shared models directory (%LOCALAPPDATA%\SmolPC\models\) for the default model.
 fn shared_model_exists() -> bool {
     if let Some(base) = dirs::data_local_dir() {
-        let shared = base.join("SmolPC").join("models").join(DEFAULT_BUNDLED_MODEL_ID);
+        let shared = base
+            .join("SmolPC")
+            .join("models")
+            .join(DEFAULT_BUNDLED_MODEL_ID);
         if shared.exists() {
             return true;
         }

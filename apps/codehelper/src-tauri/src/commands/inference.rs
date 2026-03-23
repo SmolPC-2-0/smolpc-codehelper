@@ -132,6 +132,18 @@ impl InferenceState {
             None => false,
         }
     }
+
+    /// Return the cached engine client only if it is healthy.
+    /// Does NOT trigger reconnection or spawning — safe for polling paths.
+    pub(crate) async fn cached_healthy_client(&self) -> Option<EngineClient> {
+        let guard = self.client.lock().await;
+        let client = guard.as_ref()?;
+        if client.health().await.unwrap_or(false) {
+            Some(client.clone())
+        } else {
+            None
+        }
+    }
 }
 
 pub(super) fn parse_runtime_mode(mode: &str) -> Result<RuntimeModePreference, String> {
@@ -800,14 +812,14 @@ pub async fn is_generating(
 #[tauri::command]
 pub async fn evaluate_memory_pressure(
     request: MemoryPressureRequest,
-    app_handle: tauri::AppHandle,
+    _app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<MemoryPressureStatus, String> {
     let (total_gb, available_gb) = sample_system_memory_gb();
     let level = classify_memory_level(available_gb);
     let heavy_mode_active = is_heavy_host_mode(request.active_mode.as_deref());
 
-    let client = resolve_client(&app_handle, &state, false).await.ok();
+    let client = state.cached_healthy_client().await;
     let mut current_model_id = None;
     if let Some(client) = client.as_ref() {
         if let Ok(status) = client.status().await {

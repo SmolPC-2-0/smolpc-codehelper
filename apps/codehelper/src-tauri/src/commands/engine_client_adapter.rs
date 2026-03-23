@@ -220,9 +220,7 @@ pub async fn engine_status(
 /// reconnection or spawning. Returns false if engine is dead or no client cached.
 /// Used by the frontend's 10s health poll to detect engine death immediately.
 #[tauri::command]
-pub async fn engine_health_only(
-    state: tauri::State<'_, InferenceState>,
-) -> Result<bool, String> {
+pub async fn engine_health_only(state: tauri::State<'_, InferenceState>) -> Result<bool, String> {
     Ok(state.check_health().await)
 }
 
@@ -236,7 +234,8 @@ pub async fn engine_ensure_started(
     // apply it BEFORE spawning the engine so it starts on the preferred backend in one shot.
     // This eliminates the double-startup where the engine starts on auto then restarts for the preference.
     let runtime_mode = if let Some(ref pref) = request.runtime_mode_preference {
-        parse_runtime_mode(pref).unwrap_or_else(|_| startup_mode_to_runtime_mode(request.mode.clone()))
+        parse_runtime_mode(pref)
+            .unwrap_or_else(|_| startup_mode_to_runtime_mode(request.mode.clone()))
     } else {
         startup_mode_to_runtime_mode(request.mode.clone())
     };

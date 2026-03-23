@@ -801,24 +801,42 @@ Teaching rules:
 		}
 	});
 
-	// Engine health polling — lightweight check every 10s.
+	// Engine health polling — lightweight check every 10s using setTimeout chaining.
+	// setTimeout chaining ensures the next tick only fires AFTER the previous one
+	// completes, preventing overlapping connect_or_spawn calls that race and kill
+	// each other's freshly-spawned engines.
 	// checkHealth uses engine_health_only (no reconnection side effects).
-	// When engine is down, actively attempts reconnection.
+	// pollMemoryPressure is skipped when engine is unhealthy to avoid triggering
+	// resolve_client (which auto-spawns) from evaluate_memory_pressure.
 	$effect(() => {
 		inferenceStore.checkHealth(); // immediate first check
-		void pollMemoryPressure();
 
-		const intervalId = setInterval(async () => {
+		let cancelled = false;
+		let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+		async function tick() {
+			if (cancelled) return;
+
 			const wasHealthy = inferenceStore.engineHealthy;
 			const isHealthy = await inferenceStore.checkHealth();
-			await pollMemoryPressure();
+
+			// Only poll memory pressure when the engine is alive — evaluate_memory_pressure
+			// must not go through resolve_client (which would auto-spawn the engine).
+			if (isHealthy) {
+				await pollMemoryPressure();
+			}
 
 			if (!isHealthy && !reconnectingEngineSession) {
 				// Engine is down — attempt reconnection
 				reconnectingEngineSession = true;
 				try {
 					await reestablishEngineSession();
-					await pollMemoryPressure();
+					// Update engineHealthy immediately so the banner clears
+					// without waiting for the next tick.
+					const reconnected = await inferenceStore.checkHealth();
+					if (reconnected) {
+						await pollMemoryPressure();
+					}
 				} catch (error) {
 					console.error('Failed to reconnect engine session:', error);
 				} finally {
@@ -838,9 +856,21 @@ Teaching rules:
 					reconnectingEngineSession = false;
 				}
 			}
-		}, 10_000);
 
-		return () => clearInterval(intervalId);
+			// Schedule next tick only after this one fully completes.
+			if (!cancelled) {
+				timeoutId = setTimeout(tick, 10_000);
+			}
+		}
+
+		timeoutId = setTimeout(tick, 10_000);
+
+		return () => {
+			cancelled = true;
+			if (timeoutId !== undefined) {
+				clearTimeout(timeoutId);
+			}
+		};
 	});
 
 	$effect(() => {
