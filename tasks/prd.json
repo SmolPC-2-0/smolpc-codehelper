@@ -198,7 +198,7 @@
         "eslint 0 errors on changed files"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "Use @tauri-apps/api/event listen() function. Import EngineLifecycleState type. The initInference() function should still call ensureStarted() — it now just waits on the supervisor internally."
     },
     {
