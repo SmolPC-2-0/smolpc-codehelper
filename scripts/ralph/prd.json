@@ -130,7 +130,7 @@
         "Commit as style(engine): cargo fmt + prettier on supervisor code"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Run from apps/codehelper/src-tauri for Rust. Run from apps/codehelper for frontend."
     },
     {
