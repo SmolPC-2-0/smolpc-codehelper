@@ -6,6 +6,7 @@ import type {
 	AvailableModel,
 	BackendStatus,
 	CheckModelResponse,
+	EngineLifecycleState,
 	EngineReadinessDto,
 	EngineReadinessState,
 	EnsureStartedRequestDto,
@@ -41,6 +42,7 @@ let lastMetrics = $state<GenerationMetrics | null>(null);
 let backendStatus = $state<BackendStatus | null>(null);
 let runtimeMode = $state<InferenceRuntimeMode>('auto');
 let engineHealthy = $state(true);
+let lifecycleState = $state<EngineLifecycleState>({ state: 'idle' });
 let memoryPressure = $state<MemoryPressureStatus | null>(null);
 let cancelTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let cancelTimeoutSessionId: number | null = null;
@@ -149,6 +151,18 @@ function isReadyState(value: EngineReadinessDto | null): boolean {
 	return value?.state === 'ready';
 }
 
+/**
+ * Force-reset generation UI state when the engine crashes or fails.
+ * Prevents the UI from being stuck in a "generating" state after engine death.
+ */
+function forceResetGenerationState(): void {
+	clearCancelTimeout();
+	isGenerating = false;
+	cancelState = 'idle';
+	activeGenerationSessionId = 0;
+	lastMetrics = null;
+}
+
 export const inferenceStore = {
 	// Getters
 	get readiness() {
@@ -190,6 +204,9 @@ export const inferenceStore = {
 	get memoryPressure() {
 		return memoryPressure;
 	},
+	get lifecycleState() {
+		return lifecycleState;
+	},
 
 	// Get status object for display
 	get status(): InferenceStatus {
@@ -221,6 +238,83 @@ export const inferenceStore = {
 	},
 
 	// Actions
+
+	/**
+	 * Update store from a supervisor lifecycle event.
+	 *
+	 * Maps the high-level EngineLifecycleState to the existing reactive fields
+	 * (engineHealthy, readiness, error, isReady) so the UI reacts consistently
+	 * without requiring changes to every consumer.
+	 */
+	updateLifecycleState(state: EngineLifecycleState): void {
+		lifecycleState = state;
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- not reactive state, just a timestamp string
+		const timestamp = new Date().toISOString();
+
+		switch (state.state) {
+			case 'running': {
+				engineHealthy = true;
+				error = null;
+				const backend = normalizeBackendName(state.backend);
+				if (state.model_id) {
+					readiness = readiness
+						? { ...readiness, state: 'ready', active_model_id: state.model_id, active_backend: backend }
+						: {
+								attempt_id: '',
+								state: 'ready',
+								state_since: timestamp,
+								active_backend: backend,
+								active_model_id: state.model_id,
+								error_code: null,
+								error_message: null,
+								retryable: false
+							};
+				} else {
+					readiness = readiness
+						? { ...readiness, state: 'loading_model', active_model_id: null, active_backend: backend }
+						: {
+								attempt_id: '',
+								state: 'loading_model',
+								state_since: timestamp,
+								active_backend: backend,
+								active_model_id: null,
+								error_code: null,
+								error_message: null,
+								retryable: false
+							};
+				}
+			}
+				break;
+
+			case 'crashed':
+			case 'failed':
+				engineHealthy = false;
+				error = state.message;
+				forceResetGenerationState();
+				break;
+
+			case 'starting':
+			case 'waiting_for_health':
+				engineHealthy = false;
+				readiness = readiness
+					? { ...readiness, state: 'starting' }
+					: {
+							attempt_id: '',
+							state: 'starting',
+							state_since: timestamp,
+							active_backend: null,
+							active_model_id: null,
+							error_code: null,
+							error_message: null,
+							retryable: false
+						};
+				break;
+
+			case 'idle':
+				engineHealthy = false;
+				break;
+		}
+	},
 
 	/**
 	 * List available models from engine registry.
