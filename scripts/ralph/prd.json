@@ -178,7 +178,7 @@
         "svelte-check 0 errors"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Keep existing EngineReadinessDto — it's still used by engine_status and engine_ensure_started return values. The lifecycle state is a higher-level abstraction."
     },
     {
