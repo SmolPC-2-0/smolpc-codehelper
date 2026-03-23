@@ -713,8 +713,10 @@ Teaching rules:
 
 		async function initInference() {
 			try {
-				await inferenceStore.listModels();
+				// Start engine FIRST — listModels needs get_client which waits for Running state.
+				// If listModels ran first it would block up to 60s waiting for an unstarted engine.
 				await performStartup();
+				await inferenceStore.listModels();
 				await pollMemoryPressure();
 			} catch (error) {
 				console.error('Failed to initialize inference session:', error);
