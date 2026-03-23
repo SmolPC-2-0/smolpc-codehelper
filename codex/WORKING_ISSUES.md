@@ -64,8 +64,8 @@ Master roadmap: issue #143
 ## Recently Resolved
 
 - **Issue #182 GIMP tool-path connection refused on port 9877** (2026-03-23)
-  - Status: Resolved (codex/issue-182-gimp-bridge, commit 8a708a9)
-  - Scope: Fixed the bundled GIMP extension lifecycle and request execution so MCP calls run in a live GIMP context (open image state + metadata now available), hardened Windows socket binding/host-liveness shutdown behavior, and bumped the GIMP resource manifest version for reprovision.
+  - Status: Resolved (codex/issue-182-gimp-bridge, commit 0e9b242)
+  - Scope: Fixed the bundled GIMP extension lifecycle and request execution so MCP calls run in a live GIMP context (open image state + metadata now available), hardened Windows socket binding/host-liveness shutdown behavior, and made planner JSON parsing resilient with deterministic fallback/retry behavior when model output is malformed.
 - **Host app launch should be manual in chat modes** (2026-03-22)
   - Status: Resolved (codex/manual-host-app-launch, commit e593eb0)
   - Scope: Removed automatic Blender/GIMP host-app startup from provider status/connect flows, added explicit `mode_open_host_app` command + UI button, ensured LibreOffice opens the selected app mode, and kept the Open App button responsive even when status refresh is slow.
