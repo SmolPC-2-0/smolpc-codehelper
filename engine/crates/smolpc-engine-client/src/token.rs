@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::EngineClientError;
 
-pub(crate) fn load_or_create_token(path: &Path) -> Result<String, EngineClientError> {
+pub fn load_or_create_token(path: &Path) -> Result<String, EngineClientError> {
     if let Some(token) = read_non_empty_token(path)? {
         return Ok(token);
     }

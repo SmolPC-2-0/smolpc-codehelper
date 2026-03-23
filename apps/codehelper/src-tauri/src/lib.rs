@@ -2,6 +2,7 @@ mod app_paths;
 mod assistant;
 mod benchmark;
 mod commands;
+mod engine;
 mod hardware;
 mod launcher;
 mod modes;
@@ -22,14 +23,16 @@ use commands::inference::{
     check_model_exists, check_model_readiness, evaluate_memory_pressure, get_current_model,
     get_inference_backend_status, inference_cancel, inference_generate,
     inference_generate_messages, is_generating, list_models, load_model,
-    set_inference_runtime_mode, unload_model, InferenceState,
+    set_inference_runtime_mode, unload_model,
 };
 use commands::launcher::{launcher_launch_or_focus, launcher_list_apps};
 use commands::modes::{list_modes, mode_open_host_app, mode_refresh_tools, mode_status};
 use commands::setup::{setup_prepare, setup_status};
+use engine::{EngineLifecycleState, EngineSupervisor, EngineSupervisorHandle};
 use launcher::orchestrator::LauncherState;
 use modes::registry::ModeProviderRegistry;
 use setup::SetupState;
+use smolpc_engine_client::EngineClient;
 use std::path::PathBuf;
 use tauri::Manager;
 
@@ -153,8 +156,7 @@ fn resolve_app_local_data_dir<R: tauri::Runtime>(app: &tauri::App<R>) -> Option<
         None => {
             if let Some(tauri_error) = tauri_error {
                 log::warn!(
-                    "Dev-mode app-local-data fallback is unavailable after Tauri resolution failed: {}",
-                    tauri_error
+                    "Dev-mode app-local-data fallback is unavailable after Tauri resolution failed: {tauri_error}"
                 );
             }
             None
@@ -213,8 +215,7 @@ fn resolve_bundled_resource_dir<R: tauri::Runtime>(app: &tauri::App<R>) -> Optio
                 );
             } else if let Some(tauri_error) = tauri_error {
                 log::warn!(
-                    "Bundled resource base is unavailable after Tauri resource directory resolution failed: {}",
-                    tauri_error
+                    "Bundled resource base is unavailable after Tauri resource directory resolution failed: {tauri_error}"
                 );
             }
             None
@@ -227,10 +228,22 @@ fn resolve_bundled_resource_dir<R: tauri::Runtime>(app: &tauri::App<R>) -> Optio
 pub fn run() {
     let app = tauri::Builder::default()
         .setup(|app| {
-            if cfg!(debug_assertions) {
+            {
+                let log_level = if cfg!(debug_assertions) {
+                    log::LevelFilter::Debug
+                } else {
+                    log::LevelFilter::Info
+                };
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Debug)
+                        .level(log_level)
+                        .level_for("hyper_util", log::LevelFilter::Warn)
+                        .level_for("reqwest", log::LevelFilter::Warn)
+                        .level_for("hyper", log::LevelFilter::Warn)
+                        .level_for("tungstenite", log::LevelFilter::Warn)
+                        .level_for("tokio_tungstenite", log::LevelFilter::Warn)
+                        .level_for("h2", log::LevelFilter::Warn)
+                        .level_for("rustls", log::LevelFilter::Warn)
                         .build(),
                 )?;
             }
@@ -244,11 +257,24 @@ pub fn run() {
             app.manage(setup_state);
             app.manage(mode_provider_registry);
 
+            // --- Engine Supervisor Setup ---
+            let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(16);
+            let (state_tx, state_rx) = tokio::sync::watch::channel(EngineLifecycleState::Idle);
+            let (client_tx, client_rx) = tokio::sync::watch::channel::<Option<EngineClient>>(None);
+
+            let handle = EngineSupervisorHandle::new(cmd_tx, state_rx, client_rx);
+
+            let supervisor =
+                EngineSupervisor::new(cmd_rx, state_tx, client_tx, app.handle().clone());
+            tauri::async_runtime::spawn(supervisor.run());
+            log::info!("Engine supervisor spawned");
+
+            app.manage(handle);
+
             Ok(())
         })
         .manage(AssistantState::default())
         .manage(HardwareCache::default())
-        .manage(InferenceState::default())
         .manage(LauncherState::default())
         .invoke_handler(tauri::generate_handler![
             read,
@@ -292,24 +318,26 @@ pub fn run() {
     app.run(|app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {
             log::info!("App exit requested, shutting down engine");
-            let state = app_handle.state::<InferenceState>();
+
+            // Primary: shut down via supervisor handle.
+            let supervisor_handle = app_handle.state::<EngineSupervisorHandle>();
             tauri::async_runtime::block_on(async {
                 match tokio::time::timeout(
-                    std::time::Duration::from_secs(2),
-                    state.shutdown_engine(),
+                    std::time::Duration::from_secs(3),
+                    supervisor_handle.shutdown(),
                 )
                 .await
                 {
                     Ok(Ok(_)) => {
-                        log::info!("Engine shut down gracefully");
+                        log::info!("Engine shut down gracefully via supervisor");
                         cleanup_engine_pid();
                     }
                     Ok(Err(e)) => {
-                        log::warn!("Engine graceful shutdown failed: {e}");
+                        log::warn!("Supervisor shutdown returned error: {e}");
                         force_kill_engine();
                     }
                     Err(_) => {
-                        log::warn!("Engine shutdown timed out after 2s");
+                        log::warn!("Supervisor shutdown timed out after 3s");
                         force_kill_engine();
                     }
                 }

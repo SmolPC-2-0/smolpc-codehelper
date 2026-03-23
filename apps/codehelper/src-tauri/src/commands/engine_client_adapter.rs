@@ -1,8 +1,9 @@
-use super::inference::{apply_runtime_mode_preference, resolve_client, InferenceState};
+use crate::engine::{EngineSupervisorHandle, StartupConfig};
 use chrono::Utc;
 use smolpc_engine_client::{
     read_runtime_env_overrides, EngineStatus, RuntimeModePreference, StartupMode, StartupPolicy,
 };
+use std::time::Duration;
 
 const CONTRACT_STATES: [&str; 7] = [
     "idle",
@@ -28,9 +29,23 @@ pub struct StartupPolicyDto {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeModePreferenceDto {
+    #[default]
+    Auto,
+    Cpu,
+    Dml,
+    Npu,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct EnsureStartedRequestDto {
     pub mode: StartupModeDto,
     pub startup_policy: Option<StartupPolicyDto>,
+    /// Runtime mode preference from user settings. When set, overrides `mode`
+    /// for backend selection so the engine spawns on the preferred backend
+    /// in a single spawn (no double-spawn).
+    pub runtime_mode_preference: Option<RuntimeModePreferenceDto>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -89,6 +104,17 @@ fn startup_mode_to_runtime_mode_with_auto_preference(
     match mode {
         StartupModeDto::Auto => auto_preference,
         StartupModeDto::DirectmlRequired => RuntimeModePreference::Dml,
+    }
+}
+
+fn runtime_mode_preference_dto_to_runtime_mode(
+    dto: &RuntimeModePreferenceDto,
+) -> RuntimeModePreference {
+    match dto {
+        RuntimeModePreferenceDto::Auto => RuntimeModePreference::Auto,
+        RuntimeModePreferenceDto::Cpu => RuntimeModePreference::Cpu,
+        RuntimeModePreferenceDto::Dml => RuntimeModePreference::Dml,
+        RuntimeModePreferenceDto::Npu => RuntimeModePreference::Npu,
     }
 }
 
@@ -199,10 +225,12 @@ fn map_engine_status_to_readiness(status: &EngineStatus) -> EngineReadinessDto {
 
 #[tauri::command]
 pub async fn engine_status(
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, EngineSupervisorHandle>,
 ) -> Result<EngineReadinessDto, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
+    // Status queries should return current state, not block waiting for startup.
+    let client = supervisor
+        .get_client_if_ready()
+        .ok_or_else(|| "Engine not running".to_string())?;
     let status = client
         .status()
         .await
@@ -213,18 +241,43 @@ pub async fn engine_status(
 #[tauri::command]
 pub async fn engine_ensure_started(
     request: EnsureStartedRequestDto,
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, EngineSupervisorHandle>,
 ) -> Result<EngineReadinessDto, String> {
-    let runtime_mode = startup_mode_to_runtime_mode(request.mode.clone());
-    let mode_changed = apply_runtime_mode_preference(&state, runtime_mode).await;
-    let client = resolve_client(&app_handle, &state, mode_changed).await?;
-
+    // runtime_mode_preference (from user settings) takes priority over the
+    // legacy `mode` field.  This lets the frontend pass the user's preferred
+    // backend in the initial Start command so the engine spawns once on the
+    // correct backend — no double-spawn.
+    let runtime_mode = match &request.runtime_mode_preference {
+        Some(pref) => runtime_mode_preference_dto_to_runtime_mode(pref),
+        None => startup_mode_to_runtime_mode(request.mode.clone()),
+    };
     let startup_mode = startup_mode_to_engine_mode(request.mode.clone());
     let startup_policy = normalize_startup_policy(&request);
 
+    let config = StartupConfig {
+        runtime_mode,
+        dml_device_id: read_runtime_env_overrides().dml_device_id,
+        default_model_id: startup_policy.default_model_id.clone(),
+    };
+
+    // Step 1: Tell the supervisor to spawn the engine process (if not already running).
+    supervisor.ensure_started(config).await?;
+
+    // Step 2: Get the running engine client.
+    let client = supervisor.get_client(Duration::from_secs(60)).await?;
+
+    // Step 3: Tell the engine host to apply startup policy (load default model, etc.).
+    // This is idempotent — if the engine already loaded the model, it returns the current status.
+    // Both steps are needed: the supervisor owns process lifecycle, the engine host owns model loading.
     match client.ensure_started(startup_mode, startup_policy).await {
-        Ok(status) => Ok(map_engine_status_to_readiness(&status)),
+        Ok(status) => {
+            // Track the loaded model so the supervisor can restore it after a crash.
+            if let Some(model_id) = status.current_model.as_ref().or(status.active_model_id.as_ref()) {
+                supervisor.set_desired_model(Some(model_id.clone())).await;
+            }
+            supervisor.refresh_status().await;
+            Ok(map_engine_status_to_readiness(&status))
+        }
         Err(error) => {
             let error_message = error.to_string();
             match client.status().await {
@@ -430,6 +483,7 @@ mod tests {
             startup_policy: Some(StartupPolicyDto {
                 default_model_id: Some("  qwen3  ".to_string()),
             }),
+            runtime_mode_preference: None,
         };
         let normalized = normalize_startup_policy(&request);
         assert_eq!(normalized.default_model_id.as_deref(), Some("qwen3"));
@@ -439,6 +493,7 @@ mod tests {
             startup_policy: Some(StartupPolicyDto {
                 default_model_id: Some("  ".to_string()),
             }),
+            runtime_mode_preference: None,
         };
         let normalized_missing = normalize_startup_policy(&missing);
         assert!(normalized_missing.default_model_id.is_none());
@@ -451,6 +506,7 @@ mod tests {
             startup_policy: Some(StartupPolicyDto {
                 default_model_id: Some("qwen2.5-1.5b-instruct".to_string()),
             }),
+            runtime_mode_preference: None,
         };
 
         let value =

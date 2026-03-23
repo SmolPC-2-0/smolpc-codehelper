@@ -1,5 +1,6 @@
 use reqwest::header::AUTHORIZATION;
 use std::fs::OpenOptions;
+use std::future::Future;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -15,184 +16,16 @@ use crate::{
     SPAWN_LOG_FILENAME,
 };
 
-pub async fn connect_or_spawn(
-    options: EngineConnectOptions,
-) -> Result<EngineClient, EngineClientError> {
-    std::fs::create_dir_all(&options.shared_runtime_dir)?;
-    std::fs::create_dir_all(&options.data_dir)?;
+// ---------------------------------------------------------------------------
+// Public composable primitives
+// ---------------------------------------------------------------------------
 
-    let token_path = options.shared_runtime_dir.join("engine-token.txt");
-    let token = load_or_create_token(&token_path)?;
-    let base_url = format!("http://127.0.0.1:{}", options.port);
-    let client = EngineClient::new(base_url, token.clone());
-    let force_override = options.runtime_mode.as_force_override();
-    let force_respawn = options.force_respawn;
-
-    if enforce_running_host_policy(&client, force_override, force_respawn).await? {
-        return Ok(client);
-    }
-
-    let _spawn_lock = acquire_spawn_lock(&options.shared_runtime_dir).await?;
-    if enforce_running_host_policy(&client, force_override, force_respawn).await? {
-        return Ok(client);
-    }
-
-    if !client.health().await.unwrap_or(false) {
-        // Kill any stale engine processes before spawning a fresh one.
-        kill_stale_engine_processes();
-
-        // Regenerate the token so client and freshly-spawned host share the
-        // same secret -- stale tokens from a dead host are the #1 cause of
-        // "failed to become healthy" on clean installs.
-        let _ = std::fs::remove_file(&token_path);
-        let fresh_token = load_or_create_token(&token_path)?;
-        let client = EngineClient::new(
-            format!("http://127.0.0.1:{}", options.port),
-            fresh_token.clone(),
-        );
-
-        spawn_host(&options, &fresh_token)?;
-
-        let spawn_log = options.shared_runtime_dir.join(SPAWN_LOG_FILENAME);
-        let started = std::time::Instant::now();
-        loop {
-            if client.health().await.unwrap_or(false) {
-                return finish_connect(client).await;
-            }
-            if started.elapsed() > Duration::from_secs(30) {
-                let log_hint = if spawn_log.exists() {
-                    format!(" Check spawn log: {}", spawn_log.display())
-                } else {
-                    String::new()
-                };
-                return Err(EngineClientError::Message(format!(
-                    "Engine failed to become healthy within 30s.{log_hint}"
-                )));
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    }
-
-    finish_connect(client).await
-}
-
-async fn finish_connect(client: EngineClient) -> Result<EngineClient, EngineClientError> {
-    let meta = client.meta().await?;
-    if !protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION) {
-        return Err(EngineClientError::Message(format!(
-            "Engine protocol mismatch: {}",
-            meta.protocol_version
-        )));
-    }
-    Ok(client)
-}
-
-async fn enforce_running_host_policy(
-    client: &EngineClient,
-    force_override: Option<&str>,
-    force_respawn: bool,
-) -> Result<bool, EngineClientError> {
-    if !client.health().await.unwrap_or(false) {
-        return Ok(false);
-    }
-
-    let meta = client.meta().await?;
-    let protocol_matches = protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION);
-    let needs_status_probe = !protocol_matches || force_override.is_some() || force_respawn;
-    if !needs_status_probe {
-        return Ok(true);
-    }
-
-    let status = client.status().await?;
-    match decide_running_host_policy(
-        protocol_matches,
-        status.generating,
-        force_override,
-        force_respawn,
-    ) {
-        RunningHostPolicyDecision::Reuse => Ok(true),
-        RunningHostPolicyDecision::Restart => {
-            request_engine_shutdown(client).await?;
-            wait_for_engine_down(client, Duration::from_secs(5)).await?;
-            Ok(false)
-        }
-        RunningHostPolicyDecision::Reject(message) => Err(EngineClientError::Message(message)),
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum RunningHostPolicyDecision {
-    Reuse,
-    Restart,
-    Reject(String),
-}
-
-pub(crate) fn decide_running_host_policy(
-    protocol_matches: bool,
-    generating: bool,
-    force_override: Option<&str>,
-    force_respawn: bool,
-) -> RunningHostPolicyDecision {
-    if !protocol_matches {
-        if generating {
-            return RunningHostPolicyDecision::Reject(
-                "Running engine protocol is incompatible and daemon is busy".to_string(),
-            );
-        }
-        return RunningHostPolicyDecision::Restart;
-    }
-
-    if force_override.is_some() || force_respawn {
-        if generating {
-            let policy = force_override
-                .map(|value| format!("{FORCE_EP_ENV}={value}"))
-                .unwrap_or_else(|| "forced respawn policy".to_string());
-            return RunningHostPolicyDecision::Reject(format!(
-                "Engine is busy and cannot apply {policy}. Cancel generation and retry."
-            ));
-        }
-        return RunningHostPolicyDecision::Restart;
-    }
-
-    RunningHostPolicyDecision::Reuse
-}
-
-async fn request_engine_shutdown(client: &EngineClient) -> Result<(), EngineClientError> {
-    let response = client
-        .http
-        .post(client.url("/engine/shutdown"))
-        .header(AUTHORIZATION, client.auth_header())
-        .timeout(NON_STREAMING_REQUEST_TIMEOUT)
-        .send()
-        .await;
-
-    match response {
-        Ok(r) => {
-            r.error_for_status()?;
-            Ok(())
-        }
-        Err(e) if e.is_connect() => Ok(()),
-        Err(e) => Err(e.into()),
-    }
-}
-
-async fn wait_for_engine_down(
-    client: &EngineClient,
-    timeout: Duration,
-) -> Result<(), EngineClientError> {
-    let started = Instant::now();
-    while client.health().await.unwrap_or(false) {
-        if started.elapsed() > timeout {
-            return Err(EngineClientError::Message(
-                "Engine shutdown timed out while applying runtime policy".to_string(),
-            ));
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    Ok(())
-}
-
-fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineClientError> {
+/// Spawn the engine host binary as a detached process.
+/// Does NOT wait for health. Returns the child PID.
+pub fn spawn_engine(
+    options: &EngineConnectOptions,
+    token: &str,
+) -> Result<u32, EngineClientError> {
     let host_bin = resolve_host_binary(options)?;
 
     // Write spawn diagnostics before attempting launch.
@@ -261,12 +94,281 @@ fn spawn_host(options: &EngineConnectOptions, token: &str) -> Result<(), EngineC
     }
 
     let child = cmd.spawn()?;
+    let pid = child.id();
     let pid_path = options.shared_runtime_dir.join("engine.pid");
-    if let Err(e) = std::fs::write(&pid_path, child.id().to_string()) {
+    if let Err(e) = std::fs::write(&pid_path, pid.to_string()) {
         log::warn!(
             "Failed to write engine PID file {}: {e}",
             pid_path.display()
         );
+    }
+    Ok(pid)
+}
+
+/// Poll health endpoint until responsive or timeout.
+pub async fn wait_for_healthy(
+    client: &EngineClient,
+    timeout: Duration,
+) -> Result<(), EngineClientError> {
+    let started = Instant::now();
+    loop {
+        if client.health().await.unwrap_or(false) {
+            return Ok(());
+        }
+        if started.elapsed() > timeout {
+            return Err(EngineClientError::Message(format!(
+                "Engine failed to become healthy within {}s",
+                timeout.as_secs()
+            )));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Check if a running engine satisfies runtime policy.
+///
+/// Returns [`RunningHostPolicyDecision::Reuse`] when the engine can be kept,
+/// [`Restart`](RunningHostPolicyDecision::Restart) when it needs to be shut
+/// down and re-spawned, [`SpawnNeeded`](RunningHostPolicyDecision::SpawnNeeded)
+/// when no engine is running, or [`Reject`](RunningHostPolicyDecision::Reject)
+/// when the request cannot be fulfilled.
+pub async fn check_running_policy(
+    client: &EngineClient,
+    force_override: Option<&str>,
+    force_respawn: bool,
+) -> Result<RunningHostPolicyDecision, EngineClientError> {
+    if !client.health().await.unwrap_or(false) {
+        return Ok(RunningHostPolicyDecision::SpawnNeeded);
+    }
+
+    let meta = client.meta().await?;
+    let protocol_matches =
+        protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION);
+    let needs_status_probe = !protocol_matches || force_override.is_some() || force_respawn;
+    if !needs_status_probe {
+        return Ok(RunningHostPolicyDecision::Reuse);
+    }
+
+    let status = client.status().await?;
+    Ok(decide_running_host_policy(
+        protocol_matches,
+        status.generating,
+        force_override,
+        force_respawn,
+    ))
+}
+
+/// Gracefully shut down a running engine and wait for it to stop.
+pub async fn shutdown_and_wait(
+    client: &EngineClient,
+    timeout: Duration,
+) -> Result<(), EngineClientError> {
+    request_engine_shutdown(client).await?;
+    wait_for_engine_down(client, timeout).await
+}
+
+/// Best-effort kill of any stale smolpc-engine-host process.
+///
+/// This kills all `smolpc-engine-host.exe` processes by name. On a
+/// single-app install (the current deployment model) this is correct.
+/// A future multi-app setup may need port-specific PID lookup via
+/// `Get-NetTCPConnection`.
+pub fn kill_stale_processes() {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/IM", "smolpc-engine-host.exe"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        // No blocking sleep -- the health-check loop retries every 100ms
+        // and will naturally wait for the port to become available.
+    }
+}
+
+/// Manage the filesystem spawn lock. Acquires the lock, runs the provided
+/// closure, and releases the lock when done (even on error).
+pub async fn with_spawn_lock<F, Fut, T>(
+    shared_runtime_dir: &Path,
+    f: F,
+) -> Result<T, EngineClientError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<T, EngineClientError>>,
+{
+    let _guard = acquire_spawn_lock(shared_runtime_dir).await?;
+    f().await
+}
+
+// ---------------------------------------------------------------------------
+// Policy decision types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RunningHostPolicyDecision {
+    /// Engine is healthy and compatible — reuse it.
+    Reuse,
+    /// Engine is running but must be restarted (protocol mismatch or forced).
+    Restart,
+    /// No engine is running — a fresh spawn is needed.
+    SpawnNeeded,
+    /// Cannot fulfill request (e.g., engine busy during forced override).
+    Reject(String),
+}
+
+pub fn decide_running_host_policy(
+    protocol_matches: bool,
+    generating: bool,
+    force_override: Option<&str>,
+    force_respawn: bool,
+) -> RunningHostPolicyDecision {
+    if !protocol_matches {
+        if generating {
+            return RunningHostPolicyDecision::Reject(
+                "Running engine protocol is incompatible and daemon is busy".to_string(),
+            );
+        }
+        return RunningHostPolicyDecision::Restart;
+    }
+
+    if force_override.is_some() || force_respawn {
+        if generating {
+            let policy = force_override
+                .map(|value| format!("{FORCE_EP_ENV}={value}"))
+                .unwrap_or_else(|| "forced respawn policy".to_string());
+            return RunningHostPolicyDecision::Reject(format!(
+                "Engine is busy and cannot apply {policy}. Cancel generation and retry."
+            ));
+        }
+        return RunningHostPolicyDecision::Restart;
+    }
+
+    RunningHostPolicyDecision::Reuse
+}
+
+// ---------------------------------------------------------------------------
+// Convenience wrapper (preserves original connect_or_spawn behavior)
+// ---------------------------------------------------------------------------
+
+pub async fn connect_or_spawn(
+    options: EngineConnectOptions,
+) -> Result<EngineClient, EngineClientError> {
+    std::fs::create_dir_all(&options.shared_runtime_dir)?;
+    std::fs::create_dir_all(&options.data_dir)?;
+
+    let token_path = options.shared_runtime_dir.join("engine-token.txt");
+    let token = load_or_create_token(&token_path)?;
+    let base_url = format!("http://127.0.0.1:{}", options.port);
+    let client = EngineClient::new(base_url, token.clone());
+    let force_override = options.runtime_mode.as_force_override();
+    let force_respawn = options.force_respawn;
+
+    // First policy check (no lock).
+    match check_running_policy(&client, force_override, force_respawn).await? {
+        RunningHostPolicyDecision::Reuse => return Ok(client),
+        RunningHostPolicyDecision::Restart => {
+            shutdown_and_wait(&client, Duration::from_secs(5)).await?;
+        }
+        RunningHostPolicyDecision::Reject(msg) => {
+            return Err(EngineClientError::Message(msg));
+        }
+        RunningHostPolicyDecision::SpawnNeeded => {}
+    }
+
+    // Acquire lock, then re-check (another process may have spawned).
+    let _spawn_lock = acquire_spawn_lock(&options.shared_runtime_dir).await?;
+    match check_running_policy(&client, force_override, force_respawn).await? {
+        RunningHostPolicyDecision::Reuse => return Ok(client),
+        RunningHostPolicyDecision::Restart => {
+            shutdown_and_wait(&client, Duration::from_secs(5)).await?;
+        }
+        RunningHostPolicyDecision::Reject(msg) => {
+            return Err(EngineClientError::Message(msg));
+        }
+        RunningHostPolicyDecision::SpawnNeeded => {}
+    }
+
+    // Engine is not running (or was just shut down) — spawn fresh.
+    if !client.health().await.unwrap_or(false) {
+        kill_stale_processes();
+
+        // Regenerate the token so client and freshly-spawned host share the
+        // same secret -- stale tokens from a dead host are the #1 cause of
+        // "failed to become healthy" on clean installs.
+        let _ = std::fs::remove_file(&token_path);
+        let fresh_token = load_or_create_token(&token_path)?;
+        let client = EngineClient::new(
+            format!("http://127.0.0.1:{}", options.port),
+            fresh_token.clone(),
+        );
+
+        spawn_engine(&options, &fresh_token)?;
+
+        let spawn_log = options.shared_runtime_dir.join(SPAWN_LOG_FILENAME);
+        wait_for_healthy(&client, Duration::from_secs(30))
+            .await
+            .map_err(|e| {
+                let log_hint = if spawn_log.exists() {
+                    format!(" Check spawn log: {}", spawn_log.display())
+                } else {
+                    String::new()
+                };
+                EngineClientError::Message(format!("{e}{log_hint}"))
+            })?;
+
+        return finish_connect(client).await;
+    }
+
+    finish_connect(client).await
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+async fn finish_connect(client: EngineClient) -> Result<EngineClient, EngineClientError> {
+    let meta = client.meta().await?;
+    if !protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION) {
+        return Err(EngineClientError::Message(format!(
+            "Engine protocol mismatch: {}",
+            meta.protocol_version
+        )));
+    }
+    Ok(client)
+}
+
+async fn request_engine_shutdown(client: &EngineClient) -> Result<(), EngineClientError> {
+    let response = client
+        .http
+        .post(client.url("/engine/shutdown"))
+        .header(AUTHORIZATION, client.auth_header())
+        .timeout(NON_STREAMING_REQUEST_TIMEOUT)
+        .send()
+        .await;
+
+    match response {
+        Ok(r) => {
+            r.error_for_status()?;
+            Ok(())
+        }
+        Err(e) if e.is_connect() => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+async fn wait_for_engine_down(
+    client: &EngineClient,
+    timeout: Duration,
+) -> Result<(), EngineClientError> {
+    let started = Instant::now();
+    while client.health().await.unwrap_or(false) {
+        if started.elapsed() > timeout {
+            return Err(EngineClientError::Message(
+                "Engine shutdown timed out while applying runtime policy".to_string(),
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
     Ok(())
 }
@@ -487,26 +589,6 @@ fn is_lock_holder_dead(lock_path: &Path) -> bool {
     }
 }
 
-/// Best-effort kill of any stale smolpc-engine-host process.
-///
-/// This kills all `smolpc-engine-host.exe` processes by name. On a
-/// single-app install (the current deployment model) this is correct.
-/// A future multi-app setup may need port-specific PID lookup via
-/// `Get-NetTCPConnection`.
-fn kill_stale_engine_processes() {
-    #[cfg(target_os = "windows")]
-    {
-        let _ = Command::new("taskkill")
-            .args(["/F", "/IM", "smolpc-engine-host.exe"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-        // No blocking sleep -- the health-check loop retries every 100ms
-        // and will naturally wait for the port to become available.
-    }
-}
-
 fn default_shared_models_dir() -> Option<PathBuf> {
     let base = dirs::data_local_dir()?;
     let path = base.join(SHARED_MODELS_VENDOR_DIR).join(SHARED_MODELS_DIR);
@@ -557,7 +639,9 @@ fn find_host_binary_in_dir(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-fn resolve_host_binary(options: &EngineConnectOptions) -> Result<PathBuf, EngineClientError> {
+pub(crate) fn resolve_host_binary(
+    options: &EngineConnectOptions,
+) -> Result<PathBuf, EngineClientError> {
     if let Some(path) = &options.host_binary {
         if path.exists() {
             return Ok(path.clone());

@@ -54,6 +54,14 @@ SMOLPC_MODELS_DIR=/path/to/models
 
 **Engine host owns all backend policy.** Launcher and Tauri app consume status only — they must not rank backends or override engine selection.
 
+**Engine lifecycle owned by EngineSupervisor.** A single tokio task owns spawn/kill/health/restart. Tauri commands never spawn or kill the engine directly — they send commands via mpsc channel and read state via watch channel.
+
+**Use `tauri::async_runtime::spawn` not `tokio::spawn` in `Builder::setup()`.** Tauri manages its own Tokio runtime; bare `tokio::spawn` in setup may target a different runtime or panic if none is active.
+
+**Commands get engine client via `supervisor.get_client(timeout)`.** The handle waits on a watch channel — no Mutex needed. `get_client_if_ready()` is the non-blocking variant.
+
+**Runtime mode preference must be in the Start command.** Never apply runtime mode post-spawn — that kills and respawns the engine. Pass it in `StartupConfig` so the supervisor sets `SMOLPC_FORCE_EP` before spawning.
+
 **Svelte 5 runes only.** No `writable` / `readable` from `svelte/store`. Use `$state`, `$derived`, `$effect`.
 
 **Tailwind 4.** No `@apply` — use utility classes directly in templates.

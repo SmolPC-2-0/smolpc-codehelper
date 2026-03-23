@@ -1,3 +1,4 @@
+use crate::engine::EngineSupervisorHandle;
 use crate::launcher::catalog;
 use crate::launcher::orchestrator::{launch_or_focus, LauncherState};
 use crate::launcher::types::{LauncherAppSummary, LauncherLaunchResult};
@@ -12,11 +13,12 @@ pub async fn launcher_launch_or_focus(
     app_id: String,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, LauncherState>,
+    supervisor: tauri::State<'_, EngineSupervisorHandle>,
 ) -> Result<LauncherLaunchResult, String> {
     let app_id = app_id.trim();
     if app_id.is_empty() {
         return Err("app_id cannot be empty".to_string());
     }
 
-    launch_or_focus(app_id, &app_handle, state.inner()).await
+    launch_or_focus(app_id, &app_handle, state.inner(), supervisor.inner()).await
 }

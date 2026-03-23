@@ -7,7 +7,12 @@ mod version;
 pub mod test_utils;
 
 pub use client::{EngineChatMessage, EngineClient};
-pub use spawn::connect_or_spawn;
+pub use spawn::{
+    check_running_policy, connect_or_spawn, decide_running_host_policy, kill_stale_processes,
+    shutdown_and_wait, spawn_engine, wait_for_healthy, with_spawn_lock,
+    RunningHostPolicyDecision,
+};
+pub use token::load_or_create_token;
 pub use version::{engine_api_major_compatible, expected_engine_api_major, version_major};
 
 use smolpc_engine_core::inference::backend::BackendStatus;
@@ -280,7 +285,7 @@ fn default_attempt_id() -> String {
 mod tests {
     use super::*;
     use crate::client::{fallback_stream_metrics, parse_error_message, parse_models_response};
-    use crate::spawn::{decide_running_host_policy, RunningHostPolicyDecision};
+    use crate::{decide_running_host_policy, RunningHostPolicyDecision};
     use crate::test_utils::with_runtime_env;
     use crate::token::load_or_create_token;
     use std::fs;

@@ -88,6 +88,7 @@ export interface StartupPolicyDto {
 export interface EnsureStartedRequestDto {
 	mode: StartupModeDto;
 	startup_policy?: StartupPolicyDto | null;
+	runtime_mode_preference?: InferenceRuntimeMode | null;
 }
 
 export interface EngineReadinessDto {
@@ -260,6 +261,18 @@ export interface CheckModelResponse {
 		cpu: ModelLaneReadiness;
 	};
 }
+
+/**
+ * Engine lifecycle state broadcast by the supervisor via Tauri events.
+ * Must match the Rust `EngineLifecycleState` enum (serde tagged).
+ */
+export type EngineLifecycleState =
+	| { state: 'idle' }
+	| { state: 'starting' }
+	| { state: 'waiting_for_health' }
+	| { state: 'running'; backend: string | null; model_id: string | null }
+	| { state: 'crashed'; message: string; restart_count: number }
+	| { state: 'failed'; message: string };
 
 export interface MemoryPressureRequest {
 	activeMode?: string | null;
