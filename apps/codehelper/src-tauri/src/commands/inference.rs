@@ -546,16 +546,18 @@ fn log_host_binary_resolution(host_binary: Option<&PathBuf>) {
 #[tauri::command]
 pub async fn load_model(
     model_id: String,
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<String, String> {
-    log::info!("Loading model via shared engine: {model_id}");
-    let client = resolve_client(&app_handle, &state, false).await?;
+    log::info!("Loading model via supervisor: {model_id}");
+    let client = supervisor
+        .get_client(std::time::Duration::from_secs(60))
+        .await?;
     client.load_model(&model_id).await.map_err(|e| {
         log::error!("Model load failed for {model_id}: {e}");
         format!("Failed to load model: {e}")
     })?;
-    *state.desired_model.lock().await = Some(model_id.clone());
+    supervisor.set_desired_model(Some(model_id.clone())).await;
+    supervisor.refresh_status().await;
     if let Ok(status) = client.status().await {
         log::info!(
             "Model loaded: model={} backend={:?} runtime_engine={:?} selection_reason={:?}",
@@ -570,15 +572,17 @@ pub async fn load_model(
 
 #[tauri::command]
 pub async fn unload_model(
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<String, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
+    let client = supervisor
+        .get_client(std::time::Duration::from_secs(60))
+        .await?;
     client
         .unload_model(false)
         .await
         .map_err(|e| format!("Failed to unload model: {e}"))?;
-    *state.desired_model.lock().await = None;
+    supervisor.set_desired_model(None).await;
+    supervisor.refresh_status().await;
     Ok("Model unloaded successfully".to_string())
 }
 
@@ -625,68 +629,41 @@ pub async fn get_inference_backend_status(
 pub async fn set_inference_runtime_mode(
     mode: String,
     model_id: Option<String>,
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<BackendStatus, String> {
     let requested_mode = parse_runtime_mode(&mode)?;
-    let previous_config = *state.runtime_config.lock().await;
     log::info!(
-        "Applying inference runtime mode: previous={} requested={}",
-        runtime_mode_label(previous_config.runtime_mode),
+        "Applying inference runtime mode via supervisor: requested={}",
         runtime_mode_label(requested_mode)
     );
 
-    state.runtime_config.lock().await.runtime_mode = requested_mode;
-    *state.client.lock().await = None;
+    supervisor.set_runtime_mode(requested_mode).await?;
 
-    let result = async {
-        let client = resolve_client(&app_handle, &state, true).await?;
+    let client = supervisor
+        .get_client(std::time::Duration::from_secs(60))
+        .await?;
 
-        if let Some(model_id) = model_id.as_ref().map(|value| value.trim()) {
-            if !model_id.is_empty() {
-                log::info!(
-                    "Reloading model '{}' after runtime mode switch to {}",
-                    model_id,
-                    runtime_mode_label(requested_mode)
-                );
-                client
-                    .load_model(model_id)
-                    .await
-                    .map_err(|e| format!("Failed to load model after mode switch: {e}"))?;
-                *state.desired_model.lock().await = Some(model_id.to_string());
-            }
-        }
-
-        let status = client
-            .status()
-            .await
-            .map_err(|e| format!("Failed to query engine status after mode switch: {e}"))?;
-        Ok::<BackendStatus, String>(status.backend_status)
-    }
-    .await;
-
-    if let Err(error) = &result {
-        log::warn!(
-            "Runtime mode switch '{}' failed: {}",
-            runtime_mode_label(requested_mode),
-            error
-        );
-        {
-            let mut runtime_config = state.runtime_config.lock().await;
-            let mut client = state.client.lock().await;
-            apply_runtime_mode_rollback(&mut runtime_config, &mut *client, previous_config);
-        }
-
-        if let Err(rollback_error) = resolve_client(&app_handle, &state, true).await {
-            return Err(format_runtime_mode_switch_failure(
-                error,
-                previous_config.runtime_mode,
-                Some(&rollback_error),
-            ));
+    if let Some(model_id) = model_id.as_ref().map(|value| value.trim()) {
+        if !model_id.is_empty() {
+            log::info!(
+                "Reloading model '{}' after runtime mode switch to {}",
+                model_id,
+                runtime_mode_label(requested_mode)
+            );
+            client
+                .load_model(model_id)
+                .await
+                .map_err(|e| format!("Failed to load model after mode switch: {e}"))?;
+            supervisor.set_desired_model(Some(model_id.to_string())).await;
+            supervisor.refresh_status().await;
         }
     }
 
-    result
+    let status = client
+        .status()
+        .await
+        .map_err(|e| format!("Failed to query engine status after mode switch: {e}"))?;
+    Ok(status.backend_status)
 }
 
 #[tauri::command]

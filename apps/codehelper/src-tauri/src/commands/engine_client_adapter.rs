@@ -1,8 +1,10 @@
-use super::inference::{apply_runtime_mode_preference, resolve_client, InferenceState};
+use super::inference::{resolve_client, InferenceState};
+use crate::engine::{EngineSupervisorHandle, StartupConfig};
 use chrono::Utc;
 use smolpc_engine_client::{
     read_runtime_env_overrides, EngineStatus, RuntimeModePreference, StartupMode, StartupPolicy,
 };
+use std::time::Duration;
 
 const CONTRACT_STATES: [&str; 7] = [
     "idle",
@@ -213,15 +215,24 @@ pub async fn engine_status(
 #[tauri::command]
 pub async fn engine_ensure_started(
     request: EnsureStartedRequestDto,
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, EngineSupervisorHandle>,
 ) -> Result<EngineReadinessDto, String> {
     let runtime_mode = startup_mode_to_runtime_mode(request.mode.clone());
-    let mode_changed = apply_runtime_mode_preference(&state, runtime_mode).await;
-    let client = resolve_client(&app_handle, &state, mode_changed).await?;
-
     let startup_mode = startup_mode_to_engine_mode(request.mode.clone());
     let startup_policy = normalize_startup_policy(&request);
+
+    let config = StartupConfig {
+        runtime_mode,
+        dml_device_id: read_runtime_env_overrides().dml_device_id,
+        default_model_id: startup_policy.default_model_id.clone(),
+        startup_mode,
+    };
+
+    supervisor.ensure_started(config).await?;
+
+    let client = supervisor
+        .get_client(Duration::from_secs(60))
+        .await?;
 
     match client.ensure_started(startup_mode, startup_policy).await {
         Ok(status) => Ok(map_engine_status_to_readiness(&status)),

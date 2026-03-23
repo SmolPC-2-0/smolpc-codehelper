@@ -164,6 +164,15 @@ impl EngineSupervisorHandle {
         let _ = self.cmd_tx.send(EngineCommand::RefreshStatus).await;
     }
 
+    /// Update the desired model the supervisor should restore after restarts.
+    /// Fire-and-forget — no response needed.
+    pub async fn set_desired_model(&self, model_id: Option<String>) {
+        let _ = self
+            .cmd_tx
+            .send(EngineCommand::SetDesiredModel { model_id })
+            .await;
+    }
+
     /// Subscribe to state changes. Returns a cloned watch receiver.
     pub fn subscribe(&self) -> watch::Receiver<EngineLifecycleState> {
         self.state_rx.clone()
