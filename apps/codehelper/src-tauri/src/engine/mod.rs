@@ -1,10 +1,14 @@
 //! Engine supervisor types and state machine.
 //!
-//! This module defines the lifecycle state machine, command types, and startup
-//! configuration for the engine supervisor actor pattern.
+//! This module defines the lifecycle state machine, command types, startup
+//! configuration, and the supervisor handle for the engine supervisor actor pattern.
+
+pub mod handle;
 
 use smolpc_engine_client::{RuntimeModePreference, StartupMode};
 use tokio::sync::oneshot;
+
+pub use handle::EngineSupervisorHandle;
 
 // --- Lifecycle State Machine ---
 
