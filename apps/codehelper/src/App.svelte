@@ -49,6 +49,10 @@
 	// Unified mode state
 	const activeMode = $derived(modeStore.activeMode);
 	const activeModeConfigs = $derived(modeStore.modeConfigs);
+	const activeModeConfig = $derived(modeStore.activeConfig);
+	const modeLabel = $derived(activeModeConfig?.label ?? 'Mode');
+	const modeSubtitle = $derived(activeModeConfig?.subtitle ?? 'Choose a workspace to begin');
+	const modeSuggestions = $derived(activeModeConfig?.suggestions ?? []);
 	const setupNeedsAttention = $derived(setupStore.initialized && setupStore.needsAttention);
 	const setupStatus = $derived(setupStore.status);
 	const setupError = $derived(setupStore.error);
@@ -793,6 +797,10 @@ Teaching rules:
 		{/if}
 
 		<ConversationView
+			mode={activeMode}
+			{modeLabel}
+			{modeSubtitle}
+			suggestions={modeSuggestions}
 			{messages}
 			{latestAssistantMessageId}
 			showQuickExamples={uiStore.showQuickExamples}

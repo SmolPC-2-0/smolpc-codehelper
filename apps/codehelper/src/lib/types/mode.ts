@@ -29,14 +29,14 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 	{
 		id: 'code',
 		label: 'Code',
-		subtitle: 'Codehelper workspace for fixes, explanations, and new code',
+		subtitle: 'Ask for help with code, bugs, and new ideas',
 		icon: 'code',
 		providerKind: 'local',
 		systemPromptKey: 'mode.code.default',
 		suggestions: [
-			'Fix this bug and explain the root cause',
-			'Write a function from this prompt',
-			'Review this snippet for mistakes'
+			'Explain what this loop does in simple words',
+			'Help me find the bug in this function and explain the root cause.',
+			'Write a function that checks whether a number is prime.'
 		],
 		capabilities: {
 			supportsTools: false,
@@ -51,14 +51,14 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 	{
 		id: 'gimp',
 		label: 'GIMP',
-		subtitle: 'Live image editing help for GIMP through the unified assistant shell',
+		subtitle: 'Edit pictures in GIMP with plain-language requests',
 		icon: 'image',
 		providerKind: 'mcp',
 		systemPromptKey: 'mode.gimp.default',
 		suggestions: [
-			'Blur the top half of the image',
-			'Crop this image to a square',
-			'Rotate the image 90 degrees clockwise'
+			'Make this image brighter without washing it out.',
+			'Remove the background and keep the main subject.',
+			'Crop this image to a square for a profile picture.'
 		],
 		capabilities: {
 			supportsTools: true,
@@ -73,14 +73,14 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 	{
 		id: 'blender',
 		label: 'Blender',
-		subtitle: 'Live Blender tutoring with scene-aware guidance and Blender-doc grounding',
+		subtitle: 'Ask scene-aware Blender questions and get workflow help',
 		icon: 'box',
 		providerKind: 'hybrid',
 		systemPromptKey: 'mode.blender.default',
 		suggestions: [
-			'What is in my scene right now?',
-			'How do I add a bevel to the selected object?',
-			'Explain what this modifier stack is doing'
+			'Tell me what is in the current Blender scene.',
+			'How do I smooth this model without losing its shape?',
+			'Make the selected object look like red plastic.'
 		],
 		capabilities: {
 			supportsTools: true,
@@ -95,15 +95,14 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 	{
 		id: 'writer',
 		label: 'Writer',
-		subtitle:
-			'Live LibreOffice Writer help for creating and editing documents through the unified assistant shell',
+		subtitle: 'Create and edit Writer documents with guided help',
 		icon: 'file-text',
 		providerKind: 'mcp',
 		systemPromptKey: 'mode.writer.default',
 		suggestions: [
-			'Create a blank document called lesson-plan.odt',
-			'Add a level 1 heading called Local AI in Schools',
-			'Insert a two-column table for topic and notes'
+			'Create a document called lesson-plan.odt and add a title.',
+			'Write a short introduction about renewable energy for school.',
+			'Add a two-column table for topic and notes.'
 		],
 		capabilities: {
 			supportsTools: true,
@@ -118,15 +117,14 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 	{
 		id: 'calc',
 		label: 'Calc',
-		subtitle:
-			'LibreOffice Calc scaffold in the unified shell; spreadsheet actions remain deferred for now',
+		subtitle: 'Spreadsheet mode is visible, but not active yet',
 		icon: 'table',
 		providerKind: 'mcp',
 		systemPromptKey: 'mode.calc.default',
 		suggestions: [
-			'LibreOffice Calc activation is planned next',
-			'Spreadsheet tools are not wired yet',
-			'Check back after the activation follow-up'
+			'Spreadsheet tools are planned, but this mode is not active yet.',
+			'For documents, switch to Writer.',
+			'For formulas or logic questions, Code mode may still help.'
 		],
 		capabilities: {
 			supportsTools: true,
@@ -141,15 +139,14 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 	{
 		id: 'impress',
 		label: 'Slides',
-		subtitle:
-			'Live LibreOffice Slides help for creating and editing presentations through the unified assistant shell',
+		subtitle: 'Create and edit presentations slide by slide',
 		icon: 'presentation',
 		providerKind: 'mcp',
 		systemPromptKey: 'mode.impress.default',
 		suggestions: [
-			'Create a blank presentation called demo-pitch.odp',
-			'Add a title slide for Local AI in Classrooms',
-			'Insert an image on slide 2 and scale it to fit'
+			'Create a 3-slide presentation about volcanoes.',
+			'Add a title slide called Local AI in Schools.',
+			'Rewrite slide 2 so it is shorter and clearer.'
 		],
 		capabilities: {
 			supportsTools: true,

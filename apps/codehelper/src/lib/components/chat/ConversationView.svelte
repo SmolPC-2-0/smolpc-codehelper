@@ -3,8 +3,13 @@
 	import WelcomeState from '$lib/components/chat/WelcomeState.svelte';
 	import { ArrowDown } from '@lucide/svelte';
 	import type { Message } from '$lib/types/chat';
+	import type { AppMode } from '$lib/types/mode';
 
 	interface Props {
+		mode: AppMode;
+		modeLabel: string;
+		modeSubtitle: string;
+		suggestions: string[];
 		messages: Message[];
 		latestAssistantMessageId: string | null;
 		showQuickExamples: boolean;
@@ -21,6 +26,10 @@
 	}
 
 	let {
+		mode,
+		modeLabel,
+		modeSubtitle,
+		suggestions,
 		messages,
 		latestAssistantMessageId,
 		showQuickExamples,
@@ -76,7 +85,7 @@
 >
 	<div class="conversation-view__inner">
 		{#if messages.length === 0}
-			<WelcomeState {showQuickExamples} {onSelectExample} {onToggleExamples} />
+			<WelcomeState {mode} {modeLabel} {modeSubtitle} {suggestions} {showQuickExamples} {onSelectExample} {onToggleExamples} />
 		{:else}
 			<div class="conversation-view__messages">
 				{#each messages as message (message.id)}
