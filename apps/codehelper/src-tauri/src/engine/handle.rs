@@ -44,11 +44,6 @@ impl EngineSupervisorHandle {
 
     // --- Public API ---
 
-    /// Instant snapshot of engine state. No network, no lock.
-    pub fn current_state(&self) -> EngineLifecycleState {
-        self.state_rx.borrow().clone()
-    }
-
     /// Wait until engine reaches Running state or timeout.
     /// Returns a clone of EngineClient (Arc-based, cheap to clone).
     ///
@@ -165,10 +160,6 @@ impl EngineSupervisorHandle {
             .await;
     }
 
-    /// Subscribe to state changes. Returns a cloned watch receiver.
-    pub fn subscribe(&self) -> watch::Receiver<EngineLifecycleState> {
-        self.state_rx.clone()
-    }
 }
 
 #[cfg(test)]
@@ -195,26 +186,6 @@ mod tests {
     fn handle_is_clone() {
         let (handle, ..) = make_handle(EngineLifecycleState::Idle);
         let _cloned = handle.clone();
-    }
-
-    #[test]
-    fn current_state_returns_initial_state() {
-        let (handle, ..) = make_handle(EngineLifecycleState::Idle);
-        assert_eq!(handle.current_state(), EngineLifecycleState::Idle);
-    }
-
-    #[test]
-    fn current_state_reflects_broadcast() {
-        let (handle, _cmd_rx, state_tx, _client_tx) = make_handle(EngineLifecycleState::Idle);
-
-        state_tx
-            .send(EngineLifecycleState::Running {
-                backend: Some("cpu".into()),
-                model_id: None,
-            })
-            .expect("send state");
-
-        assert!(handle.current_state().is_running());
     }
 
     #[test]
@@ -289,7 +260,6 @@ mod tests {
                 runtime_mode: RuntimeModePreference::Auto,
                 dml_device_id: None,
                 default_model_id: None,
-                startup_mode: smolpc_engine_client::StartupMode::Auto,
             })
             .await;
         assert!(result.is_ok());

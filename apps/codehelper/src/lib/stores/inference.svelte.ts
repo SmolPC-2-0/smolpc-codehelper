@@ -408,20 +408,6 @@ export const inferenceStore = {
 		await this.refreshBackendStatus();
 	},
 
-	/**
-	 * Lightweight health check — updates engineHealthy state.
-	 */
-	async checkHealth(): Promise<boolean> {
-		try {
-			await invoke('engine_status');
-			engineHealthy = true;
-			return true;
-		} catch {
-			engineHealthy = false;
-			return false;
-		}
-	},
-
 	async evaluateMemoryPressure(
 		request: MemoryPressureRequest = {}
 	): Promise<MemoryPressureStatus | null> {

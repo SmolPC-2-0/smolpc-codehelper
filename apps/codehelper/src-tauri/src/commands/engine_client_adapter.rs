@@ -255,7 +255,6 @@ pub async fn engine_ensure_started(
         runtime_mode,
         dml_device_id: read_runtime_env_overrides().dml_device_id,
         default_model_id: startup_policy.default_model_id.clone(),
-        startup_mode,
     };
 
     supervisor.ensure_started(config).await?;

@@ -192,34 +192,29 @@ fn build_memory_pressure_message(
 
     if auto_unloaded {
         return Some(format!(
-            "Available RAM is {:.1} GB and the app was minimized, so the model was unloaded to avoid instability. {}",
-            available_gb, recommendation
+            "Available RAM is {available_gb:.1} GB and the app was minimized, so the model was unloaded to avoid instability. {recommendation}"
         ));
     }
 
     match level {
         MemoryPressureLevel::Critical => Some(format!(
-            "Available RAM is critically low ({:.1} GB). {}",
-            available_gb, recommendation
+            "Available RAM is critically low ({available_gb:.1} GB). {recommendation}"
         )),
         MemoryPressureLevel::Warning => {
             if model_switch_recommended {
                 Some(format!(
-                    "Available RAM is low ({:.1} GB). {}",
-                    available_gb, recommendation
+                    "Available RAM is low ({available_gb:.1} GB). {recommendation}"
                 ))
             } else {
                 Some(format!(
-                    "Available RAM is low ({:.1} GB). Close heavy apps to avoid generation failures.",
-                    available_gb
+                    "Available RAM is low ({available_gb:.1} GB). Close heavy apps to avoid generation failures."
                 ))
             }
         }
         MemoryPressureLevel::Normal => {
             if heavy_mode_active && model_switch_recommended {
                 Some(format!(
-                    "Blender/GIMP mode is active with {:.1} GB free RAM. {}",
-                    available_gb, recommendation
+                    "Blender/GIMP mode is active with {available_gb:.1} GB free RAM. {recommendation}"
                 ))
             } else {
                 None

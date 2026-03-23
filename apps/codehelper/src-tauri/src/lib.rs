@@ -156,8 +156,7 @@ fn resolve_app_local_data_dir<R: tauri::Runtime>(app: &tauri::App<R>) -> Option<
         None => {
             if let Some(tauri_error) = tauri_error {
                 log::warn!(
-                    "Dev-mode app-local-data fallback is unavailable after Tauri resolution failed: {}",
-                    tauri_error
+                    "Dev-mode app-local-data fallback is unavailable after Tauri resolution failed: {tauri_error}"
                 );
             }
             None
@@ -216,8 +215,7 @@ fn resolve_bundled_resource_dir<R: tauri::Runtime>(app: &tauri::App<R>) -> Optio
                 );
             } else if let Some(tauri_error) = tauri_error {
                 log::warn!(
-                    "Bundled resource base is unavailable after Tauri resource directory resolution failed: {}",
-                    tauri_error
+                    "Bundled resource base is unavailable after Tauri resource directory resolution failed: {tauri_error}"
                 );
             }
             None

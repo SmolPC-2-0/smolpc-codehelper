@@ -6,7 +6,7 @@
 pub mod handle;
 pub mod supervisor;
 
-use smolpc_engine_client::{RuntimeModePreference, StartupMode};
+use smolpc_engine_client::RuntimeModePreference;
 use tokio::sync::oneshot;
 
 pub use handle::EngineSupervisorHandle;
@@ -106,8 +106,6 @@ pub struct StartupConfig {
     pub dml_device_id: Option<i32>,
     /// Default model to load after engine reaches Running state.
     pub default_model_id: Option<String>,
-    /// Startup mode (normal, DirectML required, etc.).
-    pub startup_mode: StartupMode,
 }
 
 #[cfg(test)]
