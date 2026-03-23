@@ -145,7 +145,7 @@
         "cargo check --workspace clean"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Files: inference.rs, engine_client_adapter.rs, assistant.rs. Remove resolve_generation_client and cached_generation_client usages."
     },
     {
