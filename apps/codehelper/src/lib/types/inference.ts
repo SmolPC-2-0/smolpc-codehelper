@@ -88,6 +88,7 @@ export interface StartupPolicyDto {
 export interface EnsureStartedRequestDto {
 	mode: StartupModeDto;
 	startup_policy?: StartupPolicyDto | null;
+	runtime_mode_preference?: string | null;
 }
 
 export interface EngineReadinessDto {

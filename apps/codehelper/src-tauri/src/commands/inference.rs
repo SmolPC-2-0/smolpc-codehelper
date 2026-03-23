@@ -125,7 +125,7 @@ impl InferenceState {
     }
 }
 
-fn parse_runtime_mode(mode: &str) -> Result<RuntimeModePreference, String> {
+pub(super) fn parse_runtime_mode(mode: &str) -> Result<RuntimeModePreference, String> {
     match mode.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok(RuntimeModePreference::Auto),
         "cpu" => Ok(RuntimeModePreference::Cpu),

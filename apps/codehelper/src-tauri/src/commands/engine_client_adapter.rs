@@ -1,4 +1,6 @@
-use super::inference::{apply_runtime_mode_preference, resolve_client, InferenceState};
+use super::inference::{
+    apply_runtime_mode_preference, parse_runtime_mode, resolve_client, InferenceState,
+};
 use chrono::Utc;
 use smolpc_engine_client::{
     read_runtime_env_overrides, EngineStatus, RuntimeModePreference, StartupMode, StartupPolicy,
@@ -31,6 +33,10 @@ pub struct StartupPolicyDto {
 pub struct EnsureStartedRequestDto {
     pub mode: StartupModeDto,
     pub startup_policy: Option<StartupPolicyDto>,
+    /// Optional runtime mode preference ('auto'|'cpu'|'dml'|'npu').
+    /// Applied before engine spawn so the engine starts on the preferred
+    /// backend in a single startup — no destructive force_respawn after.
+    pub runtime_mode_preference: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -216,7 +222,14 @@ pub async fn engine_ensure_started(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, InferenceState>,
 ) -> Result<EngineReadinessDto, String> {
-    let runtime_mode = startup_mode_to_runtime_mode(request.mode.clone());
+    // If a runtime mode preference is provided (e.g., 'npu' from persisted settings),
+    // apply it BEFORE spawning the engine so it starts on the preferred backend in one shot.
+    // This eliminates the double-startup where the engine starts on auto then restarts for the preference.
+    let runtime_mode = if let Some(ref pref) = request.runtime_mode_preference {
+        parse_runtime_mode(pref).unwrap_or_else(|_| startup_mode_to_runtime_mode(request.mode.clone()))
+    } else {
+        startup_mode_to_runtime_mode(request.mode.clone())
+    };
     let mode_changed = apply_runtime_mode_preference(&state, runtime_mode).await;
     let client = resolve_client(&app_handle, &state, mode_changed).await?;
 
