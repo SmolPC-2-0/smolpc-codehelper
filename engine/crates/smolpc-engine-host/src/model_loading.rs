@@ -23,7 +23,7 @@ use crate::artifacts::{
 use crate::config::{parse_dml_device_id_env, parse_force_override};
 use crate::openvino::{
     is_blocking_openvino_probe_failure, resolve_openvino_npu_tuning, run_openvino_preflight,
-    OpenVinoPreflightResult, OpenVinoStartupProbeResult,
+    OpenVinoPreflightReady, OpenVinoPreflightResult, OpenVinoStartupProbeResult,
 };
 use crate::probe::{
     current_openvino_tuning_status, directml_required_error, directml_unavailable_reason,
@@ -36,6 +36,34 @@ use crate::types::{
     OPENVINO_CHAT_MODE_STRUCTURED, OPENVINO_PREFLIGHT_BUDGET, OPENVINO_SELECTION_PROFILE,
     OPENVINO_STARTUP_PROBE_WAIT, STARTUP_PROBE_WAIT_MS,
 };
+
+/// Outcome of evaluating the OpenVINO NPU lane for model loading.
+/// Captures all state that load_model needs from the evaluation.
+pub(crate) struct OpenVinoLaneOutcome {
+    pub preflight_state: LanePreflightState,
+    pub failure_class: Option<String>,
+    pub failure_message: Option<String>,
+    pub ready: Option<OpenVinoPreflightReady>,
+    pub reason_override: Option<DecisionReason>,
+    /// If true, a timeout or pending probe means we should NOT persist
+    /// this as a negative decision — it's a temporary fallback.
+    pub suppress_store_update: bool,
+    /// Updated persistence state if the evaluation changed it
+    /// (e.g., TemporaryFallback on timeout).
+    pub persistence_state_override: Option<DecisionPersistenceState>,
+    /// Updated selection state if the evaluation changed it
+    /// (e.g., Fallback on timeout or failure).
+    pub selection_state_override: Option<BackendSelectionState>,
+}
+
+/// Outcome of running the DirectML preflight (just the preflight, not fallback logic).
+/// Callers must check for artifact existence before calling `run_directml_preflight`.
+pub(crate) enum DirectMLPreflightOutcome {
+    /// Preflight succeeded — adapter is ready.
+    Success { adapter: InferenceRuntimeAdapter },
+    /// Preflight failed or timed out.
+    Failed { error: String },
+}
 
 impl EngineState {
     pub(crate) fn openvino_cache_dir(
@@ -200,6 +228,205 @@ impl EngineState {
         }
     }
 
+    /// Build the comprehensive BackendStatus from all collected lane data.
+    /// Called after the adapter has been selected and stored.
+    #[allow(clippy::too_many_arguments)]
+    fn assemble_backend_status(
+        &self,
+        active_backend: InferenceBackend,
+        active_reason: DecisionReason,
+        active_model_path: &str,
+        runtime_engine: &str,
+        selection_state: BackendSelectionState,
+        decision_persistence_state: DecisionPersistenceState,
+        decision_key: &BackendDecisionKey,
+        force_override: Option<InferenceBackend>,
+        failure_counters: &FailureCounters,
+        probe: &BackendProbeResult,
+        openvino_probe: Option<&OpenVinoStartupProbeResult>,
+        artifacts: &ModelLaneArtifacts,
+        selected_device_id: Option<i32>,
+        selected_device_name: Option<String>,
+        persisted_record_decision: Option<&BackendDecision>,
+        directml_preflight_state: LanePreflightState,
+        openvino_preflight_state: LanePreflightState,
+        directml_failure_class: Option<String>,
+        directml_failure_message: Option<String>,
+        openvino_failure_class: Option<String>,
+        openvino_failure_message: Option<String>,
+        directml_detected: bool,
+    ) -> BackendStatus {
+        let mut status = BackendStatus {
+            active_backend: Some(active_backend),
+            active_model_path: Some(active_model_path.to_string()),
+            active_artifact_backend: Some(active_backend),
+            runtime_engine: Some(runtime_engine.to_string()),
+            selection_state: Some(selection_state),
+            selection_reason: Some(decision_reason_code(&active_reason).to_string()),
+            decision_persistence_state,
+            selection_fingerprint: Some(decision_key.fingerprint()),
+            decision_key: Some(decision_key.clone()),
+            last_decision: Some(BackendDecision::new(active_backend, active_reason, None)),
+            openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
+            openvino_tuning: current_openvino_tuning_status(),
+            failure_counters: failure_counters.clone(),
+            force_override,
+            store_path: self
+                .store_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            ..Default::default()
+        };
+        apply_runtime_bundle_status(self.runtime_bundles(), &mut status);
+        apply_directml_startup_probe_status(&mut status, probe);
+        apply_openvino_startup_probe_status(&mut status, openvino_probe);
+        apply_model_lane_artifacts(&mut status, artifacts);
+        let vram = probe.directml_candidate.as_ref().map(|c| c.vram_mb);
+        apply_directml_device(&mut status, selected_device_id, selected_device_name, vram);
+        apply_persisted_eligibility(&mut status, persisted_record_decision);
+        status.lanes.directml.preflight_state = directml_preflight_state;
+        status.lanes.openvino_npu.preflight_state = openvino_preflight_state;
+        status.lanes.openvino_npu.last_failure_class = openvino_failure_class;
+        status.lanes.openvino_npu.last_failure_message = openvino_failure_message;
+        if active_backend == InferenceBackend::DirectML {
+            status.lanes.directml.last_failure_class = None;
+            status.lanes.directml.last_failure_message = None;
+        } else if let Some(class) = directml_failure_class {
+            status.lanes.directml.last_failure_class = Some(class);
+            status.lanes.directml.last_failure_message = directml_failure_message;
+        } else if !directml_detected {
+            status.lanes.directml.last_failure_class =
+                Some("directml_candidate_missing".to_string());
+            status.lanes.directml.last_failure_message =
+                Some("No DirectML-capable adapter detected".to_string());
+        }
+        status
+    }
+
+    /// Run the DirectML preflight on a worker thread with timeout.
+    /// Returns Success with the adapter, or Failed with error details.
+    /// Does NOT handle fallback — caller decides what to do on failure.
+    async fn run_directml_preflight(
+        &self,
+        dml_model_path: &Path,
+        device_id: Option<i32>,
+    ) -> DirectMLPreflightOutcome {
+        let ort_bundle = self.runtime_bundles().ort.clone();
+        let dml_path_owned = dml_model_path.to_path_buf();
+        let dml_build_result = match timeout(
+            DIRECTML_PREFLIGHT_BUDGET,
+            tokio::task::spawn_blocking(move || {
+                build_directml_runtime_adapter(&ort_bundle, &dml_path_owned, device_id)
+            }),
+        )
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => Err(format!("DirectML preflight task panicked: {e}")),
+            Err(_) => Err(format!(
+                "DirectML preflight timed out after {}s",
+                DIRECTML_PREFLIGHT_BUDGET.as_secs()
+            )),
+        };
+        match dml_build_result {
+            Ok(adapter) => DirectMLPreflightOutcome::Success { adapter },
+            Err(error) => DirectMLPreflightOutcome::Failed { error },
+        }
+    }
+
+    /// Evaluate the OpenVINO NPU lane: check artifacts, probe status, run preflight.
+    /// Returns structured outcome without mutating any load_model locals.
+    async fn evaluate_openvino_lane(
+        &self,
+        model_id: &str,
+        artifacts: &ModelLaneArtifacts,
+        openvino_probe: Option<&OpenVinoStartupProbeResult>,
+        openvino_bundle_ready: bool,
+    ) -> OpenVinoLaneOutcome {
+        let mut preflight_state = LanePreflightState::NotStarted;
+        let mut failure_class = None;
+        let mut failure_message = None;
+        let mut ready = None;
+        let mut reason_override = None;
+        let mut suppress_store_update = false;
+        let mut persistence_state_override = None;
+        let mut selection_state_override = None;
+
+        if !artifacts.openvino_npu_ready() {
+            failure_class = artifacts.openvino_reason.clone();
+            failure_message = artifacts.openvino_message.clone();
+            reason_override = Some(DecisionReason::NoOpenVinoCandidate);
+        } else if !openvino_bundle_ready {
+            failure_class = Some(bundle_reason(
+                self.runtime_bundles().openvino.failure_code(),
+            ));
+            failure_message = Some(format!(
+                "OpenVINO runtime bundle is unavailable at {}",
+                self.runtime_bundles().openvino.display_root().display()
+            ));
+            reason_override = Some(DecisionReason::NoOpenVinoCandidate);
+        } else if openvino_probe.is_none() {
+            failure_class = Some("openvino_startup_probe_pending".to_string());
+            failure_message = Some("OpenVINO startup probe is still running".to_string());
+            suppress_store_update = true;
+            persistence_state_override = Some(DecisionPersistenceState::TemporaryFallback);
+            selection_state_override = Some(BackendSelectionState::Fallback);
+            reason_override = Some(DecisionReason::OpenVinoStartupProbePending);
+        } else if let Some(class) = openvino_probe
+            .and_then(|probe| probe.failure_class.as_deref())
+            .filter(|class| is_blocking_openvino_probe_failure(class))
+        {
+            failure_class = Some(class.to_string());
+            failure_message = openvino_probe.and_then(|probe| probe.failure_message.clone());
+            reason_override = Some(DecisionReason::NoOpenVinoCandidate);
+        } else if let Some(probe) = openvino_probe {
+            match self
+                .run_openvino_preflight_with_timeout(model_id, artifacts, probe)
+                .await
+            {
+                OpenVinoPreflightResult::Ready(r) => {
+                    preflight_state = LanePreflightState::Ready;
+                    ready = Some(r);
+                }
+                OpenVinoPreflightResult::Timeout => {
+                    preflight_state = LanePreflightState::Timeout;
+                    failure_class = Some("openvino_npu_preflight_timeout".to_string());
+                    failure_message = Some(format!(
+                        "OpenVINO preflight exceeded the {} second budget",
+                        OPENVINO_PREFLIGHT_BUDGET.as_secs()
+                    ));
+                    suppress_store_update = true;
+                    persistence_state_override = Some(DecisionPersistenceState::TemporaryFallback);
+                    selection_state_override = Some(BackendSelectionState::Fallback);
+                    reason_override = Some(DecisionReason::OpenVinoPreflightTimeout);
+                }
+                OpenVinoPreflightResult::Failed { class, message } => {
+                    preflight_state = LanePreflightState::Error;
+                    failure_class = Some(class);
+                    failure_message = Some(message);
+                    selection_state_override = Some(BackendSelectionState::Fallback);
+                    reason_override = Some(DecisionReason::OpenVinoPreflightFailed);
+                }
+            }
+        } else {
+            log::error!("OpenVINO startup probe missing unexpectedly after readiness checks");
+            failure_class = Some("openvino_startup_probe_missing".to_string());
+            failure_message = Some("OpenVINO startup probe was not available".to_string());
+            reason_override = Some(DecisionReason::NoOpenVinoCandidate);
+        }
+
+        OpenVinoLaneOutcome {
+            preflight_state,
+            failure_class,
+            failure_message,
+            ready,
+            reason_override,
+            suppress_store_update,
+            persistence_state_override,
+            selection_state_override,
+        }
+    }
+
     pub(crate) async fn load_model(
         &self,
         model_id: String,
@@ -224,6 +451,14 @@ impl EngineState {
             &model_def.directory,
             ModelArtifactBackend::DirectML,
         );
+
+        if !cpu_model_dir.exists() {
+            return Err(format!(
+                "Model directory not found for '{}': {}",
+                model_id,
+                cpu_model_dir.display()
+            ));
+        }
 
         let force_override = parse_force_override();
         let forced_device_id = parse_dml_device_id_env();
@@ -380,74 +615,40 @@ impl EngineState {
         let mut openvino_reason_override = None;
         let mut openvino_ready = None;
 
-        if should_attempt_openvino {
-            if !artifacts.openvino_npu_ready() {
-                openvino_failure_class = artifacts.openvino_reason.clone();
-                openvino_failure_message = artifacts.openvino_message.clone();
-                openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
-            } else if !openvino_bundle_ready {
-                openvino_failure_class = Some(bundle_reason(
-                    self.runtime_bundles().openvino.failure_code(),
-                ));
-                openvino_failure_message = Some(format!(
-                    "OpenVINO runtime bundle is unavailable at {}",
-                    self.runtime_bundles().openvino.display_root().display()
-                ));
-                openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
-            } else if openvino_probe.is_none() {
-                openvino_failure_class = Some("openvino_startup_probe_pending".to_string());
-                openvino_failure_message =
-                    Some("OpenVINO startup probe is still running".to_string());
-                suppress_store_update = true;
-                decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
-                selection_state = BackendSelectionState::Fallback;
-                openvino_reason_override = Some(DecisionReason::OpenVinoStartupProbePending);
-            } else if let Some(class) = openvino_probe
-                .as_ref()
-                .and_then(|probe| probe.failure_class.as_deref())
-                .filter(|class| is_blocking_openvino_probe_failure(class))
-            {
-                openvino_failure_class = Some(class.to_string());
-                openvino_failure_message = openvino_probe
-                    .as_ref()
-                    .and_then(|probe| probe.failure_message.clone());
-                openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
-            } else if let Some(probe) = openvino_probe.as_ref() {
-                match self
-                    .run_openvino_preflight_with_timeout(&model_id, &artifacts, probe)
-                    .await
-                {
-                    OpenVinoPreflightResult::Ready(ready) => {
-                        openvino_preflight_state = LanePreflightState::Ready;
-                        openvino_ready = Some(ready);
-                    }
-                    OpenVinoPreflightResult::Timeout => {
-                        openvino_preflight_state = LanePreflightState::Timeout;
-                        openvino_failure_class = Some("openvino_npu_preflight_timeout".to_string());
-                        openvino_failure_message = Some(format!(
-                            "OpenVINO preflight exceeded the {} second budget",
-                            OPENVINO_PREFLIGHT_BUDGET.as_secs()
-                        ));
-                        suppress_store_update = true;
-                        decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
-                        selection_state = BackendSelectionState::Fallback;
-                        openvino_reason_override = Some(DecisionReason::OpenVinoPreflightTimeout);
-                    }
-                    OpenVinoPreflightResult::Failed { class, message } => {
-                        openvino_preflight_state = LanePreflightState::Error;
-                        openvino_failure_class = Some(class);
-                        openvino_failure_message = Some(message);
-                        selection_state = BackendSelectionState::Fallback;
-                        openvino_reason_override = Some(DecisionReason::OpenVinoPreflightFailed);
-                    }
-                }
-            } else {
-                log::error!("OpenVINO startup probe missing unexpectedly after readiness checks");
-                openvino_failure_class = Some("openvino_startup_probe_missing".to_string());
-                openvino_failure_message =
-                    Some("OpenVINO startup probe was not available".to_string());
-                openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
+        let openvino_outcome = if should_attempt_openvino {
+            self.evaluate_openvino_lane(
+                &model_id,
+                &artifacts,
+                openvino_probe.as_ref(),
+                openvino_bundle_ready,
+            )
+            .await
+        } else {
+            OpenVinoLaneOutcome {
+                preflight_state: LanePreflightState::NotStarted,
+                failure_class: openvino_failure_class.take(),
+                failure_message: openvino_failure_message.take(),
+                ready: None,
+                reason_override: None,
+                suppress_store_update: false,
+                persistence_state_override: None,
+                selection_state_override: None,
             }
+        };
+        // Unpack results back into load_model locals
+        openvino_preflight_state = openvino_outcome.preflight_state;
+        openvino_failure_class = openvino_outcome.failure_class;
+        openvino_failure_message = openvino_outcome.failure_message;
+        openvino_ready = openvino_outcome.ready;
+        openvino_reason_override = openvino_outcome.reason_override;
+        if openvino_outcome.suppress_store_update {
+            suppress_store_update = true;
+        }
+        if let Some(ps) = openvino_outcome.persistence_state_override {
+            decision_persistence_state = ps;
+        }
+        if let Some(ss) = openvino_outcome.selection_state_override {
+            selection_state = ss;
         }
 
         if (force_override == Some(InferenceBackend::OpenVinoNpu) || openvino_required)
@@ -550,26 +751,11 @@ impl EngineState {
         } else if preferred_backend == InferenceBackend::DirectML {
             match dml_model_path.as_deref() {
                 Some(dml_path) => {
-                    let ort_bundle = self.runtime_bundles().ort.clone();
-                    let dml_path_owned = dml_path.to_path_buf();
-                    let device_id = selected_device_id;
-                    let dml_build_result = match timeout(
-                        DIRECTML_PREFLIGHT_BUDGET,
-                        tokio::task::spawn_blocking(move || {
-                            build_directml_runtime_adapter(&ort_bundle, &dml_path_owned, device_id)
-                        }),
-                    )
-                    .await
-                    {
-                        Ok(Ok(result)) => result,
-                        Ok(Err(e)) => Err(format!("DirectML preflight task panicked: {e}")),
-                        Err(_) => Err(format!(
-                            "DirectML preflight timed out after {}s",
-                            DIRECTML_PREFLIGHT_BUDGET.as_secs()
-                        )),
-                    };
-                    match dml_build_result {
-                        Ok(adapter) => {
+                    let dml_outcome = self
+                        .run_directml_preflight(dml_path, selected_device_id)
+                        .await;
+                    match dml_outcome {
+                        DirectMLPreflightOutcome::Success { adapter } => {
                             failure_counters.record_directml_success();
                             if !suppress_store_update
                                 && force_override.is_none()
@@ -586,7 +772,7 @@ impl EngineState {
                             active_model_path = dml_path.display().to_string();
                             adapter
                         }
-                        Err(error) => {
+                        DirectMLPreflightOutcome::Failed { error } => {
                             if force_override == Some(InferenceBackend::DirectML)
                                 || directml_required
                             {
@@ -646,7 +832,12 @@ impl EngineState {
 
                             let adapter = self
                                 .run_cpu_preflight_with_timeout(&model_id, &cpu_model_dir)
-                                .await?;
+                                .await
+                                .map_err(|cpu_err| {
+                                    format!(
+                                    "DirectML failed: {error}; CPU fallback also failed: {cpu_err}"
+                                )
+                                })?;
                             active_model_path = cpu_model_dir.display().to_string();
                             adapter
                         }
@@ -676,7 +867,12 @@ impl EngineState {
                     }
                     let adapter = self
                         .run_cpu_preflight_with_timeout(&model_id, &cpu_model_dir)
-                        .await?;
+                        .await
+                        .map_err(|cpu_err| {
+                            format!(
+                                "DirectML artifact missing; CPU fallback also failed: {cpu_err}"
+                            )
+                        })?;
                     active_backend = InferenceBackend::Cpu;
                     if !matches!(
                         active_reason,
@@ -739,50 +935,31 @@ impl EngineState {
 
         *self.runtime_adapter.lock().await = Some(adapter);
         *self.current_model.lock().await = Some(model_id.clone());
-        let mut status = BackendStatus {
-            active_backend: Some(active_backend),
-            active_model_path: Some(active_model_path),
-            active_artifact_backend: Some(active_backend),
-            runtime_engine: Some(runtime_engine),
-            selection_state: Some(selection_state),
-            selection_reason: Some(decision_reason_code(&active_reason).to_string()),
+
+        let status = self.assemble_backend_status(
+            active_backend,
+            active_reason,
+            &active_model_path,
+            &runtime_engine,
+            selection_state,
             decision_persistence_state,
-            selection_fingerprint: Some(decision_key.fingerprint()),
-            decision_key: Some(decision_key.clone()),
-            last_decision: Some(BackendDecision::new(active_backend, active_reason, None)),
-            openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
-            openvino_tuning: current_openvino_tuning_status(),
-            failure_counters: failure_counters.clone(),
+            &decision_key,
             force_override,
-            store_path: self
-                .store_path
-                .as_ref()
-                .map(|path| path.display().to_string()),
-            ..Default::default()
-        };
-        apply_runtime_bundle_status(self.runtime_bundles(), &mut status);
-        apply_directml_startup_probe_status(&mut status, &probe);
-        apply_openvino_startup_probe_status(&mut status, openvino_probe.as_ref());
-        apply_model_lane_artifacts(&mut status, &artifacts);
-        let vram = probe.directml_candidate.as_ref().map(|c| c.vram_mb);
-        apply_directml_device(&mut status, selected_device_id, selected_device_name, vram);
-        apply_persisted_eligibility(&mut status, persisted_record_decision.as_ref());
-        status.lanes.directml.preflight_state = directml_preflight_state;
-        status.lanes.openvino_npu.preflight_state = openvino_preflight_state;
-        status.lanes.openvino_npu.last_failure_class = openvino_failure_class;
-        status.lanes.openvino_npu.last_failure_message = openvino_failure_message;
-        if active_backend == InferenceBackend::DirectML {
-            status.lanes.directml.last_failure_class = None;
-            status.lanes.directml.last_failure_message = None;
-        } else if let Some(class) = directml_failure_class {
-            status.lanes.directml.last_failure_class = Some(class);
-            status.lanes.directml.last_failure_message = directml_failure_message;
-        } else if !directml_detected {
-            status.lanes.directml.last_failure_class =
-                Some("directml_candidate_missing".to_string());
-            status.lanes.directml.last_failure_message =
-                Some("No DirectML-capable adapter detected".to_string());
-        }
+            &failure_counters,
+            &probe,
+            openvino_probe.as_ref(),
+            &artifacts,
+            selected_device_id,
+            selected_device_name,
+            persisted_record_decision.as_ref(),
+            directml_preflight_state,
+            openvino_preflight_state,
+            directml_failure_class,
+            directml_failure_message,
+            openvino_failure_class,
+            openvino_failure_message,
+            directml_detected,
+        );
         *self.backend_status.lock().await = status;
 
         if force_override.is_none() && !suppress_store_update {
