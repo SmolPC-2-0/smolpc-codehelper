@@ -211,6 +211,16 @@ impl<R: Runtime> EngineSupervisor<R> {
         self.last_restart_window_start = None;
         self.transition(EngineLifecycleState::Starting);
         self.do_spawn_sequence().await;
+
+        // If the spawn failed (state is Crashed or Failed), revert to the previous
+        // runtime mode so auto-restart doesn't keep trying the broken mode.
+        if !self.state.is_running() {
+            log::warn!(
+                "Supervisor: mode switch to {mode:?} failed, reverting to {old_mode:?}"
+            );
+            self.runtime_config.runtime_mode = old_mode;
+        }
+
         Ok(())
     }
 

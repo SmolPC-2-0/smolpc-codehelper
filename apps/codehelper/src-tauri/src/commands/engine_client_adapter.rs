@@ -227,7 +227,10 @@ fn map_engine_status_to_readiness(status: &EngineStatus) -> EngineReadinessDto {
 pub async fn engine_status(
     supervisor: tauri::State<'_, EngineSupervisorHandle>,
 ) -> Result<EngineReadinessDto, String> {
-    let client = supervisor.get_client(Duration::from_secs(60)).await?;
+    // Status queries should return current state, not block waiting for startup.
+    let client = supervisor
+        .get_client_if_ready()
+        .ok_or_else(|| "Engine not running".to_string())?;
     let status = client
         .status()
         .await
@@ -257,10 +260,15 @@ pub async fn engine_ensure_started(
         default_model_id: startup_policy.default_model_id.clone(),
     };
 
+    // Step 1: Tell the supervisor to spawn the engine process (if not already running).
     supervisor.ensure_started(config).await?;
 
+    // Step 2: Get the running engine client.
     let client = supervisor.get_client(Duration::from_secs(60)).await?;
 
+    // Step 3: Tell the engine host to apply startup policy (load default model, etc.).
+    // This is idempotent — if the engine already loaded the model, it returns the current status.
+    // Both steps are needed: the supervisor owns process lifecycle, the engine host owns model loading.
     match client.ensure_started(startup_mode, startup_policy).await {
         Ok(status) => {
             // Track the loaded model so the supervisor can restore it after a crash.

@@ -6,7 +6,7 @@ use crate::setup::launch::{
     launch_blender_if_needed, launch_gimp_if_needed, launch_libreoffice_mode,
 };
 use smolpc_assistant_types::{AppMode, ModeConfigDto, ModeStatusDto, ProviderStateDto};
-use std::time::Duration;
+
 
 fn build_mode_status_dto(
     mode: AppMode,
@@ -93,8 +93,9 @@ async fn collect_mode_status(
     let provider_state = provider.status(mode).await?;
     let available_tools = provider.list_tools(mode).await?;
 
-    let (engine_ready, last_error) = match supervisor.get_client(Duration::from_secs(60)).await {
-        Ok(client) => match client.status().await {
+    // Status check — don't block 60s waiting for engine startup.
+    let (engine_ready, last_error) = match supervisor.get_client_if_ready() {
+        Some(client) => match client.status().await {
             Ok(status) => {
                 let ready = status.ready || status.current_model.is_some();
                 let error = if !ready {
@@ -106,7 +107,7 @@ async fn collect_mode_status(
             }
             Err(e) => (false, Some(format!("Failed to query engine status: {e}"))),
         },
-        Err(error) => (false, Some(error)),
+        None => (false, Some("Engine not running".to_string())),
     };
 
     let merged_last_error = last_error.or_else(|| {
