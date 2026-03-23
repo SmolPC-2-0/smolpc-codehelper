@@ -96,7 +96,7 @@
         "cargo check --workspace clean"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "supervisor.rs: find where Running state is broadcast. Ensure client_tx.send() happens before state_tx.send_modify() for Running transitions."
     },
     {
