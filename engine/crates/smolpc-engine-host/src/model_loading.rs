@@ -57,16 +57,12 @@ pub(crate) struct OpenVinoLaneOutcome {
 }
 
 /// Outcome of running the DirectML preflight (just the preflight, not fallback logic).
+/// Callers must check for artifact existence before calling `run_directml_preflight`.
 pub(crate) enum DirectMLPreflightOutcome {
     /// Preflight succeeded — adapter is ready.
     Success { adapter: InferenceRuntimeAdapter },
     /// Preflight failed or timed out.
-    Failed {
-        failure_class: DirectMLFailureStage,
-        error: String,
-    },
-    /// No DirectML artifact exists for this model.
-    ArtifactMissing,
+    Failed { error: String },
 }
 
 impl EngineState {
@@ -334,10 +330,7 @@ impl EngineState {
         };
         match dml_build_result {
             Ok(adapter) => DirectMLPreflightOutcome::Success { adapter },
-            Err(error) => DirectMLPreflightOutcome::Failed {
-                failure_class: DirectMLFailureStage::Init,
-                error,
-            },
+            Err(error) => DirectMLPreflightOutcome::Failed { error },
         }
     }
 
@@ -779,10 +772,7 @@ impl EngineState {
                             active_model_path = dml_path.display().to_string();
                             adapter
                         }
-                        DirectMLPreflightOutcome::Failed {
-                            failure_class: _,
-                            error,
-                        } => {
+                        DirectMLPreflightOutcome::Failed { error } => {
                             if force_override == Some(InferenceBackend::DirectML)
                                 || directml_required
                             {
@@ -851,7 +841,6 @@ impl EngineState {
                             active_model_path = cpu_model_dir.display().to_string();
                             adapter
                         }
-                        DirectMLPreflightOutcome::ArtifactMissing => unreachable!("checked above"),
                     }
                 }
                 None => {
