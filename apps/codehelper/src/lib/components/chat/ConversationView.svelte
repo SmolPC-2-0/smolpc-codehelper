@@ -7,8 +7,6 @@
 
 	interface Props {
 		mode: AppMode;
-		modeLabel: string;
-		modeSubtitle: string;
 		suggestions: string[];
 		messages: Message[];
 		latestAssistantMessageId: string | null;
@@ -27,8 +25,6 @@
 
 	let {
 		mode,
-		modeLabel,
-		modeSubtitle,
 		suggestions,
 		messages,
 		latestAssistantMessageId,
@@ -85,15 +81,7 @@
 >
 	<div class="conversation-view__inner">
 		{#if messages.length === 0}
-			<WelcomeState
-				{mode}
-				{modeLabel}
-				{modeSubtitle}
-				{suggestions}
-				{showQuickExamples}
-				{onSelectExample}
-				{onToggleExamples}
-			/>
+			<WelcomeState {mode} {suggestions} {showQuickExamples} {onSelectExample} {onToggleExamples} />
 		{:else}
 			<div class="conversation-view__messages">
 				{#each messages as message (message.id)}

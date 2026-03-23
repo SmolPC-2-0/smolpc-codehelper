@@ -3,7 +3,6 @@
 
 	export interface QuickExampleCard {
 		id: string;
-		title: string;
 		prompt: string;
 	}
 
@@ -39,9 +38,6 @@
 	<div class="quick-examples__grid">
 		{#each examples as example (example.id)}
 			<button onclick={() => handleSelect(example.prompt)} class="quick-examples__item">
-				<div class="quick-examples__item-head">
-					<span>{example.title}</span>
-				</div>
 				<p>{example.prompt}</p>
 			</button>
 		{/each}
@@ -109,8 +105,6 @@
 	}
 
 	.quick-examples__item {
-		display: grid;
-		gap: 0.4rem;
 		padding: 0.75rem 0.8rem;
 		text-align: left;
 		border-radius: var(--radius-lg);
@@ -130,20 +124,9 @@
 		background: var(--surface-active);
 	}
 
-	.quick-examples__item-head {
-		display: block;
-		font-size: 0.81rem;
-		font-weight: 700;
-	}
-
 	.quick-examples__item p {
-		font-size: 0.74rem;
-		color: var(--color-muted-foreground);
-		line-height: 1.35;
-		display: -webkit-box;
-		line-clamp: 2;
-		-webkit-line-clamp: 2;
-		-webkit-box-orient: vertical;
-		overflow: hidden;
+		font-size: 0.8rem;
+		color: var(--color-foreground);
+		line-height: 1.45;
 	}
 </style>

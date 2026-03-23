@@ -5,23 +5,13 @@
 
 	interface Props {
 		mode: AppMode;
-		modeLabel: string;
-		modeSubtitle: string;
 		suggestions: string[];
 		showQuickExamples: boolean;
 		onSelectExample: (prompt: string) => void;
 		onToggleExamples: (show: boolean) => void;
 	}
 
-	let {
-		mode,
-		modeLabel,
-		modeSubtitle,
-		suggestions,
-		showQuickExamples,
-		onSelectExample,
-		onToggleExamples
-	}: Props = $props();
+	let { mode, suggestions, showQuickExamples, onSelectExample, onToggleExamples }: Props = $props();
 
 	const MODE_COPY: Record<AppMode, { chip: string; headline: string; description: string }> = {
 		code: {
@@ -62,21 +52,10 @@
 		}
 	};
 
-	function buildExampleTitle(prompt: string): string {
-		const trimmed = prompt.trim();
-		const firstClause = trimmed.split(/[.!?]/)[0]?.trim() || trimmed;
-		if (firstClause.length <= 30) {
-			return firstClause;
-		}
-
-		return `${firstClause.slice(0, 27).trimEnd()}...`;
-	}
-
 	const heroCopy = $derived(MODE_COPY[mode]);
 	const examples = $derived<QuickExampleCard[]>(
 		suggestions.map((prompt, index) => ({
 			id: `${mode}-${index}`,
-			title: buildExampleTitle(prompt),
 			prompt
 		}))
 	);
@@ -90,7 +69,6 @@
 		</div>
 		<h2>{heroCopy.headline}</h2>
 		<p>{heroCopy.description}</p>
-		<p class="welcome-state__subtitle">{modeLabel} · {modeSubtitle}</p>
 	</div>
 
 	{#if hasExamples}
@@ -147,11 +125,6 @@
 		max-width: 40rem;
 		color: var(--color-muted-foreground);
 		font-size: 0.98rem;
-	}
-
-	.welcome-state__subtitle {
-		color: var(--color-muted-foreground);
-		font-size: 0.88rem;
 	}
 
 	.welcome-state__examples {
