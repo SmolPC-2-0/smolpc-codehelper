@@ -213,7 +213,7 @@
         "cargo check --workspace clean"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "File: apps/codehelper/src-tauri/src/launcher/orchestrator.rs. Simple replacement — launcher is a read-only consumer."
     }
   ]

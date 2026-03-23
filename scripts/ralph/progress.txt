@@ -41,6 +41,7 @@ Started: Mon Mar 23 19:22:03 GMTST 2026
 - Use `eslint-disable-next-line svelte/prefer-svelte-reactivity` for non-reactive Date usage in .svelte.ts files
 - Frontend receives supervisor state via `listen('engine-state-changed')` in App.svelte onMount — no health polling
 - Banner display uses `inferenceStore.lifecycleState.state` discriminated union (crashed/failed), not engineHealthy boolean
+- Launcher uses supervisor.get_client(60s) — no separate client cache; LauncherState only holds launch_lock
 
 ## 2026-03-23 - US-001
 - Extracted 6 pub composable primitives from monolithic connect_or_spawn
@@ -219,4 +220,19 @@ Started: Mon Mar 23 19:22:03 GMTST 2026
   - `reestablishEngineSession` was shared between init and reconnection; once reconnection is removed (supervisor handles it), the function simplifies to just initial startup
   - Banner now uses `inferenceStore.lifecycleState.state` discriminated union — no more boolean `engineHealthy` for banner display
   - StartupLoadingScreen works unchanged because `updateLifecycleState()` already maps supervisor events to `readiness` fields
+---
+
+## 2026-03-23 - US-012
+- Migrated launcher to shared supervisor handle, eliminating duplicate EngineClient cache
+- Simplified LauncherState: removed client (Arc<Mutex<Option<EngineClient>>>), connect_lock, and resolve_engine_client() function
+- LauncherState now only holds launch_lock (Mutex<()>) for concurrent launch prevention
+- launch_or_focus() takes &EngineSupervisorHandle parameter, uses supervisor.get_client(60s)
+- Deleted resolve_host_binary_path() from orchestrator (supervisor handles binary resolution)
+- launcher_launch_or_focus Tauri command takes State<EngineSupervisorHandle> in addition to State<LauncherState>
+- Files changed: apps/codehelper/src-tauri/src/launcher/orchestrator.rs, apps/codehelper/src-tauri/src/commands/launcher.rs
+- **Learnings for future iterations:**
+  - LauncherState still needs a launch_lock even with supervisor — concurrent app launches need serialization independent of engine lifecycle
+  - Tauri commands can take multiple State<> parameters — launcher uses both LauncherState (launch lock) and EngineSupervisorHandle (engine access)
+  - resolve_host_binary_path was duplicated in orchestrator.rs and supervisor.rs — supervisor's version is canonical now
+  - Net deletion: 89 lines removed — the Mutex-based client cache pattern was the bulk of the code
 ---
