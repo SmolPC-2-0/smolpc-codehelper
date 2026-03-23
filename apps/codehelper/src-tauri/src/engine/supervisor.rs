@@ -390,7 +390,7 @@ impl<R: Runtime> EngineSupervisor<R> {
         // 8. Refresh status to get backend/model info.
         self.refresh_running_status().await;
 
-        // 9. Restore desired model if set.
+        // 9. Restore desired model if set (retry once after 2s on failure).
         if let Some(model_id) = self.desired_model.clone() {
             log::info!("Supervisor: restoring desired model: {model_id}");
             match client.load_model(&model_id).await {
@@ -400,9 +400,24 @@ impl<R: Runtime> EngineSupervisor<R> {
                 }
                 Err(e) => {
                     log::warn!(
-                        "Supervisor: failed to restore model {model_id}: {e} \
-                         — remaining in Running state without model"
+                        "Supervisor: first attempt to restore model {model_id} failed: {e} \
+                         — retrying in 2 seconds"
                     );
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    match client.load_model(&model_id).await {
+                        Ok(_) => {
+                            log::info!(
+                                "Supervisor: model {model_id} loaded successfully on retry"
+                            );
+                            self.refresh_running_status().await;
+                        }
+                        Err(e2) => {
+                            log::error!(
+                                "Supervisor: retry also failed for model {model_id}: {e2} \
+                                 — remaining in Running state without model"
+                            );
+                        }
+                    }
                 }
             }
         }
