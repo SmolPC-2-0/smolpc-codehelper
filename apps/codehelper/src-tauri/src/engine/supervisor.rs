@@ -5,10 +5,18 @@
 //! `EngineClient`, runtime configuration, and restart policy — no other code
 //! touches the engine process directly.
 
+use crate::app_paths::{
+    bundled_resource_dir_path, default_dev_bundled_resource_dir,
+    select_bundled_resource_dir_resolution,
+};
 use super::{EngineCommand, EngineLifecycleState, StartupConfig};
-use smolpc_engine_client::{EngineClient, RuntimeModePreference};
+use smolpc_engine_client::{
+    EngineClient, EngineConnectOptions, RuntimeModePreference,
+    kill_stale_processes, load_or_create_token, spawn_engine, wait_for_healthy,
+};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::{mpsc, watch};
 
 /// Health check interval (seconds).
@@ -276,7 +284,7 @@ impl<R: Runtime> EngineSupervisor<R> {
         }
     }
 
-    // --- Spawn sequence (stub — filled in US-005) ---
+    // --- Spawn sequence ---
 
     async fn do_spawn_sequence(&mut self) {
         // Ensure we're in Starting state.
@@ -284,31 +292,173 @@ impl<R: Runtime> EngineSupervisor<R> {
             self.transition(EngineLifecycleState::Starting);
         }
 
-        // US-005 will implement the full spawn sequence here:
-        //   1. Resolve binary path
-        //   2. Delete old token, regenerate
-        //   3. Construct new EngineClient
-        //   4. Kill stale processes
-        //   5. Call spawn_engine + wait_for_healthy
-        //   6. Transition to Running
-        //   7. Restore desired_model if set
+        // 1. Resolve paths.
+        let paths = match self.resolve_paths() {
+            Ok(p) => p,
+            Err(e) => {
+                log::error!("Supervisor: path resolution failed: {e}");
+                self.transition(EngineLifecycleState::Failed { message: e });
+                return;
+            }
+        };
 
-        // For now, log a placeholder. The supervisor compiles and runs
-        // its core loop; the actual engine spawn is wired in US-005.
-        log::info!(
-            "Supervisor: spawn sequence requested (runtime_mode={:?}) — \
-             full implementation in US-005",
-            self.runtime_config.runtime_mode
-        );
+        // 2. Delete old token and regenerate a fresh one.
+        let token_path = paths.shared_runtime_dir.join("engine-token.txt");
+        let _ = std::fs::remove_file(&token_path);
+        let token = match load_or_create_token(&token_path) {
+            Ok(t) => t,
+            Err(e) => {
+                log::error!("Supervisor: token regeneration failed: {e}");
+                self.transition(EngineLifecycleState::Failed {
+                    message: format!("Token regeneration failed: {e}"),
+                });
+                return;
+            }
+        };
 
-        // Transition to WaitingForHealth then to a stub Running state
-        // so the rest of the command flow can be tested once wired.
-        // US-005 replaces this with real spawn + health wait.
+        // 3. Construct new EngineClient with the fresh token.
+        let base_url = format!("http://127.0.0.1:{}", paths.port);
+        let client = EngineClient::new(base_url, token.clone());
+
+        // 4. Kill stale engine processes.
+        kill_stale_processes();
+
+        // 5. Build connect options and spawn.
+        let options = EngineConnectOptions {
+            port: paths.port,
+            app_version: paths.app_version,
+            shared_runtime_dir: paths.shared_runtime_dir.clone(),
+            data_dir: paths.data_dir,
+            resource_dir: paths.resource_dir,
+            models_dir: paths.models_dir,
+            host_binary: paths.host_binary,
+            runtime_mode: self.runtime_config.runtime_mode,
+            dml_device_id: self.runtime_config.dml_device_id,
+            force_respawn: false,
+        };
+
+        // Create runtime dirs if needed.
+        let _ = std::fs::create_dir_all(&options.shared_runtime_dir);
+        let _ = std::fs::create_dir_all(&options.data_dir);
+
+        let pid = match spawn_engine(&options, &token) {
+            Ok(pid) => {
+                log::info!("Supervisor: engine spawned with PID {pid}");
+                pid
+            }
+            Err(e) => {
+                log::error!("Supervisor: spawn failed: {e}");
+                self.transition(EngineLifecycleState::Failed {
+                    message: format!("Engine spawn failed: {e}"),
+                });
+                return;
+            }
+        };
+
+        self.engine_pid = Some(pid);
         self.transition(EngineLifecycleState::WaitingForHealth);
 
-        // The actual spawn and health wait will go here.
-        // For now, we remain in WaitingForHealth until the real
-        // implementation is added. We do NOT fake a Running transition.
+        // 6. Wait for the engine to become healthy.
+        match wait_for_healthy(&client, Duration::from_secs(30)).await {
+            Ok(()) => {
+                log::info!("Supervisor: engine is healthy");
+            }
+            Err(e) => {
+                log::error!("Supervisor: health wait failed: {e}");
+                let spawn_log = paths.shared_runtime_dir.join("engine-spawn.log");
+                let log_hint = if spawn_log.exists() {
+                    format!(" Check spawn log: {}", spawn_log.display())
+                } else {
+                    String::new()
+                };
+                self.transition_to_crashed(&format!(
+                    "Engine failed to become healthy: {e}{log_hint}"
+                ));
+                self.schedule_restart();
+                return;
+            }
+        }
+
+        // 7. Transition to Running and broadcast the client.
+        self.client = Some(client.clone());
+        self.broadcast_client(Some(client.clone()));
+        self.transition(EngineLifecycleState::Running {
+            backend: None,
+            model_id: None,
+        });
+
+        // 8. Refresh status to get backend/model info.
+        self.refresh_running_status().await;
+
+        // 9. Restore desired model if set.
+        if let Some(model_id) = self.desired_model.clone() {
+            log::info!("Supervisor: restoring desired model: {model_id}");
+            match client.load_model(&model_id).await {
+                Ok(_) => {
+                    log::info!("Supervisor: model {model_id} loaded successfully");
+                    self.refresh_running_status().await;
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Supervisor: failed to restore model {model_id}: {e} \
+                         — remaining in Running state without model"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Resolve all paths needed for spawning the engine.
+    fn resolve_paths(&self) -> Result<SpawnPaths, String> {
+        let app_data_dir = self
+            .app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+
+        let shared_runtime_dir = if let Some(base) = dirs::data_local_dir() {
+            base.join("SmolPC").join("engine-runtime")
+        } else {
+            app_data_dir.join("engine-runtime")
+        };
+        let data_dir = shared_runtime_dir.join("host-data");
+
+        let resource_dir = self
+            .app_handle
+            .path()
+            .resource_dir()
+            .ok()
+            .or_else(|| Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))));
+
+        let bundled_resource_dir = select_bundled_resource_dir_resolution(
+            self.app_handle
+                .path()
+                .resource_dir()
+                .map_err(|e| e.to_string()),
+            cfg!(debug_assertions),
+            Some(default_dev_bundled_resource_dir()),
+        )
+        .map(|resolution| bundled_resource_dir_path(&resolution).to_path_buf());
+
+        let models_dir = resolve_models_dir(bundled_resource_dir.as_deref());
+        let host_binary = resolve_host_binary_path();
+
+        let port = std::env::var("SMOLPC_ENGINE_PORT")
+            .ok()
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(DEFAULT_ENGINE_PORT);
+
+        let app_version = self.app_handle.package_info().version.to_string();
+
+        Ok(SpawnPaths {
+            port,
+            app_version,
+            shared_runtime_dir,
+            data_dir,
+            resource_dir,
+            models_dir,
+            host_binary,
+        })
     }
 
     // --- Shutdown ---
@@ -405,6 +555,67 @@ impl<R: Runtime> EngineSupervisor<R> {
     fn broadcast_client(&self, client: Option<EngineClient>) {
         let _ = self.client_tx.send(client);
     }
+}
+
+// --- Path resolution helpers ---
+
+const DEFAULT_ENGINE_PORT: u16 = 19432;
+const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
+const SHARED_MODELS_DIR: &str = "models";
+
+/// Resolved paths for engine spawning.
+struct SpawnPaths {
+    port: u16,
+    app_version: String,
+    shared_runtime_dir: PathBuf,
+    data_dir: PathBuf,
+    resource_dir: Option<PathBuf>,
+    models_dir: Option<PathBuf>,
+    host_binary: Option<PathBuf>,
+}
+
+fn resolve_models_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf> {
+    let override_dir = std::env::var("SMOLPC_MODELS_DIR").ok().map(PathBuf::from);
+    let shared_dir = dirs::data_local_dir()
+        .map(|base| base.join(SHARED_MODELS_VENDOR_DIR).join(SHARED_MODELS_DIR));
+
+    override_dir
+        .filter(|path| path.exists())
+        .or_else(|| shared_dir.filter(|path| path.exists()))
+        .or_else(|| {
+            resource_dir
+                .map(|res_dir| res_dir.join("models"))
+                .filter(|path| path.exists())
+        })
+}
+
+fn resolve_host_binary_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("SMOLPC_ENGINE_HOST_BIN") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    let workspace_target = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("..")
+        .join("target")
+        .join(if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        })
+        .join(format!(
+            "smolpc-engine-host{}",
+            std::env::consts::EXE_SUFFIX
+        ));
+    if workspace_target.exists() {
+        return Some(workspace_target);
+    }
+
+    None
 }
 
 // --- OS-level PID check ---

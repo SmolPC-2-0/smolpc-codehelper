@@ -25,7 +25,7 @@ pub struct EngineChatMessage {
 }
 
 impl EngineClient {
-    pub(crate) fn new(base_url: String, token: String) -> Self {
+    pub fn new(base_url: String, token: String) -> Self {
         Self {
             base_url,
             token,

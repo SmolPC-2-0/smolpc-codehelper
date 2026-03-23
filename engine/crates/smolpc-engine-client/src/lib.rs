@@ -12,6 +12,7 @@ pub use spawn::{
     shutdown_and_wait, spawn_engine, wait_for_healthy, with_spawn_lock,
     RunningHostPolicyDecision,
 };
+pub use token::load_or_create_token;
 pub use version::{engine_api_major_compatible, expected_engine_api_major, version_major};
 
 use smolpc_engine_core::inference::backend::BackendStatus;
