@@ -234,6 +234,40 @@ impl EngineState {
         }
     }
 
+    /// Run the DirectML preflight on a worker thread with timeout.
+    /// Returns Success with the adapter, or Failed with error details.
+    /// Does NOT handle fallback — caller decides what to do on failure.
+    async fn run_directml_preflight(
+        &self,
+        dml_model_path: &Path,
+        device_id: Option<i32>,
+    ) -> DirectMLPreflightOutcome {
+        let ort_bundle = self.runtime_bundles().ort.clone();
+        let dml_path_owned = dml_model_path.to_path_buf();
+        let dml_build_result = match timeout(
+            DIRECTML_PREFLIGHT_BUDGET,
+            tokio::task::spawn_blocking(move || {
+                build_directml_runtime_adapter(&ort_bundle, &dml_path_owned, device_id)
+            }),
+        )
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => Err(format!("DirectML preflight task panicked: {e}")),
+            Err(_) => Err(format!(
+                "DirectML preflight timed out after {}s",
+                DIRECTML_PREFLIGHT_BUDGET.as_secs()
+            )),
+        };
+        match dml_build_result {
+            Ok(adapter) => DirectMLPreflightOutcome::Success { adapter },
+            Err(error) => DirectMLPreflightOutcome::Failed {
+                failure_class: DirectMLFailureStage::Init,
+                error,
+            },
+        }
+    }
+
     /// Evaluate the OpenVINO NPU lane: check artifacts, probe status, run preflight.
     /// Returns structured outcome without mutating any load_model locals.
     async fn evaluate_openvino_lane(
@@ -640,26 +674,9 @@ impl EngineState {
         } else if preferred_backend == InferenceBackend::DirectML {
             match dml_model_path.as_deref() {
                 Some(dml_path) => {
-                    let ort_bundle = self.runtime_bundles().ort.clone();
-                    let dml_path_owned = dml_path.to_path_buf();
-                    let device_id = selected_device_id;
-                    let dml_build_result = match timeout(
-                        DIRECTML_PREFLIGHT_BUDGET,
-                        tokio::task::spawn_blocking(move || {
-                            build_directml_runtime_adapter(&ort_bundle, &dml_path_owned, device_id)
-                        }),
-                    )
-                    .await
-                    {
-                        Ok(Ok(result)) => result,
-                        Ok(Err(e)) => Err(format!("DirectML preflight task panicked: {e}")),
-                        Err(_) => Err(format!(
-                            "DirectML preflight timed out after {}s",
-                            DIRECTML_PREFLIGHT_BUDGET.as_secs()
-                        )),
-                    };
-                    match dml_build_result {
-                        Ok(adapter) => {
+                    let dml_outcome = self.run_directml_preflight(dml_path, selected_device_id).await;
+                    match dml_outcome {
+                        DirectMLPreflightOutcome::Success { adapter } => {
                             failure_counters.record_directml_success();
                             if !suppress_store_update
                                 && force_override.is_none()
@@ -676,7 +693,7 @@ impl EngineState {
                             active_model_path = dml_path.display().to_string();
                             adapter
                         }
-                        Err(error) => {
+                        DirectMLPreflightOutcome::Failed { failure_class: _, error } => {
                             if force_override == Some(InferenceBackend::DirectML)
                                 || directml_required
                             {
@@ -740,6 +757,7 @@ impl EngineState {
                             active_model_path = cpu_model_dir.display().to_string();
                             adapter
                         }
+                        DirectMLPreflightOutcome::ArtifactMissing => unreachable!("checked above"),
                     }
                 }
                 None => {
