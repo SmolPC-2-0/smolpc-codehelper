@@ -51,7 +51,7 @@
         "cargo check --workspace clean"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Check supervisor.rs for existing desired_model handling. Key gap: load_model/unload_model in inference.rs must inform supervisor of desired model. Also verify post-Running restoration logic."
     },
     {
