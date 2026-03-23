@@ -51,6 +51,8 @@
 	// Unified mode state
 	const activeMode = $derived(modeStore.activeMode);
 	const activeModeConfigs = $derived(modeStore.modeConfigs);
+	const activeModeConfig = $derived(modeStore.activeConfig);
+	const modeSuggestions = $derived(activeModeConfig?.suggestions ?? []);
 	const setupNeedsAttention = $derived(setupStore.initialized && setupStore.needsAttention);
 	const setupStatus = $derived(setupStore.status);
 	const setupError = $derived(setupStore.error);
@@ -873,6 +875,8 @@ Teaching rules:
 		{/if}
 
 		<ConversationView
+			mode={activeMode}
+			suggestions={modeSuggestions}
 			{messages}
 			{latestAssistantMessageId}
 			showQuickExamples={uiStore.showQuickExamples}

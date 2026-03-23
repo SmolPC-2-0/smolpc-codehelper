@@ -1,13 +1,18 @@
 <script lang="ts">
-	import { QUICK_EXAMPLES } from '$lib/types/examples';
 	import { X } from '@lucide/svelte';
 
+	export interface QuickExampleCard {
+		id: string;
+		prompt: string;
+	}
+
 	interface Props {
+		examples: QuickExampleCard[];
 		onSelectExample: (prompt: string) => void;
 		onClose?: () => void;
 	}
 
-	let { onSelectExample, onClose }: Props = $props();
+	let { examples, onSelectExample, onClose }: Props = $props();
 
 	function handleSelect(prompt: string) {
 		onSelectExample(prompt);
@@ -19,8 +24,8 @@
 	<div class="quick-examples__header">
 		<div class="quick-examples__title">
 			<div>
-				<h3>Prompt Starters</h3>
-				<p>Pick one and adapt it to your assignment.</p>
+				<h3>Example prompts</h3>
+				<p>Choose one and change it to fit your task.</p>
 			</div>
 		</div>
 		{#if onClose}
@@ -31,11 +36,8 @@
 	</div>
 
 	<div class="quick-examples__grid">
-		{#each QUICK_EXAMPLES as example (example.id)}
+		{#each examples as example (example.id)}
 			<button onclick={() => handleSelect(example.prompt)} class="quick-examples__item">
-				<div class="quick-examples__item-head">
-					<span>{example.title}</span>
-				</div>
 				<p>{example.prompt}</p>
 			</button>
 		{/each}
@@ -103,8 +105,6 @@
 	}
 
 	.quick-examples__item {
-		display: grid;
-		gap: 0.4rem;
 		padding: 0.75rem 0.8rem;
 		text-align: left;
 		border-radius: var(--radius-lg);
@@ -124,20 +124,9 @@
 		background: var(--surface-active);
 	}
 
-	.quick-examples__item-head {
-		display: block;
-		font-size: 0.81rem;
-		font-weight: 700;
-	}
-
 	.quick-examples__item p {
-		font-size: 0.74rem;
-		color: var(--color-muted-foreground);
-		line-height: 1.35;
-		display: -webkit-box;
-		line-clamp: 2;
-		-webkit-line-clamp: 2;
-		-webkit-box-orient: vertical;
-		overflow: hidden;
+		font-size: 0.8rem;
+		color: var(--color-foreground);
+		line-height: 1.45;
 	}
 </style>
