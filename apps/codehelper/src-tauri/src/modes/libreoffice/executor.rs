@@ -189,7 +189,11 @@ fn filter_tools_by_intent<'a>(
             ],
         ),
         (
-            &["search", "replace", "find"],
+            &["add text", "add the text", "add paragraph", "add a paragraph", "append text"],
+            &["add_text", "add_paragraph"],
+        ),
+        (
+            &["search and replace", "find and replace", "replace all", "search for"],
             &["search_replace_text"],
         ),
         (
@@ -300,15 +304,56 @@ fn enrich_user_text_with_file_context(
 }
 
 fn extract_file_path_from_text(text: &str) -> Option<String> {
-    // Match Windows absolute paths (C:\...) or Unix absolute paths (/...).
+    // Document extensions we recognise (lowercase, with dot).
+    const EXTENSIONS: &[&str] = &[
+        ".odt", ".docx", ".doc", ".rtf", ".odp", ".pptx", ".ppt", ".ods",
+        ".xlsx", ".xls", ".pdf", ".txt", ".csv",
+    ];
+
+    // Scan for Windows absolute paths like `C:\...\file.ext`.  Paths may
+    // contain spaces (e.g. OneDrive folders), so we can't split on whitespace.
+    // Strategy: find each `X:\` drive-letter start, then scan forward to the
+    // first known document extension and take the whole substring.
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+    while i + 2 < len {
+        // Look for a drive letter followed by `:\`
+        if chars[i].is_ascii_alphabetic()
+            && chars[i + 1] == ':'
+            && chars[i + 2] == '\\'
+        {
+            // Find the end: scan forward for a known extension.
+            let start = i;
+            let rest = &text[start..];
+            let lower = rest.to_ascii_lowercase();
+            if let Some((ext_end, _ext)) = EXTENSIONS
+                .iter()
+                .filter_map(|ext| lower.find(ext).map(|pos| (pos + ext.len(), *ext)))
+                .min_by_key(|(pos, _)| *pos)
+            {
+                let path = rest[..ext_end].trim_end_matches(|c: char| {
+                    c == '.' || c == ',' || c == ';' || c == ')' || c == '"'
+                });
+                if !path.is_empty() {
+                    return Some(path.to_string());
+                }
+            }
+            // No extension found — skip past this drive letter.
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+
+    // Fallback: check for Unix absolute paths (simple case, no spaces).
     for word in text.split_whitespace() {
         let cleaned = word.trim_matches(|c: char| c == '.' || c == ',' || c == ':' || c == '"');
-        if (cleaned.len() > 3 && cleaned.chars().nth(1) == Some(':') && cleaned.chars().nth(2) == Some('\\'))
-            || cleaned.starts_with('/')
-        {
+        if cleaned.starts_with('/') && cleaned.len() > 3 {
             return Some(cleaned.to_string());
         }
     }
+
     None
 }
 
