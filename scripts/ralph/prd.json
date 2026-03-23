@@ -115,7 +115,7 @@
         "svelte-check 0 errors"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Current warnings: can_transition_to (fixed in US-004), startup_mode, current_state, subscribe. Also check for dead imports."
     },
     {
