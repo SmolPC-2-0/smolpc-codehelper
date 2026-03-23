@@ -803,32 +803,34 @@ Teaching rules:
 			onToggleHardware={() => uiStore.toggleOverlay('hardware')}
 			onToggleShortcuts={() => (showShortcutsOverlay = !showShortcutsOverlay)}
 			onExportChat={handleExportChat}
-		/>
+		>
+			{#snippet modeSwitcher()}
+				<AppModeDropdown
+					modes={activeModeConfigs}
+					{activeMode}
+					onChange={handleModeChange}
+					disabled={isSwitchingMode}
+					{modeAvailability}
+					{unavailableReasons}
+				/>
+			{/snippet}
+		</WorkspaceHeader>
 
 		<WorkspaceControls>
-			{#snippet modeSelector()}
-				<div class="mode-selector-group">
-					<AppModeDropdown
-						modes={activeModeConfigs}
-						{activeMode}
-						onChange={handleModeChange}
-						{modeAvailability}
-						{unavailableReasons}
-					/>
-					{#if activeHostLaunchLabel}
-						<button
-							type="button"
-							class="mode-launch-button"
-							onclick={handleOpenHostApp}
-							disabled={!canOpenHostApp || launchingHostApp}
-							title={canOpenHostApp
-								? activeHostLaunchLabel
-								: (unavailableReasons[activeMode] ?? `${activeHostLaunchLabel} unavailable`)}
-						>
-							{launchingHostApp ? 'Opening...' : activeHostLaunchLabel}
-						</button>
-					{/if}
-				</div>
+			{#snippet leadingContent()}
+				{#if activeHostLaunchLabel}
+					<button
+						type="button"
+						class="mode-launch-button"
+						onclick={handleOpenHostApp}
+						disabled={!canOpenHostApp || launchingHostApp}
+						title={canOpenHostApp
+							? activeHostLaunchLabel
+							: (unavailableReasons[activeMode] ?? `${activeHostLaunchLabel} unavailable`)}
+					>
+						{launchingHostApp ? 'Opening...' : activeHostLaunchLabel}
+					</button>
+				{/if}
 			{/snippet}
 		</WorkspaceControls>
 

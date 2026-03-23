@@ -128,77 +128,215 @@
 	});
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="mode-dropdown" onkeydown={handleKeyDown}>
-	<button
-		bind:this={triggerEl}
-		class="mode-dropdown__trigger"
-		{disabled}
-		onclick={toggleOpen}
-		aria-haspopup="listbox"
-		aria-expanded={open}
-		aria-controls={POPOVER_ID}
-		aria-label="Select assistant mode"
-	>
-		{#if activeConfig}
-			{@const IconComponent = ICON_MAP[activeConfig.icon]}
-			{#if IconComponent}
-				<IconComponent size={14} />
-			{/if}
-			<span class="mode-dropdown__trigger-label">{activeConfig.label}</span>
-		{/if}
-		<ChevronDown size={12} class="mode-dropdown__chevron" />
-	</button>
-
-	{#if open}
-		<div
-			bind:this={popoverEl}
-			id={POPOVER_ID}
-			class="mode-dropdown__popover"
-			role="listbox"
-			aria-label="Assistant modes"
-		>
-			{#each modes as mode, index (mode.id)}
-				{@const available = isAvailable(mode.id)}
-				{@const IconComponent = ICON_MAP[mode.icon]}
-				<!-- svelte-ignore a11y_click_events_have_key_events -->
-				<div
-					class="mode-dropdown__option"
-					class:active={mode.id === activeMode}
-					class:unavailable={!available}
-					class:focused={index === focusedIndex}
-					role="option"
-					tabindex="-1"
-					aria-selected={mode.id === activeMode}
-					aria-disabled={!available}
-					onclick={() => selectMode(mode.id as AppMode)}
-				>
-					{#if IconComponent}
-						<span class="mode-dropdown__option-icon">
-							<IconComponent size={14} />
-						</span>
-					{/if}
-					<span class="mode-dropdown__option-text">
-						<span class="mode-dropdown__option-label">{mode.label}</span>
-						{#if !available && unavailableReasons[mode.id]}
-							<span class="mode-dropdown__option-reason"
-								>{unavailableReasons[mode.id]}</span
-							>
-						{/if}
+<div class="mode-switcher">
+	<div class="mode-switcher__desktop" role="group" aria-label="Assistant modes">
+		<div class="mode-switcher__label" aria-hidden="true">Modes:</div>
+		{#each modes as mode (mode.id)}
+			{@const available = isAvailable(mode.id)}
+			{@const IconComponent = ICON_MAP[mode.icon]}
+			<button
+				type="button"
+				class="mode-switcher__tab"
+				class:active={mode.id === activeMode}
+				class:unavailable={!available}
+				disabled={disabled || !available}
+				aria-pressed={mode.id === activeMode}
+				onclick={() => selectMode(mode.id as AppMode)}
+				title={
+					available
+						? `${mode.label}: ${mode.subtitle}`
+						: unavailableReasons[mode.id] ?? `${mode.label} is not ready yet`
+				}
+			>
+				{#if IconComponent}
+					<span class="mode-switcher__tab-icon">
+						<IconComponent size={13} />
 					</span>
-				</div>
-			{/each}
-		</div>
-	{/if}
+				{/if}
+				<span class="mode-switcher__tab-label">{mode.label}</span>
+			</button>
+		{/each}
+	</div>
+
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="mode-switcher__mobile" onkeydown={handleKeyDown}>
+		<button
+			bind:this={triggerEl}
+			class="mode-switcher__trigger"
+			{disabled}
+			onclick={toggleOpen}
+			aria-haspopup="listbox"
+			aria-expanded={open}
+			aria-controls={POPOVER_ID}
+			aria-label="Select assistant mode"
+		>
+			{#if activeConfig}
+				{@const IconComponent = ICON_MAP[activeConfig.icon]}
+				{#if IconComponent}
+					<IconComponent size={14} />
+				{/if}
+				<span class="mode-switcher__trigger-label">{activeConfig.label}</span>
+			{/if}
+			<ChevronDown size={12} class="mode-switcher__chevron" />
+		</button>
+
+		{#if open}
+			<div
+				bind:this={popoverEl}
+				id={POPOVER_ID}
+				class="mode-switcher__popover"
+				role="listbox"
+				aria-label="Assistant modes"
+			>
+				{#each modes as mode, index (mode.id)}
+					{@const available = isAvailable(mode.id)}
+					{@const IconComponent = ICON_MAP[mode.icon]}
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<div
+						class="mode-switcher__option"
+						class:active={mode.id === activeMode}
+						class:unavailable={!available}
+						class:focused={index === focusedIndex}
+						role="option"
+						tabindex="-1"
+						aria-selected={mode.id === activeMode}
+						aria-disabled={!available}
+						onclick={() => selectMode(mode.id as AppMode)}
+					>
+						{#if IconComponent}
+							<span class="mode-switcher__option-icon">
+								<IconComponent size={14} />
+							</span>
+						{/if}
+						<span class="mode-switcher__option-text">
+							<span class="mode-switcher__option-label">{mode.label}</span>
+							<span class="mode-switcher__option-subtitle">{mode.subtitle}</span>
+							{#if !available && unavailableReasons[mode.id]}
+								<span class="mode-switcher__option-reason"
+									>{unavailableReasons[mode.id]}</span
+								>
+							{/if}
+						</span>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</div>
 </div>
 
 <style>
-	.mode-dropdown {
+	.mode-switcher {
 		position: relative;
-		display: inline-flex;
+		display: flex;
+		width: auto;
+		max-width: 100%;
+		min-width: 0;
 	}
 
-	.mode-dropdown__trigger {
+	.mode-switcher__desktop {
+		display: inline-flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.42rem;
+		padding: 0.34rem 0.42rem;
+		border-radius: calc(var(--radius-xl) + 2px);
+		border: 1px solid var(--outline-soft);
+		background:
+			linear-gradient(
+				145deg,
+				color-mix(in srgb, var(--brand-soft) 30%, transparent),
+				color-mix(in srgb, var(--surface-widget) 96%, black)
+			),
+			var(--surface-widget);
+		box-shadow: var(--glow-subtle);
+	}
+
+	.mode-switcher__label {
+		display: inline-flex;
+		align-items: center;
+		align-self: stretch;
+		padding: 0 0.58rem 0 0.2rem;
+		margin-right: 0.08rem;
+		border-right: 1px solid color-mix(in srgb, var(--outline-soft) 92%, transparent);
+		color: color-mix(in srgb, var(--color-foreground) 82%, var(--color-primary));
+		font-size: 0.79rem;
+		font-weight: 760;
+		letter-spacing: 0.02em;
+		white-space: nowrap;
+	}
+
+	.mode-switcher__tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.42rem;
+		padding: 0.52rem 0.78rem;
+		border-radius: calc(var(--radius-lg) + 2px);
+		border: 1px solid color-mix(in srgb, var(--outline-soft) 36%, transparent);
+		background: color-mix(in srgb, var(--surface-widget) 35%, transparent);
+		color: color-mix(in srgb, var(--color-muted-foreground) 92%, var(--color-foreground));
+		font-size: 0.76rem;
+		font-weight: 650;
+		letter-spacing: 0.01em;
+		cursor: pointer;
+		transition:
+			background var(--motion-fast),
+			border-color var(--motion-fast),
+			color var(--motion-fast),
+			transform var(--motion-fast),
+			box-shadow var(--motion-fast);
+	}
+
+	.mode-switcher__tab:hover:not(:disabled) {
+		color: var(--color-foreground);
+		background: color-mix(in srgb, var(--surface-active) 94%, black);
+		border-color: color-mix(in srgb, var(--outline-strong) 88%, transparent);
+		transform: translateY(-0.5px);
+	}
+
+	.mode-switcher__tab.active {
+		color: var(--color-foreground);
+		border-color: color-mix(in srgb, var(--color-primary) 42%, transparent);
+		background:
+			linear-gradient(
+				145deg,
+				color-mix(in srgb, var(--brand-soft) 94%, transparent),
+				color-mix(in srgb, var(--surface-active) 96%, black)
+			),
+			var(--surface-active);
+		box-shadow:
+			inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 22%, transparent),
+			0 0 0 1px color-mix(in srgb, var(--color-primary) 12%, transparent),
+			0 8px 22px color-mix(in srgb, var(--color-primary) 16%, transparent);
+	}
+
+	.mode-switcher__tab.active .mode-switcher__tab-label {
+		font-weight: 760;
+	}
+
+	.mode-switcher__tab.unavailable {
+		opacity: 0.5;
+	}
+
+	.mode-switcher__tab:disabled {
+		cursor: not-allowed;
+	}
+
+	.mode-switcher__tab-icon {
+		display: inline-flex;
+		color: inherit;
+	}
+
+	.mode-switcher__tab-label {
+		white-space: nowrap;
+	}
+
+	.mode-switcher__mobile {
+		position: relative;
+		display: none;
+		width: 100%;
+	}
+
+	.mode-switcher__trigger {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -214,22 +352,22 @@
 		cursor: pointer;
 	}
 
-	.mode-dropdown__trigger:disabled {
+	.mode-switcher__trigger:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
 
-	.mode-dropdown__trigger-label {
+	.mode-switcher__trigger-label {
 		flex: 1;
 		text-align: left;
 	}
 
-	:global(.mode-dropdown__chevron) {
+	:global(.mode-switcher__chevron) {
 		color: var(--color-muted-foreground);
 		flex-shrink: 0;
 	}
 
-	.mode-dropdown__popover {
+	.mode-switcher__popover {
 		position: absolute;
 		top: calc(100% + 4px);
 		left: 0;
@@ -244,7 +382,7 @@
 			0 1px 4px rgba(0, 0, 0, 0.12);
 	}
 
-	.mode-dropdown__option {
+	.mode-switcher__option {
 		display: flex;
 		align-items: flex-start;
 		gap: 0.5rem;
@@ -260,51 +398,60 @@
 		text-align: left;
 	}
 
-	.mode-dropdown__option:hover:not(.unavailable) {
+	.mode-switcher__option:hover:not(.unavailable) {
 		background: color-mix(in srgb, var(--color-foreground) 8%, transparent);
 	}
 
-	.mode-dropdown__option.focused:not(.unavailable) {
+	.mode-switcher__option.focused:not(.unavailable) {
 		background: color-mix(in srgb, var(--color-foreground) 10%, transparent);
 		outline: 1px solid var(--outline-soft);
 	}
 
-	.mode-dropdown__option.active {
+	.mode-switcher__option.active {
 		background: color-mix(in srgb, var(--color-foreground) 12%, transparent);
 	}
 
-	.mode-dropdown__option.unavailable {
+	.mode-switcher__option.unavailable {
 		opacity: 0.4;
 		cursor: not-allowed;
 	}
 
-	.mode-dropdown__option-icon {
+	.mode-switcher__option-icon {
 		flex-shrink: 0;
 		margin-top: 1px;
 		color: var(--color-muted-foreground);
 	}
 
-	.mode-dropdown__option-text {
+	.mode-switcher__option-text {
 		display: flex;
 		flex-direction: column;
 		gap: 0.1rem;
 	}
 
-	.mode-dropdown__option-label {
+	.mode-switcher__option-label {
 		font-weight: 500;
 	}
 
-	.mode-dropdown__option-reason {
+	.mode-switcher__option-subtitle,
+	.mode-switcher__option-reason {
 		font-size: 0.68rem;
 		color: var(--color-muted-foreground);
 	}
 
-	@media (max-width: 768px) {
-		.mode-dropdown {
+	@media (max-width: 920px) {
+		.mode-switcher__desktop {
+			display: none;
+		}
+
+		.mode-switcher__mobile {
+			display: inline-flex;
+		}
+
+		.mode-switcher {
 			width: 100%;
 		}
 
-		.mode-dropdown__trigger {
+		.mode-switcher__trigger {
 			min-width: 0;
 			width: 100%;
 		}

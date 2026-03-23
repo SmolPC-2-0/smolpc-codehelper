@@ -4,16 +4,16 @@
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
 
 	interface Props {
-		modeSelector?: Snippet;
+		leadingContent?: Snippet;
 	}
 
-	let { modeSelector }: Props = $props();
+	let { leadingContent }: Props = $props();
 </script>
 
 <section class="workspace-controls" aria-label="Session controls">
 	<div class="workspace-controls__row">
-		{#if modeSelector}
-			{@render modeSelector()}
+		{#if leadingContent}
+			{@render leadingContent()}
 		{/if}
 		<ContextToggle />
 	</div>
