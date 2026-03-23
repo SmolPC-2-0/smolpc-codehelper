@@ -145,7 +145,7 @@
         "cargo check --workspace clean"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Check env_logger init in lib.rs. Add module-level filters for hyper_util=warn,reqwest=warn."
     },
     {
