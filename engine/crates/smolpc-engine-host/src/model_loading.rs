@@ -234,6 +234,102 @@ impl EngineState {
         }
     }
 
+    /// Evaluate the OpenVINO NPU lane: check artifacts, probe status, run preflight.
+    /// Returns structured outcome without mutating any load_model locals.
+    async fn evaluate_openvino_lane(
+        &self,
+        model_id: &str,
+        artifacts: &ModelLaneArtifacts,
+        openvino_probe: Option<&OpenVinoStartupProbeResult>,
+        openvino_bundle_ready: bool,
+    ) -> OpenVinoLaneOutcome {
+        let mut preflight_state = LanePreflightState::NotStarted;
+        let mut failure_class = None;
+        let mut failure_message = None;
+        let mut ready = None;
+        let mut reason_override = None;
+        let mut suppress_store_update = false;
+        let mut persistence_state_override = None;
+        let mut selection_state_override = None;
+
+        if !artifacts.openvino_npu_ready() {
+            failure_class = artifacts.openvino_reason.clone();
+            failure_message = artifacts.openvino_message.clone();
+            reason_override = Some(DecisionReason::NoOpenVinoCandidate);
+        } else if !openvino_bundle_ready {
+            failure_class = Some(bundle_reason(
+                self.runtime_bundles().openvino.failure_code(),
+            ));
+            failure_message = Some(format!(
+                "OpenVINO runtime bundle is unavailable at {}",
+                self.runtime_bundles().openvino.display_root().display()
+            ));
+            reason_override = Some(DecisionReason::NoOpenVinoCandidate);
+        } else if openvino_probe.is_none() {
+            failure_class = Some("openvino_startup_probe_pending".to_string());
+            failure_message =
+                Some("OpenVINO startup probe is still running".to_string());
+            suppress_store_update = true;
+            persistence_state_override = Some(DecisionPersistenceState::TemporaryFallback);
+            selection_state_override = Some(BackendSelectionState::Fallback);
+            reason_override = Some(DecisionReason::OpenVinoStartupProbePending);
+        } else if let Some(class) = openvino_probe
+            .and_then(|probe| probe.failure_class.as_deref())
+            .filter(|class| is_blocking_openvino_probe_failure(class))
+        {
+            failure_class = Some(class.to_string());
+            failure_message = openvino_probe
+                .and_then(|probe| probe.failure_message.clone());
+            reason_override = Some(DecisionReason::NoOpenVinoCandidate);
+        } else if let Some(probe) = openvino_probe {
+            match self
+                .run_openvino_preflight_with_timeout(model_id, artifacts, probe)
+                .await
+            {
+                OpenVinoPreflightResult::Ready(r) => {
+                    preflight_state = LanePreflightState::Ready;
+                    ready = Some(r);
+                }
+                OpenVinoPreflightResult::Timeout => {
+                    preflight_state = LanePreflightState::Timeout;
+                    failure_class = Some("openvino_npu_preflight_timeout".to_string());
+                    failure_message = Some(format!(
+                        "OpenVINO preflight exceeded the {} second budget",
+                        OPENVINO_PREFLIGHT_BUDGET.as_secs()
+                    ));
+                    suppress_store_update = true;
+                    persistence_state_override = Some(DecisionPersistenceState::TemporaryFallback);
+                    selection_state_override = Some(BackendSelectionState::Fallback);
+                    reason_override = Some(DecisionReason::OpenVinoPreflightTimeout);
+                }
+                OpenVinoPreflightResult::Failed { class, message } => {
+                    preflight_state = LanePreflightState::Error;
+                    failure_class = Some(class);
+                    failure_message = Some(message);
+                    selection_state_override = Some(BackendSelectionState::Fallback);
+                    reason_override = Some(DecisionReason::OpenVinoPreflightFailed);
+                }
+            }
+        } else {
+            log::error!("OpenVINO startup probe missing unexpectedly after readiness checks");
+            failure_class = Some("openvino_startup_probe_missing".to_string());
+            failure_message =
+                Some("OpenVINO startup probe was not available".to_string());
+            reason_override = Some(DecisionReason::NoOpenVinoCandidate);
+        }
+
+        OpenVinoLaneOutcome {
+            preflight_state,
+            failure_class,
+            failure_message,
+            ready,
+            reason_override,
+            suppress_store_update,
+            persistence_state_override,
+            selection_state_override,
+        }
+    }
+
     pub(crate) async fn load_model(
         &self,
         model_id: String,
@@ -414,74 +510,34 @@ impl EngineState {
         let mut openvino_reason_override = None;
         let mut openvino_ready = None;
 
-        if should_attempt_openvino {
-            if !artifacts.openvino_npu_ready() {
-                openvino_failure_class = artifacts.openvino_reason.clone();
-                openvino_failure_message = artifacts.openvino_message.clone();
-                openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
-            } else if !openvino_bundle_ready {
-                openvino_failure_class = Some(bundle_reason(
-                    self.runtime_bundles().openvino.failure_code(),
-                ));
-                openvino_failure_message = Some(format!(
-                    "OpenVINO runtime bundle is unavailable at {}",
-                    self.runtime_bundles().openvino.display_root().display()
-                ));
-                openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
-            } else if openvino_probe.is_none() {
-                openvino_failure_class = Some("openvino_startup_probe_pending".to_string());
-                openvino_failure_message =
-                    Some("OpenVINO startup probe is still running".to_string());
-                suppress_store_update = true;
-                decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
-                selection_state = BackendSelectionState::Fallback;
-                openvino_reason_override = Some(DecisionReason::OpenVinoStartupProbePending);
-            } else if let Some(class) = openvino_probe
-                .as_ref()
-                .and_then(|probe| probe.failure_class.as_deref())
-                .filter(|class| is_blocking_openvino_probe_failure(class))
-            {
-                openvino_failure_class = Some(class.to_string());
-                openvino_failure_message = openvino_probe
-                    .as_ref()
-                    .and_then(|probe| probe.failure_message.clone());
-                openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
-            } else if let Some(probe) = openvino_probe.as_ref() {
-                match self
-                    .run_openvino_preflight_with_timeout(&model_id, &artifacts, probe)
-                    .await
-                {
-                    OpenVinoPreflightResult::Ready(ready) => {
-                        openvino_preflight_state = LanePreflightState::Ready;
-                        openvino_ready = Some(ready);
-                    }
-                    OpenVinoPreflightResult::Timeout => {
-                        openvino_preflight_state = LanePreflightState::Timeout;
-                        openvino_failure_class = Some("openvino_npu_preflight_timeout".to_string());
-                        openvino_failure_message = Some(format!(
-                            "OpenVINO preflight exceeded the {} second budget",
-                            OPENVINO_PREFLIGHT_BUDGET.as_secs()
-                        ));
-                        suppress_store_update = true;
-                        decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
-                        selection_state = BackendSelectionState::Fallback;
-                        openvino_reason_override = Some(DecisionReason::OpenVinoPreflightTimeout);
-                    }
-                    OpenVinoPreflightResult::Failed { class, message } => {
-                        openvino_preflight_state = LanePreflightState::Error;
-                        openvino_failure_class = Some(class);
-                        openvino_failure_message = Some(message);
-                        selection_state = BackendSelectionState::Fallback;
-                        openvino_reason_override = Some(DecisionReason::OpenVinoPreflightFailed);
-                    }
-                }
-            } else {
-                log::error!("OpenVINO startup probe missing unexpectedly after readiness checks");
-                openvino_failure_class = Some("openvino_startup_probe_missing".to_string());
-                openvino_failure_message =
-                    Some("OpenVINO startup probe was not available".to_string());
-                openvino_reason_override = Some(DecisionReason::NoOpenVinoCandidate);
+        let openvino_outcome = if should_attempt_openvino {
+            self.evaluate_openvino_lane(&model_id, &artifacts, openvino_probe.as_ref(), openvino_bundle_ready).await
+        } else {
+            OpenVinoLaneOutcome {
+                preflight_state: LanePreflightState::NotStarted,
+                failure_class: openvino_failure_class.take(),
+                failure_message: openvino_failure_message.take(),
+                ready: None,
+                reason_override: None,
+                suppress_store_update: false,
+                persistence_state_override: None,
+                selection_state_override: None,
             }
+        };
+        // Unpack results back into load_model locals
+        openvino_preflight_state = openvino_outcome.preflight_state;
+        openvino_failure_class = openvino_outcome.failure_class;
+        openvino_failure_message = openvino_outcome.failure_message;
+        openvino_ready = openvino_outcome.ready;
+        openvino_reason_override = openvino_outcome.reason_override;
+        if openvino_outcome.suppress_store_update {
+            suppress_store_update = true;
+        }
+        if let Some(ps) = openvino_outcome.persistence_state_override {
+            decision_persistence_state = ps;
+        }
+        if let Some(ss) = openvino_outcome.selection_state_override {
+            selection_state = ss;
         }
 
         if (force_override == Some(InferenceBackend::OpenVinoNpu) || openvino_required)
