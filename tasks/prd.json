@@ -161,7 +161,7 @@
         "Keep all non-engine learnings intact (OpenVINO, NPU, DLL, frontend, packaging)"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "File: CLAUDE.md at repo root. Surgical update — only engine-related learnings."
     }
   ]
