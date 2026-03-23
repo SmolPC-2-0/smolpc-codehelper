@@ -143,6 +143,8 @@ Corrections discovered during development. **When you correct a mistake, append 
 - After replacing a hardware data source, verify all backend paths with live tests (`SMOLPC_FORCE_EP=openvino_npu` curl test) — unit tests don't catch hardware path regressions
 - DXGI adapter enumeration is 1000x faster than WMI for GPU detection — use `IDXGIFactory6::EnumAdapterByGpuPreference` with fallback to `IDXGIFactory1::EnumAdapters1`
 - Always use the LSP tool (`findReferences`, `incomingCalls`, `goToDefinition`) when tracing symbol usage — grep misses indirect consumers and caused the NPU regression. Subagents exploring the codebase must also be instructed to use LSP.
+- NPU StaticLLMPipeline has a fixed context window: MAX_PROMPT_LEN (input) + MIN_RESPONSE_LEN (output). Exceeding MAX_PROMPT_LEN crashes with "unknown exception". Intel's default is 1024 — don't go below without good reason.
+- There is no tokenizer in the OpenVINO GenAI C API — token counting from Rust requires either the `tokenizers` crate with the model's tokenizer.json, or a character-based heuristic (~3.5 chars/token for Qwen)
 
 ---
 

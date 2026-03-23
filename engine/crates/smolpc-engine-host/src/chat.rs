@@ -304,3 +304,19 @@ pub(crate) fn stream_error_code(error: &str) -> &'static str {
         "ENGINE_STREAM_ERROR"
     }
 }
+
+/// Replace raw engine/FFI error messages with user-friendly text.
+/// The NPU StaticLLMPipeline throws "unknown exception" when the
+/// tokenized chat history exceeds MAX_PROMPT_LEN. Students shouldn't
+/// see C API error strings.
+pub(crate) fn humanize_generation_error(error: &str) -> String {
+    if error.contains("ov_genai_llm_pipeline_generate_with_history")
+        && error.contains("unknown exception")
+    {
+        "This conversation has gotten too long for the current inference mode. \
+         Try starting a new chat, or switch to CPU mode for longer conversations."
+            .to_string()
+    } else {
+        error.to_string()
+    }
+}
