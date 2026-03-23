@@ -1,4 +1,3 @@
-use super::inference::{resolve_client, InferenceState};
 use crate::engine::{EngineSupervisorHandle, StartupConfig};
 use chrono::Utc;
 use smolpc_engine_client::{
@@ -201,10 +200,11 @@ fn map_engine_status_to_readiness(status: &EngineStatus) -> EngineReadinessDto {
 
 #[tauri::command]
 pub async fn engine_status(
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, EngineSupervisorHandle>,
 ) -> Result<EngineReadinessDto, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
+    let client = supervisor
+        .get_client(Duration::from_secs(60))
+        .await?;
     let status = client
         .status()
         .await

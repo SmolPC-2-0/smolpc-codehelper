@@ -1,7 +1,7 @@
-use crate::commands::engine_client_adapter::engine_status;
-use crate::commands::inference::InferenceState;
+use crate::engine::EngineSupervisorHandle;
 use crate::modes::config::list_mode_configs;
 use crate::modes::registry::ModeProviderRegistry;
+use std::time::Duration;
 use crate::setup::host_apps::{detect_blender, detect_gimp, detect_libreoffice, HostAppDetection};
 use crate::setup::launch::{
     launch_blender_if_needed, launch_gimp_if_needed, launch_libreoffice_mode,
@@ -86,25 +86,29 @@ fn open_host_app_for_mode(mode: AppMode) -> Result<(), String> {
 
 async fn collect_mode_status(
     mode: AppMode,
-    app_handle: tauri::AppHandle,
-    inference_state: tauri::State<'_, InferenceState>,
-    registry: tauri::State<'_, ModeProviderRegistry>,
+    supervisor: &EngineSupervisorHandle,
+    registry: &ModeProviderRegistry,
 ) -> Result<ModeStatusDto, String> {
     let provider = registry.provider_for_mode(mode);
     let provider_state = provider.status(mode).await?;
     let available_tools = provider.list_tools(mode).await?;
 
-    let (engine_ready, last_error) = match engine_status(app_handle, inference_state).await {
-        Ok(readiness) => (
-            readiness.state == "ready",
-            if readiness.state == "failed" {
-                readiness.error_message.or(readiness.error_code)
-            } else {
-                None
+    let (engine_ready, last_error) =
+        match supervisor.get_client(Duration::from_secs(60)).await {
+            Ok(client) => match client.status().await {
+                Ok(status) => {
+                    let ready = status.ready || status.current_model.is_some();
+                    let error = if !ready {
+                        status.error_message.or(status.error_code)
+                    } else {
+                        None
+                    };
+                    (ready, error)
+                }
+                Err(e) => (false, Some(format!("Failed to query engine status: {e}"))),
             },
-        ),
-        Err(error) => (false, Some(error)),
-    };
+            Err(error) => (false, Some(error)),
+        };
 
     let merged_last_error = last_error.or_else(|| {
         if matches!(provider_state.state.as_str(), "disconnected" | "error") {
@@ -131,25 +135,23 @@ pub fn list_modes() -> Vec<ModeConfigDto> {
 #[tauri::command]
 pub async fn mode_status(
     mode: AppMode,
-    app_handle: tauri::AppHandle,
-    inference_state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, EngineSupervisorHandle>,
     registry: tauri::State<'_, ModeProviderRegistry>,
 ) -> Result<ModeStatusDto, String> {
-    collect_mode_status(mode, app_handle, inference_state, registry).await
+    collect_mode_status(mode, &supervisor, &registry).await
 }
 
 #[tauri::command]
 pub async fn mode_refresh_tools(
     mode: AppMode,
-    app_handle: tauri::AppHandle,
-    inference_state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, EngineSupervisorHandle>,
     registry: tauri::State<'_, ModeProviderRegistry>,
 ) -> Result<ModeStatusDto, String> {
     // Phase 4: GIMP uses refresh to force a reconnect and live tool discovery.
     let provider = registry.provider_for_mode(mode);
     let _ = provider.disconnect_if_needed(mode).await;
     let _ = provider.connect_if_needed(mode).await;
-    collect_mode_status(mode, app_handle, inference_state, registry).await
+    collect_mode_status(mode, &supervisor, &registry).await
 }
 
 #[tauri::command]

@@ -1,8 +1,6 @@
 use crate::assistant::state::AssistantState;
 use crate::assistant::{MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION, UNIFIED_ASSISTANT_NOT_IMPLEMENTED};
-use crate::commands::inference::{
-    cached_generation_client, resolve_generation_client, InferenceState,
-};
+use crate::engine::EngineSupervisorHandle;
 use crate::modes::blender::execute_blender_request;
 use crate::modes::gimp::{execute_gimp_request, EngineTextGenerator};
 use crate::modes::libreoffice::{execute_libreoffice_request, EngineTextPlanner};
@@ -11,6 +9,7 @@ use crate::modes::text_generation::EngineTextStreamer;
 use smolpc_assistant_types::{
     AppMode, AssistantResponseDto, AssistantSendRequestDto, AssistantStreamEventDto,
 };
+use std::time::Duration;
 use tauri::ipc::Channel;
 
 #[tauri::command]
@@ -18,8 +17,7 @@ pub async fn assistant_send(
     request: AssistantSendRequestDto,
     on_event: Channel<AssistantStreamEventDto>,
     state: tauri::State<'_, AssistantState>,
-    app_handle: tauri::AppHandle,
-    inference_state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, EngineSupervisorHandle>,
     registry: tauri::State<'_, ModeProviderRegistry>,
 ) -> Result<AssistantResponseDto, String> {
     state.clear_cancelled();
@@ -27,7 +25,7 @@ pub async fn assistant_send(
     let result = match request.mode {
         AppMode::Gimp => {
             let provider = registry.provider_for_mode(AppMode::Gimp);
-            let engine_client = resolve_generation_client(&app_handle, &inference_state).await?;
+            let engine_client = supervisor.get_client(Duration::from_secs(60)).await?;
             let generator = EngineTextGenerator::new(engine_client);
 
             execute_gimp_request(provider, &generator, &request, &state, |event| {
@@ -39,7 +37,7 @@ pub async fn assistant_send(
         }
         AppMode::Blender => {
             let provider = registry.provider_for_mode(AppMode::Blender);
-            let engine_client = resolve_generation_client(&app_handle, &inference_state).await?;
+            let engine_client = supervisor.get_client(Duration::from_secs(60)).await?;
             let generator = EngineTextStreamer::new(engine_client);
 
             execute_blender_request(provider, &generator, &request, &state, |event| {
@@ -51,7 +49,7 @@ pub async fn assistant_send(
         }
         AppMode::Writer | AppMode::Impress => {
             let provider = registry.provider_for_mode(request.mode);
-            let engine_client = resolve_generation_client(&app_handle, &inference_state).await?;
+            let engine_client = supervisor.get_client(Duration::from_secs(60)).await?;
             let planner = EngineTextPlanner::new(engine_client.clone());
             let generator = EngineTextStreamer::new(engine_client);
 
@@ -91,11 +89,11 @@ pub async fn assistant_send(
 #[tauri::command]
 pub async fn assistant_cancel(
     state: tauri::State<'_, AssistantState>,
-    inference_state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, EngineSupervisorHandle>,
 ) -> Result<(), String> {
     state.mark_cancelled();
 
-    if let Some(client) = cached_generation_client(&inference_state).await {
+    if let Some(client) = supervisor.get_client_if_ready() {
         let _ = client.cancel().await;
     }
 

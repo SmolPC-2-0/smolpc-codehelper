@@ -588,10 +588,11 @@ pub async fn unload_model(
 
 #[tauri::command]
 pub async fn list_models(
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<Vec<AvailableModelDto>, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
+    let client = supervisor
+        .get_client(std::time::Duration::from_secs(60))
+        .await?;
     client
         .list_models()
         .await
@@ -601,10 +602,11 @@ pub async fn list_models(
 
 #[tauri::command]
 pub async fn get_current_model(
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<Option<String>, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
+    let client = supervisor
+        .get_client(std::time::Duration::from_secs(60))
+        .await?;
     let status = client
         .status()
         .await
@@ -614,10 +616,11 @@ pub async fn get_current_model(
 
 #[tauri::command]
 pub async fn get_inference_backend_status(
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<BackendStatus, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
+    let client = supervisor
+        .get_client(std::time::Duration::from_secs(60))
+        .await?;
     let status = client
         .status()
         .await
@@ -669,10 +672,11 @@ pub async fn set_inference_runtime_mode(
 #[tauri::command]
 pub async fn check_model_readiness(
     model_id: String,
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<CheckModelResponse, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
+    let client = supervisor
+        .get_client(std::time::Duration::from_secs(60))
+        .await?;
     client
         .check_model_readiness(&model_id)
         .await
@@ -685,10 +689,9 @@ pub async fn check_model_readiness(
 #[tauri::command]
 pub async fn check_model_exists(
     model_id: String,
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<bool, String> {
-    Ok(check_model_readiness(model_id, app_handle, state)
+    Ok(check_model_readiness(model_id, supervisor)
         .await?
         .any_ready())
 }
@@ -698,11 +701,11 @@ pub async fn inference_generate(
     prompt: String,
     config: Option<GenerationConfig>,
     on_token: Channel<String>,
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<GenerationMetrics, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
-    ensure_desired_model_loaded(&client, &state).await?;
+    let client = supervisor
+        .get_client(std::time::Duration::from_secs(60))
+        .await?;
     client
         .generate_stream(&prompt, config, |token| {
             if let Err(e) = on_token.send(token) {
@@ -718,11 +721,11 @@ pub async fn inference_generate_messages(
     messages: Vec<ChatMessageInput>,
     config: Option<GenerationConfig>,
     on_token: Channel<String>,
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<GenerationMetrics, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
-    ensure_desired_model_loaded(&client, &state).await?;
+    let client = supervisor
+        .get_client(std::time::Duration::from_secs(60))
+        .await?;
     let messages = messages
         .into_iter()
         .map(|message| EngineChatMessage {
@@ -742,10 +745,11 @@ pub async fn inference_generate_messages(
 
 #[tauri::command]
 pub async fn inference_cancel(
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<(), String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
+    let client = supervisor
+        .get_client(std::time::Duration::from_secs(60))
+        .await?;
     client
         .cancel()
         .await
@@ -754,10 +758,11 @@ pub async fn inference_cancel(
 
 #[tauri::command]
 pub async fn is_generating(
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<bool, String> {
-    let client = resolve_client(&app_handle, &state, false).await?;
+    let client = supervisor
+        .get_client(std::time::Duration::from_secs(60))
+        .await?;
     let status = client
         .status()
         .await
@@ -768,14 +773,13 @@ pub async fn is_generating(
 #[tauri::command]
 pub async fn evaluate_memory_pressure(
     request: MemoryPressureRequest,
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, InferenceState>,
+    supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<MemoryPressureStatus, String> {
     let (total_gb, available_gb) = sample_system_memory_gb();
     let level = classify_memory_level(available_gb);
     let heavy_mode_active = is_heavy_host_mode(request.active_mode.as_deref());
 
-    let client = resolve_client(&app_handle, &state, false).await.ok();
+    let client = supervisor.get_client_if_ready();
     let mut current_model_id = None;
     if let Some(client) = client.as_ref() {
         if let Ok(status) = client.status().await {
@@ -798,7 +802,7 @@ pub async fn evaluate_memory_pressure(
         if let Some(client) = client.as_ref() {
             match client.unload_model(false).await {
                 Ok(()) => {
-                    *state.desired_model.lock().await = None;
+                    supervisor.set_desired_model(None).await;
                     current_model_id = None;
                     auto_unloaded = true;
                 }
