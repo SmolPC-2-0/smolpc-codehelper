@@ -128,7 +128,7 @@
         "cargo clippy --workspace clean"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "These MUST migrate before read-only commands to prevent the old path from killing supervisor-managed engines. File: apps/codehelper/src-tauri/src/commands/engine_client_adapter.rs and inference.rs."
     },
     {
