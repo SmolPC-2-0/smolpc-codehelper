@@ -70,6 +70,8 @@ SMOLPC_MODELS_DIR=/path/to/models
 
 **Conventional Commits with scope.** `feat(engine):`, `fix(openvino):`, `docs:`, etc.
 
+**No AI attribution in commits or PRs.** Do not add `Co-Authored-By` lines to commits. Do not add "Generated with Claude Code" or similar attribution to PR descriptions.
+
 **Pre-commit checks:**
 ```bash
 cargo check --workspace && cargo clippy --workspace
