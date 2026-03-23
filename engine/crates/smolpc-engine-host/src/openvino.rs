@@ -11,7 +11,10 @@ use std::path::{Component, Path, PathBuf};
 const OPENVINO_NPU_DRIVER_RECOMMENDED_FLOOR: &str = "32.0.100.3104";
 const OPENVINO_NPU_MAX_PROMPT_LEN_ENV: &str = "SMOLPC_OPENVINO_NPU_MAX_PROMPT_LEN";
 const OPENVINO_NPU_MIN_RESPONSE_LEN_ENV: &str = "SMOLPC_OPENVINO_NPU_MIN_RESPONSE_LEN";
-const DEFAULT_OPENVINO_NPU_MAX_PROMPT_LEN: usize = 512;
+/// NPU StaticLLMPipeline prompt budget. Intel's default is 1024. Increasing
+/// this allows longer multi-turn conversations but invalidates the cached
+/// compiled blob (CACHE_DIR), triggering a one-time recompilation (~2-3 min).
+const DEFAULT_OPENVINO_NPU_MAX_PROMPT_LEN: usize = 1024;
 const DEFAULT_OPENVINO_NPU_MIN_RESPONSE_LEN: usize = 1024;
 const DEFAULT_QWEN_EOS_TOKEN_ID: i64 = 151645;
 const DEFAULT_QWEN_STOP_TOKEN_IDS: [i64; 2] = [151643, 151645];
