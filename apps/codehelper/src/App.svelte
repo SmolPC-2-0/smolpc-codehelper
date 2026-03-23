@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
+	import { listen } from '@tauri-apps/api/event';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import BenchmarkPanel from '$lib/components/BenchmarkPanel.svelte';
@@ -27,6 +28,7 @@
 	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
 	import type {
+		EngineLifecycleState,
 		GenerationConfig,
 		InferenceChatMessage,
 		MemoryPressureStatus
@@ -45,7 +47,6 @@
 	let startupComplete = $state(false);
 	let isSwitchingMode = $state(false);
 	let launchingHostApp = $state(false);
-	let reconnectingEngineSession = $state(false);
 	let memoryPressureNotice = $state<string | null>(null);
 	let dismissedMemoryPressureKey = $state<string | null>(null);
 	let hostAppLaunchError = $state<string | null>(null);
@@ -251,7 +252,7 @@ Teaching rules:
 		return available[0]?.id ?? null;
 	}
 
-	async function reestablishEngineSession() {
+	async function performStartup() {
 		const preferredModelId = resolvePreferredModelId();
 		await inferenceStore.ensureStarted({
 			mode: 'auto',
@@ -713,12 +714,20 @@ Teaching rules:
 		async function initInference() {
 			try {
 				await inferenceStore.listModels();
-				await reestablishEngineSession();
+				await performStartup();
 				await pollMemoryPressure();
 			} catch (error) {
 				console.error('Failed to initialize inference session:', error);
 			}
 		}
+
+		// Listen for supervisor lifecycle events instead of polling
+		let unlistenLifecycle: (() => void) | undefined;
+		listen<EngineLifecycleState>('engine-state-changed', (event) => {
+			inferenceStore.updateLifecycleState(event.payload);
+		}).then((fn) => {
+			unlistenLifecycle = fn;
+		});
 
 		initInference();
 		modeStore.initialize();
@@ -736,6 +745,7 @@ Teaching rules:
 		window.addEventListener('keydown', handleKeyDown);
 
 		return () => {
+			unlistenLifecycle?.();
 			window.removeEventListener('keydown', handleKeyDown);
 			window.removeEventListener('resize', handleResize);
 			window.visualViewport?.removeEventListener('resize', handleResize);
@@ -796,28 +806,11 @@ Teaching rules:
 		}
 	});
 
-	// Engine health polling — immediate check + 10s interval
+	// Memory pressure polling — 30s interval (health is handled by supervisor)
 	$effect(() => {
-		inferenceStore.checkHealth(); // immediate first check
-		void pollMemoryPressure();
-
-		const intervalId = setInterval(async () => {
-			const wasHealthy = inferenceStore.engineHealthy;
-			const isHealthy = await inferenceStore.checkHealth();
-			await pollMemoryPressure();
-
-			if (!wasHealthy && isHealthy && !reconnectingEngineSession) {
-				reconnectingEngineSession = true;
-				try {
-					await reestablishEngineSession();
-					await pollMemoryPressure();
-				} catch (error) {
-					console.error('Failed to restore engine session after reconnect:', error);
-				} finally {
-					reconnectingEngineSession = false;
-				}
-			}
-		}, 10_000);
+		const intervalId = setInterval(() => {
+			void pollMemoryPressure();
+		}, 30_000);
 
 		return () => clearInterval(intervalId);
 	});
@@ -836,7 +829,7 @@ Teaching rules:
 
 <StartupLoadingScreen
 	readiness={inferenceStore.readiness}
-	onRetry={reestablishEngineSession}
+	onRetry={performStartup}
 	visible={!startupComplete}
 />
 
@@ -892,11 +885,17 @@ Teaching rules:
 			{/snippet}
 		</WorkspaceControls>
 
-		{#if !inferenceStore.engineHealthy || reconnectingEngineSession}
+		{#if inferenceStore.lifecycleState.state === 'crashed'}
 			<div
 				class="mx-4 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-200"
 			>
-				Engine disconnected — restoring session state...
+				Engine crashed — restarting automatically...
+			</div>
+		{:else if inferenceStore.lifecycleState.state === 'failed'}
+			<div
+				class="mx-4 mt-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-4 py-2 text-sm text-rose-200"
+			>
+				Engine failed: {inferenceStore.lifecycleState.message}
 			</div>
 		{/if}
 
