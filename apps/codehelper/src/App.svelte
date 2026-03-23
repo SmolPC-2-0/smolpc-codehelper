@@ -7,6 +7,7 @@
 	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
 	import ModelInfoPanel from '$lib/components/ModelInfoPanel.svelte';
 	import KeyboardShortcutsOverlay from '$lib/components/KeyboardShortcutsOverlay.svelte';
+	import ModeHelpDrawer from '$lib/components/ModeHelpDrawer.svelte';
 	import WorkspaceHeader from '$lib/components/layout/WorkspaceHeader.svelte';
 	import WorkspaceControls from '$lib/components/layout/WorkspaceControls.svelte';
 	import AppModeDropdown from '$lib/components/layout/AppModeDropdown.svelte';
@@ -39,6 +40,7 @@
 	let currentStreamingMessageId = $state<string | null>(null);
 	let bottomOffset = $state(0);
 	let showShortcutsOverlay = $state(false);
+	let showHelpDrawer = $state(false);
 	let showSetupPanel = $state(false);
 	let startupComplete = $state(false);
 	let isSwitchingMode = $state(false);
@@ -52,6 +54,7 @@
 	const activeMode = $derived(modeStore.activeMode);
 	const activeModeConfigs = $derived(modeStore.modeConfigs);
 	const activeModeConfig = $derived(modeStore.activeConfig);
+	const activeModeLabel = $derived(activeModeConfig?.label ?? 'Mode');
 	const modeSuggestions = $derived(activeModeConfig?.suggestions ?? []);
 	const setupNeedsAttention = $derived(setupStore.initialized && setupStore.needsAttention);
 	const setupStatus = $derived(setupStore.status);
@@ -596,6 +599,55 @@ Teaching rules:
 		});
 	}
 
+	function closeHelpDrawer() {
+		showHelpDrawer = false;
+	}
+
+	function closeCompetingOverlaysForHelp() {
+		showShortcutsOverlay = false;
+		showSetupPanel = false;
+		if (uiStore.activeOverlay !== 'none') {
+			uiStore.closeOverlay();
+		}
+	}
+
+	function handleToggleHelpDrawer() {
+		if (showHelpDrawer) {
+			closeHelpDrawer();
+			return;
+		}
+		closeCompetingOverlaysForHelp();
+		showHelpDrawer = true;
+	}
+
+	function handleToggleShortcutsOverlay() {
+		if (!showShortcutsOverlay && showHelpDrawer) {
+			closeHelpDrawer();
+		}
+		showShortcutsOverlay = !showShortcutsOverlay;
+	}
+
+	function handleOpenShortcutsOverlay() {
+		if (showHelpDrawer) {
+			closeHelpDrawer();
+		}
+		showShortcutsOverlay = true;
+	}
+
+	function handleToggleHeaderOverlay(overlay: 'benchmark' | 'hardware' | 'modelInfo') {
+		if (showHelpDrawer) {
+			closeHelpDrawer();
+		}
+		uiStore.toggleOverlay(overlay);
+	}
+
+	function openSetupPanel() {
+		if (showHelpDrawer) {
+			closeHelpDrawer();
+		}
+		showSetupPanel = true;
+	}
+
 	function handleKeyDown(event: KeyboardEvent) {
 		const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 		const modifierKey = isMac ? event.metaKey : event.ctrlKey;
@@ -603,7 +655,7 @@ Teaching rules:
 
 		if (modifierKey && event.shiftKey && event.key.toLowerCase() === 'b') {
 			event.preventDefault();
-			uiStore.toggleOverlay('benchmark');
+			handleToggleHeaderOverlay('benchmark');
 			return;
 		}
 
@@ -615,17 +667,23 @@ Teaching rules:
 
 		if (modifierKey && event.key === '/') {
 			event.preventDefault();
-			showShortcutsOverlay = !showShortcutsOverlay;
+			handleToggleShortcutsOverlay();
 			return;
 		}
 
 		if (!typingInInput && event.key === '?') {
 			event.preventDefault();
-			showShortcutsOverlay = true;
+			handleOpenShortcutsOverlay();
 			return;
 		}
 
 		if (event.key === 'Escape') {
+			if (showHelpDrawer) {
+				closeHelpDrawer();
+				event.preventDefault();
+				return;
+			}
+
 			if (showShortcutsOverlay) {
 				showShortcutsOverlay = false;
 				event.preventDefault();
@@ -799,9 +857,9 @@ Teaching rules:
 			shortcutsOpen={showShortcutsOverlay}
 			canExport={messages.length > 0}
 			onOpenSidebar={() => uiStore.setSidebarOpen(true)}
-			onToggleModelInfo={() => uiStore.toggleOverlay('modelInfo')}
-			onToggleHardware={() => uiStore.toggleOverlay('hardware')}
-			onToggleShortcuts={() => (showShortcutsOverlay = !showShortcutsOverlay)}
+			onToggleModelInfo={() => handleToggleHeaderOverlay('modelInfo')}
+			onToggleHardware={() => handleToggleHeaderOverlay('hardware')}
+			onToggleShortcuts={handleToggleShortcutsOverlay}
 			onExportChat={handleExportChat}
 		>
 			{#snippet modeSwitcher()}
@@ -816,7 +874,7 @@ Teaching rules:
 			{/snippet}
 		</WorkspaceHeader>
 
-		<WorkspaceControls>
+		<WorkspaceControls helpOpen={showHelpDrawer} onToggleHelp={handleToggleHelpDrawer}>
 			{#snippet leadingContent()}
 				{#if activeHostLaunchLabel}
 					<button
@@ -873,7 +931,7 @@ Teaching rules:
 		{/if}
 
 		{#if setupNeedsAttention}
-			<SetupBanner status={setupStatus} error={setupError} onOpen={() => (showSetupPanel = true)} />
+			<SetupBanner status={setupStatus} error={setupError} onOpen={openSetupPanel} />
 		{/if}
 
 		<ConversationView
@@ -916,6 +974,12 @@ Teaching rules:
 	<KeyboardShortcutsOverlay
 		open={showShortcutsOverlay}
 		onClose={() => (showShortcutsOverlay = false)}
+	/>
+	<ModeHelpDrawer
+		open={showHelpDrawer}
+		mode={activeMode}
+		modeLabel={activeModeLabel}
+		onClose={closeHelpDrawer}
 	/>
 	<SetupPanel
 		visible={showSetupPanel}
