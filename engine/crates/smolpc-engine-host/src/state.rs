@@ -271,6 +271,68 @@ impl EngineState {
         true
     }
 
+    /// When the NPU StaticLLMPipeline throws "unknown exception" (typically
+    /// context overflow), fall back to CPU OpenVINO which has no context limit.
+    /// Mirrors the DirectML fallback pattern above.
+    pub(crate) async fn try_runtime_fallback_after_npu_overflow(&self, error: &str) -> bool {
+        // Only trigger on the specific NPU overflow pattern
+        if !error.contains("ov_genai_llm_pipeline_generate_with_history")
+            || !error.contains("unknown exception")
+        {
+            return false;
+        }
+        if parse_force_override() == Some(InferenceBackend::OpenVinoNpu) {
+            return false; // user explicitly forced NPU, don't override
+        }
+
+        let status_snapshot = self.backend_status.lock().await.clone();
+        if status_snapshot.active_backend != Some(InferenceBackend::OpenVinoNpu) {
+            return false; // not running on NPU, different error
+        }
+
+        let Some(model_id) = self.current_model.lock().await.clone() else {
+            return false;
+        };
+        let Some(model_def) = ModelRegistry::get_model(&model_id) else {
+            return false;
+        };
+        let cpu_model_dir = ModelLoader::openvino_dir(&model_def.directory);
+        let Ok(cpu_adapter) = build_openvino_cpu_runtime_adapter(
+            &self.runtime_bundles().openvino,
+            &model_id,
+            &cpu_model_dir,
+        ) else {
+            log::warn!("NPU overflow fallback failed: could not build CPU adapter");
+            return false;
+        };
+
+        log::info!(
+            "NPU context overflow detected — falling back to CPU OpenVINO for model '{model_id}'"
+        );
+        *self.runtime_adapter.lock().await = Some(cpu_adapter);
+
+        let model_artifacts = resolve_model_lane_artifacts(&model_def.directory);
+        let mut updated = status_snapshot.clone();
+        updated.active_backend = Some(InferenceBackend::Cpu);
+        updated.active_artifact_backend = Some(InferenceBackend::Cpu);
+        updated.runtime_engine = Some("ov_genai_cpu".to_string());
+        updated.active_model_path = Some(cpu_model_dir.display().to_string());
+        updated.selection_state = Some(BackendSelectionState::Fallback);
+        updated.selection_reason =
+            Some(decision_reason_code(&DecisionReason::RuntimeFailureFallback).to_string());
+        updated.decision_persistence_state = DecisionPersistenceState::TemporaryFallback;
+        updated.last_decision = Some(BackendDecision::new(
+            InferenceBackend::Cpu,
+            DecisionReason::RuntimeFailureFallback,
+            None,
+        ));
+        updated.force_override = parse_force_override();
+        apply_runtime_bundle_status(self.runtime_bundles(), &mut updated);
+        apply_model_lane_artifacts(&mut updated, &model_artifacts);
+        *self.backend_status.lock().await = updated;
+        true
+    }
+
     pub(crate) async fn generate_stream<F>(
         &self,
         prompt: &str,
@@ -302,6 +364,15 @@ impl EngineState {
                     return Err(format!(
                         "{hinted_error} [DirectML failed; backend switched to CPU — retry your request]"
                     ));
+                }
+                let npu_recovered = self
+                    .try_runtime_fallback_after_npu_overflow(&error)
+                    .await;
+                if npu_recovered {
+                    return Err(
+                        "Conversation too long for NPU mode. Switched to CPU — please retry your message."
+                            .to_string(),
+                    );
                 }
                 return Err(hinted_error);
             }
@@ -343,6 +414,15 @@ impl EngineState {
                     return Err(format!(
                         "{hinted_error} [DirectML failed; backend switched to CPU — retry your request]"
                     ));
+                }
+                let npu_recovered = self
+                    .try_runtime_fallback_after_npu_overflow(&error)
+                    .await;
+                if npu_recovered {
+                    return Err(
+                        "Conversation too long for NPU mode. Switched to CPU — please retry your message."
+                            .to_string(),
+                    );
                 }
                 return Err(hinted_error);
             }
