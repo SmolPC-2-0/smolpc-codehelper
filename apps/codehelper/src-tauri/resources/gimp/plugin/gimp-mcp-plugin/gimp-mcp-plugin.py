@@ -17,7 +17,7 @@ import sys
 import json
 import socket
 import traceback
-import threading
+import ctypes
 import base64
 import tempfile
 import os
@@ -27,9 +27,9 @@ import signal
 # Constants for configuration and thresholds
 LARGE_SCALING_THRESHOLD = 4.0  # Warn if scaling ratio exceeds this value
 MAX_REGION_SIZE = 8192  # Maximum region dimension in pixels
-DEFAULT_TIMEOUT_SECONDS = 30  # Default timeout for operations
 DEFAULT_SERVER_HOST = os.environ.get("SMOLPC_GIMP_PLUGIN_HOST", "127.0.0.1")
 DEFAULT_SERVER_PORT = int(os.environ.get("SMOLPC_GIMP_PLUGIN_PORT", "9877"))
+EXTENSION_PROCEDURE_NAME = "extension-mcp-server"
 
 
 def N_(message): return message
@@ -53,18 +53,44 @@ class MCPPlugin(Gimp.PlugIn):
         self.port = port
         self.running = False
         self.socket = None
-        self.server_thread = None
         self.context = {}
         exec("from gi.repository import Gimp", self.context)
         self.auto_disconnect_client = True
 
+    def _is_host_process_alive(self):
+        """Check whether the parent GIMP process is still alive."""
+        parent_pid = os.getppid()
+        if parent_pid <= 0:
+            return False
+
+        if platform.system() == "Windows":
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, parent_pid)
+            if not handle:
+                return False
+            try:
+                exit_code = ctypes.c_ulong()
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                    return False
+                return exit_code.value == STILL_ACTIVE
+            finally:
+                kernel32.CloseHandle(handle)
+
+        try:
+            os.kill(parent_pid, 0)
+            return True
+        except OSError:
+            return False
+
     def do_query_procedures(self):
         """Register the plugin procedure."""
-        return ["plug-in-mcp-server"]
+        return [EXTENSION_PROCEDURE_NAME]
 
     def do_init_procedures(self):
         """Refresh the persistent extension registration at each GIMP startup."""
-        return ["plug-in-mcp-server"]
+        return [EXTENSION_PROCEDURE_NAME]
 
     def do_create_procedure(self, name):
         """Define the procedure properties."""
@@ -106,30 +132,32 @@ class MCPPlugin(Gimp.PlugIn):
                 print(f"Warning: unable to register {signal_name} handler: {error}")
 
         try:
-            self.server_thread = threading.Thread(target=self._serve_socket_loop, daemon=False)
-            self.server_thread.start()
             try:
                 procedure.persistent_ready()
             except AttributeError:
                 pass
-            return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+            # Keep request handling on the extension main thread so GIMP APIs stay valid.
+            self._serve_socket_loop()
         except Exception as e:
             print(f"Error starting server: {str(e)}")
+        finally:
             self.running = False
-
             if self.socket:
                 try:
                     self.socket.close()
                 except:
                     pass
                 self.socket = None
-            return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
     def _serve_socket_loop(self):
         try:
             print("Creating socket...")
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if platform.system() == "Windows" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.socket.settimeout(1.0)
             self.socket.bind((self.host, self.port))
             self.socket.listen(1)
@@ -137,6 +165,11 @@ class MCPPlugin(Gimp.PlugIn):
             print(f"GimpMCP server started on {self.host}:{self.port}")
 
             while self.running:
+                if not self._is_host_process_alive():
+                    print("GIMP host process is no longer alive; stopping MCP server.")
+                    self.running = False
+                    break
+
                 try:
                     client, address = self.socket.accept()
                     print(f"Connected to client: {address}")
@@ -145,12 +178,7 @@ class MCPPlugin(Gimp.PlugIn):
                 except OSError:
                     break
 
-                client_thread = threading.Thread(
-                    target=self._handle_client,
-                    args=(client,),
-                    daemon=True,
-                )
-                client_thread.start()
+                self._handle_client(client)
         except Exception as e:
             print(f"Error in MCP socket loop: {e}")
             print(traceback.format_exc())
