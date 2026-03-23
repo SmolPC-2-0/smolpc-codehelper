@@ -58,7 +58,7 @@
         "cargo check --workspace clean"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "EngineClient is #[derive(Clone)] with Arc-based reqwest::Client — cloning is cheap. The handle stores a cached_client: Arc<std::sync::Mutex<Option<EngineClient>>> updated by a background watcher when Running state is broadcast."
     },
     {
