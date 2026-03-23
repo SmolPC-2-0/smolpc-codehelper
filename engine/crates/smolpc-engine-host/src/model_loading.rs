@@ -234,6 +234,81 @@ impl EngineState {
         }
     }
 
+    /// Build the comprehensive BackendStatus from all collected lane data.
+    /// Called after the adapter has been selected and stored.
+    #[allow(clippy::too_many_arguments)]
+    fn assemble_backend_status(
+        &self,
+        active_backend: InferenceBackend,
+        active_reason: DecisionReason,
+        active_model_path: &str,
+        runtime_engine: &str,
+        selection_state: BackendSelectionState,
+        decision_persistence_state: DecisionPersistenceState,
+        decision_key: &BackendDecisionKey,
+        force_override: Option<InferenceBackend>,
+        failure_counters: &FailureCounters,
+        probe: &BackendProbeResult,
+        openvino_probe: Option<&OpenVinoStartupProbeResult>,
+        artifacts: &ModelLaneArtifacts,
+        selected_device_id: Option<i32>,
+        selected_device_name: Option<String>,
+        persisted_record_decision: Option<&BackendDecision>,
+        directml_preflight_state: LanePreflightState,
+        openvino_preflight_state: LanePreflightState,
+        directml_failure_class: Option<String>,
+        directml_failure_message: Option<String>,
+        openvino_failure_class: Option<String>,
+        openvino_failure_message: Option<String>,
+        directml_detected: bool,
+    ) -> BackendStatus {
+        let mut status = BackendStatus {
+            active_backend: Some(active_backend),
+            active_model_path: Some(active_model_path.to_string()),
+            active_artifact_backend: Some(active_backend),
+            runtime_engine: Some(runtime_engine.to_string()),
+            selection_state: Some(selection_state),
+            selection_reason: Some(decision_reason_code(&active_reason).to_string()),
+            decision_persistence_state,
+            selection_fingerprint: Some(decision_key.fingerprint()),
+            decision_key: Some(decision_key.clone()),
+            last_decision: Some(BackendDecision::new(active_backend, active_reason, None)),
+            openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
+            openvino_tuning: current_openvino_tuning_status(),
+            failure_counters: failure_counters.clone(),
+            force_override,
+            store_path: self
+                .store_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            ..Default::default()
+        };
+        apply_runtime_bundle_status(self.runtime_bundles(), &mut status);
+        apply_directml_startup_probe_status(&mut status, probe);
+        apply_openvino_startup_probe_status(&mut status, openvino_probe);
+        apply_model_lane_artifacts(&mut status, artifacts);
+        let vram = probe.directml_candidate.as_ref().map(|c| c.vram_mb);
+        apply_directml_device(&mut status, selected_device_id, selected_device_name, vram);
+        apply_persisted_eligibility(&mut status, persisted_record_decision);
+        status.lanes.directml.preflight_state = directml_preflight_state;
+        status.lanes.openvino_npu.preflight_state = openvino_preflight_state;
+        status.lanes.openvino_npu.last_failure_class = openvino_failure_class;
+        status.lanes.openvino_npu.last_failure_message = openvino_failure_message;
+        if active_backend == InferenceBackend::DirectML {
+            status.lanes.directml.last_failure_class = None;
+            status.lanes.directml.last_failure_message = None;
+        } else if let Some(class) = directml_failure_class {
+            status.lanes.directml.last_failure_class = Some(class);
+            status.lanes.directml.last_failure_message = directml_failure_message;
+        } else if !directml_detected {
+            status.lanes.directml.last_failure_class =
+                Some("directml_candidate_missing".to_string());
+            status.lanes.directml.last_failure_message =
+                Some("No DirectML-capable adapter detected".to_string());
+        }
+        status
+    }
+
     /// Run the DirectML preflight on a worker thread with timeout.
     /// Returns Success with the adapter, or Failed with error details.
     /// Does NOT handle fallback — caller decides what to do on failure.
@@ -847,50 +922,31 @@ impl EngineState {
 
         *self.runtime_adapter.lock().await = Some(adapter);
         *self.current_model.lock().await = Some(model_id.clone());
-        let mut status = BackendStatus {
-            active_backend: Some(active_backend),
-            active_model_path: Some(active_model_path),
-            active_artifact_backend: Some(active_backend),
-            runtime_engine: Some(runtime_engine),
-            selection_state: Some(selection_state),
-            selection_reason: Some(decision_reason_code(&active_reason).to_string()),
+
+        let status = self.assemble_backend_status(
+            active_backend,
+            active_reason,
+            &active_model_path,
+            &runtime_engine,
+            selection_state,
             decision_persistence_state,
-            selection_fingerprint: Some(decision_key.fingerprint()),
-            decision_key: Some(decision_key.clone()),
-            last_decision: Some(BackendDecision::new(active_backend, active_reason, None)),
-            openvino_message_mode: Some(OPENVINO_CHAT_MODE_STRUCTURED.to_string()),
-            openvino_tuning: current_openvino_tuning_status(),
-            failure_counters: failure_counters.clone(),
+            &decision_key,
             force_override,
-            store_path: self
-                .store_path
-                .as_ref()
-                .map(|path| path.display().to_string()),
-            ..Default::default()
-        };
-        apply_runtime_bundle_status(self.runtime_bundles(), &mut status);
-        apply_directml_startup_probe_status(&mut status, &probe);
-        apply_openvino_startup_probe_status(&mut status, openvino_probe.as_ref());
-        apply_model_lane_artifacts(&mut status, &artifacts);
-        let vram = probe.directml_candidate.as_ref().map(|c| c.vram_mb);
-        apply_directml_device(&mut status, selected_device_id, selected_device_name, vram);
-        apply_persisted_eligibility(&mut status, persisted_record_decision.as_ref());
-        status.lanes.directml.preflight_state = directml_preflight_state;
-        status.lanes.openvino_npu.preflight_state = openvino_preflight_state;
-        status.lanes.openvino_npu.last_failure_class = openvino_failure_class;
-        status.lanes.openvino_npu.last_failure_message = openvino_failure_message;
-        if active_backend == InferenceBackend::DirectML {
-            status.lanes.directml.last_failure_class = None;
-            status.lanes.directml.last_failure_message = None;
-        } else if let Some(class) = directml_failure_class {
-            status.lanes.directml.last_failure_class = Some(class);
-            status.lanes.directml.last_failure_message = directml_failure_message;
-        } else if !directml_detected {
-            status.lanes.directml.last_failure_class =
-                Some("directml_candidate_missing".to_string());
-            status.lanes.directml.last_failure_message =
-                Some("No DirectML-capable adapter detected".to_string());
-        }
+            &failure_counters,
+            &probe,
+            openvino_probe.as_ref(),
+            &artifacts,
+            selected_device_id,
+            selected_device_name,
+            persisted_record_decision.as_ref(),
+            directml_preflight_state,
+            openvino_preflight_state,
+            directml_failure_class,
+            directml_failure_message,
+            openvino_failure_class,
+            openvino_failure_message,
+            directml_detected,
+        );
         *self.backend_status.lock().await = status;
 
         if force_override.is_none() && !suppress_store_update {
