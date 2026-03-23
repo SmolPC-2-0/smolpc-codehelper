@@ -145,6 +145,8 @@ Corrections discovered during development. **When you correct a mistake, append 
 - Always use the LSP tool (`findReferences`, `incomingCalls`, `goToDefinition`) when tracing symbol usage — grep misses indirect consumers and caused the NPU regression. Subagents exploring the codebase must also be instructed to use LSP.
 - NPU StaticLLMPipeline has a fixed context window: MAX_PROMPT_LEN (input) + MIN_RESPONSE_LEN (output). Exceeding MAX_PROMPT_LEN crashes with "unknown exception". Intel's default is 1024 — don't go below without good reason.
 - There is no tokenizer in the OpenVINO GenAI C API — token counting from Rust requires either the `tokenizers` crate with the model's tokenizer.json, or a character-based heuristic (~3.5 chars/token for Qwen)
+- Apply runtime mode preferences at initial startup via the DTO, not after — post-startup `setRuntimeMode` triggers destructive `force_respawn` that kills a working engine
+- When engine health goes false, immediately clear ALL generation state (isGenerating, cancelState, session) — don't wait for reconnection which may fail
 
 ---
 
