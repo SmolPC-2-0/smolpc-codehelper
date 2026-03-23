@@ -28,9 +28,11 @@ use commands::inference::{
 use commands::launcher::{launcher_launch_or_focus, launcher_list_apps};
 use commands::modes::{list_modes, mode_open_host_app, mode_refresh_tools, mode_status};
 use commands::setup::{setup_prepare, setup_status};
+use engine::{EngineSupervisor, EngineSupervisorHandle, EngineLifecycleState};
 use launcher::orchestrator::LauncherState;
 use modes::registry::ModeProviderRegistry;
 use setup::SetupState;
+use smolpc_engine_client::EngineClient;
 use std::path::PathBuf;
 use tauri::Manager;
 
@@ -245,6 +247,26 @@ pub fn run() {
             app.manage(setup_state);
             app.manage(mode_provider_registry);
 
+            // --- Engine Supervisor Setup ---
+            let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(16);
+            let (state_tx, state_rx) = tokio::sync::watch::channel(EngineLifecycleState::Idle);
+            let (client_tx, client_rx) =
+                tokio::sync::watch::channel::<Option<EngineClient>>(None);
+
+            let handle = EngineSupervisorHandle::new(cmd_tx, state_rx);
+            handle.spawn_client_cache_watcher(client_rx);
+
+            let supervisor = EngineSupervisor::new(
+                cmd_rx,
+                state_tx,
+                client_tx,
+                app.handle().clone(),
+            );
+            tokio::spawn(supervisor.run());
+            log::info!("Engine supervisor spawned");
+
+            app.manage(handle);
+
             Ok(())
         })
         .manage(AssistantState::default())
@@ -293,24 +315,27 @@ pub fn run() {
     app.run(|app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {
             log::info!("App exit requested, shutting down engine");
-            let state = app_handle.state::<InferenceState>();
+
+            // Primary: shut down via supervisor handle.
+            let supervisor_handle = app_handle.state::<EngineSupervisorHandle>();
             tauri::async_runtime::block_on(async {
                 match tokio::time::timeout(
-                    std::time::Duration::from_secs(2),
-                    state.shutdown_engine(),
+                    std::time::Duration::from_secs(3),
+                    supervisor_handle.shutdown(),
                 )
                 .await
                 {
                     Ok(Ok(_)) => {
-                        log::info!("Engine shut down gracefully");
+                        log::info!("Engine shut down gracefully via supervisor");
                         cleanup_engine_pid();
                     }
                     Ok(Err(e)) => {
-                        log::warn!("Engine graceful shutdown failed: {e}");
-                        force_kill_engine();
+                        log::warn!("Supervisor shutdown returned error: {e}");
+                        // Fallback: try old InferenceState path during migration.
+                        fallback_shutdown_via_inference_state(app_handle);
                     }
                     Err(_) => {
-                        log::warn!("Engine shutdown timed out after 2s");
+                        log::warn!("Supervisor shutdown timed out after 3s");
                         force_kill_engine();
                     }
                 }
@@ -330,6 +355,32 @@ fn cleanup_engine_pid() {
     if let Some(path) = engine_pid_path() {
         let _ = std::fs::remove_file(&path);
     }
+}
+
+/// Fallback shutdown via old InferenceState during migration (US-006..US-009 coexistence).
+fn fallback_shutdown_via_inference_state<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) {
+    let state = app_handle.state::<InferenceState>();
+    tauri::async_runtime::block_on(async {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            state.shutdown_engine(),
+        )
+        .await
+        {
+            Ok(Ok(_)) => {
+                log::info!("Engine shut down gracefully via InferenceState fallback");
+                cleanup_engine_pid();
+            }
+            Ok(Err(e)) => {
+                log::warn!("InferenceState fallback shutdown failed: {e}");
+                force_kill_engine();
+            }
+            Err(_) => {
+                log::warn!("InferenceState fallback shutdown timed out after 2s");
+                force_kill_engine();
+            }
+        }
+    });
 }
 
 fn force_kill_engine() {
