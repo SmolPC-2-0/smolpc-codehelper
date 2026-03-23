@@ -468,6 +468,7 @@ mod tests {
             startup_policy: Some(StartupPolicyDto {
                 default_model_id: Some("  qwen3  ".to_string()),
             }),
+            runtime_mode_preference: None,
         };
         let normalized = normalize_startup_policy(&request);
         assert_eq!(normalized.default_model_id.as_deref(), Some("qwen3"));
@@ -477,6 +478,7 @@ mod tests {
             startup_policy: Some(StartupPolicyDto {
                 default_model_id: Some("  ".to_string()),
             }),
+            runtime_mode_preference: None,
         };
         let normalized_missing = normalize_startup_policy(&missing);
         assert!(normalized_missing.default_model_id.is_none());
@@ -489,6 +491,7 @@ mod tests {
             startup_policy: Some(StartupPolicyDto {
                 default_model_id: Some("qwen2.5-1.5b-instruct".to_string()),
             }),
+            runtime_mode_preference: None,
         };
 
         let value =
