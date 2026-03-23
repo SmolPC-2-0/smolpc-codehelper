@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import type { InferenceStatus } from '$lib/types/inference';
 	import HardwareIndicator from '$lib/components/HardwareIndicator.svelte';
 	import StatusIndicator from '$lib/components/StatusIndicator.svelte';
@@ -7,6 +8,7 @@
 
 	interface Props {
 		title: string;
+		modeSwitcher?: Snippet;
 		showSidebarToggle?: boolean;
 		status: InferenceStatus;
 		modelInfoActive?: boolean;
@@ -22,6 +24,7 @@
 
 	let {
 		title,
+		modeSwitcher,
 		showSidebarToggle = false,
 		status,
 		modelInfoActive = false,
@@ -52,6 +55,12 @@
 			{/if}
 			<h1>{title}</h1>
 		</div>
+
+		{#if modeSwitcher}
+			<div class="workspace-header__mode-switcher">
+				{@render modeSwitcher()}
+			</div>
+		{/if}
 	</div>
 	<div class="workspace-header__actions">
 		<Button
@@ -117,6 +126,8 @@
 	.workspace-header__main {
 		display: flex;
 		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.85rem;
 		min-width: 16rem;
 		flex: 1;
 	}
@@ -126,6 +137,7 @@
 		align-items: center;
 		gap: 0.75rem;
 		min-width: 0;
+		flex: 1;
 	}
 
 	.workspace-header__identity h1 {
@@ -136,6 +148,11 @@
 		text-overflow: ellipsis;
 		overflow: hidden;
 		white-space: nowrap;
+	}
+
+	.workspace-header__mode-switcher {
+		min-width: 0;
+		flex-shrink: 0;
 	}
 
 	:global(.workspace-header__menu) {
@@ -165,6 +182,10 @@
 	@media (max-width: 720px) {
 		.workspace-header {
 			padding: 0.8rem;
+		}
+
+		.workspace-header__main {
+			min-width: 100%;
 		}
 
 		.workspace-header__actions {
