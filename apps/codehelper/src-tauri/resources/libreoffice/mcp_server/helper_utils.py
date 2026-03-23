@@ -78,6 +78,19 @@ class HelperError(Exception):
     pass
 
 
+UNO_CONNECT_RETRIES = 2
+UNO_CONNECT_RETRY_DELAY_SECONDS = 0.25
+RETRYABLE_UNO_ERROR_MARKERS = (
+    "binary urp bridge disposed",
+    "disposedexception",
+    "noconnectexception",
+    "failed to connect to libreoffice desktop",
+    "connection refused",
+    "connector",
+    "socket",
+)
+
+
 @contextmanager
 def managed_document(file_path, read_only=False):
     doc, message = open_document(file_path, read_only)
@@ -132,32 +145,55 @@ def normalize_path(file_path):
     return file_path
 
 
-def get_uno_desktop():
+def is_retryable_uno_error(error):
+    text = f"{type(error).__name__}: {error}".lower()
+    return any(marker in text for marker in RETRYABLE_UNO_ERROR_MARKERS)
+
+
+def get_uno_desktop(
+    retries=UNO_CONNECT_RETRIES, delay=UNO_CONNECT_RETRY_DELAY_SECONDS
+):
     """Get LibreOffice desktop object."""
-    try:
-        local_context = uno.getComponentContext()
-        resolver = local_context.ServiceManager.createInstanceWithContext(
-            "com.sun.star.bridge.UnoUrlResolver", local_context
-        )
-
-        # Try both localhost and 127.0.0.1
+    last_exception = None
+    for attempt in range(1, retries + 1):
         try:
-            context = resolver.resolve(
-                "uno:socket,host=localhost,port=2002;urp;StarOffice.ComponentContext"
-            )
-        except NoConnectException:
-            context = resolver.resolve(
-                "uno:socket,host=127.0.0.1,port=2002;urp;StarOffice.ComponentContext"
+            local_context = uno.getComponentContext()
+            resolver = local_context.ServiceManager.createInstanceWithContext(
+                "com.sun.star.bridge.UnoUrlResolver", local_context
             )
 
-        desktop = context.ServiceManager.createInstanceWithContext(
-            "com.sun.star.frame.Desktop", context
-        )
-        return desktop
-    except Exception as e:
-        print(f"Failed to get UNO desktop: {str(e)}")
+            # Try both localhost and 127.0.0.1
+            try:
+                context = resolver.resolve(
+                    "uno:socket,host=localhost,port=2002;urp;StarOffice.ComponentContext"
+                )
+            except NoConnectException:
+                context = resolver.resolve(
+                    "uno:socket,host=127.0.0.1,port=2002;urp;StarOffice.ComponentContext"
+                )
+
+            desktop = context.ServiceManager.createInstanceWithContext(
+                "com.sun.star.frame.Desktop", context
+            )
+            return desktop
+        except Exception as e:
+            last_exception = e
+            if attempt < retries and is_retryable_uno_error(e):
+                logging.warning(
+                    "Failed to get UNO desktop (attempt %s/%s): %s. Retrying in %.1fs.",
+                    attempt,
+                    retries,
+                    e,
+                    delay,
+                )
+                time.sleep(delay)
+                continue
+            break
+
+    if last_exception is not None:
+        print(f"Failed to get UNO desktop: {str(last_exception)}")
         print(traceback.format_exc())
-        return None
+    return None
 
 
 def create_property_value(name, value):
@@ -184,13 +220,13 @@ def open_document(file_path, read_only=False, retries=3, delay=0.5):
     else:
         file_url = normalized_path
 
-    desktop = get_uno_desktop()
-    if not desktop:
-        raise HelperError("Failed to connect to LibreOffice desktop")
-
     last_exception = None
-    for attempt in range(retries):
+    for attempt in range(1, retries + 1):
         try:
+            desktop = get_uno_desktop()
+            if not desktop:
+                raise HelperError("Failed to connect to LibreOffice desktop")
+
             props = [
                 create_property_value("Hidden", True),
                 create_property_value("ReadOnly", read_only),
@@ -201,7 +237,16 @@ def open_document(file_path, read_only=False, retries=3, delay=0.5):
             return doc, "Success"
         except Exception as e:
             last_exception = e
-            print(f"Attempt {attempt + 1} failed: {e}")
+            print(f"Attempt {attempt} failed: {e}")
+            if attempt >= retries or not is_retryable_uno_error(e):
+                break
+            logging.warning(
+                "Retrying document open for %s after transient UNO error (attempt %s/%s): %s",
+                file_path,
+                attempt,
+                retries,
+                e,
+            )
             time.sleep(delay)
 
     if last_exception:

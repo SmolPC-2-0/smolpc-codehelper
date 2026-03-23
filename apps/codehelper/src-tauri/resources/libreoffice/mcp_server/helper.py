@@ -11,6 +11,7 @@ from helper_utils import (
     normalize_path,
     ensure_directory_exists,
     get_uno_desktop,
+    is_retryable_uno_error,
     create_property_value,
     HelperError,
 )
@@ -33,6 +34,8 @@ MAX_HELPER_FRAME_SIZE = 10 * 1024 * 1024
 HELPER_AUTH_TOKEN_ENV = "SMOLPC_LIBREOFFICE_HELPER_AUTH_TOKEN"
 HELPER_AUTH_TOKEN_FIELD = "_smolpc_auth_token"
 HELPER_AUTH_TOKEN = os.getenv(HELPER_AUTH_TOKEN_ENV, "")
+CREATE_DOCUMENT_RETRIES = 2
+CREATE_DOCUMENT_RETRY_DELAY_SECONDS = 0.5
 
 logging.info("Starting LibreOffice Helper Script...")
 
@@ -71,6 +74,13 @@ def create_server_socket():
     logging.info("LibreOffice helper listening on %s:%s", HELPER_HOST, HELPER_PORT)
     return server_socket
 
+
+def ensure_desktop_ready():
+    desktop = get_uno_desktop()
+    if not desktop:
+        raise HelperError("Failed to connect to LibreOffice desktop")
+    return "LibreOffice desktop is ready"
+
 # General functions
 
 
@@ -82,11 +92,6 @@ def create_document(doc_type, file_path, metadata=None):
     file_path = normalize_path(file_path)
     if not ensure_directory_exists(file_path):
         raise HelperError(f"Failed to create directory for {file_path}")
-
-    # Get desktop
-    desktop = get_uno_desktop()
-    if not desktop:
-        raise HelperError("Failed to connect to LibreOffice desktop")
 
     # Map document types
     type_map = {
@@ -100,42 +105,81 @@ def create_document(doc_type, file_path, metadata=None):
             f"Invalid document type. Choose from: {list(type_map.keys())}"
         )
 
-    try:
-        # Create document
-        doc = desktop.loadComponentFromURL(type_map[doc_type], "_blank", 0, ())
-        if not doc:
-            raise HelperError(f"Failed to create {doc_type} document")
+    last_error = None
+    for attempt in range(1, CREATE_DOCUMENT_RETRIES + 1):
+        desktop = get_uno_desktop()
+        if not desktop:
+            last_error = HelperError("Failed to connect to LibreOffice desktop")
+            if attempt < CREATE_DOCUMENT_RETRIES:
+                logging.warning(
+                    "Unable to acquire LibreOffice desktop for create_document attempt %s/%s. Retrying in %.2fs.",
+                    attempt,
+                    CREATE_DOCUMENT_RETRIES,
+                    CREATE_DOCUMENT_RETRY_DELAY_SECONDS,
+                )
+                time.sleep(CREATE_DOCUMENT_RETRY_DELAY_SECONDS)
+                continue
+            raise last_error
 
-        # Add metadata if provided
-        if metadata and hasattr(doc, "DocumentProperties"):
-            doc_info = doc.DocumentProperties
-            logging.info(doc_info)
-            for key, value in metadata.items():
-                logging.info(f"{key} {value} {type(value)}")
-                if hasattr(doc_info, key):
-                    setattr(doc_info, key, value)
+        try:
+            # Create document
+            doc = desktop.loadComponentFromURL(type_map[doc_type], "_blank", 0, ())
+            if not doc:
+                raise HelperError(f"Failed to create {doc_type} document")
 
-        # Save document
-        file_url = uno.systemPathToFileUrl(file_path)
-        logging.info(f"Saving to URL: {file_url}")
+            # Add metadata if provided
+            if metadata and hasattr(doc, "DocumentProperties"):
+                doc_info = doc.DocumentProperties
+                logging.info(doc_info)
+                for key, value in metadata.items():
+                    logging.info(f"{key} {value} {type(value)}")
+                    if hasattr(doc_info, key):
+                        setattr(doc_info, key, value)
 
-        props = [create_property_value("Overwrite", True)]
-        doc.storeToURL(file_url, tuple(props))
-        doc.close(True)
+            # Save document
+            file_url = uno.systemPathToFileUrl(file_path)
+            logging.info(f"Saving to URL: {file_url}")
 
-        # Verify file was created
-        time.sleep(1)  # Wait for filesystem sync
-        if os.path.exists(file_path):
-            return f"Successfully created {doc_type} document at: {file_path}"
-        else:
+            props = [create_property_value("Overwrite", True)]
+            doc.storeToURL(file_url, tuple(props))
+
+            try:
+                doc.close(True)
+            except Exception as close_error:
+                logging.warning(
+                    "Document close raised an error after save; continuing because file write completed: %s",
+                    close_error,
+                )
+
+            # Verify file was created
+            time.sleep(1)  # Wait for filesystem sync
+            if os.path.exists(file_path):
+                return f"Successfully created {doc_type} document at: {file_path}"
             raise HelperError(
                 f"Document creation attempted, but file not found at: {file_path}"
             )
+        except Exception as error:
+            last_error = error
+            is_retryable = is_retryable_uno_error(error)
+            if attempt < CREATE_DOCUMENT_RETRIES and is_retryable:
+                logging.warning(
+                    "Transient UNO error creating %s document (attempt %s/%s): %s. Retrying in %.2fs.",
+                    doc_type,
+                    attempt,
+                    CREATE_DOCUMENT_RETRIES,
+                    error,
+                    CREATE_DOCUMENT_RETRY_DELAY_SECONDS,
+                )
+                time.sleep(CREATE_DOCUMENT_RETRY_DELAY_SECONDS)
+                continue
 
-    except Exception as e:
-        logging.error(f"Error creating document: {str(e)}")
-        logging.error(traceback.format_exc())
-        raise
+            logging.error(f"Error creating document: {str(error)}")
+            logging.error(traceback.format_exc())
+            raise
+
+    if last_error is not None:
+        raise last_error
+    raise HelperError(f"Failed to create {doc_type} document")
 
 
 def list_documents(directory):
@@ -3256,6 +3300,7 @@ COMMAND_HANDLERS = {
     ),
     # System commands
     "ping": lambda cmd: "LibreOffice helper is running",
+    "desktop_ready": lambda cmd: ensure_desktop_ready(),
 }
 
 
