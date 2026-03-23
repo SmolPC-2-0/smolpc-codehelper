@@ -62,6 +62,10 @@ class MCPPlugin(Gimp.PlugIn):
         """Register the plugin procedure."""
         return ["plug-in-mcp-server"]
 
+    def do_init_procedures(self):
+        """Refresh the persistent extension registration at each GIMP startup."""
+        return ["plug-in-mcp-server"]
+
     def do_create_procedure(self, name):
         """Define the procedure properties."""
         procedure = Gimp.Procedure.new(self, name, Gimp.PDBProcType.PERSISTENT, self.run, None)
@@ -83,7 +87,7 @@ class MCPPlugin(Gimp.PlugIn):
             except:
                 pass
 
-    def run(self, procedure, run_mode, image, drawables, config, run_data):
+    def run(self, procedure, config, run_data):
         """Run the persistent extension and keep the server socket available."""
         if self.running:
             print("MCP Server is already running")
@@ -91,9 +95,15 @@ class MCPPlugin(Gimp.PlugIn):
 
         self.running = True
 
-        # Register signal handlers for graceful shutdown
-        signal.signal(signal.SIGTERM, self.shutdown_server)
-        signal.signal(signal.SIGINT, self.shutdown_server)
+        # Register signal handlers for graceful shutdown when the runtime allows it.
+        for signal_name in ("SIGTERM", "SIGINT"):
+            sig = getattr(signal, signal_name, None)
+            if sig is None:
+                continue
+            try:
+                signal.signal(sig, self.shutdown_server)
+            except (ValueError, OSError, RuntimeError) as error:
+                print(f"Warning: unable to register {signal_name} handler: {error}")
 
         try:
             self.server_thread = threading.Thread(target=self._serve_socket_loop, daemon=False)

@@ -1,5 +1,5 @@
 {
-  "version": "phase5-gimp-fb3c6c6",
+  "version": "phase5-gimp-fb3c6c6-r2",
   "source": "maorcc/gimp-mcp@fb3c6c6a6aa9b4e260a52d277ea3e7bd8330133c + smolpc tcp bridge/autostart wrapper",
   "expectedPaths": [
     "README.md",
