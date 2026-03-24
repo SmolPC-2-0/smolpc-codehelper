@@ -270,6 +270,7 @@ pub fn run() {
         })
         .manage(AssistantState::default())
         .manage(HardwareCache::default())
+        .manage(commands::audio::AudioState::default())
         .invoke_handler(tauri::generate_handler![
             read,
             write,
@@ -299,7 +300,11 @@ pub fn run() {
             mode_refresh_tools,
             mode_open_host_app,
             setup_status,
-            setup_prepare
+            setup_prepare,
+            commands::audio::start_recording,
+            commands::audio::stop_recording,
+            commands::audio::speak_text,
+            commands::audio::stop_playback
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

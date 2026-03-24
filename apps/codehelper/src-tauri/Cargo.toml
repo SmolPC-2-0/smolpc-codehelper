@@ -41,6 +41,7 @@ serde-pickle = "1.2"
 cpal = "0.17"
 rodio = "0.19"
 rubato = "1.0"
+audioadapter-buffers = "2.0"
 
 # Benchmarking dependencies
 # Pin exact sysinfo version because memory-unit handling relies on the 0.32.1 contract.
