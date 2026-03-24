@@ -598,15 +598,17 @@ fn resolve_models_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf>
     let override_dir = std::env::var("SMOLPC_MODELS_DIR").ok().map(PathBuf::from);
     let shared_dir = dirs::data_local_dir()
         .map(|base| base.join(SHARED_MODELS_VENDOR_DIR).join(SHARED_MODELS_DIR));
+    let bundled_dir = resource_dir
+        .map(|res_dir| res_dir.join("models"))
+        .filter(|path| path.exists());
 
+    // Priority: env override → bundled (fresh from installer) → shared local.
+    // Bundled before shared prevents a stale prior install from shadowing
+    // fresh models shipped with the current version.
     override_dir
         .filter(|path| path.exists())
+        .or(bundled_dir)
         .or_else(|| shared_dir.filter(|path| path.exists()))
-        .or_else(|| {
-            resource_dir
-                .map(|res_dir| res_dir.join("models"))
-                .filter(|path| path.exists())
-        })
 }
 
 fn resolve_host_binary_path() -> Option<PathBuf> {
