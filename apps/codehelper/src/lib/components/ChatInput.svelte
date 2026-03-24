@@ -35,7 +35,9 @@
 			onSend(trimmed);
 			inputValue = '';
 			composerDraftStore.clearDraft(normalizedDraftKey);
-			resizeTextarea();
+			// Defer resize to next microtask so Svelte flushes the empty value
+			// to the DOM before we measure scrollHeight.
+			queueMicrotask(() => resizeTextarea());
 		}
 	}
 

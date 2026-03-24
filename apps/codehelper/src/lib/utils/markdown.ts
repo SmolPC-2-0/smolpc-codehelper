@@ -317,7 +317,10 @@ export function renderMarkdown(text: string): string {
 		return placeholder;
 	});
 
-	// Headers
+	// Headers (process longest prefix first to avoid ###### matching as #)
+	html = html.replace(/^###### (.*$)/gim, '<h6 class="text-sm font-semibold mt-3 mb-1">$1</h6>');
+	html = html.replace(/^##### (.*$)/gim, '<h5 class="text-sm font-semibold mt-3 mb-1">$1</h5>');
+	html = html.replace(/^#### (.*$)/gim, '<h4 class="text-base font-semibold mt-3 mb-2">$1</h4>');
 	html = html.replace(/^### (.*$)/gim, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
 	html = html.replace(/^## (.*$)/gim, '<h2 class="text-xl font-semibold mt-4 mb-2">$1</h2>');
 	html = html.replace(/^# (.*$)/gim, '<h1 class="text-2xl font-bold mt-4 mb-2">$1</h1>');
@@ -350,9 +353,9 @@ export function renderMarkdown(text: string): string {
 	html = '<p class="my-2">' + html + '</p>';
 
 	// Fix invalid HTML: remove paragraph tags around block-level elements
-	// Headings
-	html = html.replace(/<p class="my-2">(<h[123])/g, '$1');
-	html = html.replace(/(<\/h[123]>)<\/p>/g, '$1');
+	// Headings (h1-h6)
+	html = html.replace(/<p class="my-2">(<h[1-6])/g, '$1');
+	html = html.replace(/(<\/h[1-6]>)<\/p>/g, '$1');
 	// Lists
 	html = html.replace(/<p class="my-2">(<ul)/g, '$1');
 	html = html.replace(/(<\/ul>)<\/p>/g, '$1');
@@ -398,6 +401,9 @@ export function renderMarkdown(text: string): string {
 			'h1',
 			'h2',
 			'h3',
+			'h4',
+			'h5',
+			'h6',
 			'p',
 			'br',
 			'strong',
