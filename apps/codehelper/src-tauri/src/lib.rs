@@ -1,10 +1,8 @@
 mod app_paths;
 mod assistant;
-mod benchmark;
 mod commands;
 mod engine;
 mod hardware;
-mod launcher;
 mod modes;
 mod security;
 mod setup;
@@ -15,7 +13,6 @@ use app_paths::{
 };
 use assistant::state::AssistantState;
 use commands::assistant::{assistant_cancel, assistant_send, mode_undo};
-use commands::benchmark::{get_benchmarks_directory, open_benchmarks_folder, run_benchmark};
 use commands::default::{read, save_code, write};
 use commands::engine_client_adapter::{engine_ensure_started, engine_status};
 use commands::hardware::{detect_hardware, get_cached_hardware, HardwareCache};
@@ -25,11 +22,9 @@ use commands::inference::{
     inference_generate_messages, is_generating, list_models, load_model,
     set_inference_runtime_mode, unload_model,
 };
-use commands::launcher::{launcher_launch_or_focus, launcher_list_apps};
 use commands::modes::{list_modes, mode_open_host_app, mode_refresh_tools, mode_status};
 use commands::setup::{setup_prepare, setup_status};
 use engine::{EngineLifecycleState, EngineSupervisor, EngineSupervisorHandle};
-use launcher::orchestrator::LauncherState;
 use modes::registry::ModeProviderRegistry;
 use setup::SetupState;
 use smolpc_engine_client::EngineClient;
@@ -275,14 +270,10 @@ pub fn run() {
         })
         .manage(AssistantState::default())
         .manage(HardwareCache::default())
-        .manage(LauncherState::default())
         .invoke_handler(tauri::generate_handler![
             read,
             write,
             save_code,
-            run_benchmark,
-            get_benchmarks_directory,
-            open_benchmarks_folder,
             detect_hardware,
             get_cached_hardware,
             load_model,
@@ -300,8 +291,6 @@ pub fn run() {
             set_inference_runtime_mode,
             engine_ensure_started,
             engine_status,
-            launcher_list_apps,
-            launcher_launch_or_focus,
             assistant_send,
             assistant_cancel,
             mode_undo,

@@ -34,7 +34,6 @@ pub fn mode_config(mode: AppMode) -> ModeConfigDto {
                 supports_undo: false,
                 show_model_info: true,
                 show_hardware_panel: true,
-                show_benchmark_panel: true,
                 show_export: true,
                 show_context_controls: true,
             },
@@ -129,7 +128,6 @@ fn shared_tool_mode_capabilities(supports_undo: bool) -> ModeCapabilitiesDto {
         supports_undo,
         show_model_info: true,
         show_hardware_panel: true,
-        show_benchmark_panel: false,
         show_export: false,
         show_context_controls: false,
     }

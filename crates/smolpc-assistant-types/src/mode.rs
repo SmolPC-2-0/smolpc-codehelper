@@ -26,7 +26,6 @@ pub struct ModeCapabilitiesDto {
     pub supports_undo: bool,
     pub show_model_info: bool,
     pub show_hardware_panel: bool,
-    pub show_benchmark_panel: bool,
     pub show_export: bool,
     pub show_context_controls: bool,
 }
