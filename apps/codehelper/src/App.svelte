@@ -48,6 +48,7 @@
 	let isSwitchingMode = $state(false);
 	let launchingHostApp = $state(false);
 	let switchingRecommendedModel = $state(false);
+	let dismissedToolRecommendationModes = $state<Partial<Record<AppMode, boolean>>>({});
 	let memoryPressureNotice = $state<string | null>(null);
 	let dismissedMemoryPressureKey = $state<string | null>(null);
 	let hostAppLaunchError = $state<string | null>(null);
@@ -76,11 +77,13 @@
 		calc: 'Open LibreOffice',
 		impress: 'Open LibreOffice'
 	};
+	// Intentionally excludes Calc because the current product keeps it preview-only.
 	const TOOL_MODE_MODEL_RECOMMENDATIONS: Readonly<Partial<Record<AppMode, string>>> = {
 		gimp: 'qwen3-4b',
 		writer: 'qwen3-4b',
 		impress: 'qwen3-4b'
 	};
+	// Exact trigger for the current bundled/default small model on main.
 	const TOOL_MODE_SMALL_MODEL_TRIGGER = 'qwen2.5-1.5b-instruct';
 
 	const modeAvailability = $derived.by(() => {
@@ -141,10 +144,14 @@
 
 		return inferenceStore.availableModels.some((model) => model.id === recommendedToolModelId);
 	});
+	const toolModelRecommendationDismissed = $derived(
+		Boolean(dismissedToolRecommendationModes[activeMode])
+	);
 	const showToolModelRecommendation = $derived(
 		recommendedToolModelId !== null &&
 			effectiveModelId === TOOL_MODE_SMALL_MODEL_TRIGGER &&
-			recommendedToolModelAvailable
+			recommendedToolModelAvailable &&
+			!toolModelRecommendationDismissed
 	);
 	const hasMemoryPressureNoticeForToolRecommendation = $derived(
 		showToolModelRecommendation &&
@@ -392,10 +399,21 @@ Teaching rules:
 			const loaded = await inferenceStore.loadModel(recommendedToolModelId);
 			if (loaded) {
 				settingsStore.setModel(recommendedToolModelId);
+				dismissedToolRecommendationModes = {
+					...dismissedToolRecommendationModes,
+					[activeMode]: false
+				};
 			}
 		} finally {
 			switchingRecommendedModel = false;
 		}
+	}
+
+	function handleDismissToolRecommendation() {
+		dismissedToolRecommendationModes = {
+			...dismissedToolRecommendationModes,
+			[activeMode]: true
+		};
 	}
 
 	function finalizeActiveStreamingMessage(fallbackContent: string) {
@@ -1010,6 +1028,7 @@ Generating summary...`
 			</div>
 		{/if}
 
+		<!-- Memory pressure stays visible unless the tool-model recommendation is intentionally taking over. -->
 		{#if memoryPressureNotice && !showToolModelRecommendation}
 			<div
 				class={`mx-4 mt-2 rounded-lg border px-4 py-2 text-sm ${
@@ -1052,6 +1071,7 @@ Generating summary...`
 				busy={switchingRecommendedModel}
 				disabled={isInferenceBusy}
 				onSwitch={handleSwitchToRecommendedModel}
+				onDismiss={handleDismissToolRecommendation}
 			/>
 		{/if}
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
+	import { X } from '@lucide/svelte';
 
 	interface Props {
 		recommendedModelLabel: string;
@@ -8,6 +9,7 @@
 		busy?: boolean;
 		disabled?: boolean;
 		onSwitch: () => void;
+		onDismiss?: () => void;
 	}
 
 	let {
@@ -16,7 +18,8 @@
 		severity = 'default',
 		busy = false,
 		disabled = false,
-		onSwitch
+		onSwitch,
+		onDismiss
 	}: Props = $props();
 
 	const actionLabel = $derived(
@@ -46,9 +49,22 @@
 			>{highlightedMessageParts.after}
 		</p>
 	</div>
-	<Button variant="outline" onclick={onSwitch} disabled={disabled || busy}>
-		{actionLabel}
-	</Button>
+	<div class="model-recommendation-banner__actions">
+		<Button variant="outline" onclick={onSwitch} disabled={disabled || busy}>
+			{actionLabel}
+		</Button>
+		{#if onDismiss}
+			<button
+				type="button"
+				class="model-recommendation-banner__dismiss"
+				onclick={onDismiss}
+				aria-label="Dismiss model recommendation"
+				title="Dismiss"
+			>
+				<X class="h-4 w-4" />
+			</button>
+		{/if}
+	</div>
 </aside>
 
 <style>
@@ -96,6 +112,12 @@
 		min-width: 0;
 	}
 
+	.model-recommendation-banner__actions {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+	}
+
 	.model-recommendation-banner__eyebrow {
 		font-size: 0.68rem;
 		font-weight: 700;
@@ -119,13 +141,39 @@
 
 	.model-recommendation-banner__copy strong {
 		color: var(--color-foreground);
-		font-weight: 650;
+		font-weight: 600;
+	}
+
+	.model-recommendation-banner__dismiss {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.38rem;
+		border-radius: var(--radius-md);
+		border: 1px solid transparent;
+		background: transparent;
+		color: var(--color-muted-foreground);
+		cursor: pointer;
+		transition:
+			color var(--motion-fast),
+			border-color var(--motion-fast),
+			background var(--motion-fast);
+	}
+
+	.model-recommendation-banner__dismiss:hover {
+		color: var(--color-foreground);
+		border-color: var(--outline-soft);
+		background: var(--surface-hover);
 	}
 
 	@media (max-width: 720px) {
 		.model-recommendation-banner {
 			flex-direction: column;
 			align-items: stretch;
+		}
+
+		.model-recommendation-banner__actions {
+			justify-content: space-between;
 		}
 	}
 </style>
