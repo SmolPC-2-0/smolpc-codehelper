@@ -18,15 +18,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
-            target: 'aarch64-apple-darwin'
-            args: '--target aarch64-apple-darwin'
-          # Uncomment for Intel builds
-          #   - platform: 'macos-latest' # for Intel based macs.
-          #     args: '--target x86_64-apple-darwin'
-          - platform: 'ubuntu-24.04'
-            target: 'x86_64-unknown-linux-gnu'
-            args: '--target x86_64-unknown-linux-gnu'
           - platform: 'windows-latest'
             target: 'x86_64-pc-windows-msvc'
             args: '--target x86_64-pc-windows-msvc'
@@ -39,39 +30,51 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '23'
+
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: install Rust stable
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.88.0
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
-      - name: install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-24.04'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release-${{ matrix.target }}"
+
+      - name: Cache staged runtime DLLs
+        id: cache-dlls
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/codehelper/src-tauri/libs
+            apps/codehelper/src-tauri/resources/python/payload
+          key: staged-runtimes-${{ hashFiles('apps/codehelper/scripts/setup-openvino-runtime.ps1', 'apps/codehelper/scripts/setup-directml-runtime.ps1', 'apps/codehelper/scripts/setup-bundled-python-runtime.ps1') }}
+
+      - name: Stage DirectML runtime
+        if: steps.cache-dlls.outputs.cache-hit != 'true'
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          & apps/codehelper/scripts/setup-directml-runtime.ps1 -Force
+
+      - name: Stage OpenVINO runtime
+        if: steps.cache-dlls.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          & apps/codehelper/scripts/setup-openvino-runtime.ps1
+
+      - name: Stage bundled Python runtime
+        if: steps.cache-dlls.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          & apps/codehelper/scripts/setup-bundled-python-runtime.ps1
 
       - name: Build shared engine host sidecar
-        run: cargo build --release -p smolpc-engine-host ${{ matrix.args }}
+        run: cargo build --release -p smolpc-engine-host --target ${{ matrix.target }}
 
-      - name: Stage sidecar binary (unix)
-        if: matrix.platform != 'windows-latest'
-        run: |
-          mkdir -p apps/codehelper/src-tauri/binaries
-          SIDE_BIN="target/${{ matrix.target }}/release/smolpc-engine-host"
-          if [ ! -f "$SIDE_BIN" ]; then
-            echo "Expected sidecar binary missing: $SIDE_BIN"
-            echo "Build output did not contain target-specific sidecar artifact."
-            exit 1
-          fi
-          cp "$SIDE_BIN" "apps/codehelper/src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}"
-          chmod +x "apps/codehelper/src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}"
-
-      - name: Stage sidecar binary (windows)
-        if: matrix.platform == 'windows-latest'
+      - name: Stage sidecar binary
+        shell: pwsh
         run: |
           New-Item -ItemType Directory -Path apps/codehelper/src-tauri/binaries -Force | Out-Null
           $sideBin = "target/${{ matrix.target }}/release/smolpc-engine-host.exe"
@@ -80,6 +83,25 @@ jobs:
             throw "Build output did not contain target-specific sidecar artifact."
           }
           Copy-Item $sideBin "apps/codehelper/src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}.exe" -Force
+
+      - name: Validate staged artifacts
+        shell: pwsh
+        run: |
+          $required = @(
+            "apps/codehelper/src-tauri/libs/onnxruntime.dll",
+            "apps/codehelper/src-tauri/libs/DirectML.dll",
+            "apps/codehelper/src-tauri/libs/onnxruntime-genai.dll",
+            "apps/codehelper/src-tauri/libs/openvino/openvino_genai_c.dll",
+            "apps/codehelper/src-tauri/libs/openvino/tbb12.dll",
+            "apps/codehelper/src-tauri/libs/openvino/openvino_intel_cpu_plugin.dll",
+            "apps/codehelper/src-tauri/resources/python/payload/python.exe",
+            "apps/codehelper/src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}.exe"
+          )
+          $missing = $required | Where-Object { -not (Test-Path $_) }
+          if ($missing) {
+            throw "Missing staged artifacts:`n$($missing -join "`n")"
+          }
+          Write-Host "All required artifacts present."
 
       - name: Build Tauri
         uses: tauri-apps/tauri-action@v0
@@ -93,3 +115,14 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Verify installer size
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path target -Recurse -Filter "*-setup.exe" |
+            Where-Object { $_.FullName -match 'bundle[\\/]nsis' } |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $installer) { throw "NSIS installer not found in target/" }
+          $sizeMB = [math]::Round($installer.Length / 1MB, 1)
+          if ($sizeMB -lt 50) { throw "Installer suspiciously small: ${sizeMB}MB (expected >200MB)" }
+          Write-Host "Installer OK: $($installer.Name) (${sizeMB}MB)"
