@@ -52,6 +52,7 @@
 			disabled={!isLoaded || isGenerating || hasActiveStream || isCancelling}
 			placeholder={inputPlaceholder}
 			{draftKey}
+			showMicButton
 		/>
 	</div>
 </section>
