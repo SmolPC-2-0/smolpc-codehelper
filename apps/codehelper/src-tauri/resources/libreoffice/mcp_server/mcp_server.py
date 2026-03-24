@@ -136,44 +136,18 @@ def resolve_document_path(file_path: str) -> str:
 
 
 def get_default_document_path(filename: str) -> str:
+    # Use USERPROFILE on Windows to get the LOCAL Documents folder.
+    # SHGetKnownFolderPath with FOLDERID_Documents resolves to OneDrive
+    # when cloud sync is active, which breaks path expectations for users
+    # who store documents locally.
     if sys.platform == "win32":
-        try:
-            import ctypes
-            from ctypes import wintypes
-            from uuid import UUID
-
-            class GUID(ctypes.Structure):
-                _fields_ = [
-                    ("Data1", ctypes.c_ulong),
-                    ("Data2", ctypes.c_ushort),
-                    ("Data3", ctypes.c_ushort),
-                    ("Data4", ctypes.c_ubyte * 8),
-                ]
-
-                def __init__(self, uuidstr):
-                    uuid = UUID(uuidstr)
-                    ctypes.Structure.__init__(self)
-                    self.Data1 = uuid.time_low
-                    self.Data2 = uuid.time_mid
-                    self.Data3 = uuid.time_hi_version
-                    self.Data4[:] = uuid.bytes[8:]
-
-            SHGetKnownFolderPath = ctypes.windll.shell32.SHGetKnownFolderPath
-            SHGetKnownFolderPath.argtypes = [
-                ctypes.POINTER(GUID), wintypes.DWORD, wintypes.HANDLE,
-                ctypes.POINTER(ctypes.c_wchar_p),
-            ]
-            SHGetKnownFolderPath.restype = ctypes.HRESULT
-            path_ptr = ctypes.c_wchar_p()
-            guid = GUID("FDD39AD0-238F-46AF-ADB4-6C85480369C7")
-            result = SHGetKnownFolderPath(ctypes.byref(guid), 0, 0, ctypes.byref(path_ptr))
-            if result == 0 and path_ptr.value:
-                docs_path = path_ptr.value
-                ctypes.windll.ole32.CoTaskMemFree(path_ptr)
-                return os.path.join(docs_path, filename)
-        except Exception:
-            pass
+        user_profile = os.environ.get("USERPROFILE", "")
+        if user_profile:
+            docs_path = os.path.join(user_profile, "Documents")
+            os.makedirs(docs_path, exist_ok=True)
+            return os.path.join(docs_path, filename)
     docs_path = os.path.join(os.path.expanduser("~"), "Documents")
+    os.makedirs(docs_path, exist_ok=True)
     return os.path.join(docs_path, filename)
 
 
