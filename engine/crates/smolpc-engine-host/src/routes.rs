@@ -23,9 +23,9 @@ use crate::chat::{
 use crate::config::{epoch_ms, with_memory_pressure_hint};
 use crate::state::AppState;
 use crate::types::{
-    ApiError, CancelOnDrop, ChatCompletionRequest, CheckModelRequest, CompletionInput,
-    EnsureStartedOutcome, EnsureStartedRequest, ErrorResponse, LoadRequest, ReadinessState,
-    StartupError, StartupMode, StreamMessage, UnloadRequest, ENGINE_API_VERSION,
+    ApiError, AudioSpeechRequest, CancelOnDrop, ChatCompletionRequest, CheckModelRequest,
+    CompletionInput, EnsureStartedOutcome, EnsureStartedRequest, ErrorResponse, LoadRequest,
+    ReadinessState, StartupError, StartupMode, StreamMessage, UnloadRequest, ENGINE_API_VERSION,
     ENGINE_PROTOCOL_VERSION, OPENVINO_CHAT_MODE_LEGACY_PROMPT, OPENVINO_CHAT_MODE_STRUCTURED,
 };
 
@@ -565,4 +565,110 @@ fn ensure_whisper_loaded(engine: &crate::state::EngineState) -> Result<(), Strin
     *guard = Some(pipeline);
     log::info!("WhisperPipeline loaded successfully");
     Ok(())
+}
+
+// ── TTS proxy ────────────────────────────────────────────────────────
+
+pub(crate) async fn v1_audio_speech(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<AudioSpeechRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+
+    if req.text.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Text is empty".to_string(),
+            }),
+        ));
+    }
+
+    // Acquire voice semaphore with 30s timeout.
+    let _permit = timeout(
+        Duration::from_secs(30),
+        state.voice_semaphore.clone().acquire_owned(),
+    )
+    .await
+    .map_err(|_| {
+        (
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(ErrorResponse {
+                error: "Voice synthesis queue timed out".to_string(),
+            }),
+        )
+    })?
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Voice semaphore closed".to_string(),
+            }),
+        )
+    })?;
+
+    // Lazy health check — only when a TTS request arrives.
+    let tts = &state.tts;
+    if !tts.check_health().await {
+        tts.attempt_respawn().await;
+        if !tts.check_health().await {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    error: "TTS service unavailable".to_string(),
+                }),
+            ));
+        }
+    }
+
+    // Forward to sidecar POST /synthesize.
+    let sidecar_url = format!("http://127.0.0.1:{}/synthesize", tts.port());
+    let response = tts
+        .http_client()
+        .post(&sidecar_url)
+        .header("Authorization", format!("Bearer {}", state.token))
+        .json(&serde_json::json!({
+            "text": req.text,
+            "voice": req.voice,
+            "speed": req.speed,
+        }))
+        .timeout(Duration::from_secs(60))
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(ErrorResponse {
+                    error: format!("TTS sidecar request failed: {e}"),
+                }),
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(ErrorResponse {
+                error: format!("TTS sidecar error ({status}): {body}"),
+            }),
+        ));
+    }
+
+    let wav_bytes = response.bytes().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Failed to read TTS response: {e}"),
+            }),
+        )
+    })?;
+
+    Ok((
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "audio/wav")],
+        wav_bytes,
+    ))
 }

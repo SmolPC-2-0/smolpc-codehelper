@@ -346,3 +346,22 @@ pub(crate) fn lock_cancel<'a>(
 // comes from the crate root via `use super::*` or `use crate::*`.
 // We use a qualified path here to avoid a circular dependency during the extraction.
 use crate::EngineState;
+
+// ── Voice I/O types ──────────────────────────────────────────────────
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct AudioSpeechRequest {
+    pub(crate) text: String,
+    #[serde(default = "default_tts_voice")]
+    pub(crate) voice: String,
+    #[serde(default = "default_tts_speed")]
+    pub(crate) speed: f32,
+}
+
+fn default_tts_voice() -> String {
+    "Bella".to_string()
+}
+
+fn default_tts_speed() -> f32 {
+    1.0
+}

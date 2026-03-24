@@ -112,6 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/v1/audio/transcriptions",
             post(routes::v1_audio_transcriptions),
         )
+        .route("/v1/audio/speech", post(routes::v1_audio_speech))
         .with_state(state.clone());
 
     let listener = TcpListener::bind(("127.0.0.1", args.port)).await?;
