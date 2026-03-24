@@ -8,7 +8,11 @@ import { invoke } from '@tauri-apps/api/core';
 
 // ── Types ────────────────────────────────────────────────────────────
 
-export type MicState = 'idle' | 'recording' | 'processing' | 'disabled';
+export interface AudioRecordingReadyEvent {
+	sessionId: string;
+}
+
+export type MicState = 'idle' | 'arming' | 'ready' | 'recording' | 'processing' | 'disabled';
 export type TtsState = 'idle' | 'loading' | 'playing' | 'unavailable';
 
 // ── State ────────────────────────────────────────────────────────────
@@ -18,20 +22,81 @@ let ttsState = $state<TtsState>('idle');
 let ttsActiveMessageId = $state<string | null>(null);
 let micError = $state<string | null>(null);
 let playbackPollInterval: ReturnType<typeof setInterval> | null = null;
+let activeRecordingSessionId = $state<string | null>(null);
+let readyTransitionTimeout: ReturnType<typeof setTimeout> | null = null;
+let readyFallbackTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function clearReadyTimers(): void {
+	if (readyTransitionTimeout !== null) {
+		clearTimeout(readyTransitionTimeout);
+		readyTransitionTimeout = null;
+	}
+
+	if (readyFallbackTimeout !== null) {
+		clearTimeout(readyFallbackTimeout);
+		readyFallbackTimeout = null;
+	}
+}
+
+function resetRecordingSession(): void {
+	activeRecordingSessionId = null;
+	clearReadyTimers();
+}
+
+function startReadyFallbackTimer(sessionId: string): void {
+	if (readyFallbackTimeout !== null) {
+		clearTimeout(readyFallbackTimeout);
+	}
+
+	readyFallbackTimeout = setTimeout(() => {
+		if (activeRecordingSessionId !== sessionId || micState !== 'arming') {
+			return;
+		}
+
+		console.warn(
+			`audio-recording-ready event missing for session ${sessionId}; promoting mic to recording`
+		);
+		readyFallbackTimeout = null;
+		micState = 'recording';
+	}, 2000);
+}
+
+function startReadyTransitionTimer(sessionId: string): void {
+	if (readyTransitionTimeout !== null) {
+		clearTimeout(readyTransitionTimeout);
+	}
+
+	readyTransitionTimeout = setTimeout(() => {
+		if (activeRecordingSessionId !== sessionId || micState !== 'ready') {
+			return;
+		}
+
+		readyTransitionTimeout = null;
+		micState = 'recording';
+	}, 1200);
+}
 
 // ── Mic actions ──────────────────────────────────────────────────────
 
 async function startRecording(): Promise<void> {
 	if (micState !== 'idle') return;
 
+	const sessionId = crypto.randomUUID();
+
 	try {
 		micError = null;
-		micState = 'recording';
-		await invoke('start_recording');
+		activeRecordingSessionId = sessionId;
+		clearReadyTimers();
+		micState = 'arming';
+		await invoke('start_recording', { sessionId });
+		if (activeRecordingSessionId === sessionId && micState === 'arming') {
+			startReadyFallbackTimer(sessionId);
+		}
 	} catch (e) {
 		const msg = String(e);
 		console.error('start_recording failed:', msg);
 		micError = msg;
+		resetRecordingSession();
 		if (msg.includes('No microphone') || msg.includes('microphone')) {
 			micState = 'disabled';
 		} else {
@@ -41,8 +106,19 @@ async function startRecording(): Promise<void> {
 }
 
 async function stopRecording(): Promise<string> {
-	if (micState !== 'recording') return '';
+	// Allow cancelling from arming state (quick double-tap before mic is live).
+	if (micState === 'arming') {
+		clearReadyTimers();
+		resetRecordingSession();
+		micState = 'idle';
+		// Best-effort cancel — the backend stream may not be fully started yet.
+		invoke('stop_recording').catch(() => {});
+		return '';
+	}
 
+	if (micState !== 'ready' && micState !== 'recording') return '';
+
+	clearReadyTimers();
 	micState = 'processing';
 	try {
 		const text = await invoke<string>('stop_recording');
@@ -53,8 +129,23 @@ async function stopRecording(): Promise<string> {
 		micError = msg;
 		return '';
 	} finally {
+		resetRecordingSession();
 		micState = 'idle';
 	}
+}
+
+function handleRecordingReady(event: AudioRecordingReadyEvent): void {
+	if (micState !== 'arming') {
+		return;
+	}
+
+	if (activeRecordingSessionId !== event.sessionId) {
+		return;
+	}
+
+	clearReadyTimers();
+	micState = 'ready';
+	startReadyTransitionTimer(event.sessionId);
 }
 
 // ── TTS actions ──────────────────────────────────────────────────────
@@ -128,6 +219,9 @@ export const voiceStore = {
 	get micState() {
 		return micState;
 	},
+	get activeRecordingSessionId() {
+		return activeRecordingSessionId;
+	},
 	get ttsState() {
 		return ttsState;
 	},
@@ -138,10 +232,16 @@ export const voiceStore = {
 		return micError;
 	},
 	get isMicBusy() {
-		return micState === 'recording' || micState === 'processing';
+		return (
+			micState === 'arming' ||
+			micState === 'ready' ||
+			micState === 'recording' ||
+			micState === 'processing'
+		);
 	},
 	startRecording,
 	stopRecording,
+	handleRecordingReady,
 	speakMessage,
 	stopPlayback
 };

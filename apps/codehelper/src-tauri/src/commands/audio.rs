@@ -1,11 +1,14 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tauri::Emitter;
 
 /// Maximum recording length in samples (30 seconds at 48kHz stereo).
 /// Prevents unbounded memory growth on 8GB target hardware.
 const MAX_RECORDING_SAMPLES: usize = 48_000 * 2 * 30;
+pub const AUDIO_RECORDING_READY_EVENT: &str = "audio-recording-ready";
 
 // ── AudioState ───────────────────────────────────────────────────────
 
@@ -32,11 +35,18 @@ struct RecordingSession {
     buffer: Arc<std::sync::Mutex<Vec<f32>>>,
     sample_rate: u32,
     channels: u16,
+    session_id: String,
 }
 
 struct PlaybackHandle {
     stop_signal: Arc<AtomicBool>,
     join_handle: Option<std::thread::JoinHandle<()>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioRecordingReadyEvent {
+    pub session_id: String,
 }
 
 // ── Commands ─────────────────────────────────────────────────────────
@@ -45,7 +55,11 @@ struct PlaybackHandle {
 /// to avoid holding the mutex across cpal device enumeration (which involves
 /// Windows COM/WASAPI calls that can take 50-200ms).
 #[tauri::command]
-pub async fn start_recording(state: tauri::State<'_, AudioState>) -> Result<(), String> {
+pub async fn start_recording(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AudioState>,
+    session_id: String,
+) -> Result<(), String> {
     // Quick check — don't hold lock during device enumeration.
     {
         let recording = state
@@ -70,6 +84,12 @@ pub async fn start_recording(state: tauri::State<'_, AudioState>) -> Result<(), 
     let channels = config.channels();
     let buffer: Arc<std::sync::Mutex<Vec<f32>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
     let buffer_clone = Arc::clone(&buffer);
+    let ready_emitted_clone = Arc::new(AtomicBool::new(false));
+    let session_registered = Arc::new(AtomicBool::new(false));
+    let session_registered_clone = Arc::clone(&session_registered);
+    let app_handle_clone = app_handle.clone();
+    let callback_session_id = session_id.clone();
+    let log_session_id = session_id.clone();
 
     // [C2 fix] Cap recording buffer at MAX_RECORDING_SAMPLES to prevent
     // unbounded memory growth if a student leaves recording on.
@@ -82,6 +102,23 @@ pub async fn start_recording(state: tauri::State<'_, AudioState>) -> Result<(), 
                     if remaining > 0 {
                         let to_copy = data.len().min(remaining);
                         buf.extend_from_slice(&data[..to_copy]);
+                    }
+                }
+
+                if data.is_empty() || !session_registered_clone.load(Ordering::Relaxed) {
+                    return;
+                }
+
+                if !ready_emitted_clone.swap(true, Ordering::Relaxed) {
+                    let payload = AudioRecordingReadyEvent {
+                        session_id: callback_session_id.clone(),
+                    };
+                    if let Err(error) = app_handle_clone.emit(AUDIO_RECORDING_READY_EVENT, payload)
+                    {
+                        log::warn!(
+                            "Failed to emit {AUDIO_RECORDING_READY_EVENT} for session {}: {error}",
+                            callback_session_id
+                        );
                     }
                 }
             },
@@ -101,6 +138,7 @@ pub async fn start_recording(state: tauri::State<'_, AudioState>) -> Result<(), 
         buffer,
         sample_rate,
         channels,
+        session_id,
     };
 
     // Re-acquire lock and set — TOCTOU double-check catches concurrent callers.
@@ -115,8 +153,18 @@ pub async fn start_recording(state: tauri::State<'_, AudioState>) -> Result<(), 
         }
         *recording = Some(session);
     }
+    // Set AFTER the session is stored in the mutex — the cpal audio callback
+    // checks this flag before emitting the ready event. This ensures the
+    // event is only emitted once the session is fully registered, preventing
+    // a race where the callback fires before the mutex holds the session.
+    session_registered.store(true, Ordering::Relaxed);
 
-    log::info!("Recording started: {sample_rate}Hz, {channels}ch");
+    log::info!(
+        "Recording started: session={} {}Hz, {}ch",
+        log_session_id,
+        sample_rate,
+        channels
+    );
     Ok(())
 }
 
@@ -146,7 +194,8 @@ pub async fn stop_recording(
     };
 
     log::info!(
-        "stop_recording: captured {} raw samples at {}Hz {}ch",
+        "stop_recording: session={} captured {} raw samples at {}Hz {}ch",
+        session.session_id,
         raw_samples.len(),
         session.sample_rate,
         session.channels
