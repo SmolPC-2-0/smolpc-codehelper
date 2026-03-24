@@ -163,10 +163,7 @@ impl TtsSidecarState {
         }
 
         if healthy {
-            log::info!(
-                "TTS sidecar healthy after {:?}",
-                started.elapsed()
-            );
+            log::info!("TTS sidecar healthy after {:?}", started.elapsed());
             *self.pid.lock().await = Some(pid);
         } else {
             log::error!(

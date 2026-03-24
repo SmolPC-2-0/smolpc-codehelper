@@ -118,9 +118,7 @@ impl LibreOfficeProvider {
             );
         }
 
-        format!(
-            "Document runtime failed. Make sure bundled Python is prepared. {error}"
-        )
+        format!("Document runtime failed. Make sure bundled Python is prepared. {error}")
     }
 
     fn is_retryable_runtime_failure(message: &str) -> bool {
@@ -142,10 +140,9 @@ impl LibreOfficeProvider {
 
         self.connect_live(mode).await?;
         let state = self.state.lock().await;
-        state
-            .session
-            .clone()
-            .ok_or_else(|| "LibreOffice provider retry reconnect did not produce a session".to_string())
+        state.session.clone().ok_or_else(|| {
+            "LibreOffice provider retry reconnect did not produce a session".to_string()
+        })
     }
 
     async fn retry_tool_after_runtime_reconnect(
@@ -465,9 +462,7 @@ impl ToolProvider for LibreOfficeProvider {
         match session.call_tool(name, arguments).await {
             Ok(payload) => {
                 let mut tool_result = build_tool_execution_result(name, payload);
-                if !tool_result.ok
-                    && Self::is_retryable_runtime_failure(&tool_result.summary)
-                {
+                if !tool_result.ok && Self::is_retryable_runtime_failure(&tool_result.summary) {
                     log::warn!(
                         "Retrying LibreOffice tool {} in mode {:?} after transient runtime failure: {}",
                         name,

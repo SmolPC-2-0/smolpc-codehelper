@@ -15,8 +15,8 @@ use tokio::time::timeout;
 use crate::artifacts::build_check_model_response;
 use crate::auth::auth;
 use crate::chat::{
-    humanize_generation_error, is_preformatted_chatml_single_user_message,
-    model_has_thinking_mode, openvino_request_defaults, request_to_config, request_to_prompt,
+    humanize_generation_error, is_preformatted_chatml_single_user_message, model_has_thinking_mode,
+    openvino_request_defaults, request_to_config, request_to_prompt,
     request_to_structured_messages, should_use_openvino_structured_messages, stream_error_code,
     ThinkingFilter,
 };
@@ -561,8 +561,10 @@ fn ensure_whisper_loaded(engine: &crate::state::EngineState) -> Result<(), Strin
     }
 
     log::info!("Loading WhisperPipeline from {}", model_dir.display());
-    let pipeline =
-        smolpc_engine_core::inference::genai::whisper::WhisperPipeline::new(openvino_bundle, &model_dir)?;
+    let pipeline = smolpc_engine_core::inference::genai::whisper::WhisperPipeline::new(
+        openvino_bundle,
+        &model_dir,
+    )?;
     *guard = Some(pipeline);
     log::info!("WhisperPipeline loaded successfully");
     Ok(())
