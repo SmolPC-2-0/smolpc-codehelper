@@ -146,6 +146,52 @@
 			effectiveModelId === TOOL_MODE_SMALL_MODEL_TRIGGER &&
 			recommendedToolModelAvailable
 	);
+	const hasMemoryPressureNoticeForToolRecommendation = $derived(
+		showToolModelRecommendation &&
+			memoryPressureNotice !== null &&
+			inferenceStore.memoryPressure !== null
+	);
+	const toolModelRecommendationSeverity = $derived.by(() => {
+		if (!hasMemoryPressureNoticeForToolRecommendation) {
+			return 'default' as const;
+		}
+
+		const snapshot = inferenceStore.memoryPressure;
+		if (!snapshot) {
+			return 'default' as const;
+		}
+
+		return snapshot.level === 'critical' || snapshot.auto_unloaded ? 'critical' : 'warning';
+	});
+	const toolModelRecommendationMessage = $derived.by(() => {
+		if (!recommendedToolModelId) {
+			return '';
+		}
+
+		if (!hasMemoryPressureNoticeForToolRecommendation) {
+			return `This mode works best with ${recommendedToolModelId}. The smaller model often misses tool calls.`;
+		}
+
+		const snapshot = inferenceStore.memoryPressure;
+		if (!snapshot) {
+			return `This mode works best with ${recommendedToolModelId}. The smaller model often misses tool calls.`;
+		}
+
+		const availableRam = `~${snapshot.available_gb.toFixed(1)} GB`;
+		if (snapshot.auto_unloaded) {
+			return `This mode works best with ${recommendedToolModelId}, but the model was unloaded because free RAM is critically low while the app was minimized. Close other apps before switching if you can.`;
+		}
+
+		if (snapshot.level === 'critical') {
+			return `This mode works best with ${recommendedToolModelId}, but free RAM is critically low (${availableRam}). Close other apps before switching if you can. It may be slow or unstable on this machine.`;
+		}
+
+		if (snapshot.level === 'warning') {
+			return `This mode works best with ${recommendedToolModelId}, but free RAM is low (${availableRam}). Close other apps before switching if you can. It may run slowly on this machine.`;
+		}
+
+		return `This mode works best with ${recommendedToolModelId}, but this machine has limited free RAM for this mode (${availableRam}). It may run slowly on this machine.`;
+	});
 	const latestAssistantMessageId = $derived(
 		[...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null
 	);
@@ -964,7 +1010,7 @@ Generating summary...`
 			</div>
 		{/if}
 
-		{#if memoryPressureNotice}
+		{#if memoryPressureNotice && !showToolModelRecommendation}
 			<div
 				class={`mx-4 mt-2 rounded-lg border px-4 py-2 text-sm ${
 					inferenceStore.memoryPressure?.level === 'critical'
@@ -1001,6 +1047,8 @@ Generating summary...`
 		{#if showToolModelRecommendation && recommendedToolModelId}
 			<ModelRecommendationBanner
 				recommendedModelLabel={recommendedToolModelId}
+				message={toolModelRecommendationMessage}
+				severity={toolModelRecommendationSeverity}
 				busy={switchingRecommendedModel}
 				disabled={isInferenceBusy}
 				onSwitch={handleSwitchToRecommendedModel}
