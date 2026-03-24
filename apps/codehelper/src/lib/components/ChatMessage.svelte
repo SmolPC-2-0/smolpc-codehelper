@@ -138,7 +138,7 @@
 							<Loader2 class="h-3 w-3 animate-spin" />
 							<span>Loading...</span>
 						{:else if isThisPlaying}
-							<Volume2 class="h-3 w-3 chat-message__action-icon--playing" />
+							<Volume2 class="chat-message__action-icon--playing h-3 w-3" />
 							<span>Stop</span>
 						{:else}
 							<Volume2 class="h-3 w-3" />

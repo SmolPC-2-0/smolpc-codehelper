@@ -118,7 +118,9 @@
 			class="chat-input__mic"
 			class:chat-input__mic--recording={voiceStore.micState === 'recording'}
 			onclick={handleMicClick}
-			disabled={disabled || voiceStore.micState === 'processing' || voiceStore.micState === 'disabled'}
+			disabled={disabled ||
+				voiceStore.micState === 'processing' ||
+				voiceStore.micState === 'disabled'}
 			title={voiceStore.micState === 'disabled'
 				? 'No microphone detected'
 				: voiceStore.micState === 'recording'
