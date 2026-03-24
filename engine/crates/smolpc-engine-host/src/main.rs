@@ -11,6 +11,7 @@ mod runtime_bundles;
 mod selection;
 mod startup;
 mod state;
+mod tts_sidecar;
 mod types;
 
 use axum::routing::{get, post};
