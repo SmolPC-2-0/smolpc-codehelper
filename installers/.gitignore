@@ -1,0 +1,6 @@
+# Offline bundle build artifacts (multi-GB, not checked into git)
+usb/*.exe
+usb/*.cmd
+usb/*.ps1
+usb/models/
+!usb/.gitkeep
