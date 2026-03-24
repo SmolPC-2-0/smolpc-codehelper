@@ -1,20 +1,23 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
 	import { composerDraftStore } from '$lib/stores/composerDraft.svelte';
-	import { CornerDownLeft, Send } from '@lucide/svelte';
+	import { voiceStore } from '$lib/stores/voice.svelte';
+	import { CornerDownLeft, Mic, Square, Loader2, Send } from '@lucide/svelte';
 
 	interface Props {
 		onSend: (message: string) => void;
 		disabled?: boolean;
 		placeholder?: string;
 		draftKey?: string;
+		showMicButton?: boolean;
 	}
 
 	let {
 		onSend,
 		disabled = false,
 		placeholder = 'Ask a coding question...',
-		draftKey = 'global'
+		draftKey = 'global',
+		showMicButton = false
 	}: Props = $props();
 
 	let inputValue = $state('');
@@ -53,6 +56,32 @@
 		composerDraftStore.setDraft(normalizedDraftKey, inputValue);
 	}
 
+	async function handleMicClick() {
+		if (voiceStore.micState === 'recording') {
+			const text = await voiceStore.stopRecording();
+			if (text.trim()) {
+				const start = textarea?.selectionStart ?? inputValue.length;
+				const end = textarea?.selectionEnd ?? inputValue.length;
+				const before = inputValue.slice(0, start);
+				const after = inputValue.slice(end);
+				const sep = before && !before.endsWith(' ') ? ' ' : '';
+				inputValue = before + sep + text + after;
+				composerDraftStore.setDraft(normalizedDraftKey, inputValue);
+				queueMicrotask(() => {
+					resizeTextarea();
+					const newPos = before.length + sep.length + text.length;
+					if (textarea) {
+						textarea.selectionStart = newPos;
+						textarea.selectionEnd = newPos;
+						textarea.focus();
+					}
+				});
+			}
+		} else if (voiceStore.micState === 'idle') {
+			await voiceStore.startRecording();
+		}
+	}
+
 	$effect(() => {
 		const key = normalizedDraftKey;
 		if (hydratedDraftKey === key) {
@@ -83,6 +112,32 @@
 			<span>Enter to send, Shift+Enter newline</span>
 		</div>
 	</div>
+	{#if showMicButton}
+		<button
+			type="button"
+			class="chat-input__mic"
+			class:chat-input__mic--recording={voiceStore.micState === 'recording'}
+			onclick={handleMicClick}
+			disabled={disabled ||
+				voiceStore.micState === 'processing' ||
+				voiceStore.micState === 'disabled'}
+			title={voiceStore.micState === 'disabled'
+				? 'No microphone detected'
+				: voiceStore.micState === 'recording'
+					? 'Stop recording'
+					: voiceStore.micState === 'processing'
+						? 'Transcribing...'
+						: 'Voice input'}
+		>
+			{#if voiceStore.micState === 'recording'}
+				<Square class="h-4 w-4" />
+			{:else if voiceStore.micState === 'processing'}
+				<Loader2 class="h-4 w-4 animate-spin" />
+			{:else}
+				<Mic class="h-4 w-4" />
+			{/if}
+		</button>
+	{/if}
 	<Button onclick={handleSubmit} {disabled} size="icon" class="chat-input__send">
 		<Send class="h-4.5 w-4.5" />
 	</Button>
@@ -181,5 +236,50 @@
 
 	textarea::-webkit-scrollbar-thumb:hover {
 		background: color-mix(in srgb, var(--color-muted-foreground) 80%, transparent);
+	}
+
+	.chat-input__mic {
+		position: relative;
+		height: 3rem;
+		width: 3rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		border-radius: calc(var(--radius-xl) + 4px);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-widget) 96%, black);
+		color: var(--color-muted-foreground);
+		cursor: pointer;
+		transition:
+			color var(--motion-fast),
+			background var(--motion-fast),
+			border-color var(--motion-fast);
+	}
+
+	.chat-input__mic:hover:not(:disabled) {
+		color: var(--color-foreground);
+		border-color: var(--outline-strong);
+	}
+
+	.chat-input__mic:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.chat-input__mic--recording {
+		border-color: var(--color-destructive);
+		color: var(--color-destructive);
+		animation: mic-pulse 1.4s ease-in-out infinite;
+	}
+
+	@keyframes mic-pulse {
+		0%,
+		100% {
+			opacity: 0.7;
+		}
+		50% {
+			opacity: 1;
+		}
 	}
 </style>

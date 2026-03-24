@@ -20,6 +20,7 @@ dist-ssr
 !.env.example
 /target/
 /apps/codehelper/src-tauri/target/
+/engine/crates/smolpc-tts-server/target/
 /apps/codehelper/src-tauri/gen/schemas
 /docs/.local_docs/
 .claude/settings.local.json

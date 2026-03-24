@@ -1,0 +1,26 @@
+[package]
+name = "smolpc-tts-server"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+
+# Standalone workspace — must NOT be part of the parent workspace.
+# kitten-tts pins ort 2.0.0-rc.12 which conflicts with the parent
+# workspace's ort 2.0.0-rc.11 (Tauri dev-dep). Separate workspace
+# = separate dependency resolution = zero ORT version conflict.
+[workspace]
+
+[[bin]]
+name = "smolpc-tts-server"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+env_logger = "0.11"
+clap = { version = "4", features = ["derive"] }
+hound = "3.5"
+kitten-tts = { git = "https://github.com/SmolPC-2-0/kitten_tts_rs.git", rev = "4461999e" }

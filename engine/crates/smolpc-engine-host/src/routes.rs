@@ -1,3 +1,4 @@
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -7,6 +8,7 @@ use chrono::Utc;
 use smolpc_engine_core::models::ModelRegistry;
 use std::convert::Infallible;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
@@ -21,9 +23,9 @@ use crate::chat::{
 use crate::config::{epoch_ms, with_memory_pressure_hint};
 use crate::state::AppState;
 use crate::types::{
-    ApiError, CancelOnDrop, ChatCompletionRequest, CheckModelRequest, CompletionInput,
-    EnsureStartedOutcome, EnsureStartedRequest, ErrorResponse, LoadRequest, ReadinessState,
-    StartupError, StartupMode, StreamMessage, UnloadRequest, ENGINE_API_VERSION,
+    ApiError, AudioSpeechRequest, CancelOnDrop, ChatCompletionRequest, CheckModelRequest,
+    CompletionInput, EnsureStartedOutcome, EnsureStartedRequest, ErrorResponse, LoadRequest,
+    ReadinessState, StartupError, StartupMode, StreamMessage, UnloadRequest, ENGINE_API_VERSION,
     ENGINE_PROTOCOL_VERSION, OPENVINO_CHAT_MODE_LEGACY_PROMPT, OPENVINO_CHAT_MODE_STRUCTURED,
 };
 
@@ -446,4 +448,228 @@ pub(crate) async fn v1_chat_completions(
             }),
         ))
     }
+}
+
+// ── Whisper STT ──────────────────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
+pub(crate) async fn v1_audio_transcriptions(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+
+    // Validate body: must be f32-aligned and non-empty.
+    if body.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Empty audio body".to_string(),
+            }),
+        ));
+    }
+    if body.len() % 4 != 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Body length must be a multiple of 4 (f32 PCM samples)".to_string(),
+            }),
+        ));
+    }
+
+    // Acquire voice semaphore with 30s timeout.
+    let permit = timeout(
+        Duration::from_secs(30),
+        state.voice_semaphore.clone().acquire_owned(),
+    )
+    .await
+    .map_err(|_| {
+        (
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(ErrorResponse {
+                error: "Voice transcription queue timed out".to_string(),
+            }),
+        )
+    })?
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Voice semaphore closed".to_string(),
+            }),
+        )
+    })?;
+
+    // Convert bytes to f32 samples (little-endian).
+    let audio: Vec<f32> = body
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect();
+
+    let engine = state.engine.clone();
+
+    let text = tokio::task::spawn_blocking(move || {
+        let _permit = permit; // Hold permit for the duration of transcription.
+        ensure_whisper_loaded(&engine)?;
+        let pipeline_guard = engine.whisper_pipeline.blocking_lock();
+        let pipeline = pipeline_guard
+            .as_ref()
+            .ok_or_else(|| "WhisperPipeline not loaded".to_string())?;
+        pipeline.transcribe(&audio)
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Transcription worker error: {e}"),
+            }),
+        )
+    })?
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+
+    Ok(Json(serde_json::json!({ "text": text })))
+}
+
+/// Lazy-load the WhisperPipeline if not already loaded.
+/// Called inside `spawn_blocking` — uses `blocking_lock()`.
+#[cfg(target_os = "windows")]
+fn ensure_whisper_loaded(engine: &crate::state::EngineState) -> Result<(), String> {
+    let mut guard = engine.whisper_pipeline.blocking_lock();
+    if guard.is_some() {
+        return Ok(());
+    }
+
+    let openvino_bundle = &engine.runtime_bundles().openvino;
+
+    let model_dir = smolpc_engine_core::models::ModelLoader::models_dir()
+        .join("whisper-base.en")
+        .join("openvino");
+
+    if !model_dir.exists() {
+        return Err(format!(
+            "Whisper model not found at {}",
+            model_dir.display()
+        ));
+    }
+
+    log::info!("Loading WhisperPipeline from {}", model_dir.display());
+    let pipeline =
+        smolpc_engine_core::inference::genai::whisper::WhisperPipeline::new(openvino_bundle, &model_dir)?;
+    *guard = Some(pipeline);
+    log::info!("WhisperPipeline loaded successfully");
+    Ok(())
+}
+
+// ── TTS proxy ────────────────────────────────────────────────────────
+
+pub(crate) async fn v1_audio_speech(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<AudioSpeechRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    auth(&headers, &state.token)?;
+    state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
+
+    if req.text.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Text is empty".to_string(),
+            }),
+        ));
+    }
+
+    // Acquire voice semaphore with 30s timeout.
+    let _permit = timeout(
+        Duration::from_secs(30),
+        state.voice_semaphore.clone().acquire_owned(),
+    )
+    .await
+    .map_err(|_| {
+        (
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(ErrorResponse {
+                error: "Voice synthesis queue timed out".to_string(),
+            }),
+        )
+    })?
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Voice semaphore closed".to_string(),
+            }),
+        )
+    })?;
+
+    // Lazy health check — only when a TTS request arrives.
+    let tts = &state.tts;
+    if !tts.check_health().await {
+        tts.attempt_respawn().await;
+        if !tts.check_health().await {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    error: "TTS service unavailable".to_string(),
+                }),
+            ));
+        }
+    }
+
+    // Forward to sidecar POST /synthesize.
+    let sidecar_url = format!("http://127.0.0.1:{}/synthesize", tts.port());
+    let response = tts
+        .http_client()
+        .post(&sidecar_url)
+        .header("Authorization", format!("Bearer {}", state.token))
+        .json(&serde_json::json!({
+            "text": req.text,
+            "voice": req.voice,
+            "speed": req.speed,
+        }))
+        .timeout(Duration::from_secs(60))
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(ErrorResponse {
+                    error: format!("TTS sidecar request failed: {e}"),
+                }),
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(ErrorResponse {
+                error: format!("TTS sidecar error ({status}): {body}"),
+            }),
+        ));
+    }
+
+    let wav_bytes = response.bytes().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Failed to read TTS response: {e}"),
+            }),
+        )
+    })?;
+
+    Ok((
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "audio/wav")],
+        wav_bytes,
+    ))
 }

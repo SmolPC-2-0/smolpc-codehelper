@@ -1,4 +1,5 @@
 pub mod assistant;
+pub mod audio;
 pub mod default;
 pub mod engine_client_adapter;
 pub mod errors;

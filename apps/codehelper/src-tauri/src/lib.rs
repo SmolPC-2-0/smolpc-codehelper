@@ -270,6 +270,7 @@ pub fn run() {
         })
         .manage(AssistantState::default())
         .manage(HardwareCache::default())
+        .manage(commands::audio::AudioState::default())
         .invoke_handler(tauri::generate_handler![
             read,
             write,
@@ -299,7 +300,12 @@ pub fn run() {
             mode_refresh_tools,
             mode_open_host_app,
             setup_status,
-            setup_prepare
+            setup_prepare,
+            commands::audio::start_recording,
+            commands::audio::stop_recording,
+            commands::audio::speak_text,
+            commands::audio::stop_playback,
+            commands::audio::is_playing
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -307,6 +313,12 @@ pub fn run() {
     app.run(|app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {
             log::info!("App exit requested, shutting down engine");
+
+            // [I2 fix] Stop active audio before engine shutdown to avoid
+            // leaving WASAPI sessions in a bad state on Windows.
+            let audio = app_handle.state::<commands::audio::AudioState>();
+            commands::audio::stop_recording_sync(&audio);
+            commands::audio::stop_playback_sync(&audio);
 
             // Primary: shut down via supervisor handle.
             let supervisor_handle = app_handle.state::<EngineSupervisorHandle>();
