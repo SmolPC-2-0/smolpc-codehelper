@@ -372,6 +372,7 @@ pub(crate) struct AppState {
     pub(crate) generation_semaphore: Arc<Semaphore>,
     pub(crate) queue_semaphore: Arc<Semaphore>,
     pub(crate) voice_semaphore: Arc<Semaphore>,
+    pub(crate) tts: Arc<crate::tts_sidecar::TtsSidecarState>,
     pub(crate) queue_timeout: Duration,
     pub(crate) shutdown: Arc<Notify>,
     pub(crate) last_activity_ms: Arc<AtomicU64>,

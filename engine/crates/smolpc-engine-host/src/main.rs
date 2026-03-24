@@ -34,18 +34,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let token =
         std::env::var("SMOLPC_ENGINE_TOKEN").map_err(|_| "SMOLPC_ENGINE_TOKEN is required")?;
+    let token = Arc::new(token);
+
+    let tts_port = std::env::var("SMOLPC_TTS_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(19433);
+    let tts = Arc::new(tts_sidecar::TtsSidecarState::new(
+        tts_port,
+        token.clone(),
+        args.data_dir.clone(),
+        args.resource_dir.clone(),
+    ));
 
     let state = AppState {
-        token: Arc::new(token),
+        token,
         engine: Arc::new(EngineState::new(&args)),
         generation_semaphore: Arc::new(Semaphore::new(1)),
         queue_semaphore: Arc::new(Semaphore::new(args.queue_size)),
         voice_semaphore: Arc::new(Semaphore::new(1)),
+        tts,
         queue_timeout: args.queue_timeout,
         shutdown: Arc::new(Notify::new()),
         last_activity_ms: Arc::new(AtomicU64::new(epoch_ms())),
     };
     state.engine.launch_startup_probe();
+
+    // Spawn TTS sidecar in background (non-blocking to engine startup).
+    let tts_spawn = state.tts.clone();
+    tokio::spawn(async move {
+        tts_spawn.spawn_tts_sidecar().await;
+    });
 
     let idle_state = state.clone();
     tokio::spawn(async move {
@@ -69,6 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if idle_ms >= process_idle_exit.as_millis() as u64
                     && !idle_state.engine.generating.load(Ordering::SeqCst)
                 {
+                    idle_state.tts.kill_sidecar().await;
                     idle_state.shutdown.notify_waiters();
                     break;
                 }
@@ -107,6 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         log::info!("Shutdown signal received, cancelling active generation");
         state.engine.cancel();
+        state.tts.kill_sidecar().await;
         sleep(Duration::from_secs(2)).await;
     };
 
