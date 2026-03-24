@@ -46,7 +46,6 @@
 			case 'processing':
 				return 'loading';
 			case 'ready':
-				return 'ready';
 			case 'recording':
 				return 'recording';
 			default:
@@ -58,13 +57,9 @@
 			case 'arming':
 				return {
 					headline: 'Starting microphone...',
-					detail: 'Wait for "Speak now"'
+					detail: 'Switching to listening...'
 				};
 			case 'ready':
-				return {
-					headline: 'Speak now',
-					detail: 'Mic is live'
-				};
 			case 'recording':
 				return {
 					headline: 'Listening...',
@@ -274,12 +269,6 @@
 		background: color-mix(in srgb, var(--brand-soft) 86%, var(--surface-floating));
 	}
 
-	.chat-input__status--ready {
-		border-color: color-mix(in srgb, var(--color-success) 42%, var(--outline-strong));
-		background: color-mix(in srgb, var(--color-success) 12%, var(--surface-floating));
-		animation: status-ready-pop 1.1s ease-out 1;
-	}
-
 	.chat-input__status--recording {
 		border-color: color-mix(in srgb, var(--color-primary) 42%, var(--outline-strong));
 		background: color-mix(in srgb, var(--color-primary) 12%, var(--surface-floating));
@@ -427,21 +416,6 @@
 		color: var(--color-destructive);
 		background: color-mix(in srgb, var(--color-destructive) 10%, var(--surface-widget));
 		animation: mic-pulse 1.4s ease-in-out infinite;
-	}
-
-	@keyframes status-ready-pop {
-		0% {
-			transform: translateY(4px) scale(0.96);
-			opacity: 0;
-		}
-		40% {
-			transform: translateY(0) scale(1.01);
-			opacity: 1;
-		}
-		100% {
-			transform: translateY(0) scale(1);
-			opacity: 1;
-		}
 	}
 
 	@keyframes mic-ready-flash {
