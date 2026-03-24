@@ -135,7 +135,7 @@
 		}
 	}
 
-	function micButtonTitle(): string {
+	const micButtonTitle = $derived.by(() => {
 		switch (voiceStore.micState) {
 			case 'arming':
 				return 'Starting microphone...';
@@ -151,7 +151,7 @@
 			default:
 				return 'Voice input';
 		}
-	}
+	});
 
 	$effect(() => {
 		const key = normalizedDraftKey;
@@ -207,7 +207,7 @@
 				class:chat-input__mic--processing={voiceStore.micState === 'processing'}
 				onclick={handleMicClick}
 				disabled={isMicActionDisabled}
-				title={micButtonTitle()}
+				title={micButtonTitle}
 			>
 				{#if voiceStore.micState === 'arming' || voiceStore.micState === 'processing'}
 					<Loader2 class="h-4 w-4 animate-spin" />

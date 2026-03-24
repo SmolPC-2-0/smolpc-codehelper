@@ -153,6 +153,10 @@ pub async fn start_recording(
         }
         *recording = Some(session);
     }
+    // Set AFTER the session is stored in the mutex — the cpal audio callback
+    // checks this flag before emitting the ready event. This ensures the
+    // event is only emitted once the session is fully registered, preventing
+    // a race where the callback fires before the mutex holds the session.
     session_registered.store(true, Ordering::Relaxed);
 
     log::info!(

@@ -106,6 +106,16 @@ async function startRecording(): Promise<void> {
 }
 
 async function stopRecording(): Promise<string> {
+	// Allow cancelling from arming state (quick double-tap before mic is live).
+	if (micState === 'arming') {
+		clearReadyTimers();
+		resetRecordingSession();
+		micState = 'idle';
+		// Best-effort cancel — the backend stream may not be fully started yet.
+		invoke('stop_recording').catch(() => {});
+		return '';
+	}
+
 	if (micState !== 'ready' && micState !== 'recording') return '';
 
 	clearReadyTimers();
