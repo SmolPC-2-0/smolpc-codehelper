@@ -3,6 +3,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Maximum recording length in samples (30 seconds at 48kHz stereo).
+/// Prevents unbounded memory growth on 8GB target hardware.
+const MAX_RECORDING_SAMPLES: usize = 48_000 * 2 * 30;
+
 // ── AudioState ───────────────────────────────────────────────────────
 
 /// Managed state for audio recording and playback.
@@ -37,19 +41,25 @@ struct PlaybackHandle {
 
 // ── Commands ─────────────────────────────────────────────────────────
 
+/// [I1 fix] start_recording uses a narrow lock scope: check-then-build-then-set
+/// to avoid holding the mutex across cpal device enumeration (which involves
+/// Windows COM/WASAPI calls that can take 50-200ms).
 #[tauri::command]
 pub async fn start_recording(
     state: tauri::State<'_, AudioState>,
 ) -> Result<(), String> {
-    let mut recording = state
-        .recording
-        .lock()
-        .map_err(|e| format!("Lock poisoned: {e}"))?;
-
-    if recording.is_some() {
-        return Err("Already recording".to_string());
+    // Quick check — don't hold lock during device enumeration.
+    {
+        let recording = state
+            .recording
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
+        if recording.is_some() {
+            return Err("Already recording".to_string());
+        }
     }
 
+    // Build stream without holding the lock.
     let host = cpal::default_host();
     let device = host
         .default_input_device()
@@ -64,12 +74,18 @@ pub async fn start_recording(
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let buffer_clone = Arc::clone(&buffer);
 
+    // [C2 fix] Cap recording buffer at MAX_RECORDING_SAMPLES to prevent
+    // unbounded memory growth if a student leaves recording on.
     let stream = device
         .build_input_stream(
             &config.into(),
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
                 if let Ok(mut buf) = buffer_clone.lock() {
-                    buf.extend_from_slice(data);
+                    let remaining = MAX_RECORDING_SAMPLES.saturating_sub(buf.len());
+                    if remaining > 0 {
+                        let to_copy = data.len().min(remaining);
+                        buf.extend_from_slice(&data[..to_copy]);
+                    }
                 }
             },
             |err| {
@@ -83,12 +99,25 @@ pub async fn start_recording(
         .play()
         .map_err(|e| format!("Failed to start recording: {e}"))?;
 
-    *recording = Some(RecordingSession {
+    let session = RecordingSession {
         _stream: stream,
         buffer,
         sample_rate,
         channels,
-    });
+    };
+
+    // Re-acquire lock and set — TOCTOU double-check catches concurrent callers.
+    {
+        let mut recording = state
+            .recording
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
+        if recording.is_some() {
+            // Another caller won the race — drop our session.
+            return Err("Recording started by another caller".to_string());
+        }
+        *recording = Some(session);
+    }
 
     log::info!("Recording started: {sample_rate}Hz, {channels}ch");
     Ok(())
@@ -131,9 +160,7 @@ pub async fn stop_recording(
     let resampled = resample_to_16k(&mono_samples, session.sample_rate)?;
 
     // POST to engine.
-    let client = supervisor
-        .get_client(Duration::from_secs(60))
-        .await?;
+    let client = supervisor.get_client(Duration::from_secs(60)).await?;
     let text = client
         .transcribe(&resampled)
         .await
@@ -143,6 +170,9 @@ pub async fn stop_recording(
     Ok(text)
 }
 
+/// [I4 fix] speak_text uses a oneshot channel to report playback initialization
+/// failures from the dedicated thread back to the async caller. The frontend
+/// gets a proper error instead of a silent Ok(()) followed by is_playing()=false.
 #[tauri::command]
 pub async fn speak_text(
     text: String,
@@ -150,26 +180,34 @@ pub async fn speak_text(
     audio_state: tauri::State<'_, AudioState>,
     supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<(), String> {
-    // Stop any existing playback.
-    stop_playback_inner(&audio_state)?;
+    // [C1 fix] Use async stop to avoid blocking tokio with jh.join().
+    stop_playback_async(&audio_state).await?;
 
     // Get WAV bytes from engine.
-    let client = supervisor
-        .get_client(Duration::from_secs(60))
-        .await?;
+    let client = supervisor.get_client(Duration::from_secs(60)).await?;
     let wav_bytes = client
         .speak(&text, voice.as_deref())
         .await
         .map_err(|e| format!("TTS failed: {e}"))?;
+
+    // [I4 fix] Oneshot channel: playback thread reports init success/failure.
+    let (init_tx, init_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
     // Play on a dedicated thread (rodio::OutputStream is !Send on some platforms).
     let stop_signal = Arc::new(AtomicBool::new(false));
     let stop_clone = Arc::clone(&stop_signal);
 
     let join_handle = std::thread::spawn(move || {
-        let Ok((_stream, stream_handle)) = rodio::OutputStream::try_default() else {
-            log::error!("Failed to open audio output");
-            return;
+        let (_stream, stream_handle) = match rodio::OutputStream::try_default() {
+            Ok(s) => {
+                // Signal success before starting playback.
+                let _ = init_tx.send(Ok(()));
+                s
+            }
+            Err(e) => {
+                let _ = init_tx.send(Err(format!("Failed to open audio output: {e}")));
+                return;
+            }
         };
         let sink = match rodio::Sink::try_new(&stream_handle) {
             Ok(s) => s,
@@ -197,6 +235,11 @@ pub async fn speak_text(
         }
     });
 
+    // Wait for the init result from the playback thread.
+    init_rx
+        .await
+        .map_err(|_| "Playback thread exited before initialization".to_string())??;
+
     let mut playback = audio_state
         .playback
         .lock()
@@ -210,10 +253,10 @@ pub async fn speak_text(
 }
 
 #[tauri::command]
-pub fn stop_playback(
+pub async fn stop_playback(
     state: tauri::State<'_, AudioState>,
 ) -> Result<(), String> {
-    stop_playback_inner(&state)
+    stop_playback_async(&state).await
 }
 
 #[tauri::command]
@@ -238,18 +281,51 @@ pub fn is_playing(
     }
 }
 
-fn stop_playback_inner(state: &AudioState) -> Result<(), String> {
-    let mut playback = state
-        .playback
-        .lock()
-        .map_err(|e| format!("Lock poisoned: {e}"))?;
-    if let Some(mut handle) = playback.take() {
+/// [C1 fix] Async-safe stop that uses spawn_blocking for the thread join,
+/// preventing tokio worker starvation. The stop signal is set immediately
+/// (fast), then the blocking join runs on the tokio blocking thread pool.
+async fn stop_playback_async(state: &AudioState) -> Result<(), String> {
+    let handle = {
+        let mut playback = state
+            .playback
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
+        playback.take()
+    };
+    if let Some(mut handle) = handle {
+        // Signal stop immediately — the playback loop checks every 50ms.
+        handle.stop_signal.store(true, Ordering::Relaxed);
+        if let Some(jh) = handle.join_handle.take() {
+            // Join on the blocking pool so we don't stall an async worker.
+            let _ = tokio::task::spawn_blocking(move || jh.join()).await;
+        }
+    }
+    Ok(())
+}
+
+/// Synchronous stop for use in non-async contexts (e.g., app exit cleanup).
+pub fn stop_playback_sync(state: &AudioState) {
+    let handle = {
+        let Ok(mut playback) = state.playback.lock() else {
+            return;
+        };
+        playback.take()
+    };
+    if let Some(mut handle) = handle {
         handle.stop_signal.store(true, Ordering::Relaxed);
         if let Some(jh) = handle.join_handle.take() {
             let _ = jh.join();
         }
     }
-    Ok(())
+}
+
+/// Stop any active recording. For use in app exit cleanup.
+pub fn stop_recording_sync(state: &AudioState) {
+    let Ok(mut recording) = state.recording.lock() else {
+        return;
+    };
+    // Dropping the RecordingSession stops the cpal stream.
+    recording.take();
 }
 
 // ── Resampling helpers ───────────────────────────────────────────────
@@ -295,8 +371,8 @@ fn resample_to_16k(samples: &[f32], source_rate: u32) -> Result<Vec<f32>, String
     let input_adapter =
         InterleavedSlice::new(samples, channels, samples.len()).map_err(|e| format!("{e}"))?;
     let output_len = output.len();
-    let mut output_adapter =
-        InterleavedSlice::new_mut(&mut output, channels, output_len).map_err(|e| format!("{e}"))?;
+    let mut output_adapter = InterleavedSlice::new_mut(&mut output, channels, output_len)
+        .map_err(|e| format!("{e}"))?;
 
     let (_nbr_in, nbr_out) = resampler
         .process_all_into_buffer(&input_adapter, &mut output_adapter, samples.len(), None)
@@ -353,5 +429,13 @@ mod tests {
             "Expected ~1600 samples, got {}",
             result.len()
         );
+    }
+
+    #[test]
+    fn recording_buffer_cap_constant_is_sane() {
+        // 30s at 48kHz stereo = 2,880,000 samples * 4 bytes = ~11 MB
+        assert_eq!(MAX_RECORDING_SAMPLES, 2_880_000);
+        let bytes = MAX_RECORDING_SAMPLES * std::mem::size_of::<f32>();
+        assert!(bytes < 12_000_000, "Cap should be under 12 MB");
     }
 }

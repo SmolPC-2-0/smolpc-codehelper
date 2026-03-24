@@ -314,6 +314,12 @@ pub fn run() {
         if let tauri::RunEvent::ExitRequested { .. } = event {
             log::info!("App exit requested, shutting down engine");
 
+            // [I2 fix] Stop active audio before engine shutdown to avoid
+            // leaving WASAPI sessions in a bad state on Windows.
+            let audio = app_handle.state::<commands::audio::AudioState>();
+            commands::audio::stop_recording_sync(&audio);
+            commands::audio::stop_playback_sync(&audio);
+
             // Primary: shut down via supervisor handle.
             let supervisor_handle = app_handle.state::<EngineSupervisorHandle>();
             tauri::async_runtime::block_on(async {
