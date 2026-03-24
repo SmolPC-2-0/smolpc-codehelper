@@ -8,6 +8,114 @@
 
 ---
 
+## 0. Review Amendments (resolved blockers)
+
+### 0a. Dev-mode resource resolution — option (d): per-connector resource roots
+
+**Problem:** `app_paths.rs` validates dev-mode by checking that `CARGO_MANIFEST_DIR/resources` contains at least one of `["python", "models", "gimp", "blender", "libreoffice"]`. After extraction, `gimp/`, `blender/`, `libreoffice/` won't be there.
+
+**Solution:** Change `KNOWN_BUNDLED_RESOURCE_ROOTS` to only contain app-owned resources. Connector resources are resolved by each connector crate independently.
+
+```rust
+// app_paths.rs — AFTER
+const KNOWN_BUNDLED_RESOURCE_ROOTS: [&str; 2] = ["python", "models"];
+```
+
+Each connector already receives `resource_dir: Option<PathBuf>` at construction and probes for its own resources with dev-fallback candidates:
+- `resource_dir.join("blender")` (production: Tauri bundle maps connector resources here)
+- `env!("CARGO_MANIFEST_DIR")/resources/blender` (legacy dev path, still works if symlinked)
+
+In production builds, Tauri's `bundle.resources` maps `../../connectors/X/resources/ → X/` so the connector resources appear at the same paths they do today. In dev mode, the Tauri dev server handles the resource mapping via `tauri.conf.json` — no code change needed beyond trimming the validation constant.
+
+The connector resource resolution code in each connector's `resources.rs` / `provider.rs` already has multi-candidate fallback logic. No new abstraction needed.
+
+### 0b. sysinfo version — promote to workspace dependency
+
+**Problem:** App pins `sysinfo = "=0.32.1"` with an exact version. `launch.rs` (moving to connector-common) also needs sysinfo.
+
+**Solution:** Promote to `[workspace.dependencies]` in root `Cargo.toml`:
+```toml
+sysinfo = { version = "=0.32.1" }
+```
+Both `app/src-tauri/Cargo.toml` and `crates/smolpc-connector-common/Cargo.toml` use `sysinfo.workspace = true`.
+
+### 0c. Executor signatures — concrete CancellationToken changes
+
+All three executor functions change their `state` parameter:
+
+```rust
+// BEFORE (all three executors):
+pub async fn execute_blender_request<F>(
+    ...,
+    state: &AssistantState,
+    ...
+)
+
+// AFTER:
+pub async fn execute_blender_request<F>(
+    ...,
+    cancel: &dyn CancellationToken,
+    ...
+)
+```
+
+Same pattern for `execute_gimp_request` and `execute_libreoffice_request`.
+
+### 0d. MockCancellationToken for connector tests
+
+Tests in extracted crates call `state.mark_cancelled()` which isn't on the `CancellationToken` trait. Add a test utility to connector-common:
+
+```rust
+// In smolpc-connector-common, #[cfg(test)] or behind a "test-utils" feature:
+pub struct MockCancellationToken {
+    cancelled: std::sync::atomic::AtomicBool,
+}
+
+impl MockCancellationToken {
+    pub fn new() -> Self {
+        Self { cancelled: AtomicBool::new(false) }
+    }
+    pub fn mark_cancelled(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+}
+
+impl CancellationToken for MockCancellationToken {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+}
+```
+
+Used at: `blender/executor.rs:423`, `libreoffice/executor.rs:902`, `text_generation.rs:119`.
+
+### 0e. MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION — complete consumer list
+
+In addition to the connector providers, these app-side files also consume the constant:
+- `modes/code.rs:4` — `use crate::assistant::MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION`
+- `commands/assistant.rs:2` — same
+
+After move: both import from `smolpc_connector_common::MODE_UNDO_NOT_SUPPORTED`. Added to Section 5 rewiring table.
+
+### 0f. Additional script/config path updates
+
+| File | Reference | Change |
+|------|-----------|--------|
+| `scripts/build-windows-local-bundle.ps1:195` | `"smolpc-code-helper.exe"` | → `"smolpc-desktop.exe"` |
+| `scripts/run-tauri-dev.ps1:54,59` | `"smolpc-code-helper"` | → `"smolpc-desktop"` |
+| `.github/workflows/ci.yml:24` | `--workspace apps/codehelper` | → `--workspace app` |
+| `.github/workflows/ci.yml:133-140` | `apps/codehelper/*` filter | → `app/*` |
+
+### 0g. TextStreamer error message — make generic
+
+`text_generation.rs:95` hardcodes `"Blender generation failed: {message}"`. Change to `"Text generation failed: {message}"` during extraction since this is now shared infrastructure.
+
+### 0h. Tauri identifier — keep unchanged
+
+Changing `com.smolpc.codehelper` to `com.smolpc.desktop` would break NSIS upgrade detection. **Keep the identifier as `com.smolpc.codehelper`** — only the `productName` changes to "SmolPC 2.0". This preserves upgrade path for existing installs.
+
+---
+
 ## 1. Target Directory Structure
 
 ```
@@ -461,7 +569,7 @@ smolpc-connector-libreoffice = { path = "../../connectors/libreoffice" }
 ```json
 {
   "productName": "SmolPC 2.0",
-  "identifier": "com.smolpc.desktop",
+  "identifier": "com.smolpc.codehelper",  // KEEP unchanged — preserves NSIS upgrade path
   "bundle": {
     "resources": {
       "libs/": "libs/",
