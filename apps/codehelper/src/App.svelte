@@ -50,7 +50,6 @@
 	let switchingRecommendedModel = $state(false);
 	// Banner dismissal lasts only until the user leaves the current mode.
 	let dismissedToolRecommendationMode = $state<AppMode | null>(null);
-	let lastSeenActiveMode = $state<AppMode | null>(null);
 	let memoryPressureNotice = $state<string | null>(null);
 	let dismissedMemoryPressureKey = $state<string | null>(null);
 	let hostAppLaunchError = $state<string | null>(null);
@@ -196,13 +195,6 @@
 	const latestAssistantMessageId = $derived(
 		[...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null
 	);
-
-	$effect(() => {
-		if (activeMode !== lastSeenActiveMode) {
-			dismissedToolRecommendationMode = null;
-			lastSeenActiveMode = activeMode;
-		}
-	});
 
 	function setMessagesContainer(element: HTMLDivElement) {
 		messagesContainer = element;
@@ -689,6 +681,7 @@ Generating summary...`
 
 		isSwitchingMode = true;
 		try {
+			dismissedToolRecommendationMode = null;
 			// Cancel any in-flight generation before switching modes
 			if (hasActiveStream || inferenceStore.isGenerating) {
 				await handleCancelGeneration();
