@@ -32,6 +32,14 @@ pub(super) struct WhisperApi {
     ) -> OvStatus,
     pub(super) free_pipeline: unsafe extern "C" fn(*mut OvGenAiWhisperPipeline),
 
+    // Config
+    pub(super) pipeline_get_generation_config: unsafe extern "C" fn(
+        *mut OvGenAiWhisperPipeline,
+        *mut *mut OvGenAiWhisperGenerationConfig,
+    ) -> OvStatus,
+    pub(super) generation_config_free:
+        unsafe extern "C" fn(*mut OvGenAiWhisperGenerationConfig),
+
     // Generation
     pub(super) generate: unsafe extern "C" fn(
         *mut OvGenAiWhisperPipeline,
@@ -43,12 +51,12 @@ pub(super) struct WhisperApi {
 
     // Results
     pub(super) results_free: unsafe extern "C" fn(*mut OvGenAiWhisperDecodedResults),
-    pub(super) results_get_texts_size:
-        unsafe extern "C" fn(*const OvGenAiWhisperDecodedResults, *mut usize) -> OvStatus,
-    pub(super) results_get_text: unsafe extern "C" fn(
+    // Two-call buffer pattern: first call with output=null to get size,
+    // second call with allocated buffer to get the string.
+    pub(super) results_get_string: unsafe extern "C" fn(
         *const OvGenAiWhisperDecodedResults,
-        usize,
-        *mut *const c_char,
+        *mut u8,    // output buffer (null on first call)
+        *mut usize, // in/out: required size including null terminator
     ) -> OvStatus,
 }
 
@@ -78,6 +86,14 @@ impl WhisperApi {
                     &openvino_genai_c,
                     b"ov_genai_whisper_pipeline_free\0",
                 )?,
+                pipeline_get_generation_config: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_whisper_pipeline_get_generation_config\0",
+                )?,
+                generation_config_free: load_symbol(
+                    &openvino_genai_c,
+                    b"ov_genai_whisper_generation_config_free\0",
+                )?,
                 generate: load_symbol(
                     &openvino_genai_c,
                     b"ov_genai_whisper_pipeline_generate\0",
@@ -86,13 +102,9 @@ impl WhisperApi {
                     &openvino_genai_c,
                     b"ov_genai_whisper_decoded_results_free\0",
                 )?,
-                results_get_texts_size: load_symbol(
+                results_get_string: load_symbol(
                     &openvino_genai_c,
-                    b"ov_genai_whisper_decoded_results_get_texts_size\0",
-                )?,
-                results_get_text: load_symbol(
-                    &openvino_genai_c,
-                    b"ov_genai_whisper_decoded_results_get_text\0",
+                    b"ov_genai_whisper_decoded_results_get_string\0",
                 )?,
 
                 _openvino_c: openvino_c,

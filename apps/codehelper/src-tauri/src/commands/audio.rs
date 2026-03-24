@@ -128,12 +128,15 @@ pub async fn stop_recording(
     audio_state: tauri::State<'_, AudioState>,
     supervisor: tauri::State<'_, crate::engine::EngineSupervisorHandle>,
 ) -> Result<String, String> {
+    log::info!("stop_recording command invoked");
     // Take the recording session (dropping the stream stops capture).
     let session = {
         let mut recording = audio_state
             .recording
             .lock()
             .map_err(|e| format!("Lock poisoned: {e}"))?;
+        let has_session = recording.is_some();
+        log::info!("stop_recording: has active session = {has_session}");
         recording.take().ok_or("Not recording")?
     };
 
@@ -145,22 +148,34 @@ pub async fn stop_recording(
         buf.clone()
     };
 
+    log::info!(
+        "stop_recording: captured {} raw samples at {}Hz {}ch",
+        raw_samples.len(),
+        session.sample_rate,
+        session.channels
+    );
+
     if raw_samples.is_empty() {
         return Ok(String::new());
     }
 
     // Mono mix if stereo.
     let mono_samples = if session.channels > 1 {
+        log::info!("stop_recording: mono mixing {} stereo samples", raw_samples.len());
         mono_mix(&raw_samples, session.channels)
     } else {
         raw_samples
     };
+    log::info!("stop_recording: {} mono samples, resampling to 16kHz", mono_samples.len());
 
     // Resample to 16kHz.
     let resampled = resample_to_16k(&mono_samples, session.sample_rate)?;
+    log::info!("stop_recording: resampled to {} samples at 16kHz", resampled.len());
 
     // POST to engine.
+    log::info!("stop_recording: getting engine client...");
     let client = supervisor.get_client(Duration::from_secs(60)).await?;
+    log::info!("stop_recording: got client, posting to engine /v1/audio/transcriptions...");
     let text = client
         .transcribe(&resampled)
         .await

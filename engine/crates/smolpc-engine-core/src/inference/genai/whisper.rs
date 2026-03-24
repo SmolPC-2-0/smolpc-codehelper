@@ -84,62 +84,59 @@ impl WhisperPipeline {
         let api = &self.inner.api;
         let pipeline = self.inner.pipeline;
 
+        log::info!("whisper: calling generate with {} samples (null config = defaults)", audio.len());
+
         let mut results_ptr: *mut OvGenAiWhisperDecodedResults = ptr::null_mut();
         let status = unsafe {
             (api.generate)(
                 pipeline,
                 audio.as_ptr(),
                 audio.len(),
-                ptr::null(), // config = null → use defaults (English, transcribe)
+                ptr::null(), // null config = use defaults (confirmed safe by C API source)
                 &mut results_ptr,
             )
         };
+
+        log::info!("whisper: generate returned status {status}");
         check_whisper_status(api, status, "whisper_pipeline_generate")?;
 
         if results_ptr.is_null() {
             return Err("whisper_pipeline_generate returned null results".to_string());
         }
 
-        // Extract transcribed text from results.
-        let text = unsafe { extract_text(api, results_ptr) };
+        // Extract text using the two-call buffer pattern:
+        // 1) Call with null output to get required size
+        // 2) Allocate buffer, call again to get the string
+        log::info!("whisper: extracting text from results via get_string (two-call pattern)");
 
-        // Always free results, even if extraction failed.
+        let text = unsafe {
+            // First call: get required buffer size.
+            let mut size: usize = 0;
+            let status = (api.results_get_string)(results_ptr, ptr::null_mut(), &mut size);
+            check_whisper_status(api, status, "whisper_results_get_string (size query)")?;
+
+            if size == 0 {
+                String::new()
+            } else {
+                // Second call: fill buffer.
+                let mut buf = vec![0u8; size];
+                let status = (api.results_get_string)(results_ptr, buf.as_mut_ptr(), &mut size);
+                check_whisper_status(api, status, "whisper_results_get_string (fill)")?;
+
+                // Trim null terminator and convert to String.
+                if let Some(nul_pos) = buf.iter().position(|&b| b == 0) {
+                    buf.truncate(nul_pos);
+                }
+                String::from_utf8_lossy(&buf).trim().to_string()
+            }
+        };
+
+        // Always free results.
         unsafe { (api.results_free)(results_ptr) };
 
-        text
+        log::info!("whisper: transcription complete, {} chars: {:?}",
+            text.len(),
+            if text.len() > 80 { &text[..80] } else { &text });
+        Ok(text)
     }
-}
-
-/// Extract the first text segment from WhisperDecodedResults.
-unsafe fn extract_text(
-    api: &WhisperApi,
-    results: *const OvGenAiWhisperDecodedResults,
-) -> Result<String, String> {
-    let mut count: usize = 0;
-    let status = (api.results_get_texts_size)(results, &mut count);
-    check_whisper_status(api, status, "whisper_results_get_texts_size")?;
-
-    if count == 0 {
-        return Ok(String::new());
-    }
-
-    // Concatenate all text segments (typically just one for short audio).
-    let mut full_text = String::new();
-    for i in 0..count {
-        let mut text_ptr: *const std::ffi::c_char = ptr::null();
-        let status = (api.results_get_text)(results, i, &mut text_ptr);
-        check_whisper_status(api, status, &format!("whisper_results_get_text[{i}]"))?;
-
-        if !text_ptr.is_null() {
-            let segment = c_string_to_string(text_ptr);
-            if !segment.is_empty() {
-                if !full_text.is_empty() {
-                    full_text.push(' ');
-                }
-                full_text.push_str(&segment);
-            }
-        }
-    }
-
-    Ok(full_text)
 }
