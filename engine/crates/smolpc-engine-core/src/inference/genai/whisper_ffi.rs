@@ -1,9 +1,7 @@
 use super::super::runtime_loading::{
     OpenVinoRuntimeBundle, OpenVinoRuntimeLoader, RetainedLibrary,
 };
-use super::openvino_ffi::{
-    c_string_to_string, cstring, load_symbol, path_to_cstring, OvStatus, OV_STATUS_OK,
-};
+use super::openvino_ffi::{c_string_to_string, load_symbol, OvStatus, OV_STATUS_OK};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 use std::sync::{Arc, Mutex, OnceLock};
