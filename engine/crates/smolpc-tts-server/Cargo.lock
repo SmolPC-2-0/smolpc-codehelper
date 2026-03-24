@@ -806,7 +806,7 @@ dependencies = [
 [[package]]
 name = "kitten-tts"
 version = "0.1.0"
-source = "git+https://github.com/second-state/kitten_tts_rs.git?tag=v0.2.1#6fe1a84da20bd7e4d08a7c8da32108a7994e54a4"
+source = "git+https://github.com/SmolPC-2-0/kitten_tts_rs.git?branch=smolpc-no-window#4461999e865895d39eea6a75011bf33868162e24"
 dependencies = [
  "anyhow",
  "axum",
