@@ -7,14 +7,6 @@ members = [
   "engine/crates/smolpc-engine-host",
   "engine/crates/smolpc-engine-client",
 ]
-default-members = [
-  "apps/codehelper/src-tauri",
-  "crates/smolpc-assistant-types",
-  "crates/smolpc-mcp-client",
-  "engine/crates/smolpc-engine-core",
-  "engine/crates/smolpc-engine-host",
-  "engine/crates/smolpc-engine-client",
-]
 resolver = "2"
 
 [workspace.package]

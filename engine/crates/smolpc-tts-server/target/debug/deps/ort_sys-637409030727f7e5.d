@@ -1,0 +1,9 @@
+C:\Users\Student\smolpc\CodeHelper\final-edition-openvino-supported-qwen-baseline\engine\crates\smolpc-tts-server\target\debug\deps\ort_sys-637409030727f7e5.d: C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\lib.rs C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\internal\mod.rs C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\internal\dirs.rs C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\stub.rs C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\version.rs
+
+C:\Users\Student\smolpc\CodeHelper\final-edition-openvino-supported-qwen-baseline\engine\crates\smolpc-tts-server\target\debug\deps\libort_sys-637409030727f7e5.rmeta: C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\lib.rs C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\internal\mod.rs C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\internal\dirs.rs C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\stub.rs C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\version.rs
+
+C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\lib.rs:
+C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\internal\mod.rs:
+C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\internal\dirs.rs:
+C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\stub.rs:
+C:\Users\Student\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ort-sys-2.0.0-rc.12\src\version.rs:

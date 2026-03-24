@@ -1,0 +1,21 @@
+cargo:rustc-check-cfg=cfg(link_error)
+cargo:rerun-if-env-changed=ORT_LIB_PATH
+cargo:rerun-if-env-changed=ORT_LIB_LOCATION
+cargo:rerun-if-env-changed=CARGO_NET_OFFLINE
+cargo:rerun-if-env-changed=ORT_SKIP_DOWNLOAD
+cargo:rerun-if-env-changed=ORT_OFFLINE
+[ort-sys] [DEBUG] Using prebuilt binaries
+[ort-sys] [DEBUG] looking for prebuilt binaries matching feature set: none
+[ort-sys] [DEBUG] downloading from 'https://cdn.pyke.io/0/pyke:ort-rs/ms@1.24.2/x86_64-pc-windows-msvc.tar.lzma2'; tls_provider=NativeTls, root_certs=PlatformVerifier
+cargo:rerun-if-env-changed=ORT_CXX_STDLIB
+cargo:rerun-if-env-changed=CXXSTDLIB
+cargo:rustc-link-lib=dxguid
+cargo:rustc-link-lib=DXCORE
+cargo:rustc-link-lib=DXGI
+cargo:rustc-link-lib=D3D12
+cargo:rustc-link-lib=DirectML
+cargo:rerun-if-changed=C:\Users\Student\smolpc\CodeHelper\final-edition-openvino-supported-qwen-baseline\engine\crates\smolpc-tts-server\target\debug\DirectML.dll
+cargo:rerun-if-changed=C:\Users\Student\smolpc\CodeHelper\final-edition-openvino-supported-qwen-baseline\engine\crates\smolpc-tts-server\target\debug\examples\DirectML.dll
+cargo:rerun-if-changed=C:\Users\Student\smolpc\CodeHelper\final-edition-openvino-supported-qwen-baseline\engine\crates\smolpc-tts-server\target\debug\deps\DirectML.dll
+cargo:rustc-link-search=native=C:\Users\Student\AppData\Local\ort.pyke.io\dfbin\x86_64-pc-windows-msvc\b685bfc8d336e0ba95c066a7a982c03aa6dedd528a492eb99ca4ccb7f3af9e7a
+cargo:rustc-link-lib=static=onnxruntime
