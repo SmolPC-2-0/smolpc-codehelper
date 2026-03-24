@@ -45,6 +45,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: Test engine crates
         run: cargo test -p smolpc-engine-core -p smolpc-engine-client -p smolpc-engine-host
 
@@ -54,6 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: Test engine crates
         run: cargo test -p smolpc-engine-core -p smolpc-engine-client -p smolpc-engine-host
 
@@ -65,6 +67,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: Check Tauri crate builds
         run: cargo check -p smolpc-code-helper
 
