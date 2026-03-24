@@ -45,6 +45,9 @@ pub(crate) struct EngineState {
     pub(crate) startup_attempt_seq: AtomicU64,
     pub(crate) openvino_startup_probe: Arc<Mutex<Option<OpenVinoStartupProbeResult>>>,
     pub(crate) openvino_startup_probe_ready: Arc<Notify>,
+    #[cfg(target_os = "windows")]
+    pub(crate) whisper_pipeline:
+        Arc<Mutex<Option<smolpc_engine_core::inference::genai::whisper::WhisperPipeline>>>,
 }
 
 impl EngineState {
@@ -114,6 +117,8 @@ impl EngineState {
             startup_attempt_seq: AtomicU64::new(0),
             openvino_startup_probe: Arc::new(Mutex::new(None)),
             openvino_startup_probe_ready: Arc::new(Notify::new()),
+            #[cfg(target_os = "windows")]
+            whisper_pipeline: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -366,6 +371,7 @@ pub(crate) struct AppState {
     pub(crate) engine: Arc<EngineState>,
     pub(crate) generation_semaphore: Arc<Semaphore>,
     pub(crate) queue_semaphore: Arc<Semaphore>,
+    pub(crate) voice_semaphore: Arc<Semaphore>,
     pub(crate) queue_timeout: Duration,
     pub(crate) shutdown: Arc<Notify>,
     pub(crate) last_activity_ms: Arc<AtomicU64>,

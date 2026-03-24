@@ -39,6 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         engine: Arc::new(EngineState::new(&args)),
         generation_semaphore: Arc::new(Semaphore::new(1)),
         queue_semaphore: Arc::new(Semaphore::new(args.queue_size)),
+        voice_semaphore: Arc::new(Semaphore::new(1)),
         queue_timeout: args.queue_timeout,
         shutdown: Arc::new(Notify::new()),
         last_activity_ms: Arc::new(AtomicU64::new(epoch_ms())),
