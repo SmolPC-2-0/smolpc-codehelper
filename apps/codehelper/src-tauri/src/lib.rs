@@ -256,11 +256,12 @@ pub fn run() {
             let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(16);
             let (state_tx, state_rx) = tokio::sync::watch::channel(EngineLifecycleState::Idle);
             let (client_tx, client_rx) = tokio::sync::watch::channel::<Option<EngineClient>>(None);
+            let (pid_tx, pid_rx) = tokio::sync::watch::channel::<Option<u32>>(None);
 
-            let handle = EngineSupervisorHandle::new(cmd_tx, state_rx, client_rx);
+            let handle = EngineSupervisorHandle::new(cmd_tx, state_rx, client_rx, pid_rx);
 
             let supervisor =
-                EngineSupervisor::new(cmd_rx, state_tx, client_tx, app.handle().clone());
+                EngineSupervisor::new(cmd_rx, state_tx, client_tx, pid_tx, app.handle().clone());
             tauri::async_runtime::spawn(supervisor.run());
             log::info!("Engine supervisor spawned");
 
@@ -322,9 +323,14 @@ pub fn run() {
 
             // Primary: shut down via supervisor handle.
             let supervisor_handle = app_handle.state::<EngineSupervisorHandle>();
+            // Snapshot the PID before shutdown clears it — used as fallback for force-kill.
+            let last_pid = supervisor_handle.last_engine_pid();
             tauri::async_runtime::block_on(async {
                 match tokio::time::timeout(
-                    std::time::Duration::from_secs(3),
+                    // Must exceed the supervisor's internal 5s shutdown_and_wait
+                    // timeout, otherwise this outer timeout always fires first and
+                    // graceful shutdown never completes.
+                    std::time::Duration::from_secs(8),
                     supervisor_handle.shutdown(),
                 )
                 .await
@@ -335,11 +341,11 @@ pub fn run() {
                     }
                     Ok(Err(e)) => {
                         log::warn!("Supervisor shutdown returned error: {e}");
-                        force_kill_engine();
+                        force_kill_engine(last_pid);
                     }
                     Err(_) => {
-                        log::warn!("Supervisor shutdown timed out after 3s");
-                        force_kill_engine();
+                        log::warn!("Supervisor shutdown timed out after 8s");
+                        force_kill_engine(last_pid);
                     }
                 }
             });
@@ -360,15 +366,22 @@ fn cleanup_engine_pid() {
     }
 }
 
-fn force_kill_engine() {
-    let Some(pid_path) = engine_pid_path() else {
-        return;
-    };
-    let Ok(pid_str) = std::fs::read_to_string(&pid_path) else {
-        return;
-    };
-    let Ok(pid) = pid_str.trim().parse::<u32>() else {
-        return;
+fn force_kill_engine(handle_pid: Option<u32>) {
+    // Prefer the in-memory PID from the supervisor handle (always current),
+    // fall back to the PID file (may be stale after restarts).
+    let pid = if let Some(pid) = handle_pid {
+        pid
+    } else {
+        let Some(pid_path) = engine_pid_path() else {
+            return;
+        };
+        let Ok(pid_str) = std::fs::read_to_string(&pid_path) else {
+            return;
+        };
+        let Ok(pid) = pid_str.trim().parse::<u32>() else {
+            return;
+        };
+        pid
     };
 
     // Verify the PID is still an engine process before killing

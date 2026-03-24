@@ -26,6 +26,9 @@ pub struct EngineSupervisorHandle {
     /// the Running state via `state_tx`, so this receiver is guaranteed to have the
     /// client available by the time `get_client()` observes Running.
     client_rx: Arc<std::sync::Mutex<watch::Receiver<Option<EngineClient>>>>,
+    /// Watch receiver for the current engine PID. Used by the shutdown path to
+    /// force-kill the correct process without relying on a potentially stale PID file.
+    pid_rx: watch::Receiver<Option<u32>>,
 }
 
 impl EngineSupervisorHandle {
@@ -34,11 +37,13 @@ impl EngineSupervisorHandle {
         cmd_tx: mpsc::Sender<EngineCommand>,
         state_rx: watch::Receiver<EngineLifecycleState>,
         client_rx: watch::Receiver<Option<EngineClient>>,
+        pid_rx: watch::Receiver<Option<u32>>,
     ) -> Self {
         Self {
             cmd_tx,
             state_rx,
             client_rx: Arc::new(std::sync::Mutex::new(client_rx)),
+            pid_rx,
         }
     }
 
@@ -159,6 +164,12 @@ impl EngineSupervisorHandle {
             .send(EngineCommand::SetDesiredModel { model_id })
             .await;
     }
+
+    /// Return the last known engine PID, if any.
+    /// Used by the shutdown fallback to force-kill the correct process.
+    pub fn last_engine_pid(&self) -> Option<u32> {
+        *self.pid_rx.borrow()
+    }
 }
 
 #[cfg(test)]
@@ -177,7 +188,8 @@ mod tests {
         let (cmd_tx, cmd_rx) = mpsc::channel(16);
         let (state_tx, state_rx) = watch::channel(initial_state);
         let (client_tx, client_rx) = watch::channel::<Option<EngineClient>>(None);
-        let handle = EngineSupervisorHandle::new(cmd_tx, state_rx, client_rx);
+        let (_pid_tx, pid_rx) = watch::channel::<Option<u32>>(None);
+        let handle = EngineSupervisorHandle::new(cmd_tx, state_rx, client_rx, pid_rx);
         (handle, cmd_rx, state_tx, client_tx)
     }
 
