@@ -310,7 +310,7 @@ impl EngineClient {
             .header(AUTHORIZATION, self.auth_header())
             .header(CONTENT_TYPE, "application/octet-stream")
             .body(bytes)
-            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
+            .timeout(Duration::from_secs(60))
             .send()
             .await?;
         let response = ensure_success(response, "/v1/audio/transcriptions").await?;

@@ -304,7 +304,8 @@ pub fn run() {
             commands::audio::start_recording,
             commands::audio::stop_recording,
             commands::audio::speak_text,
-            commands::audio::stop_playback
+            commands::audio::stop_playback,
+            commands::audio::is_playing
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

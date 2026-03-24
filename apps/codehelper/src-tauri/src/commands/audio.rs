@@ -216,6 +216,28 @@ pub fn stop_playback(
     stop_playback_inner(&state)
 }
 
+#[tauri::command]
+pub fn is_playing(
+    state: tauri::State<'_, AudioState>,
+) -> Result<bool, String> {
+    let playback = state
+        .playback
+        .lock()
+        .map_err(|e| format!("Lock poisoned: {e}"))?;
+    match &*playback {
+        Some(handle) => {
+            // If the thread has finished, playback is done.
+            let thread_alive = handle
+                .join_handle
+                .as_ref()
+                .map(|jh| !jh.is_finished())
+                .unwrap_or(false);
+            Ok(thread_alive && !handle.stop_signal.load(Ordering::Relaxed))
+        }
+        None => Ok(false),
+    }
+}
+
 fn stop_playback_inner(state: &AudioState) -> Result<(), String> {
     let mut playback = state
         .playback
@@ -264,10 +286,9 @@ fn resample_to_16k(samples: &[f32], source_rate: u32) -> Result<Vec<f32>, String
     )
     .map_err(|e| format!("Failed to create resampler: {e}"))?;
 
-    // Allocate output buffer — estimate needed size with margin.
-    let ratio = TARGET_RATE as f64 / source as f64;
-    let estimated_output = (samples.len() as f64 * ratio) as usize + chunk_size;
-    let mut output = vec![0.0f32; estimated_output];
+    // Allocate output buffer using rubato's official sizing API.
+    let output_len = resampler.process_all_needed_output_len(samples.len());
+    let mut output = vec![0.0f32; output_len];
 
     // Use process_all_into_buffer for simplicity.
     use audioadapter_buffers::direct::InterleavedSlice;
@@ -315,6 +336,18 @@ mod tests {
         let samples = vec![0.0f32; 4800];
         let result = resample_to_16k(&samples, 48000).unwrap();
         // Allow some tolerance for resampler edge effects
+        assert!(
+            result.len() >= 1500 && result.len() <= 1700,
+            "Expected ~1600 samples, got {}",
+            result.len()
+        );
+    }
+
+    #[test]
+    fn resample_44100_to_16k_reduces_samples() {
+        // 4410 samples at 44.1kHz = 0.1s → should produce ~1600 samples at 16kHz
+        let samples = vec![0.0f32; 4410];
+        let result = resample_to_16k(&samples, 44100).unwrap();
         assert!(
             result.len() >= 1500 && result.len() <= 1700,
             "Expected ~1600 samples, got {}",
