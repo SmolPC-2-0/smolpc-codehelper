@@ -8,11 +8,15 @@ SmolPC Code Helper is an **offline AI coding assistant** for secondary school st
 
 **Stack:** Rust engine (`axum` HTTP server) + Tauri 2 + Svelte 5 + Tailwind 4
 
-**Architecture:** `engine/` contains the shared inference server (`smolpc-engine-host` + `smolpc-engine-core`). `apps/` contains product apps (Code Helper is the first). `launcher/` is the suite shell. The engine runs as a local HTTP server; Tauri apps connect via `smolpc-engine-client` over HTTP + SSE.
+**Architecture:**
+- `engine/` — shared inference server: `smolpc-engine-host` (axum, 17 modules), `smolpc-engine-core` (backends, hardware, models), `smolpc-engine-client` (HTTP+SSE client for apps), `smolpc-tts-server` (standalone TTS sidecar).
+- `apps/codehelper/` — Tauri 2 app with modes: Code (default), Blender, GIMP, LibreOffice. Each mode has its own executor, provider, and runtime under `src-tauri/src/modes/`.
+- `launcher/` — suite shell (extraction target, currently embedded in `apps/codehelper/src-tauri/src/launcher/`).
+- Engine runs as a local HTTP server on port 19432; Tauri apps connect via `smolpc-engine-client`.
 
-**Backend selection priority:** `directml` > `openvino_npu` > `cpu`
+**Backend selection priority:** `directml` (discrete GPU only) > `openvino_npu` > `cpu`. RAM-aware model defaults: 16GB+ gets `qwen3-4b`, <16GB gets `qwen2.5-1.5b-instruct`.
 
-**Current runtime status:** the supported shared model baseline is `qwen2.5-1.5b-instruct` (default) plus `qwen3-4b`. OpenVINO CPU and OpenVINO NPU now use structured chat history for normal chat requests; only explicit legacy ChatML payloads stay on the prompt-compatibility path.
+**Voice I/O:** Whisper STT via OpenVINO GenAI FFI (`/v1/audio/transcriptions`), TTS via `smolpc-tts-server` sidecar (`/v1/audio/speech`). Both Windows-only.
 
 ---
 
@@ -38,11 +42,13 @@ SMOLPC_OPENVINO_BUNDLE_ROOT=/path/to/libs
 SMOLPC_MODELS_DIR=/path/to/models
 ```
 
-**Key docs:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | [`docs/ENGINE_API.md`](docs/ENGINE_API.md) | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)
+**Key docs:** @docs/ARCHITECTURE.md | [`docs/ENGINE_API.md`](docs/ENGINE_API.md) (290 lines — read on demand) | @docs/CONTRIBUTING.md
 
 ---
 
 ## Conventions
+
+**Verify before claiming done.** Run pre-commit checks, live-test hardware paths with `SMOLPC_FORCE_EP=<backend> curl`, and confirm output BEFORE claiming success. Never say "should work" — prove it works.
 
 **DLL loading is centralized.** All `Library::new()` / `load_with_flags()` calls live in `runtime_loading.rs`. A source-invariant test enforces this — adding DLL loading elsewhere fails CI.
 
@@ -54,13 +60,7 @@ SMOLPC_MODELS_DIR=/path/to/models
 
 **Engine host owns all backend policy.** Launcher and Tauri app consume status only — they must not rank backends or override engine selection.
 
-**Engine lifecycle owned by EngineSupervisor.** A single tokio task owns spawn/kill/health/restart. Tauri commands never spawn or kill the engine directly — they send commands via mpsc channel and read state via watch channel.
-
-**Use `tauri::async_runtime::spawn` not `tokio::spawn` in `Builder::setup()`.** Tauri manages its own Tokio runtime; bare `tokio::spawn` in setup may target a different runtime or panic if none is active.
-
-**Commands get engine client via `supervisor.get_client(timeout)`.** The handle waits on a watch channel — no Mutex needed. `get_client_if_ready()` is the non-blocking variant.
-
-**Runtime mode preference must be in the Start command.** Never apply runtime mode post-spawn — that kills and respawns the engine. Pass it in `StartupConfig` so the supervisor sets `SMOLPC_FORCE_EP` before spawning.
+**Engine lifecycle owned by EngineSupervisor.** Tauri commands never spawn or kill the engine directly — they send commands via mpsc channel and read state via watch channel. See `.claude/rules/tauri-patterns.md` for detailed Tauri conventions.
 
 **Svelte 5 runes only.** No `writable` / `readable` from `svelte/store`. Use `$state`, `$derived`, `$effect`.
 
@@ -102,59 +102,32 @@ cd apps/codehelper && npm run check && npm run lint
 
 ## Learnings
 
-Corrections discovered during development. **When you correct a mistake, append a one-line rule here.**
+Hard-won rules from development. Organized by theme. **Detailed per-subsystem rules live in `.claude/rules/`** — these are the cross-cutting principles.
 
-- OpenVINO GenAI handles its own tokenization — Rust `TokenizerWrapper` is not involved for the NPU lane
-- OpenVINO 2026.0.0 is the pinned tuple — `openvino`, `openvino_genai`, `openvino_tokenizers` must match; mixing breaks ABI
-- Use INT4, not NF4, for broad NPU compatibility — NF4 only works on Core Ultra Series 2+
-- Qwen2.5 has TWO stop tokens: `<|endoftext|>` (151643) + `<|im_end|>` (151645) — check both
-- OpenVINO GenAI chat requests must use structured message history on CPU and NPU; keep the preformatted ChatML string path only for explicit legacy compatibility
-- Use `OnceLock<Result>` over `Once` for fallible init — `Once::call_once` can't return values
-- Use `AtomicBool` over `try_lock()` for state tracking — `try_lock()` creates TOCTOU races
-- Bundle fingerprint auto-invalidates on DLL change — mtime change forces fresh backend selection
-- Don't dismiss broken checks as "pre-existing" - if verification fails, fix it in the current session
-- Selection profile constant (`OPENVINO_SELECTION_PROFILE`) change forces re-evaluation of all cached decisions
-- NPU compilation is slow on first load but fast after - `CACHE_DIR` enables compiled blob reuse
-- Qwen3 OpenVINO support is currently non-thinking only; align temperature, top_p, top_k, and presence_penalty with the upstream non-thinking guidance
-- Do NOT set `min_new_tokens` on OpenVINO GenAI 2026.0.0 — any value >= 1 permanently suppresses EOS detection, causing runaway generation
-- PowerShell wrappers around native tools must coerce stderr records to plain strings before logging or `$ErrorActionPreference = 'Stop'` will treat normal tool output as a fatal error
-- After a long-running model export times out at the shell layer, check for orphaned builder `python` processes before retrying or the next validation pass starts from a dirty state
-- Do not hard-block DirectML mode selection on the background hardware probe; the probe can time out while DirectML runtime initialization still works with a valid staged artifact
-- NPU StaticLLMPipeline only supports greedy decoding — always force do_sample=false for NPU target
-- presence_penalty is incompatible with NPU greedy decoding — skip it on NPU
-- NPU StaticLLMPipeline does not support extra_context API for thinking control — inject /nothink into the system message content instead
+*Hardware validation:*
+- Unit tests validate logic; live `curl` tests validate hardware paths. After changing generation config, backend selection, or model loading: start the engine with `SMOLPC_FORCE_EP=<backend>` and curl a streaming chat completion before declaring it fixed
+- When removing or replacing a dependency, trace every consumed field to its terminal behavior — a "hint" boolean can be a hard gate downstream
+- DirectML on Intel integrated GPU produces garbage — only accept discrete GPUs as DirectML candidates
+- DXGI adapter enumeration (`IDXGIFactory6`) is 1000x faster than WMI for GPU detection
+
+*Rust state management:*
+- Use RAII drop guards for multi-path state transitions (e.g., `TransitionGuard` for `model_transition_in_progress`)
+- Use `OnceLock<Result>` over `Once` for fallible init; `AtomicBool` over `try_lock()` for flags
+- CPU and DirectML preflights need timeouts via `spawn_blocking` — hung GPU drivers block the load path forever
+
+*Windows process lifecycle:*
+- Detached processes need: PID file on spawn, identity check before kill, stderr→log file, cleanup on all exit paths (graceful + force-kill)
+- Use `CREATE_NO_WINDOW` for background sidecars to prevent console flash
 - Force-backend env var is `SMOLPC_FORCE_EP` (not `SMOLPC_FORCE_BACKEND`)
-- Use `starts_with` not `contains` for directive idempotency checks — `contains` matches user content substrings
-- Qwen3 chat_template.jinja defaults to thinking mode when enable_thinking is undefined — NPU requires the template condition to be patched to default to non-thinking
-- Qwen3-4B INT4 produces garbage on NPU but INT8_SYM per-channel (via `nncf.compress_weights`) works — INT8 is the NPU variant, INT4 stays for CPU
-- Model idle unload must default to disabled (None) — a 30s timeout causes the "unhealthy after idle" bug
+
+*Config parsing:*
 - HuggingFace `tokenizer_config.json` `chat_template` can be a string OR an array of `{name, template}` objects — handle both
-- Use `env_logger::init()` in the engine host main() — without it, all log::info!/warn! calls are silently discarded
-- Qwen3 NPU template patch failure must be a hard error, not a warning — un-patched template defaults to thinking mode causing runaway generation
-- CPU and DirectML preflights need timeouts (30s/60s) via spawn_blocking — a hung GPU driver or malformed model can block the load path forever
-- Use a drop guard (TransitionGuard) for model_transition_in_progress — load_model has many early return paths
-- In PowerShell packaging scripts, use `$env:SystemRoot\System32\tar.exe` not bare `tar` — Git Bash tar intercepts and can't handle Windows paths
-- PowerShell `Compress-Archive` has a 2 GB limit — use Windows tar.exe for large model archives
-- PowerShell array splatting (`@array`) can split flag strings — use explicit if/else for cargo build flags
-- Tauri resource map format (`"libs/": "libs/"`) recursively copies directories including subdirectories — preferred over glob arrays for nested DLL layouts
-- DirectML on Intel integrated GPU produces garbage (no EOS, runaway generation) — only accept discrete GPUs as DirectML candidates
-- Tauri NSIS `installMode: "currentUser"` installs to `%LOCALAPPDATA%\<productName>\` and kebab-cases the binary name (e.g., `smolpc-code-helper.exe`)
-- Detached engine processes must redirect stderr to a log file — `Stdio::null()` makes crash diagnosis impossible on user machines
-- `npm ci` fails with EPERM on Tailwind's `.node` binary when VS Code Tailwind IntelliSense extension holds a file lock — close VS Code or disable the extension before running `npm ci`
-- Tauri 2 `Builder::run()` has no RunEvent access — use `Builder::build()` + `App::run(callback)` to hook `ExitRequested` for cleanup
-- Use `tauri::async_runtime::block_on()` for async cleanup in `RunEvent::ExitRequested` — the closure is sync (`FnMut`), not async
-- Engine PID must be written to `engine.pid` on spawn — DETACHED_PROCESS children survive parent exit and need explicit cleanup
-- Verify PID identity before force-killing — stale `engine.pid` after crash can match a reused PID from an unrelated process
-- Clean up `engine.pid` on both graceful exit and after force-kill to prevent stale PID accumulation
-- GIMP NSIS installer defaults to per-user install at `%LOCALAPPDATA%\Programs\GIMP 3\`, not `Program Files` — check both paths
-- GIMP 3.2 creates its profile under `GIMP/3.2/`, not `GIMP/3.0/` — resolve profile version dynamically by scanning the config root
-- Blender version detection must use dynamic directory enumeration, not hardcoded versions — Blender Foundation updates version numbers frequently
-- When removing a dependency, trace every consumed field to its terminal behavior — a "hint" boolean can be a hard gate downstream (e.g., `npu_hardware_detected` gates the entire OpenVINO probe)
-- After replacing a hardware data source, verify all backend paths with live tests (`SMOLPC_FORCE_EP=openvino_npu` curl test) — unit tests don't catch hardware path regressions
-- DXGI adapter enumeration is 1000x faster than WMI for GPU detection — use `IDXGIFactory6::EnumAdapterByGpuPreference` with fallback to `IDXGIFactory1::EnumAdapters1`
-- Always use the LSP tool (`findReferences`, `incomingCalls`, `goToDefinition`) when tracing symbol usage — grep misses indirect consumers and caused the NPU regression. Subagents exploring the codebase must also be instructed to use LSP.
-- NPU StaticLLMPipeline has a fixed context window: MAX_PROMPT_LEN (input) + MIN_RESPONSE_LEN (output). Exceeding MAX_PROMPT_LEN crashes with "unknown exception". Intel's default is 1024 — don't go below without good reason.
-- There is no tokenizer in the OpenVINO GenAI C API — token counting from Rust requires either the `tokenizers` crate with the model's tokenizer.json, or a character-based heuristic (~3.5 chars/token for Qwen)
+- Use `starts_with` not `contains` for directive idempotency checks — `contains` matches user content substrings
+- Model idle unload must default to disabled (`None`) — a timeout causes the "unhealthy after idle" bug
+
+*Workflow discipline:*
+- Don't dismiss broken checks as "pre-existing" — if verification fails, fix it in the current session
+- Always use LSP (`findReferences`, `incomingCalls`, `goToDefinition`) when tracing symbol usage — grep misses indirect consumers. Subagents must also use LSP.
 
 ---
 
@@ -168,3 +141,9 @@ Corrections discovered during development. **When you correct a mistake, append 
 - [Tailwind CSS 4](https://tailwindcss.com/docs)
 - [HuggingFace: Qwen2.5-1.5B-Instruct-int4-ov](https://huggingface.co/OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov)
 - [HuggingFace: Qwen3-4B-int4-ov](https://huggingface.co/OpenVINO/Qwen3-4B-int4-ov)
+
+---
+
+## Compaction
+
+When compacting, always preserve: the current task and its acceptance criteria, all modified file paths, which backend/model combination is being tested, and any test commands that must be re-run.
