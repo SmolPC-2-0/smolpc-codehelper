@@ -11,3 +11,8 @@ mod openvino_ffi;
 pub use directml::GenAiDirectMlGenerator;
 #[cfg(target_os = "windows")]
 pub use openvino::{OpenVinoGenAiGenerator, OpenVinoGenerationControls, OpenVinoPipelineConfig};
+
+#[cfg(target_os = "windows")]
+mod whisper_ffi;
+#[cfg(target_os = "windows")]
+pub mod whisper;
