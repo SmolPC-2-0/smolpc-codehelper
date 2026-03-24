@@ -15,7 +15,8 @@
 ---
 
 ## Phase 1: Structural move (`apps/codehelper/` → `app/`)
-- **Status:** pending
+- **Status:** completed
+- **Commit:** d3c048d
 - **Key spec sections:** 4 (file moves), 6 (config updates), 0a (dev-mode resource fix)
 - **Gate:** `cargo check --workspace` + `cd app && npm run check`
 
