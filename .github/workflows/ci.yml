@@ -21,7 +21,7 @@ jobs:
       - name: Type + Svelte checks
         run: npm run check
       - name: NPM vulnerability audit (high+)
-        run: npm audit --workspace apps/codehelper --omit=dev --audit-level=high
+        run: npm audit --workspace app --omit=dev --audit-level=high
 
   boundary-enforcement:
     name: Boundary Enforcement
@@ -130,14 +130,14 @@ jobs:
           })
           if ($prettierFiles.Count -gt 0) {
             Write-Host "Running Prettier check on changed files..."
-            $workspacePrettierFiles = @($prettierFiles | Where-Object { $_ -like 'apps/codehelper/*' })
-            $rootPrettierFiles = @($prettierFiles | Where-Object { $_ -notlike 'apps/codehelper/*' })
+            $workspacePrettierFiles = @($prettierFiles | Where-Object { $_ -like 'app/*' })
+            $rootPrettierFiles = @($prettierFiles | Where-Object { $_ -notlike 'app/*' })
 
             if ($workspacePrettierFiles.Count -gt 0) {
-              Push-Location apps/codehelper
+              Push-Location app
               try {
                 foreach ($file in $workspacePrettierFiles) {
-                  $workspaceFile = $file.Substring('apps/codehelper/'.Length)
+                  $workspaceFile = $file.Substring(4)
                   & ".\node_modules\.bin\prettier.cmd" --check -- $workspaceFile
                 }
               } finally {

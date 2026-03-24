@@ -1,6 +1,0 @@
-{
-  "version": "phase2-foundation-placeholder",
-  "source": "qwen3-4b-instruct-2507 staging contract",
-  "expectedPaths": ["README.md", "qwen3-4b-instruct-2507"],
-  "status": "placeholder"
-}

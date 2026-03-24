@@ -1,6 +1,0 @@
-{
-  "version": "phase2-foundation-placeholder",
-  "source": "imported libreoffice runtime scripts",
-  "expectedPaths": ["README.md", "mcp_server"],
-  "status": "tracked"
-}

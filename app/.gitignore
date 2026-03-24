@@ -1,0 +1,21 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+
+# Tauri build output
+src-tauri/target/
+src-tauri/gen/schemas
+
+# Runtime libs and models (managed separately)
+src-tauri/models/
+src-tauri/libs/*
+!src-tauri/libs/README.md
+!src-tauri/libs/openvino/
+src-tauri/libs/openvino/*
+!src-tauri/libs/openvino/.gitkeep
+src-tauri/*.dll
+
+# Local/generated artifacts
+cache_dir/

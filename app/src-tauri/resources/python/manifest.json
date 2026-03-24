@@ -1,0 +1,6 @@
+{
+  "version": "phase5-bundled-python-cpython-3.12.9-uv-0.10.12",
+  "source": "python.org CPython 3.12.9 embeddable amd64 + Astral uv 0.10.12 staged by runtime:setup:python",
+  "expectedPaths": ["README.md", "payload/python.exe", "payload/uv.exe", "payload/uvx.exe"],
+  "status": "staging-required"
+}

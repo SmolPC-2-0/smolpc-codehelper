@@ -1,7 +1,0 @@
-/target/
-/gen/schemas
-*.txt
-
-# Build artifacts staged by packaging scripts
-/binaries/*.exe
-/models/
