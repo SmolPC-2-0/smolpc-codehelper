@@ -14,10 +14,13 @@
 		Copy,
 		Download,
 		GitBranchPlus,
+		Loader2,
 		RefreshCw,
 		User,
+		Volume2,
 		Waypoints
 	} from '@lucide/svelte';
+	import { voiceStore } from '$lib/stores/voice.svelte';
 
 	// src/lib/components/ChatMessage.svelte 9-30
 	interface Props {
@@ -59,6 +62,23 @@
 		} catch (error) {
 			console.error('Failed to save code:', error);
 			alert('Failed to save file. Please try again.');
+		}
+	}
+
+	// Voice TTS state for this message
+	const isThisPlaying = $derived(
+		voiceStore.ttsActiveMessageId === message.id && voiceStore.ttsState === 'playing'
+	);
+	const isThisLoading = $derived(
+		voiceStore.ttsActiveMessageId === message.id && voiceStore.ttsState === 'loading'
+	);
+	const ttsAvailable = $derived(voiceStore.ttsState !== 'unavailable');
+
+	async function handlePlay() {
+		if (isThisPlaying) {
+			await voiceStore.stopPlayback();
+		} else {
+			await voiceStore.speakMessage(message.id, message.content);
 		}
 	}
 
@@ -106,6 +126,27 @@
 
 		{#if message.role === 'assistant' && !message.isStreaming}
 			<div class="chat-message__actions">
+				{#if ttsAvailable}
+					<button
+						type="button"
+						onclick={handlePlay}
+						class="chat-message__action"
+						disabled={isThisLoading}
+						title={isThisPlaying ? 'Stop playback' : isThisLoading ? 'Loading...' : 'Read aloud'}
+					>
+						{#if isThisLoading}
+							<Loader2 class="h-3 w-3 animate-spin" />
+							<span>Loading...</span>
+						{:else if isThisPlaying}
+							<Volume2 class="h-3 w-3 chat-message__action-icon--playing" />
+							<span>Stop</span>
+						{:else}
+							<Volume2 class="h-3 w-3" />
+							<span>Read Aloud</span>
+						{/if}
+					</button>
+				{/if}
+
 				{#if canRegenerate}
 					<button
 						type="button"
@@ -491,5 +532,20 @@
 
 	:global(.prose li) {
 		margin-left: 1.5rem;
+	}
+
+	:global(.chat-message__action-icon--playing) {
+		animation: speaker-pulse 1s ease-in-out infinite;
+		color: var(--color-primary);
+	}
+
+	@keyframes speaker-pulse {
+		0%,
+		100% {
+			opacity: 0.6;
+		}
+		50% {
+			opacity: 1;
+		}
 	}
 </style>
