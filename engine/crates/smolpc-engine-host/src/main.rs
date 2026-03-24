@@ -87,6 +87,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/engine/check-model", post(routes::check_model))
         .route("/v1/models", get(routes::v1_models))
         .route("/v1/chat/completions", post(routes::v1_chat_completions))
+        .route(
+            "/v1/audio/transcriptions",
+            post(routes::v1_audio_transcriptions),
+        )
         .with_state(state.clone());
 
     let listener = TcpListener::bind(("127.0.0.1", args.port)).await?;
