@@ -682,9 +682,6 @@ where
     let mode = request.mode;
     let profile = libreoffice_profile(mode)
         .ok_or_else(|| format!("LibreOffice provider does not handle mode {mode:?}"))?;
-    if !profile.live_in_phase_6b {
-        return Err("UNIFIED_ASSISTANT_NOT_IMPLEMENTED".to_string());
-    }
 
     emit(AssistantStreamEventDto::Status {
         phase: "starting_libreoffice_request".to_string(),
@@ -1068,29 +1065,6 @@ I hope this helps!"#;
         let tool_call = extract_tool_call(raw).expect("should repair comma-for-colon");
         assert_eq!(tool_call.name, "create_blank_presentation");
         assert_eq!(tool_call.arguments["filename"], json!("test.odp"));
-    }
-
-    #[tokio::test]
-    async fn calc_mode_remains_unimplemented() {
-        let provider = Arc::new(MockProvider::default());
-        let planner = MockPlanner {
-            reply: "no-op".to_string(),
-        };
-        let streamer = MockStreamer;
-        let state = AssistantState::default();
-
-        let error = execute_libreoffice_request(
-            provider,
-            &planner,
-            &streamer,
-            &request(AppMode::Calc, "Open a sheet"),
-            &state,
-            |_| {},
-        )
-        .await
-        .expect_err("calc should remain scaffold-only");
-
-        assert_eq!(error, "UNIFIED_ASSISTANT_NOT_IMPLEMENTED");
     }
 
     #[tokio::test]

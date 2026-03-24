@@ -102,7 +102,6 @@ pub fn build_libreoffice_response(
     let mode_name = match mode {
         AppMode::Writer => "writer",
         AppMode::Impress => "impress",
-        AppMode::Calc => "calc",
         _ => "unknown",
     };
 

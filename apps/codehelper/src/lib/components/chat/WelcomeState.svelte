@@ -38,12 +38,6 @@
 			description:
 				'This mode helps with writing, headings, tables, and document structure inside LibreOffice Writer.'
 		},
-		calc: {
-			chip: 'Calc Preview',
-			headline: 'Spreadsheet help is still being wired up.',
-			description:
-				'Calc is visible so users can see it is part of the unified product, but it should clearly look like a future mode for now.'
-		},
 		impress: {
 			chip: 'Slides Mode',
 			headline: 'Build or edit a presentation slide by slide.',

@@ -69,13 +69,12 @@
 	const SETUP_ID_TO_MODES: Readonly<Record<string, string[]>> = {
 		host_gimp: ['gimp'],
 		host_blender: ['blender'],
-		host_libreoffice: ['writer', 'calc', 'impress']
+		host_libreoffice: ['writer', 'impress']
 	};
 	const HOST_LAUNCH_LABELS: Partial<Record<AppMode, string>> = {
 		gimp: 'Open GIMP',
 		blender: 'Open Blender',
 		writer: 'Open LibreOffice',
-		calc: 'Open LibreOffice',
 		impress: 'Open LibreOffice'
 	};
 	// Intentionally excludes Calc because the current product keeps it preview-only.

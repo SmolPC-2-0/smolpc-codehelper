@@ -23,6 +23,6 @@ Runtime contract:
 Notes:
 
 1. `libre.py` currently exposes 27 active MCP tools upstream.
-2. Unified Phase 6B activates Writer and Slides only; Calc remains scaffold-only.
+2. Unified Phase 6B activates Writer and Slides in the unified shell.
 3. Keep this integration engine-only in this repo; do not add Ollama runtime
    dependencies while porting.

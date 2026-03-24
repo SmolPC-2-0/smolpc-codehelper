@@ -62,15 +62,6 @@ fn open_host_app_for_mode(mode: AppMode) -> Result<(), String> {
             launch_libreoffice_mode(&path, "--writer")?;
             Ok(())
         }
-        AppMode::Calc => {
-            let detection = detect_libreoffice(None);
-            let path = detection
-                .path
-                .clone()
-                .ok_or_else(|| detection_error_detail(&detection))?;
-            launch_libreoffice_mode(&path, "--calc")?;
-            Ok(())
-        }
         AppMode::Impress => {
             let detection = detect_libreoffice(None);
             let path = detection
@@ -166,10 +157,10 @@ mod tests {
     #[test]
     fn mode_status_dto_uses_camel_case_keys() {
         let dto = build_mode_status_dto(
-            AppMode::Calc,
+            AppMode::Writer,
             false,
             ProviderStateDto {
-                mode: AppMode::Calc,
+                mode: AppMode::Writer,
                 state: "disconnected".to_string(),
                 detail: Some("Provider not integrated yet".to_string()),
                 supports_tools: true,
@@ -180,7 +171,7 @@ mod tests {
         );
 
         let value = serde_json::to_value(dto).expect("serialize mode status");
-        assert_eq!(value["providerState"]["mode"], "calc");
+        assert_eq!(value["providerState"]["mode"], "writer");
         assert_eq!(value["engineReady"], false);
         assert_eq!(value["lastError"], "engine offline");
     }

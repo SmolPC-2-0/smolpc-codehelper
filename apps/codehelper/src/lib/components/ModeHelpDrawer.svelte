@@ -76,21 +76,6 @@
 				'If a request fails, use shorter instructions and mention the exact document change.'
 			]
 		},
-		calc: {
-			summary:
-				'Calc is visible so you can see the future workflow, but this mode is not fully live yet.',
-			controls: [
-				'Mode lets you preview where Calc fits in the unified app.',
-				'Open LibreOffice can still launch the host app.',
-				'Setup shows whether LibreOffice prerequisites are present.',
-				'Model and status controls remain available for system checks.'
-			],
-			troubleshooting: [
-				'If Calc does not behave like a live assistant mode yet, that is expected right now.',
-				'Use Code, Writer, or Slides for currently live workflows.',
-				'Keep Setup healthy so Calc can be enabled smoothly when support lands.'
-			]
-		},
 		impress: {
 			summary: 'Use Slides mode when you want help creating or editing a presentation.',
 			controls: [

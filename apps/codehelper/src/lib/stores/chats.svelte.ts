@@ -6,16 +6,32 @@ import { saveToStorage, loadFromStorage } from '$lib/utils/storage';
 const STORAGE_KEY = 'smolpc_chats';
 const CURRENT_CHAT_KEY = 'smolpc_current_chat'; // legacy single key — kept for migration
 const MODE_CHAT_KEY = 'smolpc_mode_chats';
+const REMOVED_CALC_MODE = 'calc';
+type StoredMode = AppMode | typeof REMOVED_CALC_MODE;
+
+type StoredChat = Omit<Chat, 'mode'> & { mode?: StoredMode };
+type StoredModeChats = Partial<Record<StoredMode, string | null>>;
 
 // Load initial state from localStorage
-const initialChats = loadFromStorage<Chat[]>(STORAGE_KEY, []);
+const storedChats = loadFromStorage<StoredChat[]>(STORAGE_KEY, []);
+const initialChats = storedChats.filter((chat): chat is Chat => chat.mode !== REMOVED_CALC_MODE);
+
+if (initialChats.length !== storedChats.length) {
+	saveToStorage(STORAGE_KEY, initialChats);
+}
 
 // Migrate: if legacy single currentChatId exists, seed it as the 'code' mode chat
 const legacySingle = loadFromStorage<string | null>(CURRENT_CHAT_KEY, null);
-const initialModeChats = loadFromStorage<Partial<Record<AppMode, string | null>>>(
+const storedModeChats = loadFromStorage<StoredModeChats>(
 	MODE_CHAT_KEY,
 	legacySingle ? { code: legacySingle } : {}
 );
+const { [REMOVED_CALC_MODE]: _removedCalcChatId, ...initialModeChats } = storedModeChats;
+
+if (REMOVED_CALC_MODE in storedModeChats) {
+	saveToStorage(MODE_CHAT_KEY, initialModeChats);
+}
+
 if (legacySingle) {
 	try {
 		localStorage.removeItem(CURRENT_CHAT_KEY);
