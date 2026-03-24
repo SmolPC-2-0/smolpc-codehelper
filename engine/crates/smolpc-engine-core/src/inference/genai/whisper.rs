@@ -104,13 +104,26 @@ impl WhisperPipeline {
             return Err("whisper_pipeline_generate returned null results".to_string());
         }
 
+        // RAII guard ensures results_free is always called, even on early ? returns.
+        struct ResultsGuard<'a> {
+            api: &'a WhisperApi,
+            ptr: *mut OvGenAiWhisperDecodedResults,
+        }
+        impl Drop for ResultsGuard<'_> {
+            fn drop(&mut self) {
+                if !self.ptr.is_null() {
+                    unsafe { (self.api.results_free)(self.ptr) };
+                }
+            }
+        }
+        let _guard = ResultsGuard { api, ptr: results_ptr };
+
         // Extract text using the two-call buffer pattern:
         // 1) Call with null output to get required size
         // 2) Allocate buffer, call again to get the string
         log::info!("whisper: extracting text from results via get_string (two-call pattern)");
 
         let text = unsafe {
-            // First call: get required buffer size.
             let mut size: usize = 0;
             let status = (api.results_get_string)(results_ptr, ptr::null_mut(), &mut size);
             check_whisper_status(api, status, "whisper_results_get_string (size query)")?;
@@ -118,21 +131,17 @@ impl WhisperPipeline {
             if size == 0 {
                 String::new()
             } else {
-                // Second call: fill buffer.
                 let mut buf = vec![0u8; size];
                 let status = (api.results_get_string)(results_ptr, buf.as_mut_ptr(), &mut size);
                 check_whisper_status(api, status, "whisper_results_get_string (fill)")?;
 
-                // Trim null terminator and convert to String.
                 if let Some(nul_pos) = buf.iter().position(|&b| b == 0) {
                     buf.truncate(nul_pos);
                 }
                 String::from_utf8_lossy(&buf).trim().to_string()
             }
         };
-
-        // Always free results.
-        unsafe { (api.results_free)(results_ptr) };
+        // _guard drops here, calling results_free
 
         log::info!("whisper: transcription complete, {} chars: {:?}",
             text.len(),

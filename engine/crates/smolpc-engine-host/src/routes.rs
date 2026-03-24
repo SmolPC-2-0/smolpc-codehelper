@@ -452,6 +452,7 @@ pub(crate) async fn v1_chat_completions(
 
 // ── Whisper STT ──────────────────────────────────────────────────────
 
+#[cfg(target_os = "windows")]
 pub(crate) async fn v1_audio_transcriptions(
     headers: HeaderMap,
     State(state): State<AppState>,

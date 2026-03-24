@@ -57,7 +57,6 @@
 	}
 
 	async function handleMicClick() {
-		console.log('[ChatInput] handleMicClick, micState:', voiceStore.micState);
 		if (voiceStore.micState === 'recording') {
 			const text = await voiceStore.stopRecording();
 			if (text.trim()) {

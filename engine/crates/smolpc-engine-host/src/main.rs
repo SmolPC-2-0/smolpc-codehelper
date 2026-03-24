@@ -107,13 +107,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/engine/shutdown", post(routes::shutdown))
         .route("/engine/check-model", post(routes::check_model))
         .route("/v1/models", get(routes::v1_models))
-        .route("/v1/chat/completions", post(routes::v1_chat_completions))
+        .route("/v1/chat/completions", post(routes::v1_chat_completions));
+
+    #[cfg(target_os = "windows")]
+    let app = app
         .route(
             "/v1/audio/transcriptions",
             post(routes::v1_audio_transcriptions),
         )
-        .route("/v1/audio/speech", post(routes::v1_audio_speech))
-        .with_state(state.clone());
+        .route("/v1/audio/speech", post(routes::v1_audio_speech));
+
+    let app = app.with_state(state.clone());
 
     let listener = TcpListener::bind(("127.0.0.1", args.port)).await?;
     println!(

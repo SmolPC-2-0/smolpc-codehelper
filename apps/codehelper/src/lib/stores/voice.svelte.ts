@@ -22,21 +22,15 @@ let playbackPollInterval: ReturnType<typeof setInterval> | null = null;
 // ── Mic actions ──────────────────────────────────────────────────────
 
 async function startRecording(): Promise<void> {
-	console.log('[voice] startRecording called, current micState:', micState);
-	if (micState !== 'idle') {
-		console.log('[voice] startRecording skipped — micState is not idle');
-		return;
-	}
+	if (micState !== 'idle') return;
 
 	try {
 		micError = null;
 		micState = 'recording';
-		console.log('[voice] micState set to recording, invoking start_recording');
 		await invoke('start_recording');
-		console.log('[voice] start_recording invoke returned successfully, micState:', micState);
 	} catch (e) {
 		const msg = String(e);
-		console.error('[voice] start_recording failed:', msg);
+		console.error('start_recording failed:', msg);
 		micError = msg;
 		if (msg.includes('No microphone') || msg.includes('microphone')) {
 			micState = 'disabled';
@@ -47,26 +41,19 @@ async function startRecording(): Promise<void> {
 }
 
 async function stopRecording(): Promise<string> {
-	console.log('[voice] stopRecording called, current micState:', micState);
-	if (micState !== 'recording') {
-		console.log('[voice] stopRecording skipped — micState is not recording, it is:', micState);
-		return '';
-	}
+	if (micState !== 'recording') return '';
 
 	micState = 'processing';
-	console.log('[voice] micState set to processing, invoking stop_recording');
 	try {
 		const text = await invoke<string>('stop_recording');
-		console.log('[voice] stop_recording returned:', text?.length, 'chars');
 		return text;
 	} catch (e) {
 		const msg = String(e);
-		console.error('[voice] stop_recording failed:', msg);
+		console.error('stop_recording failed:', msg);
 		micError = msg;
 		return '';
 	} finally {
 		micState = 'idle';
-		console.log('[voice] micState reset to idle');
 	}
 }
 
@@ -121,7 +108,6 @@ function startPlaybackPolling(): void {
 				ttsActiveMessageId = null;
 			}
 		} catch {
-			// If the invoke fails, assume playback ended.
 			clearPlaybackPolling();
 			ttsState = 'idle';
 			ttsActiveMessageId = null;

@@ -76,16 +76,32 @@ fn auth(headers: &HeaderMap, token: &str) -> Result<(), ApiError> {
 }
 
 fn constant_time_eq(lhs: &[u8], rhs: &[u8]) -> bool {
-    let len_diff = (lhs.len() ^ rhs.len()) as u8;
-    let min_len = lhs.len().min(rhs.len());
-    let mut diff = len_diff;
-    for i in 0..min_len {
+    if lhs.len() != rhs.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for i in 0..lhs.len() {
         diff |= lhs[i] ^ rhs[i];
     }
     diff == 0
 }
 
 // ── Text preprocessing ───────────────────────────────────────────────
+
+fn strip_ordered_list_marker(line: &str) -> &str {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i > 0 && i < bytes.len() && bytes[i] == b'.' {
+        let rest = &line[i + 1..];
+        if rest.starts_with(' ') {
+            return &rest[1..];
+        }
+    }
+    line
+}
 
 fn strip_markdown(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
@@ -102,6 +118,11 @@ fn strip_markdown(input: &str) -> String {
             continue;
         }
 
+        // Skip horizontal rules
+        if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+            continue;
+        }
+
         // Strip heading markers
         let line = trimmed.trim_start_matches('#').trim_start();
         // Strip blockquote markers
@@ -112,8 +133,14 @@ fn strip_markdown(input: &str) -> String {
         } else {
             line
         };
-        // Strip bold/italic markers
-        let line = line.replace("**", "").replace("__", "");
+        // Strip ordered list markers (e.g., "1. ", "12. ")
+        let line = strip_ordered_list_marker(line);
+        // Strip bold/italic markers (** __ * _)
+        let line = line
+            .replace("**", "")
+            .replace("__", "")
+            .replace('*', "")
+            .replace('_', " "); // single _ often joins words, replace with space
         // Strip inline backticks (keep content inside)
         let line = line.replace('`', "");
 
