@@ -6,7 +6,7 @@ SmolPC Code Helper — offline AI coding assistant for secondary school students
 
 **Architecture:** `engine/` = shared inference server (`smolpc-engine-host` + `smolpc-engine-core`). `apps/` = product apps. `launcher/` = suite shell. Engine runs as local HTTP server on port 19432.
 
-**Backend priority:** `openvino_npu` > `directml` > `cpu`
+**Backend priority:** `directml` (discrete GPU only) > `openvino_npu` > `cpu`
 
 ---
 
