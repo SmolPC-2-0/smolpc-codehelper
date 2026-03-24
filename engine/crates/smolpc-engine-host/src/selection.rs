@@ -1,6 +1,4 @@
-use smolpc_engine_core::inference::backend::{
-    DecisionReason, FailureCounters, InferenceBackend,
-};
+use smolpc_engine_core::inference::backend::{DecisionReason, FailureCounters, InferenceBackend};
 use smolpc_engine_core::inference::backend_store::BackendDecisionRecord;
 
 pub(crate) fn choose_preferred_backend(

@@ -1,6 +1,6 @@
-use super::directml_ffi::*;
 use super::super::runtime_loading::OrtRuntimeBundle;
 use super::super::types::{GenerationConfig, GenerationMetrics};
+use super::directml_ffi::*;
 use half::f16;
 use std::ffi::{c_char, c_void, CStr};
 use std::ptr;

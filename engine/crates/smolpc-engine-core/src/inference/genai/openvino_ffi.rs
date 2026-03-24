@@ -86,12 +86,10 @@ pub(super) struct OpenVinoGenAiApi {
         unsafe extern "C" fn(*mut OvGenAiGenerationConfig, *const i64, usize) -> OvStatus,
     pub(super) set_stop_strings:
         unsafe extern "C" fn(*mut OvGenAiGenerationConfig, *const *const c_char, usize) -> OvStatus,
-    pub(super) set_ignore_eos:
-        unsafe extern "C" fn(*mut OvGenAiGenerationConfig, bool) -> OvStatus,
+    pub(super) set_ignore_eos: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, bool) -> OvStatus,
     pub(super) set_echo: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, bool) -> OvStatus,
     pub(super) set_do_sample: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, bool) -> OvStatus,
-    pub(super) set_temperature:
-        unsafe extern "C" fn(*mut OvGenAiGenerationConfig, f32) -> OvStatus,
+    pub(super) set_temperature: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, f32) -> OvStatus,
     pub(super) set_top_p: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, f32) -> OvStatus,
     pub(super) set_top_k: unsafe extern "C" fn(*mut OvGenAiGenerationConfig, usize) -> OvStatus,
     pub(super) set_repetition_penalty:
@@ -294,7 +292,11 @@ pub(super) fn path_to_cstring(path: &Path, field: &str) -> Result<CString, Strin
     cstring(utf8, field)
 }
 
-pub(super) fn check_status(api: &OpenVinoGenAiApi, status: OvStatus, context: &str) -> Result<(), String> {
+pub(super) fn check_status(
+    api: &OpenVinoGenAiApi,
+    status: OvStatus,
+    context: &str,
+) -> Result<(), String> {
     if status == OV_STATUS_OK {
         return Ok(());
     }
@@ -353,7 +355,11 @@ pub(super) struct OvOwned<T> {
 }
 
 impl<T> OvOwned<T> {
-    pub(super) fn new(api: Arc<OpenVinoGenAiApi>, ptr: *mut T, destroy: unsafe extern "C" fn(*mut T)) -> Self {
+    pub(super) fn new(
+        api: Arc<OpenVinoGenAiApi>,
+        ptr: *mut T,
+        destroy: unsafe extern "C" fn(*mut T),
+    ) -> Self {
         Self { api, ptr, destroy }
     }
 

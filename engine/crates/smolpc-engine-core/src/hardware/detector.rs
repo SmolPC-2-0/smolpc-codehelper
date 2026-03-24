@@ -294,7 +294,10 @@ fn convert_npu_info(hw_info: &hardware_query::HardwareInfo) -> Option<NpuInfo> {
         .map(|(info, _)| info);
 
     if hw_info.npus().len() > 1 {
-        log::debug!("Detected {} NPUs; selected best identifier", hw_info.npus().len());
+        log::debug!(
+            "Detected {} NPUs; selected best identifier",
+            hw_info.npus().len()
+        );
     }
 
     selected

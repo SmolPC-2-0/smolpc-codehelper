@@ -47,8 +47,7 @@ pub(super) struct GenAiApi {
     pub(super) create_config:
         unsafe extern "system" fn(*const c_char, *mut *mut OgaConfig) -> *mut OgaResult,
     pub(super) destroy_config: unsafe extern "system" fn(*mut OgaConfig),
-    pub(super) config_clear_providers:
-        unsafe extern "system" fn(*mut OgaConfig) -> *mut OgaResult,
+    pub(super) config_clear_providers: unsafe extern "system" fn(*mut OgaConfig) -> *mut OgaResult,
     pub(super) config_append_provider:
         unsafe extern "system" fn(*mut OgaConfig, *const c_char) -> *mut OgaResult,
     pub(super) config_set_hw_device_id:
@@ -91,16 +90,10 @@ pub(super) struct GenAiApi {
     pub(super) create_generator_params:
         unsafe extern "system" fn(*const OgaModel, *mut *mut OgaGeneratorParams) -> *mut OgaResult,
     pub(super) destroy_generator_params: unsafe extern "system" fn(*mut OgaGeneratorParams),
-    pub(super) generator_params_set_search_number: unsafe extern "system" fn(
-        *mut OgaGeneratorParams,
-        *const c_char,
-        f64,
-    ) -> *mut OgaResult,
-    pub(super) generator_params_set_search_bool: unsafe extern "system" fn(
-        *mut OgaGeneratorParams,
-        *const c_char,
-        bool,
-    ) -> *mut OgaResult,
+    pub(super) generator_params_set_search_number:
+        unsafe extern "system" fn(*mut OgaGeneratorParams, *const c_char, f64) -> *mut OgaResult,
+    pub(super) generator_params_set_search_bool:
+        unsafe extern "system" fn(*mut OgaGeneratorParams, *const c_char, bool) -> *mut OgaResult,
 
     pub(super) create_generator: unsafe extern "system" fn(
         *const OgaModel,
@@ -230,7 +223,11 @@ pub(super) fn path_to_cstring(path: &Path) -> Result<CString, String> {
     cstring(utf8, "path")
 }
 
-pub(super) fn check_oga(api: &GenAiApi, result: *mut OgaResult, context: &str) -> Result<(), String> {
+pub(super) fn check_oga(
+    api: &GenAiApi,
+    result: *mut OgaResult,
+    context: &str,
+) -> Result<(), String> {
     if result.is_null() {
         return Ok(());
     }
@@ -255,7 +252,11 @@ pub(super) struct OgaOwned<T> {
 }
 
 impl<T> OgaOwned<T> {
-    pub(super) fn new(api: Arc<GenAiApi>, ptr: *mut T, destroy: unsafe extern "system" fn(*mut T)) -> Self {
+    pub(super) fn new(
+        api: Arc<GenAiApi>,
+        ptr: *mut T,
+        destroy: unsafe extern "system" fn(*mut T),
+    ) -> Self {
         Self { api, ptr, destroy }
     }
 
@@ -285,7 +286,10 @@ impl<T> Drop for OgaOwned<T> {
 unsafe impl<T> Send for OgaOwned<T> {}
 unsafe impl<T> Sync for OgaOwned<T> {}
 
-pub(super) fn read_eos_token_ids(api: &GenAiApi, tokenizer: *mut OgaTokenizer) -> Result<Vec<i32>, String> {
+pub(super) fn read_eos_token_ids(
+    api: &GenAiApi,
+    tokenizer: *mut OgaTokenizer,
+) -> Result<Vec<i32>, String> {
     let mut eos_ptr: *const i32 = ptr::null();
     let mut eos_count = 0usize;
     check_oga(

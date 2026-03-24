@@ -156,9 +156,7 @@ pub(crate) fn apply_persisted_eligibility(
         match decision.backend {
             InferenceBackend::Cpu => status.lanes.cpu.persisted_eligibility = true,
             InferenceBackend::DirectML => status.lanes.directml.persisted_eligibility = true,
-            InferenceBackend::OpenVinoNpu => {
-                status.lanes.openvino_npu.persisted_eligibility = true
-            }
+            InferenceBackend::OpenVinoNpu => status.lanes.openvino_npu.persisted_eligibility = true,
         }
     }
 }

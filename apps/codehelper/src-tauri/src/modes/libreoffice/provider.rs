@@ -7,7 +7,6 @@ use crate::assistant::MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION;
 use crate::modes::provider::{
     provider_state, ToolProvider, FOUNDATION_PROVIDER_EXECUTION_NOT_IMPLEMENTED,
 };
-use crate::setup::host_apps::detect_libreoffice;
 use async_trait::async_trait;
 use smolpc_assistant_types::{
     AppMode, ProviderStateDto, ToolDefinitionDto, ToolExecutionResultDto,
@@ -16,6 +15,13 @@ use smolpc_mcp_client::McpTool;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+const RETRYABLE_RUNTIME_FAILURE_MARKERS: [&str; 4] = [
+    "broken pipe",
+    "channel closed",
+    "connection reset",
+    "process exited",
+];
 
 #[derive(Debug)]
 pub struct LibreOfficeProvider {
@@ -102,30 +108,89 @@ impl LibreOfficeProvider {
     fn friendly_runtime_error(error: &str) -> String {
         if error.contains("Bundled Python is not prepared yet") {
             return format!(
-                "LibreOffice runtime is not ready yet. Prepare bundled Python from the setup panel before using Writer or Slides. {error}"
+                "Document runtime is not ready yet. Prepare bundled Python from the setup panel before using Writer or Slides. {error}"
             );
         }
 
         if error.contains("spawn stdio MCP command") {
             return format!(
-                "Unable to start the LibreOffice MCP runtime. Bundled Python should be prepared first, and LibreOffice or Collabora must be installed. {error}"
+                "Unable to start the document MCP server. Bundled Python should be prepared first. {error}"
             );
         }
 
         format!(
-            "LibreOffice runtime failed. Make sure bundled Python is prepared and LibreOffice or Collabora is installed. {error}"
+            "Document runtime failed. Make sure bundled Python is prepared. {error}"
         )
+    }
+
+    fn is_retryable_runtime_failure(message: &str) -> bool {
+        let normalized = message.to_ascii_lowercase();
+        RETRYABLE_RUNTIME_FAILURE_MARKERS
+            .iter()
+            .any(|marker| normalized.contains(marker))
+    }
+
+    async fn reconnect_session_for_retry(
+        &self,
+        mode: AppMode,
+    ) -> Result<Arc<smolpc_mcp_client::McpSession>, String> {
+        {
+            let mut state = self.state.lock().await;
+            state.session = None;
+            state.tools.clear();
+        }
+
+        self.connect_live(mode).await?;
+        let state = self.state.lock().await;
+        state
+            .session
+            .clone()
+            .ok_or_else(|| "LibreOffice provider retry reconnect did not produce a session".to_string())
+    }
+
+    async fn retry_tool_after_runtime_reconnect(
+        &self,
+        mode: AppMode,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<Option<ToolExecutionResultDto>, String> {
+        let retry_session = match self.reconnect_session_for_retry(mode).await {
+            Ok(session) => session,
+            Err(error) => {
+                log::warn!(
+                    "LibreOffice runtime retry reconnect failed for tool {} in mode {:?}: {}",
+                    name,
+                    mode,
+                    error
+                );
+                return Ok(None);
+            }
+        };
+
+        match retry_session.call_tool(name, arguments).await {
+            Ok(payload) => Ok(Some(build_tool_execution_result(name, payload))),
+            Err(error) => {
+                let message = Self::friendly_runtime_error(&error.to_string());
+                let mut state = self.state.lock().await;
+                state.session = None;
+                state.tools.clear();
+                state.last_error = Some(message.clone());
+                Err(message)
+            }
+        }
     }
 
     fn live_connected_detail(
         profile: super::LibreOfficeModeProfile,
+        layout: &super::resources::LibreOfficeResourceLayout,
         runtime: &LibreOfficeRuntimeConfig,
         tools: &[ToolDefinitionDto],
     ) -> String {
         format!(
-            "{} is connected through the shared LibreOffice stdio MCP runtime. {} {} tool(s) available in this mode.",
+            "{} is connected through the document MCP server. {} Scaffold: {}. {} tool(s) available in this mode.",
             profile.label,
             runtime.summary(),
+            layout.mcp_server_dir.display(),
             tools.len()
         )
     }
@@ -170,16 +235,17 @@ impl LibreOfficeProvider {
     > {
         let layout =
             resolve_mcp_server_layout(self.resource_dir.as_deref(), self.resolution_options)?;
-        let office_detection = detect_libreoffice(None);
-        let office_path = office_detection.path.ok_or_else(|| {
-            "LibreOffice or Collabora is not installed or could not be detected yet.".to_string()
-        })?;
         let runtime = LibreOfficeRuntimeConfig::from_layout(
             &layout,
             self.app_local_data_dir.as_deref(),
             self.resolution_options.allow_system_python_fallback,
-            Some(office_path),
         )?;
+        log::debug!(
+            "Resolved document runtime prerequisites: scaffold_dir={}, entrypoint={}, python_command={}",
+            layout.mcp_server_dir.display(),
+            layout.mcp_server_py_path.display(),
+            runtime.python_command,
+        );
         Ok((layout, runtime))
     }
 
@@ -195,6 +261,11 @@ impl LibreOfficeProvider {
         }
 
         let (layout, runtime) = self.validate_runtime_prerequisites()?;
+        log::info!(
+            "Connecting LibreOffice runtime from scaffold {} via entrypoint {}",
+            layout.mcp_server_dir.display(),
+            runtime.entrypoint.display()
+        );
         {
             let mut state = self.state.lock().await;
             state.scaffold_dir = Some(layout.mcp_server_dir.clone());
@@ -232,7 +303,9 @@ impl LibreOfficeProvider {
         state.last_error = None;
         Ok(Self::connected_state(
             mode,
-            Some(Self::live_connected_detail(profile, &runtime, &tools)),
+            Some(Self::live_connected_detail(
+                profile, &layout, &runtime, &tools,
+            )),
         ))
     }
 
@@ -253,7 +326,7 @@ impl LibreOfficeProvider {
 
         {
             let mut state = self.state.lock().await;
-            state.scaffold_dir = Some(layout.mcp_server_dir);
+            state.scaffold_dir = Some(layout.mcp_server_dir.clone());
         }
 
         let session = {
@@ -276,7 +349,9 @@ impl LibreOfficeProvider {
                     state.last_error = None;
                     return Self::connected_state(
                         mode,
-                        Some(Self::live_connected_detail(profile, &runtime, &tools)),
+                        Some(Self::live_connected_detail(
+                            profile, &layout, &runtime, &tools,
+                        )),
                     );
                 }
                 Err(error) => {
@@ -385,10 +460,27 @@ impl ToolProvider for LibreOfficeProvider {
                     .ok_or_else(|| "LibreOffice provider is not connected".to_string())?
             }
         };
+        let retry_arguments = arguments.clone();
 
         match session.call_tool(name, arguments).await {
             Ok(payload) => {
-                let tool_result = build_tool_execution_result(name, payload);
+                let mut tool_result = build_tool_execution_result(name, payload);
+                if !tool_result.ok
+                    && Self::is_retryable_runtime_failure(&tool_result.summary)
+                {
+                    log::warn!(
+                        "Retrying LibreOffice tool {} in mode {:?} after transient runtime failure: {}",
+                        name,
+                        mode,
+                        tool_result.summary
+                    );
+                    if let Some(retry_result) = self
+                        .retry_tool_after_runtime_reconnect(mode, name, retry_arguments)
+                        .await?
+                    {
+                        tool_result = retry_result;
+                    }
+                }
                 let mut state = self.state.lock().await;
                 if tool_result.ok {
                     state.last_error = None;
@@ -398,6 +490,28 @@ impl ToolProvider for LibreOfficeProvider {
                 Ok(tool_result)
             }
             Err(error) => {
+                let error_text = error.to_string();
+                if Self::is_retryable_runtime_failure(&error_text) {
+                    log::warn!(
+                        "Retrying LibreOffice tool {} in mode {:?} after runtime transport error: {}",
+                        name,
+                        mode,
+                        error_text
+                    );
+                    if let Some(tool_result) = self
+                        .retry_tool_after_runtime_reconnect(mode, name, retry_arguments)
+                        .await?
+                    {
+                        let mut state = self.state.lock().await;
+                        if tool_result.ok {
+                            state.last_error = None;
+                        } else {
+                            state.last_error = Some(tool_result.summary.clone());
+                        }
+                        return Ok(tool_result);
+                    }
+                }
+
                 let message = Self::friendly_runtime_error(&error.to_string());
                 let mut state = self.state.lock().await;
                 state.session = None;
@@ -465,7 +579,7 @@ for line in sys.stdin:
         send({"jsonrpc": "2.0", "id": payload["id"], "result": {"content": [{"type": "text", "text": f"{name} completed"}]}})
 "#;
 
-    fn staged_runtime_root(main_py: &str) -> tempfile::TempDir {
+    fn staged_runtime_root(mcp_server_py: &str) -> tempfile::TempDir {
         let tempdir = tempdir().expect("tempdir");
         let staged_dir = tempdir
             .path()
@@ -474,12 +588,9 @@ for line in sys.stdin:
             .join("mcp_server");
         fs::create_dir_all(&staged_dir).expect("create staged dir");
         fs::write(staged_dir.join("README.md"), "placeholder").expect("write readme");
-        fs::write(staged_dir.join("main.py"), main_py).expect("write main");
-        fs::write(staged_dir.join("libre.py"), "placeholder").expect("write libre");
-        fs::write(staged_dir.join("helper.py"), "placeholder").expect("write helper");
-        fs::write(staged_dir.join("helper_utils.py"), "placeholder").expect("write helper utils");
-        fs::write(staged_dir.join("helper_test_functions.py"), "placeholder")
-            .expect("write helper tests");
+        fs::write(staged_dir.join("mcp_server.py"), mcp_server_py).expect("write mcp_server");
+        fs::write(staged_dir.join("test_functions.py"), "placeholder")
+            .expect("write test_functions");
         tempdir
     }
 
@@ -565,7 +676,7 @@ for line in sys.stdin:
         assert!(state
             .detail
             .expect("detail")
-            .contains("LibreOffice runtime failed"));
+            .contains("Document runtime failed"));
     }
 
     #[tokio::test]
@@ -623,5 +734,24 @@ for line in sys.stdin:
         assert!(tool_result.ok);
         assert_eq!(tool_result.name, "add_heading");
         assert_eq!(refreshed_state.state, "connected");
+    }
+
+    #[test]
+    fn retryable_runtime_failure_detection_matches_known_messages() {
+        assert!(LibreOfficeProvider::is_retryable_runtime_failure(
+            "Error: broken pipe"
+        ));
+        assert!(LibreOfficeProvider::is_retryable_runtime_failure(
+            "Error: channel closed unexpectedly"
+        ));
+        assert!(LibreOfficeProvider::is_retryable_runtime_failure(
+            "connection reset by peer"
+        ));
+        assert!(LibreOfficeProvider::is_retryable_runtime_failure(
+            "process exited with code 1"
+        ));
+        assert!(!LibreOfficeProvider::is_retryable_runtime_failure(
+            "Mode is unavailable in this build"
+        ));
     }
 }

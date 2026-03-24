@@ -1,6 +1,4 @@
-use smolpc_engine_core::inference::backend::{
-    BackendOpenVinoTuningStatus, InferenceBackend,
-};
+use smolpc_engine_core::inference::backend::{BackendOpenVinoTuningStatus, InferenceBackend};
 use std::cmp::Ordering as CmpOrdering;
 
 use crate::openvino::resolve_openvino_npu_tuning;
@@ -84,9 +82,7 @@ pub(crate) fn directml_required_error(model_id: &str, reason: &str) -> String {
 }
 
 pub(crate) fn openvino_required_error(model_id: &str, reason: &str) -> String {
-    format!(
-        "Model '{model_id}' currently requires OpenVINO NPU backend in shared engine: {reason}"
-    )
+    format!("Model '{model_id}' currently requires OpenVINO NPU backend in shared engine: {reason}")
 }
 
 pub(crate) fn directml_unavailable_reason(

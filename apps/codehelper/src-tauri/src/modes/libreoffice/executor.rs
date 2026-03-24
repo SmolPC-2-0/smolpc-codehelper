@@ -77,37 +77,184 @@ fn ensure_not_cancelled(state: &AssistantState) -> Result<(), String> {
     }
 }
 
+/// Strip a multi-line MCP tool description to just the first non-empty line.
+/// This removes the redundant `Args:` section that duplicates `inputSchema`,
+/// keeping the planner prompt compact for the small local LLM.
+fn first_line_description(description: &str) -> &str {
+    description
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or(description.trim())
+}
+
+/// Strip optional properties from a JSON Schema `inputSchema` so the planner
+/// prompt only shows required parameters.  The small LLM struggles with many
+/// optional empty-string fields and often garbles the JSON syntax.
+fn strip_optional_properties(schema: &Value) -> Value {
+    let Some(obj) = schema.as_object() else {
+        return schema.clone();
+    };
+    let required: Vec<String> = obj
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if required.is_empty() {
+        return schema.clone();
+    }
+
+    let mut out = obj.clone();
+    if let Some(props) = obj.get("properties").and_then(Value::as_object) {
+        let filtered: serde_json::Map<String, Value> = props
+            .iter()
+            .filter(|(key, _)| required.contains(key))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        out.insert("properties".to_string(), Value::Object(filtered));
+    }
+    Value::Object(out)
+}
+
+/// Keyword-based tool pre-filter. Small models can't reliably pick from 18+
+/// tools — narrow the catalog to the best matches so the LLM only chooses
+/// between 1-4 tools.  Falls back to the full catalog when nothing matches.
+fn filter_tools_by_intent<'a>(
+    user_text: &str,
+    tools: &'a [ToolDefinitionDto],
+) -> Vec<&'a ToolDefinitionDto> {
+    let lower = user_text.to_ascii_lowercase();
+
+    // Keyword → tool name mapping, checked in order (first match wins).
+    let routing: &[(&[&str], &[&str])] = &[
+        (
+            &["open", "launch", "view in libre", "view in office"],
+            &["open_in_libreoffice"],
+        ),
+        (
+            &["list", "show all", "what documents", "what files"],
+            &["list_documents"],
+        ),
+        (
+            &["read", "show content", "what does it say", "contents of"],
+            &["read_text_document", "read_presentation"],
+        ),
+        (
+            &["properties", "info", "metadata", "word count", "stats"],
+            &["get_document_properties"],
+        ),
+        (
+            &["copy", "duplicate"],
+            &["copy_document"],
+        ),
+        (
+            &["create", "new", "blank", "make"],
+            &["create_blank_document", "create_blank_presentation"],
+        ),
+        (
+            &["heading"],
+            &["add_heading"],
+        ),
+        (
+            &["table"],
+            &["add_table", "format_table"],
+        ),
+        (
+            &["slide"],
+            &["add_slide", "edit_slide_content", "edit_slide_title", "delete_slide"],
+        ),
+        (
+            &["image", "picture", "photo"],
+            &["insert_image", "insert_slide_image"],
+        ),
+        (
+            &["page break"],
+            &["insert_page_break"],
+        ),
+        (
+            &["format", "bold", "italic", "font", "style", "color"],
+            &[
+                "format_text",
+                "format_table",
+                "format_slide_content",
+                "format_slide_title",
+                "apply_document_style",
+                "apply_presentation_template",
+            ],
+        ),
+        (
+            &["add text", "add the text", "add paragraph", "add a paragraph", "append text"],
+            &["add_text", "add_paragraph"],
+        ),
+        (
+            &["search and replace", "find and replace", "replace all", "search for"],
+            &["search_replace_text"],
+        ),
+        (
+            &["delete", "remove"],
+            &["delete_text", "delete_paragraph", "delete_slide"],
+        ),
+        (
+            &["paragraph", "text"],
+            &["add_paragraph", "add_text"],
+        ),
+    ];
+
+    for (keywords, tool_names) in routing {
+        if keywords.iter().any(|kw| lower.contains(kw)) {
+            let matched: Vec<&ToolDefinitionDto> = tools
+                .iter()
+                .filter(|t| tool_names.contains(&t.name.as_str()))
+                .collect();
+            if !matched.is_empty() {
+                return matched;
+            }
+        }
+    }
+
+    // No keyword match — return all tools.
+    tools.iter().collect()
+}
+
 fn build_planner_messages(
     mode: AppMode,
     request: &AssistantSendRequestDto,
     tools: &[ToolDefinitionDto],
 ) -> Vec<EngineChatMessage> {
-    let (label, allowed_tools) = libreoffice_profile(mode)
-        .map(|profile| (profile.label, profile.allowed_tools))
-        .unwrap_or(("LibreOffice", &[]));
-    let tool_catalog = tools
+    let label = libreoffice_profile(mode)
+        .map(|profile| profile.label)
+        .unwrap_or("LibreOffice");
+
+    // Pre-filter the tool catalog to 1-4 tools based on user intent keywords.
+    // The small LLM can't reliably pick from 18 tools but handles 1-4 well.
+    let filtered = filter_tools_by_intent(&request.user_text, tools);
+    let tool_catalog = filtered
         .iter()
         .map(|tool| {
             format!(
-                "- {}: {}\n  inputSchema: {}",
-                tool.name, tool.description, tool.input_schema
+                "- {}: {} inputSchema: {}",
+                tool.name,
+                first_line_description(&tool.description),
+                strip_optional_properties(&tool.input_schema)
             )
         })
         .collect::<Vec<_>>()
         .join("\n");
 
     let system_prompt = format!(
-        "You are the unified LibreOffice {} assistant.\n\
-Choose at most one tool call for the user's latest request.\n\
-Return JSON only when a tool call is required, using exactly this shape:\n\
+        "You are the LibreOffice {} assistant.\n\
+Reply with a JSON tool call. Use this shape:\n\
 {{\"tool_call\":{{\"name\":\"<tool_name>\",\"arguments\":{{...}}}}}}\n\
-Do not use markdown fences.\n\
-If no tool call is needed, return the final user-facing answer as plain text.\n\
-Only use tools from this allowlist:\n{}\n\
-Tool catalog:\n{}",
-        label,
-        allowed_tools.join(", "),
-        tool_catalog
+No markdown. No natural language. JSON only.\n\
+If the user refers to a file from earlier in the conversation, use that file path.\n\
+Available tools:\n{}",
+        label, tool_catalog
     );
 
     let mut messages = vec![EngineChatMessage {
@@ -115,19 +262,99 @@ Tool catalog:\n{}",
         content: system_prompt,
     }];
 
-    if request.messages.is_empty() {
-        messages.push(EngineChatMessage {
-            role: "user".to_string(),
-            content: request.user_text.clone(),
-        });
-        return messages;
+    // Only send the current user message to the planner — conversation history
+    // contains natural-language summaries that prime the small model to respond
+    // in natural language instead of JSON.  File references like "that document"
+    // are handled by scanning the history for the most recent file path.
+    let user_content = enrich_user_text_with_file_context(
+        &request.user_text,
+        &request.messages,
+    );
+    messages.push(EngineChatMessage {
+        role: "user".to_string(),
+        content: user_content,
+    });
+    messages
+}
+
+/// If the user message references a file implicitly ("it", "that document",
+/// "the document", or a bare filename without a path), scan the conversation
+/// history for the most recently mentioned absolute file path and append it
+/// as context so the planner can fill in the `file_path` argument.
+fn enrich_user_text_with_file_context(
+    user_text: &str,
+    history: &[smolpc_assistant_types::AssistantMessageDto],
+) -> String {
+    // Only enrich if the user didn't already provide a full path.
+    if user_text.contains('\\') || user_text.contains('/') {
+        return user_text.to_string();
     }
 
-    messages.extend(request.messages.iter().map(|message| EngineChatMessage {
-        role: message.role.clone(),
-        content: message.content.clone(),
-    }));
-    messages
+    // Scan history (newest first) for an absolute file path.
+    let path = history
+        .iter()
+        .rev()
+        .filter(|m| m.role == "assistant")
+        .find_map(|m| extract_file_path_from_text(&m.content));
+
+    match path {
+        Some(p) => format!("{user_text}\n(Context: the most recent file is {p})"),
+        None => user_text.to_string(),
+    }
+}
+
+fn extract_file_path_from_text(text: &str) -> Option<String> {
+    // Document extensions we recognise (lowercase, with dot).
+    const EXTENSIONS: &[&str] = &[
+        ".odt", ".docx", ".doc", ".rtf", ".odp", ".pptx", ".ppt", ".ods",
+        ".xlsx", ".xls", ".pdf", ".txt", ".csv",
+    ];
+
+    // Scan for Windows absolute paths like `C:\...\file.ext`.  Paths may
+    // contain spaces (e.g. OneDrive folders), so we can't split on whitespace.
+    // Strategy: find each `X:\` drive-letter start, then scan forward to the
+    // first known document extension and take the whole substring.
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+    while i + 2 < len {
+        // Look for a drive letter followed by `:\`
+        if chars[i].is_ascii_alphabetic()
+            && chars[i + 1] == ':'
+            && chars[i + 2] == '\\'
+        {
+            // Find the end: scan forward for a known extension.
+            let start = i;
+            let rest = &text[start..];
+            let lower = rest.to_ascii_lowercase();
+            if let Some((ext_end, _ext)) = EXTENSIONS
+                .iter()
+                .filter_map(|ext| lower.find(ext).map(|pos| (pos + ext.len(), *ext)))
+                .min_by_key(|(pos, _)| *pos)
+            {
+                let path = rest[..ext_end].trim_end_matches(|c: char| {
+                    c == '.' || c == ',' || c == ';' || c == ')' || c == '"'
+                });
+                if !path.is_empty() {
+                    return Some(path.to_string());
+                }
+            }
+            // No extension found — skip past this drive letter.
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+
+    // Fallback: check for Unix absolute paths (simple case, no spaces).
+    for word in text.split_whitespace() {
+        let cleaned = word.trim_matches(|c: char| c == '.' || c == ',' || c == ':' || c == '"');
+        if cleaned.starts_with('/') && cleaned.len() > 3 {
+            return Some(cleaned.to_string());
+        }
+    }
+
+    None
 }
 
 fn build_summary_messages(
@@ -211,14 +438,55 @@ fn normalize_tool_calls(value: &Value) -> Vec<ToolCall> {
     parse_single_tool_call(value).into_iter().collect()
 }
 
+/// Find the substring from the first `{` to the matching closing `}` by
+/// tracking brace depth.  Small LLMs sometimes emit trailing garbage (extra
+/// `}`, whitespace, or stray characters) after otherwise valid JSON — this
+/// recovers the balanced object without relying on serde accepting the whole
+/// input.
+fn extract_balanced_braces(text: &str) -> Option<&str> {
+    let start = text.find('{')?;
+    let bytes = text.as_bytes();
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut escape_next = false;
+    for (i, &byte) in bytes.iter().enumerate().skip(start) {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+        match byte {
+            b'\\' if in_string => escape_next = true,
+            b'"' => in_string = !in_string,
+            b'{' if !in_string => depth += 1,
+            b'}' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&text[start..=i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 fn extract_json_candidates(raw_text: &str) -> Vec<String> {
     let trimmed = raw_text.trim();
-    let mut candidates = if trimmed.is_empty() {
-        Vec::new()
-    } else {
-        vec![trimmed.to_string()]
-    };
+    let mut candidates = Vec::new();
 
+    // First try the full trimmed text (handles the common case cleanly).
+    if !trimmed.is_empty() {
+        candidates.push(trimmed.to_string());
+    }
+
+    // Then try the balanced-brace substring to handle trailing garbage.
+    if let Some(balanced) = extract_balanced_braces(trimmed) {
+        if balanced != trimmed {
+            candidates.push(balanced.to_string());
+        }
+    }
+
+    // Finally extract from markdown code fences.
     let mut remaining = raw_text;
     while let Some(start) = remaining.find("```") {
         remaining = &remaining[start + 3..];
@@ -229,6 +497,12 @@ fn extract_json_candidates(raw_text: &str) -> Vec<String> {
             let candidate = remaining[..end].trim();
             if !candidate.is_empty() {
                 candidates.push(candidate.to_string());
+                // Also try balanced extraction within the fence.
+                if let Some(balanced) = extract_balanced_braces(candidate) {
+                    if balanced != candidate {
+                        candidates.push(balanced.to_string());
+                    }
+                }
             }
             remaining = &remaining[end + 3..];
         } else {
@@ -239,11 +513,82 @@ fn extract_json_candidates(raw_text: &str) -> Vec<String> {
     candidates
 }
 
+/// Attempt light repairs on common small-LLM JSON mistakes.
+/// e.g. `"title","value"` → `"title":"value"` (comma used instead of colon
+/// between key and value).
+fn repair_json(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+    while i < len {
+        // Inside a string literal, copy verbatim until closing quote.
+        if chars[i] == '"' {
+            out.push('"');
+            i += 1;
+            while i < len && chars[i] != '"' {
+                if chars[i] == '\\' && i + 1 < len {
+                    out.push(chars[i]);
+                    out.push(chars[i + 1]);
+                    i += 2;
+                } else {
+                    out.push(chars[i]);
+                    i += 1;
+                }
+            }
+            if i < len {
+                out.push('"'); // closing quote
+                i += 1;
+                // If the next non-whitespace char is `"` but we expect `:`,
+                // the LLM used `,"` or just `"` where `:` was needed.
+                let mut j = i;
+                while j < len && chars[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if j < len && chars[j] == ',' {
+                    // Peek past the comma — if the next token is `"`, this
+                    // is likely a key,value pair with comma instead of colon.
+                    let mut k = j + 1;
+                    while k < len && chars[k].is_ascii_whitespace() {
+                        k += 1;
+                    }
+                    if k < len && chars[k] == '"' {
+                        // Check if this looks like a key-value pair: the value
+                        // after the comma-separated quote should be followed by
+                        // another comma or `}`.  Heuristic: if the string after
+                        // the comma is short (empty or short value) and followed
+                        // by `,` or `}`, treat this as a `:` replacement.
+                        out.push(':');
+                        i = j + 1; // skip the comma
+                        continue;
+                    }
+                }
+            }
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 fn extract_tool_call(raw_text: &str) -> Option<ToolCall> {
     for candidate in extract_json_candidates(raw_text) {
         if let Ok(parsed) = serde_json::from_str::<Value>(&candidate) {
             if let Some(tool_call) = normalize_tool_calls(&parsed).into_iter().next() {
                 return Some(tool_call);
+            }
+        }
+    }
+
+    // Last resort: try repairing common JSON mistakes (e.g. comma-for-colon).
+    let repaired = repair_json(raw_text);
+    if repaired != raw_text {
+        for candidate in extract_json_candidates(&repaired) {
+            if let Ok(parsed) = serde_json::from_str::<Value>(&candidate) {
+                if let Some(tool_call) = normalize_tool_calls(&parsed).into_iter().next() {
+                    return Some(tool_call);
+                }
             }
         }
     }
@@ -656,6 +1001,34 @@ mod tests {
 
         assert_eq!(tool_call.name, "add_heading");
         assert_eq!(tool_call.arguments["text"], json!("Hello"));
+    }
+
+    #[test]
+    fn extract_tool_call_recovers_from_trailing_brace_garbage() {
+        // Exact failure observed in E2E: LLM emits an extra closing brace.
+        let raw = r#"{"tool_call":{"name":"create_blank_presentation","arguments":{"filename":"demo-pitch.odp","author":"","keywords":"","subject":"","title":""}}}}"#;
+        let tool_call = extract_tool_call(raw).expect("should recover from trailing brace");
+        assert_eq!(tool_call.name, "create_blank_presentation");
+        assert_eq!(tool_call.arguments["filename"], json!("demo-pitch.odp"));
+    }
+
+    #[test]
+    fn extract_tool_call_recovers_from_trailing_whitespace_and_text() {
+        let raw = r#"{"tool_call":{"name":"add_heading","arguments":{"text":"Hello"}}}
+I hope this helps!"#;
+        let tool_call = extract_tool_call(raw).expect("should recover from trailing text");
+        assert_eq!(tool_call.name, "add_heading");
+        assert_eq!(tool_call.arguments["text"], json!("Hello"));
+    }
+
+    #[test]
+    fn extract_tool_call_repairs_comma_used_as_colon() {
+        // Exact failure from E2E: LLM used commas instead of colons for some
+        // key-value pairs in the arguments object.
+        let raw = r#"{"tool_call":{"name":"create_blank_presentation","arguments":{"filename":"test.odp","author":"","title","","keywords","","subject":""}}}"#;
+        let tool_call = extract_tool_call(raw).expect("should repair comma-for-colon");
+        assert_eq!(tool_call.name, "create_blank_presentation");
+        assert_eq!(tool_call.arguments["filename"], json!("test.odp"));
     }
 
     #[tokio::test]
