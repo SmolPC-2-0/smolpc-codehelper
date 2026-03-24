@@ -7,6 +7,14 @@ members = [
   "engine/crates/smolpc-engine-host",
   "engine/crates/smolpc-engine-client",
 ]
+default-members = [
+  "apps/codehelper/src-tauri",
+  "crates/smolpc-assistant-types",
+  "crates/smolpc-mcp-client",
+  "engine/crates/smolpc-engine-core",
+  "engine/crates/smolpc-engine-host",
+  "engine/crates/smolpc-engine-client",
+]
 resolver = "2"
 
 [workspace.package]
@@ -39,3 +47,5 @@ libloading = "0.8"
 windows-sys = { version = "0.59.0", features = ["Win32_Storage_FileSystem"] }
 dirs = "6"
 env_logger = "0.11"
+clap = { version = "4", features = ["derive"] }
+hound = "3.5"
