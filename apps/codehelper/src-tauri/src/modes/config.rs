@@ -7,7 +7,6 @@ pub fn list_mode_configs() -> Vec<ModeConfigDto> {
         AppMode::Gimp,
         AppMode::Blender,
         AppMode::Writer,
-        AppMode::Calc,
         AppMode::Impress,
     ]
     .into_iter()
@@ -85,23 +84,6 @@ pub fn mode_config(mode: AppMode) -> ModeConfigDto {
                 capabilities: shared_tool_mode_capabilities(false),
             }
         }
-        AppMode::Calc => {
-            let profile = libreoffice_profile(AppMode::Calc).expect("calc profile");
-            ModeConfigDto {
-                id: AppMode::Calc,
-                label: profile.label.to_string(),
-                subtitle: profile.subtitle.to_string(),
-                icon: "table".to_string(),
-                provider_kind: ProviderKind::Mcp,
-                system_prompt_key: "mode.calc.default".to_string(),
-                suggestions: profile
-                    .suggestions
-                    .iter()
-                    .map(|value| (*value).to_string())
-                    .collect(),
-                capabilities: shared_tool_mode_capabilities(false),
-            }
-        }
         AppMode::Impress => {
             let profile = libreoffice_profile(AppMode::Impress).expect("impress profile");
             ModeConfigDto {
@@ -150,7 +132,6 @@ mod tests {
                 AppMode::Gimp,
                 AppMode::Blender,
                 AppMode::Writer,
-                AppMode::Calc,
                 AppMode::Impress,
             ]
         );

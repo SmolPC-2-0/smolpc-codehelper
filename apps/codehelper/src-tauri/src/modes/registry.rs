@@ -49,7 +49,7 @@ impl ModeProviderRegistry {
             AppMode::Code => ProviderFamily::Code,
             AppMode::Gimp => ProviderFamily::Gimp,
             AppMode::Blender => ProviderFamily::Blender,
-            AppMode::Writer | AppMode::Calc | AppMode::Impress => ProviderFamily::LibreOffice,
+            AppMode::Writer | AppMode::Impress => ProviderFamily::LibreOffice,
         }
     }
 
@@ -72,10 +72,6 @@ mod tests {
     fn libreoffice_modes_share_one_provider_family() {
         assert_eq!(
             ModeProviderRegistry::provider_family(AppMode::Writer),
-            ProviderFamily::LibreOffice
-        );
-        assert_eq!(
-            ModeProviderRegistry::provider_family(AppMode::Calc),
             ProviderFamily::LibreOffice
         );
         assert_eq!(

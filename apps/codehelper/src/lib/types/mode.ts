@@ -1,4 +1,4 @@
-export const APP_MODES = ['code', 'gimp', 'blender', 'writer', 'calc', 'impress'] as const;
+export const APP_MODES = ['code', 'gimp', 'blender', 'writer', 'impress'] as const;
 
 export type AppMode = (typeof APP_MODES)[number];
 
@@ -103,24 +103,6 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 			'Write a short introduction about renewable energy for school.',
 			'Add a two-column table for topic and notes.'
 		],
-		capabilities: {
-			supportsTools: true,
-			supportsUndo: false,
-			showModelInfo: true,
-			showHardwarePanel: true,
-
-			showExport: false,
-			showContextControls: false
-		}
-	},
-	{
-		id: 'calc',
-		label: 'Calc',
-		subtitle: 'Spreadsheet mode is visible, but not active yet',
-		icon: 'table',
-		providerKind: 'mcp',
-		systemPromptKey: 'mode.calc.default',
-		suggestions: [],
 		capabilities: {
 			supportsTools: true,
 			supportsUndo: false,

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronDown, Code, Image, Box, FileText, Table, Presentation } from '@lucide/svelte';
+	import { ChevronDown, Code, Image, Box, FileText, Presentation } from '@lucide/svelte';
 	import type { AppMode, ModeConfigDto } from '$lib/types/mode';
 	import type { Component } from 'svelte';
 
@@ -31,7 +31,6 @@
 		image: Image,
 		box: Box,
 		'file-text': FileText,
-		table: Table,
 		presentation: Presentation
 	};
 

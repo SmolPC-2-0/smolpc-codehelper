@@ -4,7 +4,14 @@ const STORAGE_KEY = 'smolpc_composer_drafts_v1';
 
 type DraftsByKey = Record<string, string>;
 
-const initialDrafts = loadFromStorage<DraftsByKey>(STORAGE_KEY, {});
+const storedDrafts = loadFromStorage<DraftsByKey>(STORAGE_KEY, {});
+const initialDrafts = Object.fromEntries(
+	Object.entries(storedDrafts).filter(([key]) => !key.startsWith('calc:'))
+);
+
+if (Object.keys(initialDrafts).length !== Object.keys(storedDrafts).length) {
+	saveToStorage(STORAGE_KEY, initialDrafts);
+}
 
 let draftsByKey = $state<DraftsByKey>(initialDrafts);
 

@@ -7,7 +7,6 @@ pub enum AppMode {
     Gimp,
     Blender,
     Writer,
-    Calc,
     Impress,
 }
 

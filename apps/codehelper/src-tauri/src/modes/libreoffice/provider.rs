@@ -1,12 +1,10 @@
-use super::profiles::{allowed_tool_names, is_live_libreoffice_mode, libreoffice_profile};
+use super::profiles::{allowed_tool_names, libreoffice_profile};
 use super::resources::{resolve_mcp_server_layout, ResourceResolutionOptions};
 use super::response::build_tool_execution_result;
 use super::runtime::LibreOfficeRuntimeConfig;
 use super::state::LibreOfficeProviderState;
 use crate::assistant::MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION;
-use crate::modes::provider::{
-    provider_state, ToolProvider, FOUNDATION_PROVIDER_EXECUTION_NOT_IMPLEMENTED,
-};
+use crate::modes::provider::{provider_state, ToolProvider};
 use async_trait::async_trait;
 use smolpc_assistant_types::{
     AppMode, ProviderStateDto, ToolDefinitionDto, ToolExecutionResultDto,
@@ -118,9 +116,7 @@ impl LibreOfficeProvider {
             );
         }
 
-        format!(
-            "Document runtime failed. Make sure bundled Python is prepared. {error}"
-        )
+        format!("Document runtime failed. Make sure bundled Python is prepared. {error}")
     }
 
     fn is_retryable_runtime_failure(message: &str) -> bool {
@@ -142,10 +138,9 @@ impl LibreOfficeProvider {
 
         self.connect_live(mode).await?;
         let state = self.state.lock().await;
-        state
-            .session
-            .clone()
-            .ok_or_else(|| "LibreOffice provider retry reconnect did not produce a session".to_string())
+        state.session.clone().ok_or_else(|| {
+            "LibreOffice provider retry reconnect did not produce a session".to_string()
+        })
     }
 
     async fn retry_tool_after_runtime_reconnect(
@@ -200,28 +195,6 @@ impl LibreOfficeProvider {
             "{} connected, but the runtime did not expose any {} allowlisted tools.",
             profile.label, profile.label
         )
-    }
-
-    fn calc_scaffold_state(
-        mode: AppMode,
-        state: &mut LibreOfficeProviderState,
-    ) -> Result<ProviderStateDto, String> {
-        let profile = Self::profile_for_mode(mode)?;
-        let detail = format!(
-            "{} scaffold is present in the unified app, but live spreadsheet actions remain deferred in Phase 6B. {} Future runtime: {}.",
-            profile.label,
-            profile.source_coverage,
-            profile.future_runtime_family
-        );
-        state.tools.clear();
-        state.last_error = None;
-        Ok(provider_state(
-            mode,
-            "disconnected",
-            Some(detail.as_str()),
-            true,
-            false,
-        ))
     }
 
     fn validate_runtime_prerequisites(
@@ -310,10 +283,7 @@ impl LibreOfficeProvider {
     }
 
     async fn refresh_live_state(&self, mode: AppMode) -> ProviderStateDto {
-        let profile = match Self::profile_for_mode(mode) {
-            Ok(profile) => profile,
-            Err(error) => return provider_state(mode, "error", Some(error.as_str()), true, false),
-        };
+        let profile = Self::profile_for_mode(mode).expect("validated libreoffice mode");
         let (layout, runtime) = match self.validate_runtime_prerequisites() {
             Ok(value) => value,
             Err(error) => {
@@ -377,10 +347,8 @@ impl LibreOfficeProvider {
 #[async_trait]
 impl ToolProvider for LibreOfficeProvider {
     async fn connect_if_needed(&self, mode: AppMode) -> Result<ProviderStateDto, String> {
-        let mut state = self.state.lock().await;
-        if !is_live_libreoffice_mode(mode) {
-            return Self::calc_scaffold_state(mode, &mut state);
-        }
+        Self::profile_for_mode(mode)?;
+        let state = self.state.lock().await;
 
         if state.session.is_some() && !state.tools.is_empty() {
             return Ok(Self::connected_state(mode, state.last_error.clone()));
@@ -391,6 +359,7 @@ impl ToolProvider for LibreOfficeProvider {
     }
 
     async fn status(&self, mode: AppMode) -> Result<ProviderStateDto, String> {
+        Self::profile_for_mode(mode)?;
         let mut state = self.state.lock().await;
 
         match self.validate_runtime_prerequisites() {
@@ -409,19 +378,13 @@ impl ToolProvider for LibreOfficeProvider {
                 ));
             }
         }
-
-        if !is_live_libreoffice_mode(mode) {
-            return Self::calc_scaffold_state(mode, &mut state);
-        }
         drop(state);
 
         Ok(self.refresh_live_state(mode).await)
     }
 
     async fn list_tools(&self, mode: AppMode) -> Result<Vec<ToolDefinitionDto>, String> {
-        if !is_live_libreoffice_mode(mode) {
-            return Ok(Vec::new());
-        }
+        Self::profile_for_mode(mode)?;
 
         let state = self.state.lock().await;
         Ok(state.tools.clone())
@@ -433,12 +396,9 @@ impl ToolProvider for LibreOfficeProvider {
         name: &str,
         arguments: serde_json::Value,
     ) -> Result<ToolExecutionResultDto, String> {
-        if !is_live_libreoffice_mode(mode) {
-            return Err(FOUNDATION_PROVIDER_EXECUTION_NOT_IMPLEMENTED.to_string());
-        }
+        let profile = Self::profile_for_mode(mode)?;
 
         if !allowed_tool_names(mode).contains(&name) {
-            let profile = Self::profile_for_mode(mode)?;
             return Err(format!(
                 "{name} is not available in {} mode.",
                 profile.label
@@ -465,9 +425,7 @@ impl ToolProvider for LibreOfficeProvider {
         match session.call_tool(name, arguments).await {
             Ok(payload) => {
                 let mut tool_result = build_tool_execution_result(name, payload);
-                if !tool_result.ok
-                    && Self::is_retryable_runtime_failure(&tool_result.summary)
-                {
+                if !tool_result.ok && Self::is_retryable_runtime_failure(&tool_result.summary) {
                     log::warn!(
                         "Retrying LibreOffice tool {} in mode {:?} after transient runtime failure: {}",
                         name,
@@ -527,9 +485,7 @@ impl ToolProvider for LibreOfficeProvider {
     }
 
     async fn disconnect_if_needed(&self, mode: AppMode) -> Result<(), String> {
-        if !is_live_libreoffice_mode(mode) {
-            return Ok(());
-        }
+        Self::profile_for_mode(mode)?;
 
         let mut state = self.state.lock().await;
         state.session = None;
@@ -633,7 +589,7 @@ for line in sys.stdin:
     }
 
     #[tokio::test]
-    async fn calc_mode_reports_scaffold_detail_without_starting_runtime() {
+    async fn unsupported_mode_returns_error_without_starting_runtime() {
         let tempdir = staged_runtime_root(
             "from pathlib import Path\nPath('runtime-started.txt').write_text('started')\n",
         );
@@ -645,16 +601,15 @@ for line in sys.stdin:
             },
         );
 
-        let state = provider.status(AppMode::Calc).await.expect("status");
+        let error = provider
+            .status(AppMode::Code)
+            .await
+            .expect_err("unsupported mode");
 
-        assert_eq!(state.state, "disconnected");
-        assert!(state
-            .detail
-            .expect("detail")
-            .contains("spreadsheet actions remain deferred"));
+        assert!(error.contains("does not handle mode"));
         assert!(
             !tempdir.path().join("runtime-started.txt").exists(),
-            "Calc status should not start the runtime"
+            "Unsupported mode status should not start the runtime"
         );
     }
 

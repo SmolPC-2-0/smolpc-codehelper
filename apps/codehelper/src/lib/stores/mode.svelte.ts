@@ -1,6 +1,6 @@
 import { getModeStatus, listModes } from '$lib/api/unified';
 import { loadFromStorage, saveToStorage } from '$lib/utils/storage';
-import { FALLBACK_MODE_CONFIGS, type AppMode, type ModeConfigDto } from '$lib/types/mode';
+import { APP_MODES, FALLBACK_MODE_CONFIGS, type AppMode, type ModeConfigDto } from '$lib/types/mode';
 import type { ModeStatusDto } from '$lib/types/provider';
 
 const ACTIVE_MODE_KEY = 'smolpc_unified_active_mode_v1';
@@ -12,6 +12,12 @@ let loading = $state(false);
 let configError = $state<string | null>(null);
 let statusError = $state<string | null>(null);
 let initialized = $state(false);
+
+type StoredMode = AppMode | 'calc';
+
+function isAppMode(value: string): value is AppMode {
+	return (APP_MODES as readonly string[]).includes(value);
+}
 
 function getModeConfig(mode: AppMode): ModeConfigDto | null {
 	return modeConfigs.find((config) => config.id === mode) ?? null;
@@ -74,7 +80,7 @@ export const modeStore = {
 		loading = true;
 		configError = null;
 		statusError = null;
-		const storedMode = loadFromStorage<AppMode>(ACTIVE_MODE_KEY, 'code');
+		const storedMode = loadFromStorage<StoredMode>(ACTIVE_MODE_KEY, 'code');
 
 		try {
 			const remoteModes = await listModes();
@@ -87,7 +93,7 @@ export const modeStore = {
 			modeConfigs = FALLBACK_MODE_CONFIGS;
 		}
 
-		const resolvedMode = getModeConfig(storedMode) ? storedMode : 'code';
+		const resolvedMode = isAppMode(storedMode) && getModeConfig(storedMode) ? storedMode : 'code';
 		activeMode = resolvedMode;
 		saveToStorage(ACTIVE_MODE_KEY, activeMode);
 
