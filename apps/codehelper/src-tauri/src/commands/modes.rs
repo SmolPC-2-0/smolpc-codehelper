@@ -7,7 +7,6 @@ use crate::setup::launch::{
 };
 use smolpc_assistant_types::{AppMode, ModeConfigDto, ModeStatusDto, ProviderStateDto};
 
-
 fn build_mode_status_dto(
     mode: AppMode,
     engine_ready: bool,

@@ -37,8 +37,7 @@ pub(super) struct WhisperApi {
         *mut OvGenAiWhisperPipeline,
         *mut *mut OvGenAiWhisperGenerationConfig,
     ) -> OvStatus,
-    pub(super) generation_config_free:
-        unsafe extern "C" fn(*mut OvGenAiWhisperGenerationConfig),
+    pub(super) generation_config_free: unsafe extern "C" fn(*mut OvGenAiWhisperGenerationConfig),
 
     // Generation
     pub(super) generate: unsafe extern "C" fn(
@@ -82,10 +81,7 @@ impl WhisperApi {
                     &openvino_genai_c,
                     b"ov_genai_whisper_pipeline_create\0",
                 )?,
-                free_pipeline: load_symbol(
-                    &openvino_genai_c,
-                    b"ov_genai_whisper_pipeline_free\0",
-                )?,
+                free_pipeline: load_symbol(&openvino_genai_c, b"ov_genai_whisper_pipeline_free\0")?,
                 pipeline_get_generation_config: load_symbol(
                     &openvino_genai_c,
                     b"ov_genai_whisper_pipeline_get_generation_config\0",
@@ -94,10 +90,7 @@ impl WhisperApi {
                     &openvino_genai_c,
                     b"ov_genai_whisper_generation_config_free\0",
                 )?,
-                generate: load_symbol(
-                    &openvino_genai_c,
-                    b"ov_genai_whisper_pipeline_generate\0",
-                )?,
+                generate: load_symbol(&openvino_genai_c, b"ov_genai_whisper_pipeline_generate\0")?,
                 results_free: load_symbol(
                     &openvino_genai_c,
                     b"ov_genai_whisper_decoded_results_free\0",
@@ -235,4 +228,3 @@ pub(super) fn whisper_api_for_bundle(
         .insert(fingerprint, CachedWhisperApi::Success(Arc::clone(&api)));
     Ok(api)
 }
-

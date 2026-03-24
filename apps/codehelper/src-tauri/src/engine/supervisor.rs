@@ -244,9 +244,7 @@ impl<R: Runtime> EngineSupervisor<R> {
         // If the spawn failed (state is Crashed or Failed), revert to the previous
         // runtime mode so auto-restart doesn't keep trying the broken mode.
         if !self.state.is_running() {
-            log::warn!(
-                "Supervisor: mode switch to {mode:?} failed, reverting to {old_mode:?}"
-            );
+            log::warn!("Supervisor: mode switch to {mode:?} failed, reverting to {old_mode:?}");
             self.runtime_config.runtime_mode = old_mode;
             return Err(format!(
                 "Failed to switch runtime mode to {mode:?} — engine did not reach Running state"
@@ -581,6 +579,7 @@ impl<R: Runtime> EngineSupervisor<R> {
     fn transition_to_crashed(&mut self, message: &str) {
         self.client = None;
         self.engine_pid = None;
+        self.health_failure_count = 0;
         self.broadcast_client(None);
         self.broadcast_pid(None);
 

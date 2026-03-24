@@ -84,7 +84,10 @@ impl WhisperPipeline {
         let api = &self.inner.api;
         let pipeline = self.inner.pipeline;
 
-        log::info!("whisper: calling generate with {} samples (null config = defaults)", audio.len());
+        log::info!(
+            "whisper: calling generate with {} samples (null config = defaults)",
+            audio.len()
+        );
 
         let mut results_ptr: *mut OvGenAiWhisperDecodedResults = ptr::null_mut();
         let status = unsafe {
@@ -116,7 +119,10 @@ impl WhisperPipeline {
                 }
             }
         }
-        let _guard = ResultsGuard { api, ptr: results_ptr };
+        let _guard = ResultsGuard {
+            api,
+            ptr: results_ptr,
+        };
 
         // Extract text using the two-call buffer pattern:
         // 1) Call with null output to get required size
@@ -143,9 +149,11 @@ impl WhisperPipeline {
         };
         // _guard drops here, calling results_free
 
-        log::info!("whisper: transcription complete, {} chars: {:?}",
+        log::info!(
+            "whisper: transcription complete, {} chars: {:?}",
             text.len(),
-            if text.len() > 80 { &text[..80] } else { &text });
+            if text.len() > 80 { &text[..80] } else { &text }
+        );
         Ok(text)
     }
 }

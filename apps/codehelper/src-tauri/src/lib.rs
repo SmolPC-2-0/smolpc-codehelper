@@ -367,15 +367,17 @@ fn cleanup_engine_pid() {
 }
 
 fn force_kill_engine(handle_pid: Option<u32>) {
+    let pid_path = engine_pid_path();
+
     // Prefer the in-memory PID from the supervisor handle (always current),
     // fall back to the PID file (may be stale after restarts).
     let pid = if let Some(pid) = handle_pid {
         pid
     } else {
-        let Some(pid_path) = engine_pid_path() else {
+        let Some(ref path) = pid_path else {
             return;
         };
-        let Ok(pid_str) = std::fs::read_to_string(&pid_path) else {
+        let Ok(pid_str) = std::fs::read_to_string(path) else {
             return;
         };
         let Ok(pid) = pid_str.trim().parse::<u32>() else {
@@ -401,7 +403,9 @@ fn force_kill_engine(handle_pid: Option<u32>) {
             });
             if !is_engine {
                 log::warn!("PID {pid} is not an engine process, skipping force-kill");
-                let _ = std::fs::remove_file(&pid_path);
+                if let Some(ref path) = pid_path {
+                    let _ = std::fs::remove_file(path);
+                }
                 return;
             }
         }
@@ -419,7 +423,9 @@ fn force_kill_engine(handle_pid: Option<u32>) {
         }
     }
 
-    let _ = std::fs::remove_file(&pid_path);
+    if let Some(ref path) = pid_path {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[cfg(test)]
