@@ -74,11 +74,11 @@
 		justify-content: space-between;
 		gap: 0.85rem;
 		padding: 0.85rem 1rem;
-		border-bottom: 1px solid color-mix(in srgb, var(--color-primary) 18%, var(--outline-soft));
+		border-bottom: 1px solid color-mix(in srgb, var(--color-warning) 18%, var(--outline-soft));
 		background:
 			linear-gradient(
 				180deg,
-				color-mix(in srgb, var(--brand-soft) 44%, var(--surface-widget)),
+				color-mix(in srgb, var(--color-warning) 9%, var(--surface-widget)),
 				color-mix(in srgb, var(--surface-widget) 97%, black)
 			),
 			var(--surface-widget);
@@ -123,7 +123,7 @@
 		font-weight: 700;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		color: color-mix(in srgb, var(--color-primary) 68%, var(--color-foreground));
+		color: color-mix(in srgb, var(--color-warning) 72%, var(--color-foreground));
 	}
 
 	.model-recommendation-banner--warning .model-recommendation-banner__eyebrow {

@@ -48,7 +48,9 @@
 	let isSwitchingMode = $state(false);
 	let launchingHostApp = $state(false);
 	let switchingRecommendedModel = $state(false);
-	let dismissedToolRecommendationModes = $state<Partial<Record<AppMode, boolean>>>({});
+	// Banner dismissal lasts only until the user leaves the current mode.
+	let dismissedToolRecommendationMode = $state<AppMode | null>(null);
+	let lastSeenActiveMode = $state<AppMode | null>(null);
 	let memoryPressureNotice = $state<string | null>(null);
 	let dismissedMemoryPressureKey = $state<string | null>(null);
 	let hostAppLaunchError = $state<string | null>(null);
@@ -145,7 +147,7 @@
 		return inferenceStore.availableModels.some((model) => model.id === recommendedToolModelId);
 	});
 	const toolModelRecommendationDismissed = $derived(
-		Boolean(dismissedToolRecommendationModes[activeMode])
+		dismissedToolRecommendationMode === activeMode
 	);
 	const showToolModelRecommendation = $derived(
 		recommendedToolModelId !== null &&
@@ -163,11 +165,7 @@
 			return 'default' as const;
 		}
 
-		const snapshot = inferenceStore.memoryPressure;
-		if (!snapshot) {
-			return 'default' as const;
-		}
-
+		const snapshot = inferenceStore.memoryPressure!;
 		return snapshot.level === 'critical' || snapshot.auto_unloaded ? 'critical' : 'warning';
 	});
 	const toolModelRecommendationMessage = $derived.by(() => {
@@ -179,11 +177,7 @@
 			return `This mode works best with ${recommendedToolModelId}. The smaller model often misses tool calls.`;
 		}
 
-		const snapshot = inferenceStore.memoryPressure;
-		if (!snapshot) {
-			return `This mode works best with ${recommendedToolModelId}. The smaller model often misses tool calls.`;
-		}
-
+		const snapshot = inferenceStore.memoryPressure!;
 		const availableRam = `~${snapshot.available_gb.toFixed(1)} GB`;
 		if (snapshot.auto_unloaded) {
 			return `This mode works best with ${recommendedToolModelId}, but the model was unloaded because free RAM is critically low while the app was minimized. Close other apps before switching if you can.`;
@@ -202,6 +196,13 @@
 	const latestAssistantMessageId = $derived(
 		[...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null
 	);
+
+	$effect(() => {
+		if (activeMode !== lastSeenActiveMode) {
+			dismissedToolRecommendationMode = null;
+			lastSeenActiveMode = activeMode;
+		}
+	});
 
 	function setMessagesContainer(element: HTMLDivElement) {
 		messagesContainer = element;
@@ -399,10 +400,7 @@ Teaching rules:
 			const loaded = await inferenceStore.loadModel(recommendedToolModelId);
 			if (loaded) {
 				settingsStore.setModel(recommendedToolModelId);
-				dismissedToolRecommendationModes = {
-					...dismissedToolRecommendationModes,
-					[activeMode]: false
-				};
+				dismissedToolRecommendationMode = null;
 			}
 		} finally {
 			switchingRecommendedModel = false;
@@ -410,10 +408,7 @@ Teaching rules:
 	}
 
 	function handleDismissToolRecommendation() {
-		dismissedToolRecommendationModes = {
-			...dismissedToolRecommendationModes,
-			[activeMode]: true
-		};
+		dismissedToolRecommendationMode = activeMode;
 	}
 
 	function finalizeActiveStreamingMessage(fallbackContent: string) {
@@ -1063,9 +1058,9 @@ Generating summary...`
 			<SetupBanner status={setupStatus} error={setupError} onOpen={openSetupPanel} />
 		{/if}
 
-		{#if showToolModelRecommendation && recommendedToolModelId}
+		{#if showToolModelRecommendation}
 			<ModelRecommendationBanner
-				recommendedModelLabel={recommendedToolModelId}
+				recommendedModelLabel={recommendedToolModelId!}
 				message={toolModelRecommendationMessage}
 				severity={toolModelRecommendationSeverity}
 				busy={switchingRecommendedModel}
