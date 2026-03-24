@@ -295,6 +295,59 @@ impl EngineClient {
         parse_models_response(&value)
     }
 
+    /// Transcribe 16kHz mono f32 audio via Whisper STT endpoint.
+    pub async fn transcribe(
+        &self,
+        audio_16khz_mono: &[f32],
+    ) -> Result<String, EngineClientError> {
+        let bytes: Vec<u8> = audio_16khz_mono
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .collect();
+        let response = self
+            .http
+            .post(self.url("/v1/audio/transcriptions"))
+            .header(AUTHORIZATION, self.auth_header())
+            .header(CONTENT_TYPE, "application/octet-stream")
+            .body(bytes)
+            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
+            .send()
+            .await?;
+        let response = ensure_success(response, "/v1/audio/transcriptions").await?;
+        let value: serde_json::Value = response.json().await?;
+        value
+            .get("text")
+            .and_then(|t| t.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                EngineClientError::Message(
+                    "Transcription response missing 'text' field".to_string(),
+                )
+            })
+    }
+
+    /// Synthesize speech via TTS proxy endpoint. Returns WAV bytes.
+    pub async fn speak(
+        &self,
+        text: &str,
+        voice: Option<&str>,
+    ) -> Result<Vec<u8>, EngineClientError> {
+        let body = serde_json::json!({
+            "text": text,
+            "voice": voice.unwrap_or("Bella"),
+        });
+        let response = self
+            .http
+            .post(self.url("/v1/audio/speech"))
+            .header(AUTHORIZATION, self.auth_header())
+            .json(&body)
+            .timeout(Duration::from_secs(60))
+            .send()
+            .await?;
+        let response = ensure_success(response, "/v1/audio/speech").await?;
+        Ok(response.bytes().await?.to_vec())
+    }
+
     pub async fn generate_stream<F>(
         &self,
         prompt: &str,
