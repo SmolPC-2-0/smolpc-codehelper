@@ -9,7 +9,6 @@ export interface ModeCapabilitiesDto {
 	supportsUndo: boolean;
 	showModelInfo: boolean;
 	showHardwarePanel: boolean;
-	showBenchmarkPanel: boolean;
 	showExport: boolean;
 	showContextControls: boolean;
 }
@@ -43,7 +42,7 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 			supportsUndo: false,
 			showModelInfo: true,
 			showHardwarePanel: true,
-			showBenchmarkPanel: true,
+
 			showExport: true,
 			showContextControls: true
 		}
@@ -65,7 +64,7 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 			supportsUndo: true,
 			showModelInfo: true,
 			showHardwarePanel: true,
-			showBenchmarkPanel: false,
+
 			showExport: false,
 			showContextControls: false
 		}
@@ -87,7 +86,7 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 			supportsUndo: false,
 			showModelInfo: true,
 			showHardwarePanel: true,
-			showBenchmarkPanel: false,
+
 			showExport: false,
 			showContextControls: false
 		}
@@ -109,7 +108,7 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 			supportsUndo: false,
 			showModelInfo: true,
 			showHardwarePanel: true,
-			showBenchmarkPanel: false,
+
 			showExport: false,
 			showContextControls: false
 		}
@@ -127,7 +126,7 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 			supportsUndo: false,
 			showModelInfo: true,
 			showHardwarePanel: true,
-			showBenchmarkPanel: false,
+
 			showExport: false,
 			showContextControls: false
 		}
@@ -149,7 +148,7 @@ export const FALLBACK_MODE_CONFIGS: ModeConfigDto[] = [
 			supportsUndo: false,
 			showModelInfo: true,
 			showHardwarePanel: true,
-			showBenchmarkPanel: false,
+
 			showExport: false,
 			showContextControls: false
 		}

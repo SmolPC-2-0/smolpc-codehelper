@@ -17,7 +17,6 @@
 	const shortcuts: ShortcutItem[] = [
 		{ keys: ['Enter'], description: 'Send message' },
 		{ keys: ['Shift', 'Enter'], description: 'New line in composer' },
-		{ keys: ['Ctrl/Cmd', 'Shift', 'B'], description: 'Toggle benchmark panel' },
 		{ keys: ['Ctrl/Cmd', '\\'], description: 'Toggle sidebar collapse' },
 		{ keys: ['Ctrl/Cmd', '/'], description: 'Toggle shortcuts overlay' },
 		{ keys: ['Esc'], description: 'Close active panel/overlay' }

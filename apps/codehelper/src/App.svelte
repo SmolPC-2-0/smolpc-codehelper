@@ -4,7 +4,6 @@
 	import { listen } from '@tauri-apps/api/event';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import Sidebar from '$lib/components/Sidebar.svelte';
-	import BenchmarkPanel from '$lib/components/BenchmarkPanel.svelte';
 	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
 	import ModelInfoPanel from '$lib/components/ModelInfoPanel.svelte';
 	import KeyboardShortcutsOverlay from '$lib/components/KeyboardShortcutsOverlay.svelte';
@@ -118,7 +117,6 @@
 	const messages = $derived(currentChat?.messages ?? []);
 	const hasNoChats = $derived(chatsStore.chats.length === 0);
 	const pageTitle = $derived(currentChat?.title ?? 'New Chat');
-	const showBenchmarkPanel = $derived(uiStore.activeOverlay === 'benchmark');
 	const showHardwarePanel = $derived(uiStore.activeOverlay === 'hardware');
 	const showModelInfoPanel = $derived(uiStore.activeOverlay === 'modelInfo');
 	const showScrollToLatest = $derived(uiStore.userHasScrolledUp && messages.length > 0);
@@ -632,7 +630,7 @@ Teaching rules:
 		showShortcutsOverlay = true;
 	}
 
-	function handleToggleHeaderOverlay(overlay: 'benchmark' | 'hardware' | 'modelInfo') {
+	function handleToggleHeaderOverlay(overlay: 'hardware' | 'modelInfo') {
 		if (showHelpDrawer) {
 			closeHelpDrawer();
 		}
@@ -650,12 +648,6 @@ Teaching rules:
 		const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 		const modifierKey = isMac ? event.metaKey : event.ctrlKey;
 		const typingInInput = isTypingTarget(event.target);
-
-		if (modifierKey && event.shiftKey && event.key.toLowerCase() === 'b') {
-			event.preventDefault();
-			handleToggleHeaderOverlay('benchmark');
-			return;
-		}
 
 		if (modifierKey && event.key === '\\') {
 			event.preventDefault();
@@ -962,7 +954,6 @@ Teaching rules:
 		/>
 	</div>
 
-	<BenchmarkPanel visible={showBenchmarkPanel} onClose={() => uiStore.closeOverlay()} />
 	<HardwarePanel visible={showHardwarePanel} onClose={() => uiStore.closeOverlay()} />
 	<ModelInfoPanel
 		visible={showModelInfoPanel}

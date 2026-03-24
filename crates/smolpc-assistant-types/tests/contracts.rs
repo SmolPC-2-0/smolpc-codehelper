@@ -25,7 +25,6 @@ fn mode_config_uses_camel_case_keys() {
             supports_undo: false,
             show_model_info: true,
             show_hardware_panel: true,
-            show_benchmark_panel: true,
             show_export: true,
             show_context_controls: true,
         },
