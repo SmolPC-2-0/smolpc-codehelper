@@ -1042,3 +1042,118 @@ fn ram_selection_4gb_returns_none() {
     let selected = select_best_model_for_ram(&models, 4.0);
     assert_eq!(selected, None);
 }
+
+#[test]
+    fn classify_startup_model_error_flags_memory_pressure() {
+        let classified = classify_startup_model_error("OpenVINO runtime failed: out of memory");
+        assert_eq!(classified.code, STARTUP_MEMORY_PRESSURE);
+        assert!(classified.retryable);
+        assert!(classified.message.contains("Memory pressure detected."));
+    }
+
+    #[test]
+    fn classify_startup_model_error_ignores_non_memory_substrings() {
+        let classified = classify_startup_model_error("Launcher window room resize failed");
+        assert_eq!(classified.code, STARTUP_MODEL_LOAD_FAILED);
+        assert!(!classified.message.contains("Memory pressure detected."));
+    }
+
+    #[test]
+    fn with_memory_pressure_hint_is_idempotent() {
+        let hinted =
+            with_memory_pressure_hint("generation failed: out of memory", Some("qwen3-4b"));
+        let hinted_twice = with_memory_pressure_hint(&hinted, Some("qwen3-4b"));
+        assert_eq!(hinted, hinted_twice);
+    }
+
+    #[test]
+    fn startup_mode_directml_required_sets_directml_gate() {
+        assert!(StartupMode::DirectmlRequired.requires_directml());
+        assert!(!StartupMode::Auto.requires_directml());
+    }
+
+    fn fixture_models() -> Vec<smolpc_engine_core::ModelDefinition> {
+        vec![
+            smolpc_engine_core::ModelDefinition {
+                id: "small-model".to_string(),
+                name: "Small".to_string(),
+                size: "1.5B".to_string(),
+                disk_size_gb: 0.9,
+                min_ram_gb: 8.0,
+                estimated_runtime_ram_gb: 1.5,
+                directory: "small".to_string(),
+                description: "test".to_string(),
+            },
+            smolpc_engine_core::ModelDefinition {
+                id: "large-model".to_string(),
+                name: "Large".to_string(),
+                size: "4B".to_string(),
+                disk_size_gb: 2.5,
+                min_ram_gb: 16.0,
+                estimated_runtime_ram_gb: 4.0,
+                directory: "large".to_string(),
+                description: "test".to_string(),
+            },
+        ]
+    }
+
+    #[test]
+    fn ram_selection_32gb_picks_largest() {
+        let models = fixture_models();
+        let selected = select_best_model_for_ram(&models, 32.0);
+        assert_eq!(selected, Some(("large-model".to_string(), 16.0)));
+    }
+
+    #[test]
+    fn ram_selection_16gb_picks_largest_at_threshold() {
+        let models = fixture_models();
+        let selected = select_best_model_for_ram(&models, 16.0);
+        assert_eq!(selected, Some(("large-model".to_string(), 16.0)));
+    }
+
+    #[test]
+    fn ram_selection_12gb_picks_smaller() {
+        let models = fixture_models();
+        let selected = select_best_model_for_ram(&models, 12.0);
+        assert_eq!(selected, Some(("small-model".to_string(), 8.0)));
+    }
+
+    #[test]
+    fn ram_selection_4gb_returns_none() {
+        let models = fixture_models();
+        let selected = select_best_model_for_ram(&models, 4.0);
+        assert_eq!(selected, None);
+    }
+
+    // ── Whisper STT tests ────────────────────────────────────────────
+
+    #[test]
+    fn audio_body_must_be_f32_aligned() {
+        // f32 samples are 4 bytes each. Non-aligned bodies must be rejected.
+        assert!(5 % 4 != 0, "5 bytes is not f32-aligned");
+        assert!(8 % 4 == 0, "8 bytes is f32-aligned");
+        assert!(0 % 4 == 0, "empty is technically aligned but rejected separately");
+    }
+
+    #[test]
+    fn f32_le_bytes_round_trip() {
+        let samples: Vec<f32> = vec![0.0, 0.5, -0.5, 1.0, -1.0];
+        let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        let recovered: Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        assert_eq!(samples, recovered);
+    }
+
+    #[test]
+    fn whisper_model_path_structure() {
+        let models_dir = PathBuf::from("/fake/models");
+        let whisper_dir = models_dir.join("whisper-base.en").join("openvino");
+        assert!(
+            whisper_dir.ends_with("whisper-base.en/openvino")
+                || whisper_dir.ends_with(r"whisper-base.en\openvino"),
+            "unexpected path: {}",
+            whisper_dir.display()
+        );
+    }
