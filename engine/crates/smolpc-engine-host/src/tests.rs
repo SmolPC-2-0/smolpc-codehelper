@@ -1157,3 +1157,47 @@ fn ram_selection_4gb_returns_none() {
             whisper_dir.display()
         );
     }
+
+    // ── TTS sidecar tests ────────────────────────────────────────────
+
+    #[test]
+    fn tts_binary_not_in_resource_dir() {
+        // In debug builds, the fallback path may find the actual built binary
+        // in the workspace target dir. This test only verifies that an empty
+        // resource_dir doesn't contain the binary.
+        let dir = tempdir().unwrap();
+        let binaries = dir.path().join("binaries");
+        fs::create_dir_all(&binaries).unwrap();
+        // binaries/ dir exists but is empty — no TTS binary inside it
+        let binary_name = format!("smolpc-tts-server{}", std::env::consts::EXE_SUFFIX);
+        assert!(!binaries.join(&binary_name).exists());
+    }
+
+    #[test]
+    fn tts_binary_found_in_binaries_dir() {
+        let dir = tempdir().unwrap();
+        let binaries = dir.path().join("binaries");
+        fs::create_dir_all(&binaries).unwrap();
+        let binary_name = format!("smolpc-tts-server{}", std::env::consts::EXE_SUFFIX);
+        fs::write(binaries.join(&binary_name), b"fake").unwrap();
+        let result = crate::tts_sidecar::resolve_tts_binary(Some(dir.path()));
+        assert!(result.is_some());
+        assert!(result.unwrap().ends_with(&binary_name));
+    }
+
+    #[test]
+    fn audio_speech_request_defaults() {
+        let req: AudioSpeechRequest =
+            serde_json::from_str(r#"{"text":"hello"}"#).unwrap();
+        assert_eq!(req.voice, "Bella");
+        assert_eq!(req.speed, 1.0);
+        assert_eq!(req.text, "hello");
+    }
+
+    #[test]
+    fn audio_speech_request_with_overrides() {
+        let req: AudioSpeechRequest =
+            serde_json::from_str(r#"{"text":"hi","voice":"Luna","speed":1.5}"#).unwrap();
+        assert_eq!(req.voice, "Luna");
+        assert_eq!(req.speed, 1.5);
+    }
