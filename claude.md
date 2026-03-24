@@ -11,7 +11,7 @@ SmolPC Code Helper is an **offline AI coding assistant** for secondary school st
 **Architecture:**
 - `engine/` — shared inference server: `smolpc-engine-host` (axum, 17 modules), `smolpc-engine-core` (backends, hardware, models), `smolpc-engine-client` (HTTP+SSE client for apps), `smolpc-tts-server` (standalone TTS sidecar).
 - `apps/codehelper/` — Tauri 2 app with modes: Code (default), Blender, GIMP, LibreOffice. Each mode has its own executor, provider, and runtime under `src-tauri/src/modes/`.
-- `launcher/` — suite shell (extraction target, currently embedded in `apps/codehelper/src-tauri/src/launcher/`).
+- `apps/codehelper/src-tauri/src/engine/` — `EngineSupervisor` actor task owns the engine process lifecycle (spawn, health, auto-restart, shutdown). Tauri commands interact via `EngineSupervisorHandle` (mpsc+watch channels, no Mutex). See `docs/ENGINE_SUPERVISOR.md`.
 - Engine runs as a local HTTP server on port 19432; Tauri apps connect via `smolpc-engine-client`.
 
 **Backend selection priority:** `directml` (discrete GPU only) > `openvino_npu` > `cpu`. RAM-aware model defaults: 16GB+ gets `qwen3-4b`, <16GB gets `qwen2.5-1.5b-instruct`.
@@ -109,6 +109,8 @@ Hard-won rules from development. Organized by theme. **Detailed per-subsystem ru
 - When removing or replacing a dependency, trace every consumed field to its terminal behavior — a "hint" boolean can be a hard gate downstream
 - DirectML on Intel integrated GPU produces garbage — only accept discrete GPUs as DirectML candidates
 - DXGI adapter enumeration (`IDXGIFactory6`) is 1000x faster than WMI for GPU detection
+- NPU StaticLLMPipeline has a fixed context window: `MAX_PROMPT_LEN` (2048) + `MIN_RESPONSE_LEN` (1024). Exceeding `MAX_PROMPT_LEN` crashes with "unknown exception" — no graceful error. Token counting must happen host-side before sending. The C API does not expose a tokenizer; use the `tokenizers` crate with the model's `tokenizer.json` or a character heuristic (~3.5 chars/token for Qwen)
+- `smolpc-tts-server` is a standalone workspace (own `[workspace]` in Cargo.toml) — `ort` version conflict prevents workspace membership. Build with `--manifest-path`, not `-p`
 
 *Rust state management:*
 - Use RAII drop guards for multi-path state transitions (e.g., `TransitionGuard` for `model_transition_in_progress`)
