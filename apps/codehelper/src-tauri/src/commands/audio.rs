@@ -1,11 +1,14 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tauri::Emitter;
 
 /// Maximum recording length in samples (30 seconds at 48kHz stereo).
 /// Prevents unbounded memory growth on 8GB target hardware.
 const MAX_RECORDING_SAMPLES: usize = 48_000 * 2 * 30;
+pub const AUDIO_RECORDING_READY_EVENT: &str = "audio-recording-ready";
 
 // ── AudioState ───────────────────────────────────────────────────────
 
@@ -32,11 +35,18 @@ struct RecordingSession {
     buffer: Arc<std::sync::Mutex<Vec<f32>>>,
     sample_rate: u32,
     channels: u16,
+    session_id: String,
 }
 
 struct PlaybackHandle {
     stop_signal: Arc<AtomicBool>,
     join_handle: Option<std::thread::JoinHandle<()>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioRecordingReadyEvent {
+    pub session_id: String,
 }
 
 // ── Commands ─────────────────────────────────────────────────────────
@@ -46,7 +56,9 @@ struct PlaybackHandle {
 /// Windows COM/WASAPI calls that can take 50-200ms).
 #[tauri::command]
 pub async fn start_recording(
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, AudioState>,
+    session_id: String,
 ) -> Result<(), String> {
     // Quick check — don't hold lock during device enumeration.
     {
@@ -70,9 +82,14 @@ pub async fn start_recording(
 
     let sample_rate = config.sample_rate();
     let channels = config.channels();
-    let buffer: Arc<std::sync::Mutex<Vec<f32>>> =
-        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let buffer: Arc<std::sync::Mutex<Vec<f32>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
     let buffer_clone = Arc::clone(&buffer);
+    let ready_emitted_clone = Arc::new(AtomicBool::new(false));
+    let session_registered = Arc::new(AtomicBool::new(false));
+    let session_registered_clone = Arc::clone(&session_registered);
+    let app_handle_clone = app_handle.clone();
+    let callback_session_id = session_id.clone();
+    let log_session_id = session_id.clone();
 
     // [C2 fix] Cap recording buffer at MAX_RECORDING_SAMPLES to prevent
     // unbounded memory growth if a student leaves recording on.
@@ -85,6 +102,23 @@ pub async fn start_recording(
                     if remaining > 0 {
                         let to_copy = data.len().min(remaining);
                         buf.extend_from_slice(&data[..to_copy]);
+                    }
+                }
+
+                if data.is_empty() || !session_registered_clone.load(Ordering::Relaxed) {
+                    return;
+                }
+
+                if !ready_emitted_clone.swap(true, Ordering::Relaxed) {
+                    let payload = AudioRecordingReadyEvent {
+                        session_id: callback_session_id.clone(),
+                    };
+                    if let Err(error) = app_handle_clone.emit(AUDIO_RECORDING_READY_EVENT, payload)
+                    {
+                        log::warn!(
+                            "Failed to emit {AUDIO_RECORDING_READY_EVENT} for session {}: {error}",
+                            callback_session_id
+                        );
                     }
                 }
             },
@@ -104,6 +138,7 @@ pub async fn start_recording(
         buffer,
         sample_rate,
         channels,
+        session_id,
     };
 
     // Re-acquire lock and set — TOCTOU double-check catches concurrent callers.
@@ -118,8 +153,14 @@ pub async fn start_recording(
         }
         *recording = Some(session);
     }
+    session_registered.store(true, Ordering::Relaxed);
 
-    log::info!("Recording started: {sample_rate}Hz, {channels}ch");
+    log::info!(
+        "Recording started: session={} {}Hz, {}ch",
+        log_session_id,
+        sample_rate,
+        channels
+    );
     Ok(())
 }
 
@@ -149,7 +190,8 @@ pub async fn stop_recording(
     };
 
     log::info!(
-        "stop_recording: captured {} raw samples at {}Hz {}ch",
+        "stop_recording: session={} captured {} raw samples at {}Hz {}ch",
+        session.session_id,
         raw_samples.len(),
         session.sample_rate,
         session.channels
@@ -161,16 +203,25 @@ pub async fn stop_recording(
 
     // Mono mix if stereo.
     let mono_samples = if session.channels > 1 {
-        log::info!("stop_recording: mono mixing {} stereo samples", raw_samples.len());
+        log::info!(
+            "stop_recording: mono mixing {} stereo samples",
+            raw_samples.len()
+        );
         mono_mix(&raw_samples, session.channels)
     } else {
         raw_samples
     };
-    log::info!("stop_recording: {} mono samples, resampling to 16kHz", mono_samples.len());
+    log::info!(
+        "stop_recording: {} mono samples, resampling to 16kHz",
+        mono_samples.len()
+    );
 
     // Resample to 16kHz.
     let resampled = resample_to_16k(&mono_samples, session.sample_rate)?;
-    log::info!("stop_recording: resampled to {} samples at 16kHz", resampled.len());
+    log::info!(
+        "stop_recording: resampled to {} samples at 16kHz",
+        resampled.len()
+    );
 
     // POST to engine.
     log::info!("stop_recording: getting engine client...");
@@ -268,16 +319,12 @@ pub async fn speak_text(
 }
 
 #[tauri::command]
-pub async fn stop_playback(
-    state: tauri::State<'_, AudioState>,
-) -> Result<(), String> {
+pub async fn stop_playback(state: tauri::State<'_, AudioState>) -> Result<(), String> {
     stop_playback_async(&state).await
 }
 
 #[tauri::command]
-pub fn is_playing(
-    state: tauri::State<'_, AudioState>,
-) -> Result<bool, String> {
+pub fn is_playing(state: tauri::State<'_, AudioState>) -> Result<bool, String> {
     let playback = state
         .playback
         .lock()
@@ -386,8 +433,8 @@ fn resample_to_16k(samples: &[f32], source_rate: u32) -> Result<Vec<f32>, String
     let input_adapter =
         InterleavedSlice::new(samples, channels, samples.len()).map_err(|e| format!("{e}"))?;
     let output_len = output.len();
-    let mut output_adapter = InterleavedSlice::new_mut(&mut output, channels, output_len)
-        .map_err(|e| format!("{e}"))?;
+    let mut output_adapter =
+        InterleavedSlice::new_mut(&mut output, channels, output_len).map_err(|e| format!("{e}"))?;
 
     let (_nbr_in, nbr_out) = resampler
         .process_all_into_buffer(&input_adapter, &mut output_adapter, samples.len(), None)

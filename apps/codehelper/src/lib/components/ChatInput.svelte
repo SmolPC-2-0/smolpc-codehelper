@@ -24,6 +24,64 @@
 	let textarea: HTMLTextAreaElement;
 	let hydratedDraftKey = $state<string | null>(null);
 	const normalizedDraftKey = $derived(draftKey.trim() || 'global');
+	const showMicStatusPill = $derived(
+		showMicButton &&
+			(voiceStore.micState === 'arming' ||
+				voiceStore.micState === 'ready' ||
+				voiceStore.micState === 'recording' ||
+				voiceStore.micState === 'processing')
+	);
+	const isMicActionDisabled = $derived(
+		disabled ||
+			voiceStore.micState === 'arming' ||
+			voiceStore.micState === 'processing' ||
+			voiceStore.micState === 'disabled'
+	);
+	const isMicStopState = $derived(
+		voiceStore.micState === 'ready' || voiceStore.micState === 'recording'
+	);
+	const micStatusTone = $derived.by(() => {
+		switch (voiceStore.micState) {
+			case 'arming':
+			case 'processing':
+				return 'loading';
+			case 'ready':
+				return 'ready';
+			case 'recording':
+				return 'recording';
+			default:
+				return 'idle';
+		}
+	});
+	const micStatusCopy = $derived.by(() => {
+		switch (voiceStore.micState) {
+			case 'arming':
+				return {
+					headline: 'Starting microphone...',
+					detail: 'Wait for "Speak now"'
+				};
+			case 'ready':
+				return {
+					headline: 'Speak now',
+					detail: 'Mic is live'
+				};
+			case 'recording':
+				return {
+					headline: 'Listening...',
+					detail: 'Tap the square to stop'
+				};
+			case 'processing':
+				return {
+					headline: 'Transcribing...',
+					detail: 'Adding text to your draft'
+				};
+			default:
+				return {
+					headline: '',
+					detail: ''
+				};
+		}
+	});
 
 	function resizeTextarea() {
 		if (textarea) {
@@ -57,7 +115,7 @@
 	}
 
 	async function handleMicClick() {
-		if (voiceStore.micState === 'recording') {
+		if (voiceStore.micState === 'ready' || voiceStore.micState === 'recording') {
 			const text = await voiceStore.stopRecording();
 			if (text.trim()) {
 				const start = textarea?.selectionStart ?? inputValue.length;
@@ -82,6 +140,24 @@
 		}
 	}
 
+	function micButtonTitle(): string {
+		switch (voiceStore.micState) {
+			case 'arming':
+				return 'Starting microphone...';
+			case 'ready':
+				return 'Microphone is live. Tap to stop recording.';
+			case 'recording':
+				return 'Stop recording';
+			case 'processing':
+				return 'Transcribing...';
+			case 'disabled':
+				return 'No microphone detected';
+			case 'idle':
+			default:
+				return 'Voice input';
+		}
+	}
+
 	$effect(() => {
 		const key = normalizedDraftKey;
 		if (hydratedDraftKey === key) {
@@ -94,56 +170,121 @@
 	});
 </script>
 
-<div class="chat-input">
-	<div class="chat-input__field">
-		<textarea
-			bind:this={textarea}
-			bind:value={inputValue}
-			onkeydown={handleKeydown}
-			oninput={handleInput}
-			{placeholder}
-			{disabled}
-			rows="1"
-			class="chat-input__textarea"
-			style="max-height: 200px; overflow-y: auto;"
-		></textarea>
-		<div class="chat-input__hint">
-			<CornerDownLeft class="h-3.5 w-3.5" />
-			<span>Enter to send, Shift+Enter newline</span>
+<div class="chat-input-shell">
+	{#if showMicStatusPill}
+		<div class="chat-input__status-row">
+			<div
+				class={`chat-input__status chat-input__status--${micStatusTone} ${showMicButton ? 'chat-input__status--with-mic' : ''}`}
+				role="status"
+				aria-live="polite"
+			>
+				<span class="chat-input__status-headline">{micStatusCopy.headline}</span>
+				<span class="chat-input__status-detail">{micStatusCopy.detail}</span>
+			</div>
 		</div>
-	</div>
-	{#if showMicButton}
-		<button
-			type="button"
-			class="chat-input__mic"
-			class:chat-input__mic--recording={voiceStore.micState === 'recording'}
-			onclick={handleMicClick}
-			disabled={disabled ||
-				voiceStore.micState === 'processing' ||
-				voiceStore.micState === 'disabled'}
-			title={voiceStore.micState === 'disabled'
-				? 'No microphone detected'
-				: voiceStore.micState === 'recording'
-					? 'Stop recording'
-					: voiceStore.micState === 'processing'
-						? 'Transcribing...'
-						: 'Voice input'}
-		>
-			{#if voiceStore.micState === 'recording'}
-				<Square class="h-4 w-4" />
-			{:else if voiceStore.micState === 'processing'}
-				<Loader2 class="h-4 w-4 animate-spin" />
-			{:else}
-				<Mic class="h-4 w-4" />
-			{/if}
-		</button>
 	{/if}
-	<Button onclick={handleSubmit} {disabled} size="icon" class="chat-input__send">
-		<Send class="h-4.5 w-4.5" />
-	</Button>
+
+	<div class="chat-input">
+		<div class="chat-input__field">
+			<textarea
+				bind:this={textarea}
+				bind:value={inputValue}
+				onkeydown={handleKeydown}
+				oninput={handleInput}
+				{placeholder}
+				{disabled}
+				rows="1"
+				class="chat-input__textarea"
+				style="max-height: 200px; overflow-y: auto;"
+			></textarea>
+			<div class="chat-input__hint">
+				<CornerDownLeft class="h-3.5 w-3.5" />
+				<span>Enter to send, Shift+Enter newline</span>
+			</div>
+		</div>
+		{#if showMicButton}
+			<button
+				type="button"
+				class="chat-input__mic"
+				class:chat-input__mic--arming={voiceStore.micState === 'arming'}
+				class:chat-input__mic--ready={voiceStore.micState === 'ready'}
+				class:chat-input__mic--recording={voiceStore.micState === 'recording'}
+				class:chat-input__mic--processing={voiceStore.micState === 'processing'}
+				onclick={handleMicClick}
+				disabled={isMicActionDisabled}
+				title={micButtonTitle()}
+			>
+				{#if voiceStore.micState === 'arming' || voiceStore.micState === 'processing'}
+					<Loader2 class="h-4 w-4 animate-spin" />
+				{:else if isMicStopState}
+					<Square class="h-4 w-4" />
+				{:else}
+					<Mic class="h-4 w-4" />
+				{/if}
+			</button>
+		{/if}
+		<Button onclick={handleSubmit} {disabled} size="icon" class="chat-input__send">
+			<Send class="h-4.5 w-4.5" />
+		</Button>
+	</div>
 </div>
 
 <style>
+	.chat-input-shell {
+		display: grid;
+		gap: 0.45rem;
+	}
+
+	.chat-input__status-row {
+		display: flex;
+		justify-content: flex-end;
+	}
+
+	.chat-input__status {
+		display: flex;
+		flex-direction: column;
+		gap: 0.08rem;
+		max-width: min(18rem, 100%);
+		padding: 0.55rem 0.75rem;
+		border-radius: var(--radius-lg);
+		border: 1px solid var(--outline-soft);
+		background: color-mix(in srgb, var(--surface-floating) 96%, black);
+		box-shadow: var(--glow-subtle);
+		backdrop-filter: blur(10px);
+	}
+
+	.chat-input__status--with-mic {
+		margin-right: 3.65rem;
+	}
+
+	.chat-input__status-headline {
+		font-size: 0.72rem;
+		font-weight: 650;
+		line-height: 1.15;
+	}
+
+	.chat-input__status-detail {
+		font-size: 0.65rem;
+		line-height: 1.2;
+		color: var(--color-muted-foreground);
+	}
+
+	.chat-input__status--loading {
+		border-color: color-mix(in srgb, var(--outline-strong) 86%, transparent);
+		background: color-mix(in srgb, var(--brand-soft) 86%, var(--surface-floating));
+	}
+
+	.chat-input__status--ready {
+		border-color: color-mix(in srgb, var(--color-success) 42%, var(--outline-strong));
+		background: color-mix(in srgb, var(--color-success) 12%, var(--surface-floating));
+		animation: status-ready-pop 1.1s ease-out 1;
+	}
+
+	.chat-input__status--recording {
+		border-color: color-mix(in srgb, var(--color-primary) 42%, var(--outline-strong));
+		background: color-mix(in srgb, var(--color-primary) 12%, var(--surface-floating));
+	}
+
 	.chat-input {
 		display: flex;
 		align-items: flex-end;
@@ -262,15 +403,60 @@
 		border-color: var(--outline-strong);
 	}
 
+	.chat-input__mic--arming,
+	.chat-input__mic--processing {
+		border-color: var(--outline-strong);
+		color: var(--color-primary);
+		background: color-mix(in srgb, var(--brand-soft) 78%, var(--surface-widget));
+	}
+
 	.chat-input__mic:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
 
+	.chat-input__mic--ready {
+		border-color: color-mix(in srgb, var(--color-success) 44%, var(--outline-strong));
+		color: color-mix(in srgb, var(--color-success) 82%, var(--color-foreground));
+		background: color-mix(in srgb, var(--color-success) 12%, var(--surface-widget));
+		animation: mic-ready-flash 1.1s ease-out 1;
+	}
+
 	.chat-input__mic--recording {
 		border-color: var(--color-destructive);
 		color: var(--color-destructive);
+		background: color-mix(in srgb, var(--color-destructive) 10%, var(--surface-widget));
 		animation: mic-pulse 1.4s ease-in-out infinite;
+	}
+
+	@keyframes status-ready-pop {
+		0% {
+			transform: translateY(4px) scale(0.96);
+			opacity: 0;
+		}
+		40% {
+			transform: translateY(0) scale(1.01);
+			opacity: 1;
+		}
+		100% {
+			transform: translateY(0) scale(1);
+			opacity: 1;
+		}
+	}
+
+	@keyframes mic-ready-flash {
+		0% {
+			box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-success) 18%, transparent);
+			transform: scale(0.96);
+		}
+		45% {
+			box-shadow: 0 0 0 8px color-mix(in srgb, var(--color-success) 10%, transparent);
+			transform: scale(1.03);
+		}
+		100% {
+			box-shadow: var(--glow-subtle);
+			transform: scale(1);
+		}
 	}
 
 	@keyframes mic-pulse {
@@ -280,6 +466,17 @@
 		}
 		50% {
 			opacity: 1;
+		}
+	}
+
+	@media (max-width: 768px) {
+		.chat-input__status {
+			max-width: none;
+			width: 100%;
+		}
+
+		.chat-input__status--with-mic {
+			margin-right: 0;
 		}
 	}
 </style>

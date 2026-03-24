@@ -23,6 +23,7 @@
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { modeStore } from '$lib/stores/mode.svelte';
 	import { setupStore } from '$lib/stores/setup.svelte';
+	import { voiceStore, type AudioRecordingReadyEvent } from '$lib/stores/voice.svelte';
 	import { assistantSend, assistantCancel, openModeHostApp } from '$lib/api/unified';
 	import { applyTheme, watchSystemTheme } from '$lib/utils/theme';
 	import type { Message } from '$lib/types/chat';
@@ -750,10 +751,16 @@ Generating summary...`
 
 		// Listen for supervisor lifecycle events instead of polling
 		let unlistenLifecycle: (() => void) | undefined;
+		let unlistenAudioRecordingReady: (() => void) | undefined;
 		listen<EngineLifecycleState>('engine-state-changed', (event) => {
 			inferenceStore.updateLifecycleState(event.payload);
 		}).then((fn) => {
 			unlistenLifecycle = fn;
+		});
+		listen<AudioRecordingReadyEvent>('audio-recording-ready', (event) => {
+			voiceStore.handleRecordingReady(event.payload);
+		}).then((fn) => {
+			unlistenAudioRecordingReady = fn;
 		});
 
 		initInference();
@@ -773,6 +780,7 @@ Generating summary...`
 
 		return () => {
 			unlistenLifecycle?.();
+			unlistenAudioRecordingReady?.();
 			window.removeEventListener('keydown', handleKeyDown);
 			window.removeEventListener('resize', handleResize);
 			window.visualViewport?.removeEventListener('resize', handleResize);
