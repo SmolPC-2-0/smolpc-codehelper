@@ -6,6 +6,7 @@
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
 	import ModelInfoPanel from '$lib/components/ModelInfoPanel.svelte';
+	import ModelRecommendationBanner from '$lib/components/ModelRecommendationBanner.svelte';
 	import KeyboardShortcutsOverlay from '$lib/components/KeyboardShortcutsOverlay.svelte';
 	import ModeHelpDrawer from '$lib/components/ModeHelpDrawer.svelte';
 	import WorkspaceHeader from '$lib/components/layout/WorkspaceHeader.svelte';
@@ -46,6 +47,7 @@
 	let startupComplete = $state(false);
 	let isSwitchingMode = $state(false);
 	let launchingHostApp = $state(false);
+	let switchingRecommendedModel = $state(false);
 	let memoryPressureNotice = $state<string | null>(null);
 	let dismissedMemoryPressureKey = $state<string | null>(null);
 	let hostAppLaunchError = $state<string | null>(null);
@@ -74,6 +76,12 @@
 		calc: 'Open LibreOffice',
 		impress: 'Open LibreOffice'
 	};
+	const TOOL_MODE_MODEL_RECOMMENDATIONS: Readonly<Partial<Record<AppMode, string>>> = {
+		gimp: 'qwen3-4b',
+		writer: 'qwen3-4b',
+		impress: 'qwen3-4b'
+	};
+	const TOOL_MODE_SMALL_MODEL_TRIGGER = 'qwen2.5-1.5b-instruct';
 
 	const modeAvailability = $derived.by(() => {
 		const result: Record<string, boolean> = { code: true }; // Code always available
@@ -124,6 +132,20 @@
 	const isCancelling = $derived(inferenceStore.cancelState === 'pending');
 	const isInferenceBusy = $derived(inferenceStore.isGenerating || isCancelling || hasActiveStream);
 	const composerDraftKey = $derived(`${activeMode}:${currentChat?.id ?? 'new'}`);
+	const effectiveModelId = $derived(inferenceStore.currentModel ?? settingsStore.selectedModel ?? null);
+	const recommendedToolModelId = $derived(TOOL_MODE_MODEL_RECOMMENDATIONS[activeMode] ?? null);
+	const recommendedToolModelAvailable = $derived.by(() => {
+		if (!recommendedToolModelId) {
+			return false;
+		}
+
+		return inferenceStore.availableModels.some((model) => model.id === recommendedToolModelId);
+	});
+	const showToolModelRecommendation = $derived(
+		recommendedToolModelId !== null &&
+			effectiveModelId === TOOL_MODE_SMALL_MODEL_TRIGGER &&
+			recommendedToolModelAvailable
+	);
 	const latestAssistantMessageId = $derived(
 		[...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null
 	);
@@ -312,6 +334,22 @@ Teaching rules:
 			dismissedMemoryPressureKey = memoryPressureNoticeKey(snapshot);
 		}
 		memoryPressureNotice = null;
+	}
+
+	async function handleSwitchToRecommendedModel() {
+		if (!recommendedToolModelId || isInferenceBusy || switchingRecommendedModel) {
+			return;
+		}
+
+		switchingRecommendedModel = true;
+		try {
+			const loaded = await inferenceStore.loadModel(recommendedToolModelId);
+			if (loaded) {
+				settingsStore.setModel(recommendedToolModelId);
+			}
+		} finally {
+			switchingRecommendedModel = false;
+		}
 	}
 
 	function finalizeActiveStreamingMessage(fallbackContent: string) {
@@ -958,6 +996,15 @@ Generating summary...`
 
 		{#if setupNeedsAttention}
 			<SetupBanner status={setupStatus} error={setupError} onOpen={openSetupPanel} />
+		{/if}
+
+		{#if showToolModelRecommendation && recommendedToolModelId}
+			<ModelRecommendationBanner
+				recommendedModelLabel={recommendedToolModelId}
+				busy={switchingRecommendedModel}
+				disabled={isInferenceBusy}
+				onSwitch={handleSwitchToRecommendedModel}
+			/>
 		{/if}
 
 		<ConversationView
