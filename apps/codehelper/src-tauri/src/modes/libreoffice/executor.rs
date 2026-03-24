@@ -149,34 +149,27 @@ fn filter_tools_by_intent<'a>(
             &["properties", "info", "metadata", "word count", "stats"],
             &["get_document_properties"],
         ),
-        (
-            &["copy", "duplicate"],
-            &["copy_document"],
-        ),
+        (&["copy", "duplicate"], &["copy_document"]),
         (
             &["create", "new", "blank", "make"],
             &["create_blank_document", "create_blank_presentation"],
         ),
-        (
-            &["heading"],
-            &["add_heading"],
-        ),
-        (
-            &["table"],
-            &["add_table", "format_table"],
-        ),
+        (&["heading"], &["add_heading"]),
+        (&["table"], &["add_table", "format_table"]),
         (
             &["slide"],
-            &["add_slide", "edit_slide_content", "edit_slide_title", "delete_slide"],
+            &[
+                "add_slide",
+                "edit_slide_content",
+                "edit_slide_title",
+                "delete_slide",
+            ],
         ),
         (
             &["image", "picture", "photo"],
             &["insert_image", "insert_slide_image"],
         ),
-        (
-            &["page break"],
-            &["insert_page_break"],
-        ),
+        (&["page break"], &["insert_page_break"]),
         (
             &["format", "bold", "italic", "font", "style", "color"],
             &[
@@ -189,21 +182,29 @@ fn filter_tools_by_intent<'a>(
             ],
         ),
         (
-            &["add text", "add the text", "add paragraph", "add a paragraph", "append text"],
+            &[
+                "add text",
+                "add the text",
+                "add paragraph",
+                "add a paragraph",
+                "append text",
+            ],
             &["add_text", "add_paragraph"],
         ),
         (
-            &["search and replace", "find and replace", "replace all", "search for"],
+            &[
+                "search and replace",
+                "find and replace",
+                "replace all",
+                "search for",
+            ],
             &["search_replace_text"],
         ),
         (
             &["delete", "remove"],
             &["delete_text", "delete_paragraph", "delete_slide"],
         ),
-        (
-            &["paragraph", "text"],
-            &["add_paragraph", "add_text"],
-        ),
+        (&["paragraph", "text"], &["add_paragraph", "add_text"]),
     ];
 
     for (keywords, tool_names) in routing {
@@ -250,9 +251,13 @@ fn build_planner_messages(
     let system_prompt = format!(
         "You are the LibreOffice {} assistant.\n\
 Reply with a JSON tool call. Use this shape:\n\
-{{\"tool_call\":{{\"name\":\"<tool_name>\",\"arguments\":{{...}}}}}}\n\
+{{\"tool_call\":{{\"name\":\"TOOL_NAME\",\"arguments\":{{...}}}}}}\n\
 No markdown. No natural language. JSON only.\n\
-If the user refers to a file from earlier in the conversation, use that file path.\n\
+IMPORTANT: The tool name MUST be exactly one of the tool names listed below. \
+Never use a filename, document title, or any other string as the tool name.\n\
+For file_path arguments: pass the filename exactly as the user wrote it. \
+Do NOT construct absolute paths yourself. \
+If the user message ends with a (Context: ...) note, copy that path verbatim.\n\
 Available tools:\n{}",
         label, tool_catalog
     );
@@ -266,10 +271,7 @@ Available tools:\n{}",
     // contains natural-language summaries that prime the small model to respond
     // in natural language instead of JSON.  File references like "that document"
     // are handled by scanning the history for the most recent file path.
-    let user_content = enrich_user_text_with_file_context(
-        &request.user_text,
-        &request.messages,
-    );
+    let user_content = enrich_user_text_with_file_context(&request.user_text, &request.messages);
     messages.push(EngineChatMessage {
         role: "user".to_string(),
         content: user_content,
@@ -297,8 +299,21 @@ fn enrich_user_text_with_file_context(
         .filter(|m| m.role == "assistant")
         .find_map(|m| extract_file_path_from_text(&m.content));
 
+    // Also check user messages — the path may have been mentioned by the user
+    // (e.g., "Create a document called X.docx") and echoed back in the
+    // assistant reply with the full resolved path.
+    let path = path.or_else(|| {
+        history
+            .iter()
+            .rev()
+            .filter(|m| m.role == "user")
+            .find_map(|m| extract_file_path_from_text(&m.content))
+    });
+
     match path {
-        Some(p) => format!("{user_text}\n(Context: the most recent file is {p})"),
+        Some(p) => format!("{user_text}\n(Context: the current file is {p})"),
+        // No context path found — return user text unchanged.
+        // The MCP server handles bare filenames by resolving them to Documents.
         None => user_text.to_string(),
     }
 }
@@ -306,8 +321,8 @@ fn enrich_user_text_with_file_context(
 fn extract_file_path_from_text(text: &str) -> Option<String> {
     // Document extensions we recognise (lowercase, with dot).
     const EXTENSIONS: &[&str] = &[
-        ".odt", ".docx", ".doc", ".rtf", ".odp", ".pptx", ".ppt", ".ods",
-        ".xlsx", ".xls", ".pdf", ".txt", ".csv",
+        ".odt", ".docx", ".doc", ".rtf", ".odp", ".pptx", ".ppt", ".ods", ".xlsx", ".xls", ".pdf",
+        ".txt", ".csv",
     ];
 
     // Scan for Windows absolute paths like `C:\...\file.ext`.  Paths may
@@ -319,10 +334,7 @@ fn extract_file_path_from_text(text: &str) -> Option<String> {
     let mut i = 0;
     while i + 2 < len {
         // Look for a drive letter followed by `:\`
-        if chars[i].is_ascii_alphabetic()
-            && chars[i + 1] == ':'
-            && chars[i + 2] == '\\'
-        {
+        if chars[i].is_ascii_alphabetic() && chars[i + 1] == ':' && chars[i + 2] == '\\' {
             // Find the end: scan forward for a known extension.
             let start = i;
             let rest = &text[start..];
@@ -727,12 +739,39 @@ where
         )
     })?;
     let allowlist = allowed_tool_names(mode);
-    if !allowlist.iter().any(|name| *name == tool_call.name) {
-        return Err(format!(
-            "{} is not an allowed {} tool in Phase 6B.",
-            tool_call.name, profile.label
-        ));
-    }
+    // If the extracted tool name isn't in the allowlist, try to recover:
+    // the small LLM sometimes emits a mangled filename instead of a tool name.
+    // Attempt a case-insensitive prefix/substring match against allowed tools.
+    let tool_call = if allowlist.iter().any(|name| *name == tool_call.name) {
+        tool_call
+    } else {
+        let lower_name = tool_call.name.to_ascii_lowercase();
+        let fuzzy_match = allowlist.iter().find(|allowed| {
+            let lower_allowed = allowed.to_ascii_lowercase();
+            lower_allowed.starts_with(&lower_name) || lower_name.starts_with(&lower_allowed)
+        });
+        match fuzzy_match {
+            Some(matched) => {
+                log::warn!(
+                    "Planner emitted '{}' which is not a valid tool; \
+                     fuzzy-matched to '{}'",
+                    tool_call.name,
+                    matched
+                );
+                ToolCall {
+                    name: matched.to_string(),
+                    arguments: tool_call.arguments,
+                }
+            }
+            None => {
+                return Err(format!(
+                    "I couldn't choose a safe {} action for that request. \
+                     Try rephrasing as a single supported step.",
+                    profile.label
+                ));
+            }
+        }
+    };
 
     ensure_not_cancelled(state)?;
     emit(AssistantStreamEventDto::ToolCall {

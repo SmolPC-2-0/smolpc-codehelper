@@ -22,6 +22,10 @@ use tokio::sync::{mpsc, watch};
 /// Health check interval (seconds).
 const HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(10);
 
+/// Number of consecutive HTTP health check failures before transitioning to Crashed.
+/// PID-dead checks still trigger an immediate crash (process exit is definitive).
+const HEALTH_FAILURE_THRESHOLD: u32 = 3;
+
 /// Maximum number of automatic restarts within the restart window.
 const MAX_RESTARTS: u32 = 3;
 
@@ -45,6 +49,7 @@ pub struct EngineSupervisor<R: Runtime> {
     cmd_rx: mpsc::Receiver<EngineCommand>,
     state_tx: watch::Sender<EngineLifecycleState>,
     client_tx: watch::Sender<Option<EngineClient>>,
+    pid_tx: watch::Sender<Option<u32>>,
     app_handle: AppHandle<R>,
 
     // --- Owned state ---
@@ -53,6 +58,9 @@ pub struct EngineSupervisor<R: Runtime> {
     engine_pid: Option<u32>,
     runtime_config: RuntimeConfig,
     desired_model: Option<String>,
+
+    // --- Health tracking ---
+    health_failure_count: u32,
 
     // --- Restart policy ---
     restart_count: u32,
@@ -83,18 +91,21 @@ impl<R: Runtime> EngineSupervisor<R> {
         cmd_rx: mpsc::Receiver<EngineCommand>,
         state_tx: watch::Sender<EngineLifecycleState>,
         client_tx: watch::Sender<Option<EngineClient>>,
+        pid_tx: watch::Sender<Option<u32>>,
         app_handle: AppHandle<R>,
     ) -> Self {
         Self {
             cmd_rx,
             state_tx,
             client_tx,
+            pid_tx,
             app_handle,
             state: EngineLifecycleState::Idle,
             client: None,
             engine_pid: None,
             runtime_config: RuntimeConfig::default(),
             desired_model: None,
+            health_failure_count: 0,
             restart_count: 0,
             last_restart_window_start: None,
             restart_pending: false,
@@ -105,6 +116,11 @@ impl<R: Runtime> EngineSupervisor<R> {
     /// Run the supervisor loop. Blocks until all command senders are dropped.
     pub async fn run(mut self) {
         let mut health_interval = tokio::time::interval(HEALTH_CHECK_INTERVAL);
+        // Skip missed ticks rather than firing them in a burst. This prevents
+        // a spurious health check from firing immediately after do_spawn_sequence()
+        // blocks the select loop — the first real check will be a full interval
+        // after the engine enters Running.
+        health_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // The first tick completes immediately — consume it so we don't
         // fire a spurious health check before the engine is even started.
         health_interval.tick().await;
@@ -117,7 +133,12 @@ impl<R: Runtime> EngineSupervisor<R> {
             tokio::select! {
                 cmd = self.cmd_rx.recv() => {
                     match cmd {
-                        Some(cmd) => self.handle_command(cmd).await,
+                        Some(cmd) => {
+                            let spawned = self.handle_command(cmd).await;
+                            if spawned {
+                                health_interval.reset();
+                            }
+                        }
                         None => {
                             // All senders dropped — app is shutting down.
                             log::info!("Supervisor: all command senders dropped, shutting down");
@@ -132,6 +153,9 @@ impl<R: Runtime> EngineSupervisor<R> {
                 _ = tokio::time::sleep(restart_delay), if restart_pending => {
                     self.restart_pending = false;
                     self.do_spawn_sequence().await;
+                    // Reset so the first health check fires a full interval after
+                    // the engine enters Running, not immediately.
+                    health_interval.reset();
                 },
             }
         }
@@ -139,7 +163,10 @@ impl<R: Runtime> EngineSupervisor<R> {
 
     // --- Command handling ---
 
-    async fn handle_command(&mut self, cmd: EngineCommand) {
+    /// Handle a command. Returns `true` if a spawn sequence was executed (callers
+    /// should reset the health interval).
+    async fn handle_command(&mut self, cmd: EngineCommand) -> bool {
+        let state_before = self.state.clone();
         match cmd {
             EngineCommand::Start { config, respond_to } => {
                 let result = self.handle_start(config).await;
@@ -160,6 +187,8 @@ impl<R: Runtime> EngineSupervisor<R> {
                 let _ = respond_to.send(result);
             }
         }
+        // A spawn occurred if we transitioned into Running from a non-Running state.
+        !state_before.is_running() && self.state.is_running()
     }
 
     async fn handle_start(&mut self, config: StartupConfig) -> Result<(), String> {
@@ -215,9 +244,7 @@ impl<R: Runtime> EngineSupervisor<R> {
         // If the spawn failed (state is Crashed or Failed), revert to the previous
         // runtime mode so auto-restart doesn't keep trying the broken mode.
         if !self.state.is_running() {
-            log::warn!(
-                "Supervisor: mode switch to {mode:?} failed, reverting to {old_mode:?}"
-            );
+            log::warn!("Supervisor: mode switch to {mode:?} failed, reverting to {old_mode:?}");
             self.runtime_config.runtime_mode = old_mode;
             return Err(format!(
                 "Failed to switch runtime mode to {mode:?} — engine did not reach Running state"
@@ -248,13 +275,26 @@ impl<R: Runtime> EngineSupervisor<R> {
         };
 
         if !healthy {
-            log::warn!("Supervisor: engine health check failed");
-            self.transition_to_crashed("Engine health check failed");
-            self.schedule_restart();
+            self.health_failure_count += 1;
+            if self.health_failure_count >= HEALTH_FAILURE_THRESHOLD {
+                log::warn!(
+                    "Supervisor: engine health check failed {} consecutive times, transitioning to Crashed",
+                    self.health_failure_count
+                );
+                self.transition_to_crashed("Engine health check failed");
+                self.schedule_restart();
+            } else {
+                log::warn!(
+                    "Supervisor: engine health check failed ({}/{} before restart)",
+                    self.health_failure_count,
+                    HEALTH_FAILURE_THRESHOLD
+                );
+            }
             return;
         }
 
-        // Health passed — refresh status fields (backend, model_id).
+        // Health passed — reset failure counter and refresh status fields.
+        self.health_failure_count = 0;
         self.refresh_running_status().await;
     }
 
@@ -357,6 +397,7 @@ impl<R: Runtime> EngineSupervisor<R> {
         };
 
         self.engine_pid = Some(pid);
+        self.broadcast_pid(Some(pid));
         self.transition(EngineLifecycleState::WaitingForHealth);
 
         // 6. Wait for the engine to become healthy.
@@ -381,6 +422,7 @@ impl<R: Runtime> EngineSupervisor<R> {
         }
 
         // 7. Transition to Running and broadcast the client.
+        self.health_failure_count = 0;
         self.client = Some(client.clone());
         self.broadcast_client(Some(client.clone()));
         self.transition(EngineLifecycleState::Running {
@@ -489,6 +531,7 @@ impl<R: Runtime> EngineSupervisor<R> {
         self.client = None;
         self.engine_pid = None;
         self.broadcast_client(None);
+        self.broadcast_pid(None);
         Ok(())
     }
 
@@ -536,7 +579,9 @@ impl<R: Runtime> EngineSupervisor<R> {
     fn transition_to_crashed(&mut self, message: &str) {
         self.client = None;
         self.engine_pid = None;
+        self.health_failure_count = 0;
         self.broadcast_client(None);
+        self.broadcast_pid(None);
 
         self.transition(EngineLifecycleState::Crashed {
             message: message.to_string(),
@@ -574,6 +619,10 @@ impl<R: Runtime> EngineSupervisor<R> {
 
     fn broadcast_client(&self, client: Option<EngineClient>) {
         let _ = self.client_tx.send(client);
+    }
+
+    fn broadcast_pid(&self, pid: Option<u32>) {
+        let _ = self.pid_tx.send(pid);
     }
 }
 

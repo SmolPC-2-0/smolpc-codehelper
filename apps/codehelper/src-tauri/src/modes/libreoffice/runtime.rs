@@ -5,8 +5,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 const LIBREOFFICE_CLIENT_NAME: &str = "smolpc-unified-libreoffice";
-const LIBREOFFICE_CONNECT_HINT: &str =
-    "Make sure bundled Python has been prepared first.";
+const LIBREOFFICE_CONNECT_HINT: &str = "Make sure bundled Python has been prepared first.";
 const LIBREOFFICE_LOG_SUBDIR: &str = "libreoffice/logs";
 
 #[cfg(windows)]
@@ -155,8 +154,8 @@ mod tests {
             test_functions_py_path: mcp_server_dir.join("test_functions.py"),
         };
 
-        let config = LibreOfficeRuntimeConfig::from_layout(&layout, None, true)
-            .expect("from_layout");
+        let config =
+            LibreOfficeRuntimeConfig::from_layout(&layout, None, true).expect("from_layout");
 
         assert_eq!(config.entrypoint, mcp_server_dir.join("mcp_server.py"));
         assert_eq!(config.working_dir, mcp_server_dir);

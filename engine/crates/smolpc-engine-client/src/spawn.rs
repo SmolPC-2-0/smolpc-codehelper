@@ -22,10 +22,7 @@ use crate::{
 
 /// Spawn the engine host binary as a detached process.
 /// Does NOT wait for health. Returns the child PID.
-pub fn spawn_engine(
-    options: &EngineConnectOptions,
-    token: &str,
-) -> Result<u32, EngineClientError> {
+pub fn spawn_engine(options: &EngineConnectOptions, token: &str) -> Result<u32, EngineClientError> {
     let host_bin = resolve_host_binary(options)?;
 
     // Write spawn diagnostics before attempting launch.
@@ -142,8 +139,7 @@ pub async fn check_running_policy(
     }
 
     let meta = client.meta().await?;
-    let protocol_matches =
-        protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION);
+    let protocol_matches = protocol_major_matches(&meta.protocol_version, ENGINE_PROTOCOL_VERSION);
     let needs_status_probe = !protocol_matches || force_override.is_some() || force_respawn;
     if !needs_status_probe {
         return Ok(RunningHostPolicyDecision::Reuse);

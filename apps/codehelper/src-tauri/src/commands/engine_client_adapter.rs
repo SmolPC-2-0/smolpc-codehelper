@@ -272,7 +272,11 @@ pub async fn engine_ensure_started(
     match client.ensure_started(startup_mode, startup_policy).await {
         Ok(status) => {
             // Track the loaded model so the supervisor can restore it after a crash.
-            if let Some(model_id) = status.current_model.as_ref().or(status.active_model_id.as_ref()) {
+            if let Some(model_id) = status
+                .current_model
+                .as_ref()
+                .or(status.active_model_id.as_ref())
+            {
                 supervisor.set_desired_model(Some(model_id.clone())).await;
             }
             supervisor.refresh_status().await;
