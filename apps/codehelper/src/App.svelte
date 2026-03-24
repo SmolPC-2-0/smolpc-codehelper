@@ -6,6 +6,7 @@
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
 	import ModelInfoPanel from '$lib/components/ModelInfoPanel.svelte';
+	import ModelRecommendationBanner from '$lib/components/ModelRecommendationBanner.svelte';
 	import KeyboardShortcutsOverlay from '$lib/components/KeyboardShortcutsOverlay.svelte';
 	import ModeHelpDrawer from '$lib/components/ModeHelpDrawer.svelte';
 	import WorkspaceHeader from '$lib/components/layout/WorkspaceHeader.svelte';
@@ -46,6 +47,9 @@
 	let startupComplete = $state(false);
 	let isSwitchingMode = $state(false);
 	let launchingHostApp = $state(false);
+	let switchingRecommendedModel = $state(false);
+	// Banner dismissal lasts only until the user leaves the current mode.
+	let dismissedToolRecommendationMode = $state<AppMode | null>(null);
 	let memoryPressureNotice = $state<string | null>(null);
 	let dismissedMemoryPressureKey = $state<string | null>(null);
 	let hostAppLaunchError = $state<string | null>(null);
@@ -74,6 +78,14 @@
 		calc: 'Open LibreOffice',
 		impress: 'Open LibreOffice'
 	};
+	// Intentionally excludes Calc because the current product keeps it preview-only.
+	const TOOL_MODE_MODEL_RECOMMENDATIONS: Readonly<Partial<Record<AppMode, string>>> = {
+		gimp: 'qwen3-4b',
+		writer: 'qwen3-4b',
+		impress: 'qwen3-4b'
+	};
+	// Exact trigger for the current bundled/default small model on main.
+	const TOOL_MODE_SMALL_MODEL_TRIGGER = 'qwen2.5-1.5b-instruct';
 
 	const modeAvailability = $derived.by(() => {
 		const result: Record<string, boolean> = { code: true }; // Code always available
@@ -124,6 +136,62 @@
 	const isCancelling = $derived(inferenceStore.cancelState === 'pending');
 	const isInferenceBusy = $derived(inferenceStore.isGenerating || isCancelling || hasActiveStream);
 	const composerDraftKey = $derived(`${activeMode}:${currentChat?.id ?? 'new'}`);
+	const effectiveModelId = $derived(inferenceStore.currentModel ?? settingsStore.selectedModel ?? null);
+	const recommendedToolModelId = $derived(TOOL_MODE_MODEL_RECOMMENDATIONS[activeMode] ?? null);
+	const recommendedToolModelAvailable = $derived.by(() => {
+		if (!recommendedToolModelId) {
+			return false;
+		}
+
+		return inferenceStore.availableModels.some((model) => model.id === recommendedToolModelId);
+	});
+	const toolModelRecommendationDismissed = $derived(
+		dismissedToolRecommendationMode === activeMode
+	);
+	const showToolModelRecommendation = $derived(
+		recommendedToolModelId !== null &&
+			effectiveModelId === TOOL_MODE_SMALL_MODEL_TRIGGER &&
+			recommendedToolModelAvailable &&
+			!toolModelRecommendationDismissed
+	);
+	const hasMemoryPressureNoticeForToolRecommendation = $derived(
+		showToolModelRecommendation &&
+			memoryPressureNotice !== null &&
+			inferenceStore.memoryPressure !== null
+	);
+	const toolModelRecommendationSeverity = $derived.by(() => {
+		if (!hasMemoryPressureNoticeForToolRecommendation) {
+			return 'default' as const;
+		}
+
+		const snapshot = inferenceStore.memoryPressure!;
+		return snapshot.level === 'critical' || snapshot.auto_unloaded ? 'critical' : 'warning';
+	});
+	const toolModelRecommendationMessage = $derived.by(() => {
+		if (!recommendedToolModelId) {
+			return '';
+		}
+
+		if (!hasMemoryPressureNoticeForToolRecommendation) {
+			return `This mode works best with ${recommendedToolModelId}. The smaller model often misses tool calls.`;
+		}
+
+		const snapshot = inferenceStore.memoryPressure!;
+		const availableRam = `~${snapshot.available_gb.toFixed(1)} GB`;
+		if (snapshot.auto_unloaded) {
+			return `This mode works best with ${recommendedToolModelId}, but the model was unloaded because free RAM is critically low while the app was minimized. Close other apps before switching if you can.`;
+		}
+
+		if (snapshot.level === 'critical') {
+			return `This mode works best with ${recommendedToolModelId}, but free RAM is critically low (${availableRam}). Close other apps before switching if you can. It may be slow or unstable on this machine.`;
+		}
+
+		if (snapshot.level === 'warning') {
+			return `This mode works best with ${recommendedToolModelId}, but free RAM is low (${availableRam}). Close other apps before switching if you can. It may run slowly on this machine.`;
+		}
+
+		return `This mode works best with ${recommendedToolModelId}, but this machine has limited free RAM for this mode (${availableRam}). It may run slowly on this machine.`;
+	});
 	const latestAssistantMessageId = $derived(
 		[...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null
 	);
@@ -312,6 +380,27 @@ Teaching rules:
 			dismissedMemoryPressureKey = memoryPressureNoticeKey(snapshot);
 		}
 		memoryPressureNotice = null;
+	}
+
+	async function handleSwitchToRecommendedModel() {
+		if (!recommendedToolModelId || isInferenceBusy || switchingRecommendedModel) {
+			return;
+		}
+
+		switchingRecommendedModel = true;
+		try {
+			const loaded = await inferenceStore.loadModel(recommendedToolModelId);
+			if (loaded) {
+				settingsStore.setModel(recommendedToolModelId);
+				dismissedToolRecommendationMode = null;
+			}
+		} finally {
+			switchingRecommendedModel = false;
+		}
+	}
+
+	function handleDismissToolRecommendation() {
+		dismissedToolRecommendationMode = activeMode;
 	}
 
 	function finalizeActiveStreamingMessage(fallbackContent: string) {
@@ -592,6 +681,7 @@ Generating summary...`
 
 		isSwitchingMode = true;
 		try {
+			dismissedToolRecommendationMode = null;
 			// Cancel any in-flight generation before switching modes
 			if (hasActiveStream || inferenceStore.isGenerating) {
 				await handleCancelGeneration();
@@ -926,7 +1016,8 @@ Generating summary...`
 			</div>
 		{/if}
 
-		{#if memoryPressureNotice}
+		<!-- Memory pressure stays visible unless the tool-model recommendation is intentionally taking over. -->
+		{#if memoryPressureNotice && !showToolModelRecommendation}
 			<div
 				class={`mx-4 mt-2 rounded-lg border px-4 py-2 text-sm ${
 					inferenceStore.memoryPressure?.level === 'critical'
@@ -958,6 +1049,18 @@ Generating summary...`
 
 		{#if setupNeedsAttention}
 			<SetupBanner status={setupStatus} error={setupError} onOpen={openSetupPanel} />
+		{/if}
+
+		{#if showToolModelRecommendation}
+			<ModelRecommendationBanner
+				recommendedModelLabel={recommendedToolModelId!}
+				message={toolModelRecommendationMessage}
+				severity={toolModelRecommendationSeverity}
+				busy={switchingRecommendedModel}
+				disabled={isInferenceBusy}
+				onSwitch={handleSwitchToRecommendedModel}
+				onDismiss={handleDismissToolRecommendation}
+			/>
 		{/if}
 
 		<ConversationView
