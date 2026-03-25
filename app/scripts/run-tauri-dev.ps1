@@ -28,7 +28,7 @@ function Request-EngineShutdown {
     }
 
     try {
-        Invoke-RestMethod -Uri "http://127.0.0.1:19432/engine/shutdown" -Method Post -Headers @{ Authorization = "Bearer $token" } | Out-Null
+        Invoke-RestMethod -Uri "http://127.0.0.1:19432/engine/shutdown" -Method Post -Headers @{ Authorization = "Bearer $token" } -TimeoutSec 3 | Out-Null
         Start-Sleep -Milliseconds 400
     } catch {
         # Ignore shutdown errors - host may already be offline.
