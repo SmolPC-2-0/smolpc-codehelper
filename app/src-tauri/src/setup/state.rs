@@ -253,7 +253,7 @@ impl SetupState {
 #[cfg(test)]
 mod tests {
     use super::SetupState;
-    use crate::setup::types::SETUP_ITEM_HOST_BLENDER;
+    use smolpc_connector_common::SETUP_ITEM_HOST_BLENDER;
     use tempfile::TempDir;
 
     #[tokio::test]

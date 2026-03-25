@@ -2,7 +2,7 @@ use super::prompts::build_question_prompts;
 use super::rag::RagContext;
 use super::response::{build_blender_response, parse_rag_contexts, parse_scene_snapshot};
 use crate::assistant::state::AssistantState;
-use crate::modes::provider::ToolProvider;
+use smolpc_connector_common::ToolProvider;
 use crate::modes::text_generation::TextStreamer;
 use smolpc_assistant_types::{
     AppMode, AssistantResponseDto, AssistantSendRequestDto, AssistantStreamEventDto,
@@ -179,7 +179,7 @@ where
 mod tests {
     use super::execute_blender_request;
     use crate::assistant::state::AssistantState;
-    use crate::modes::provider::{provider_state, ToolProvider};
+    use smolpc_connector_common::{provider_state, ToolProvider};
     use crate::modes::text_generation::TextStreamer;
     use async_trait::async_trait;
     use serde_json::json;

@@ -5,9 +5,9 @@ use super::launch::setup_launch_detail;
 use super::models::bundled_model_item;
 use super::python::bundled_python_item;
 use super::state::SetupState;
-use super::types::{
-    SETUP_ITEM_ENGINE_RUNTIME, SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP,
-    SETUP_ITEM_HOST_LIBREOFFICE,
+use super::types::SETUP_ITEM_ENGINE_RUNTIME;
+use smolpc_connector_common::{
+    SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP, SETUP_ITEM_HOST_LIBREOFFICE,
 };
 use smolpc_assistant_types::{
     SetupItemDto, SetupItemStateDto, SetupOverallStateDto, SetupStatusDto,
@@ -175,7 +175,7 @@ fn overall_state_for_items(items: &[SetupItemDto], has_last_error: bool) -> Setu
 mod tests {
     use super::collect_setup_status;
     use crate::setup::state::SetupState;
-    use crate::setup::types::{SETUP_ITEM_BLENDER_ADDON, SETUP_ITEM_GIMP_PLUGIN_RUNTIME};
+    use smolpc_connector_common::{SETUP_ITEM_BLENDER_ADDON, SETUP_ITEM_GIMP_PLUGIN_RUNTIME};
     use smolpc_assistant_types::{SetupItemStateDto, SetupOverallStateDto};
     use tempfile::TempDir;
 

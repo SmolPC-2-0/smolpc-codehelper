@@ -4,13 +4,6 @@ pub const DEFAULT_BUNDLED_MODEL_ID: &str = "qwen2.5-1.5b-instruct";
 
 pub const SETUP_ITEM_ENGINE_RUNTIME: &str = "engine_runtime";
 pub const SETUP_ITEM_BUNDLED_MODEL: &str = "bundled_model";
-pub const SETUP_ITEM_BUNDLED_PYTHON: &str = "bundled_python";
-pub const SETUP_ITEM_HOST_GIMP: &str = "host_gimp";
-pub const SETUP_ITEM_HOST_BLENDER: &str = "host_blender";
-pub const SETUP_ITEM_BLENDER_ADDON: &str = "blender_addon";
-pub const SETUP_ITEM_GIMP_PLUGIN_RUNTIME: &str = "gimp_plugin_runtime";
-pub const SETUP_ITEM_HOST_LIBREOFFICE: &str = "host_libreoffice";
-
 #[allow(dead_code)]
 pub trait OwnedIntegration {
     fn id(&self) -> &'static str;

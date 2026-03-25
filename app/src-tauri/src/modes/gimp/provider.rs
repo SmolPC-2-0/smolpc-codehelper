@@ -2,7 +2,7 @@ use super::macros;
 use super::response::build_tool_execution_result;
 use super::runtime::GimpRuntimeConfig;
 use super::transport::{connect_session, default_transport_config, tool_definition};
-use crate::modes::provider::{provider_state, ToolProvider};
+use smolpc_connector_common::{provider_state, ToolProvider};
 use crate::setup::gimp::{
     ensure_gimp_plugin_runtime_prepared, validate_supported_gimp, GimpPluginRuntimePrepareOutcome,
 };
@@ -580,7 +580,7 @@ impl ToolProvider for GimpProvider {
 #[cfg(test)]
 mod tests {
     use super::GimpProvider;
-    use crate::modes::provider::ToolProvider;
+    use smolpc_connector_common::ToolProvider;
     use serde_json::json;
     use smolpc_assistant_types::AppMode;
     use smolpc_mcp_client::TcpTransportConfig;

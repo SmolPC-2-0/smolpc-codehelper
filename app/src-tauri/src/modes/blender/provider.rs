@@ -1,8 +1,7 @@
 use super::bridge::{start_scene_bridge, BridgeConfig, SceneBridgeHandle};
 use super::rag::{RagContext, RagIndex};
 use super::state::{shared_scene_cache, SceneCache, SceneSnapshot};
-use crate::assistant::MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION;
-use crate::modes::provider::{provider_state, ToolProvider};
+use smolpc_connector_common::{provider_state, ToolProvider, MODE_UNDO_NOT_SUPPORTED};
 use crate::setup::blender::{ensure_blender_addon_prepared, BlenderAddonPrepareOutcome};
 use crate::setup::host_apps::{detect_blender, HostAppDetection};
 use crate::setup::launch::is_matching_blender_process_running;
@@ -478,7 +477,7 @@ impl ToolProvider for BlenderProvider {
     }
 
     async fn undo_last_action(&self, _mode: AppMode) -> Result<(), String> {
-        Err(MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION.to_string())
+        Err(MODE_UNDO_NOT_SUPPORTED.to_string())
     }
 
     async fn disconnect_if_needed(&self, _mode: AppMode) -> Result<(), String> {
@@ -498,7 +497,7 @@ mod tests {
     use super::BlenderProvider;
     use crate::modes::blender::bridge::BridgeConfig;
     use crate::modes::blender::state::SceneData;
-    use crate::modes::provider::ToolProvider;
+    use smolpc_connector_common::ToolProvider;
     use serde_json::json;
     use smolpc_assistant_types::AppMode;
     use std::path::{Path, PathBuf};

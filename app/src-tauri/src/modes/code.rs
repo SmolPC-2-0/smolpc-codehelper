@@ -1,7 +1,7 @@
-use super::provider::{
+use smolpc_connector_common::{
     provider_state, ToolProvider, FOUNDATION_PROVIDER_EXECUTION_NOT_IMPLEMENTED,
+    MODE_UNDO_NOT_SUPPORTED,
 };
-use crate::assistant::MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION;
 use async_trait::async_trait;
 use smolpc_assistant_types::{
     AppMode, ProviderStateDto, ToolDefinitionDto, ToolExecutionResultDto,
@@ -46,7 +46,7 @@ impl ToolProvider for CodeProvider {
     }
 
     async fn undo_last_action(&self, _mode: AppMode) -> Result<(), String> {
-        Err(MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION.to_string())
+        Err(MODE_UNDO_NOT_SUPPORTED.to_string())
     }
 
     async fn disconnect_if_needed(&self, _mode: AppMode) -> Result<(), String> {
@@ -57,7 +57,7 @@ impl ToolProvider for CodeProvider {
 #[cfg(test)]
 mod tests {
     use super::CodeProvider;
-    use crate::modes::provider::ToolProvider;
+    use smolpc_connector_common::ToolProvider;
     use smolpc_assistant_types::AppMode;
 
     #[tokio::test]

@@ -2,7 +2,7 @@ use super::blender::BlenderProvider;
 use super::code::CodeProvider;
 use super::gimp::GimpProvider;
 use super::libreoffice::LibreOfficeProvider;
-use super::provider::ToolProvider;
+use smolpc_connector_common::ToolProvider;
 use smolpc_assistant_types::AppMode;
 use std::path::PathBuf;
 use std::sync::Arc;

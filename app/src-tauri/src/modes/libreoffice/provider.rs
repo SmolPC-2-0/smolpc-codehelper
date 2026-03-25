@@ -3,8 +3,7 @@ use super::resources::{resolve_mcp_server_layout, ResourceResolutionOptions};
 use super::response::build_tool_execution_result;
 use super::runtime::LibreOfficeRuntimeConfig;
 use super::state::LibreOfficeProviderState;
-use crate::assistant::MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION;
-use crate::modes::provider::{provider_state, ToolProvider};
+use smolpc_connector_common::{provider_state, ToolProvider, MODE_UNDO_NOT_SUPPORTED};
 use async_trait::async_trait;
 use smolpc_assistant_types::{
     AppMode, ProviderStateDto, ToolDefinitionDto, ToolExecutionResultDto,
@@ -481,7 +480,7 @@ impl ToolProvider for LibreOfficeProvider {
     }
 
     async fn undo_last_action(&self, _mode: AppMode) -> Result<(), String> {
-        Err(MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION.to_string())
+        Err(MODE_UNDO_NOT_SUPPORTED.to_string())
     }
 
     async fn disconnect_if_needed(&self, mode: AppMode) -> Result<(), String> {
@@ -498,7 +497,7 @@ impl ToolProvider for LibreOfficeProvider {
 mod tests {
     use super::LibreOfficeProvider;
     use crate::modes::libreoffice::resources::ResourceResolutionOptions;
-    use crate::modes::provider::ToolProvider;
+    use smolpc_connector_common::ToolProvider;
     use serde_json::json;
     use smolpc_assistant_types::AppMode;
     use std::fs;

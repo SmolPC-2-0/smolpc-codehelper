@@ -4,7 +4,7 @@ use super::planner::{
 };
 use super::response::{parse_gimp_info_reply, parse_image_metadata_reply};
 use crate::assistant::state::AssistantState;
-use crate::modes::provider::ToolProvider;
+use smolpc_connector_common::ToolProvider;
 use smolpc_assistant_types::{
     AppMode, AssistantResponseDto, AssistantSendRequestDto, AssistantStreamEventDto,
 };
@@ -283,7 +283,7 @@ where
 mod tests {
     use super::execute_gimp_request;
     use crate::assistant::state::AssistantState;
-    use crate::modes::provider::{provider_state, ToolProvider};
+    use smolpc_connector_common::{provider_state, ToolProvider};
     use async_trait::async_trait;
     use serde_json::json;
     use smolpc_assistant_types::{

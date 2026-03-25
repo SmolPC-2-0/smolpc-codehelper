@@ -1,4 +1,4 @@
-use super::types::{SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP, SETUP_ITEM_HOST_LIBREOFFICE};
+use smolpc_connector_common::{SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP, SETUP_ITEM_HOST_LIBREOFFICE};
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};

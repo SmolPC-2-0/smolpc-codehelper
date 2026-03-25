@@ -1,5 +1,6 @@
 use crate::assistant::state::AssistantState;
-use crate::assistant::{MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION, UNIFIED_ASSISTANT_NOT_IMPLEMENTED};
+use crate::assistant::UNIFIED_ASSISTANT_NOT_IMPLEMENTED;
+use smolpc_connector_common::MODE_UNDO_NOT_SUPPORTED;
 use crate::engine::EngineSupervisorHandle;
 use crate::modes::blender::execute_blender_request;
 use crate::modes::gimp::{execute_gimp_request, EngineTextGenerator};
@@ -110,7 +111,7 @@ pub async fn mode_undo(
         if mode == AppMode::Gimp {
             error
         } else {
-            MODE_UNDO_NOT_SUPPORTED_IN_FOUNDATION.to_string()
+            MODE_UNDO_NOT_SUPPORTED.to_string()
         }
     })
 }

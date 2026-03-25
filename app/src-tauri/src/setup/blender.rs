@@ -1,5 +1,5 @@
 use super::manifests::{load_manifest, missing_expected_paths, resource_root};
-use super::types::SETUP_ITEM_BLENDER_ADDON;
+use smolpc_connector_common::SETUP_ITEM_BLENDER_ADDON;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use smolpc_assistant_types::{SetupItemDto, SetupItemStateDto};

@@ -4,7 +4,7 @@ use super::host_apps::{detect_blender_with_policy, detect_gimp_with_policy};
 use super::python::prepare_bundled_python;
 use super::state::SetupState;
 use super::status::collect_setup_status;
-use super::types::{SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP};
+use smolpc_connector_common::{SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP};
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -96,7 +96,7 @@ fn prepare_setup_directories(setup_root: &Path) -> Result<(), String> {
 mod tests {
     use super::prepare_setup;
     use crate::setup::state::SetupState;
-    use crate::setup::types::{
+    use smolpc_connector_common::{
         SETUP_ITEM_GIMP_PLUGIN_RUNTIME, SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP,
     };
     use smolpc_assistant_types::SetupItemStateDto;
