@@ -40,7 +40,7 @@
 			"resources/launcher/": "launcher/",
 			"resources/model-installer/": "model-installer/",
 			"resources/gimp/": "gimp/",
-			"resources/blender/": "blender/",
+			"../../connectors/blender/resources/": "blender/",
 			"resources/libreoffice/": "libreoffice/",
 			"resources/python/": "python/",
 			"resources/models/": "models/"

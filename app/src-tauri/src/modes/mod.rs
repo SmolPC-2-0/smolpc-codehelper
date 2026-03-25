@@ -1,4 +1,3 @@
-pub mod blender;
 pub mod code;
 pub mod config;
 pub mod gimp;

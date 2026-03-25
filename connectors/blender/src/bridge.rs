@@ -53,7 +53,7 @@ pub struct SceneBridgeHandle {
     #[cfg(test)]
     local_addr: SocketAddr,
     shutdown: Option<oneshot::Sender<()>>,
-    task: tauri::async_runtime::JoinHandle<()>,
+    task: tokio::task::JoinHandle<()>,
 }
 
 impl SceneBridgeHandle {
@@ -218,7 +218,7 @@ pub async fn start_scene_bridge(
         .map_err(|error| format!("Failed to resolve the Blender bridge address: {error}"))?;
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    let task = tauri::async_runtime::spawn(async move {
+    let task = tokio::spawn(async move {
         let server = axum::serve(listener, app).with_graceful_shutdown(async {
             let _ = shutdown_rx.await;
         });
@@ -286,7 +286,7 @@ mod tests {
         build_router, start_scene_bridge, tokens_match, write_bridge_token_in_dir, BridgeConfig,
         BridgeState, BRIDGE_BODY_LIMIT_BYTES,
     };
-    use crate::modes::blender::state::{shared_scene_cache, SceneData};
+    use crate::state::{shared_scene_cache, SceneData};
     use axum::body::{to_bytes, Body};
     use axum::http::{header, Request, StatusCode};
     use tempfile::tempdir;

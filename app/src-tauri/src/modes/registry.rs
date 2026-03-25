@@ -1,4 +1,4 @@
-use super::blender::BlenderProvider;
+use smolpc_connector_blender::BlenderProvider;
 use super::code::CodeProvider;
 use super::gimp::GimpProvider;
 use super::libreoffice::LibreOfficeProvider;

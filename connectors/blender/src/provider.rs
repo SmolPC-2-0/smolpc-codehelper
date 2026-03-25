@@ -2,7 +2,7 @@ use super::bridge::{start_scene_bridge, BridgeConfig, SceneBridgeHandle};
 use super::rag::{RagContext, RagIndex};
 use super::state::{shared_scene_cache, SceneCache, SceneSnapshot};
 use smolpc_connector_common::{provider_state, ToolProvider, MODE_UNDO_NOT_SUPPORTED};
-use crate::setup::blender::{ensure_blender_addon_prepared, BlenderAddonPrepareOutcome};
+use crate::setup::{ensure_blender_addon_prepared, BlenderAddonPrepareOutcome};
 use smolpc_connector_common::host_apps::{detect_blender, HostAppDetection};
 use smolpc_connector_common::launch::is_matching_blender_process_running;
 use async_trait::async_trait;
@@ -495,8 +495,8 @@ impl ToolProvider for BlenderProvider {
 #[cfg(test)]
 mod tests {
     use super::BlenderProvider;
-    use crate::modes::blender::bridge::BridgeConfig;
-    use crate::modes::blender::state::SceneData;
+    use crate::bridge::BridgeConfig;
+    use crate::state::SceneData;
     use smolpc_connector_common::ToolProvider;
     use serde_json::json;
     use smolpc_assistant_types::AppMode;

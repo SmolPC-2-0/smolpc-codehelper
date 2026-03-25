@@ -1,4 +1,3 @@
-pub mod blender;
 pub mod gimp;
 pub mod models;
 pub mod provision;

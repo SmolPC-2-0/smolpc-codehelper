@@ -2,7 +2,7 @@ use crate::assistant::state::AssistantState;
 use crate::assistant::UNIFIED_ASSISTANT_NOT_IMPLEMENTED;
 use smolpc_connector_common::MODE_UNDO_NOT_SUPPORTED;
 use crate::engine::EngineSupervisorHandle;
-use crate::modes::blender::execute_blender_request;
+use smolpc_connector_blender::execute_blender_request;
 use crate::modes::gimp::{execute_gimp_request, EngineTextGenerator};
 use crate::modes::libreoffice::{execute_libreoffice_request, EngineTextPlanner};
 use crate::modes::registry::ModeProviderRegistry;
@@ -41,7 +41,7 @@ pub async fn assistant_send(
             let engine_client = supervisor.get_client(Duration::from_secs(60)).await?;
             let generator = EngineTextStreamer::new(engine_client);
 
-            execute_blender_request(provider, &generator, &request, &state, |event| {
+            execute_blender_request(provider, &generator, &request, &*state, |event| {
                 if let Err(error) = on_event.send(event) {
                     log::warn!("Failed to emit Blender assistant event: {error}");
                 }

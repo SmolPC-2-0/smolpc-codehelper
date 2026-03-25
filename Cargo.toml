@@ -4,6 +4,7 @@ members = [
   "crates/smolpc-assistant-types",
   "crates/smolpc-connector-common",
   "crates/smolpc-mcp-client",
+  "connectors/blender",
   "engine/crates/smolpc-engine-core",
   "engine/crates/smolpc-engine-host",
   "engine/crates/smolpc-engine-client",

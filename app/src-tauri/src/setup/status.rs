@@ -1,4 +1,4 @@
-use super::blender::blender_addon_item;
+use smolpc_connector_blender::blender_addon_item;
 use super::gimp::gimp_plugin_runtime_item;
 use smolpc_connector_common::host_apps::{detect_all_with_policy, HostAppDetection};
 use smolpc_connector_common::launch::setup_launch_detail;

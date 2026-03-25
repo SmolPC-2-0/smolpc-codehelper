@@ -1,7 +1,7 @@
 use super::prompts::build_question_prompts;
 use super::rag::RagContext;
 use super::response::{build_blender_response, parse_rag_contexts, parse_scene_snapshot};
-use crate::assistant::state::AssistantState;
+use smolpc_connector_common::CancellationToken;
 use smolpc_connector_common::ToolProvider;
 use smolpc_connector_common::TextStreamer;
 use smolpc_assistant_types::{
@@ -43,8 +43,8 @@ const WORKFLOW_HINTS: [&str; 12] = [
     "explain how",
 ];
 
-fn ensure_not_cancelled(state: &AssistantState) -> Result<(), String> {
-    if state.is_cancelled() {
+fn ensure_not_cancelled(cancel: &dyn CancellationToken) -> Result<(), String> {
+    if cancel.is_cancelled() {
         Err(ASSISTANT_CANCELLED.to_string())
     } else {
         Ok(())
@@ -69,7 +69,7 @@ pub async fn execute_blender_request<F>(
     provider: Arc<dyn ToolProvider>,
     generator: &dyn TextStreamer,
     request: &AssistantSendRequestDto,
-    state: &AssistantState,
+    cancel: &dyn CancellationToken,
     mut emit: F,
 ) -> Result<AssistantResponseDto, String>
 where
@@ -79,10 +79,10 @@ where
         phase: "starting_blender_request".to_string(),
         detail: "Starting the Blender tutoring request.".to_string(),
     });
-    ensure_not_cancelled(state)?;
+    ensure_not_cancelled(cancel)?;
 
     provider.connect_if_needed(AppMode::Blender).await?;
-    ensure_not_cancelled(state)?;
+    ensure_not_cancelled(cancel)?;
 
     emit(AssistantStreamEventDto::ToolCall {
         name: "scene_current".to_string(),
@@ -130,7 +130,7 @@ where
         tool_results.push(rag_result);
     }
 
-    ensure_not_cancelled(state)?;
+    ensure_not_cancelled(cancel)?;
 
     let (system_prompt, user_prompt) =
         build_question_prompts(&request.user_text, scene_context.as_ref(), &rag_contexts);
@@ -152,7 +152,7 @@ where
 
     let mut emitted_tokens = false;
     let reply = generator
-        .generate_stream(&messages, state, &mut |token| {
+        .generate_stream(&messages, cancel, &mut |token| {
             emitted_tokens = true;
             emit(AssistantStreamEventDto::Token { token });
         })
@@ -178,7 +178,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::execute_blender_request;
-    use crate::assistant::state::AssistantState;
+    use smolpc_connector_common::MockCancellationToken;
     use smolpc_connector_common::{provider_state, ToolProvider};
     use smolpc_connector_common::TextStreamer;
     use async_trait::async_trait;
@@ -248,7 +248,7 @@ mod tests {
         async fn generate_stream(
             &self,
             _messages: &[EngineChatMessage],
-            _state: &AssistantState,
+            _cancel: &dyn smolpc_connector_common::CancellationToken,
             on_token: &mut (dyn FnMut(String) + Send),
         ) -> Result<String, String> {
             on_token("Blender ".to_string());
@@ -264,11 +264,11 @@ mod tests {
         async fn generate_stream(
             &self,
             _messages: &[EngineChatMessage],
-            state: &AssistantState,
+            cancel: &dyn smolpc_connector_common::CancellationToken,
             _on_token: &mut (dyn FnMut(String) + Send),
         ) -> Result<String, String> {
             loop {
-                if state.is_cancelled() {
+                if cancel.is_cancelled() {
                     return Err("ASSISTANT_CANCELLED".to_string());
                 }
 
@@ -311,13 +311,13 @@ mod tests {
                 }),
             }])),
         });
-        let state = AssistantState::default();
+        let cancel = MockCancellationToken::new();
 
         let response = execute_blender_request(
             provider.clone(),
             &MockStreamer,
             &request("What is in my scene right now?"),
-            &state,
+            &cancel,
             |_| {},
         )
         .await
@@ -362,14 +362,14 @@ mod tests {
                 },
             ])),
         });
-        let state = AssistantState::default();
+        let cancel = MockCancellationToken::new();
         let events = Arc::new(Mutex::new(Vec::<AssistantStreamEventDto>::new()));
 
         let response = execute_blender_request(
             provider,
             &MockStreamer,
             &request("How do I add a bevel to the selected object?"),
-            &state,
+            &cancel,
             {
                 let events = Arc::clone(&events);
                 move |event| events.lock().expect("events lock").push(event)
@@ -402,17 +402,17 @@ mod tests {
                 }),
             }])),
         });
-        let state = Arc::new(AssistantState::default());
+        let cancel = Arc::new(MockCancellationToken::new());
 
         let task = tokio::spawn({
             let provider = provider.clone();
-            let state = state.clone();
+            let cancel = cancel.clone();
             async move {
                 execute_blender_request(
                     provider,
                     &BlockingStreamer,
                     &request("What is in my scene right now?"),
-                    state.as_ref(),
+                    cancel.as_ref(),
                     |_| {},
                 )
                 .await
@@ -420,7 +420,7 @@ mod tests {
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-        state.mark_cancelled();
+        cancel.mark_cancelled();
 
         let error = task
             .await
