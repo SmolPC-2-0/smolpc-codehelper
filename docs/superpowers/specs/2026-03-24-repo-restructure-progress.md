@@ -39,7 +39,8 @@
 - **Gate:** `cargo check --workspace` + `cargo test -p smolpc-connector-gimp`
 
 ## Phase 5: Extract LibreOffice connector
-- **Status:** pending
+- **Status:** completed
+- **Commit:** d3bba62
 - **Key spec sections:** 3 (connector deps), 4 (file moves), 5 (import rewiring)
 - **Gate:** `cargo check --workspace` + `cargo test -p smolpc-connector-libreoffice`
 
