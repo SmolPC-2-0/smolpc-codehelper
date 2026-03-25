@@ -244,10 +244,14 @@ fn lookup_on_path(spec: &HostAppSpec) -> Option<PathBuf> {
 
 #[cfg(windows)]
 fn lookup_windows_app_paths(spec: &HostAppSpec) -> Option<PathBuf> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
     for executable in spec.executable_names {
         let key = format!(r"HKLM\Software\Microsoft\Windows\CurrentVersion\App Paths\{executable}");
         let output = std::process::Command::new("reg")
             .args(["query", &key, "/ve"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .ok()?;
         if !output.status.success() {

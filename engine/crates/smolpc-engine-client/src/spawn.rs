@@ -173,8 +173,11 @@ pub async fn shutdown_and_wait(
 pub fn kill_stale_processes() {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
         let _ = Command::new("taskkill")
             .args(["/F", "/IM", "smolpc-engine-host.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

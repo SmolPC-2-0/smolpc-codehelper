@@ -183,6 +183,10 @@ function Build-PortableBundle {
     }
     New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
 
+    # Sentinel file — signals is_portable() to use flat layout resolution
+    Set-Content -LiteralPath (Join-Path $portableRoot ".portable") -Value "SmolPC portable deployment" -Encoding UTF8
+    Write-Host "  Created .portable sentinel."
+
     # Engine binary
     $engineSrc = Join-Path $AppRoot "src-tauri\binaries\smolpc-engine-host-x86_64-pc-windows-msvc.exe"
     if (Test-Path $engineSrc -PathType Leaf) {

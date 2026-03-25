@@ -88,16 +88,15 @@ pub struct AppBootState {
     pub portable: bool,
 }
 
-/// Detect portable mode: models/ directory exists next to the exe in release builds.
+/// Detect portable mode: a `.portable` sentinel file exists next to the exe.
+/// This file is created by `build-release.ps1 -Variant Portable`.
 /// Used by both the provisioning startup check and the supervisor's path resolution.
 pub fn is_portable() -> bool {
     if cfg!(debug_assertions) {
         return false;
     }
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("models").exists()))
-        .unwrap_or(false)
+    let Some(dir) = exe_dir() else { return false };
+    dir.join(".portable").exists()
 }
 
 /// Get the exe's parent directory

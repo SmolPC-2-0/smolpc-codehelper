@@ -467,7 +467,13 @@ impl<R: Runtime> EngineSupervisor<R> {
 
     /// Resolve all paths needed for spawning the engine.
     fn resolve_paths(&self) -> Result<SpawnPaths, String> {
-        if is_portable() {
+        let portable = is_portable();
+        log::info!(
+            "Supervisor: resolve_paths — is_portable={portable}, exe_dir={:?}",
+            exe_dir()
+        );
+
+        if portable {
             let exe_dir = exe_dir().ok_or("Cannot determine exe directory")?;
 
             // Warn if running from a network drive (slow, may break)
