@@ -51,6 +51,7 @@
 				"silent": true
 			},
 			"nsis": {
+				"installerHooks": "nsis/hooks.nsh",
 				"installMode": "currentUser"
 			}
 		}
