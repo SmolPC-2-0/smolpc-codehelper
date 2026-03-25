@@ -4,6 +4,7 @@ mod commands;
 mod engine;
 mod hardware;
 mod modes;
+mod provisioning;
 mod security;
 mod setup;
 
