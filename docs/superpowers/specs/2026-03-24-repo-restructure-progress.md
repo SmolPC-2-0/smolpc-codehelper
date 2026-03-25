@@ -21,7 +21,8 @@
 - **Gate:** `cargo check --workspace` + `cd app && npm run check`
 
 ## Phase 2: Create `smolpc-connector-common` crate
-- **Status:** pending
+- **Status:** completed
+- **Commits:** d2e38be, b344510, 1905001
 - **Key spec sections:** 2 (exports/deps), 4 (file moves), 5 (import rewiring), 0b-0d (sysinfo, CancellationToken, MockCancellationToken), 0g (TextStreamer error message)
 - **Gate:** `cargo check --workspace` + `cargo test -p smolpc-connector-common`
 
