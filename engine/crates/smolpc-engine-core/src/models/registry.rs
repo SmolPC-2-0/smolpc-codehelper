@@ -43,7 +43,7 @@ impl ModelRegistry {
                 name: "Qwen3 4B".to_string(),
                 size: "4B".to_string(),
                 disk_size_gb: 2.5,
-                min_ram_gb: 16.0,
+                min_ram_gb: 15.0,
                 estimated_runtime_ram_gb: 4.0,
                 directory: "qwen3-4b".to_string(),
                 description:

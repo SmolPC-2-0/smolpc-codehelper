@@ -477,10 +477,25 @@ impl EngineState {
 
         let directml_detected = probe.directml_candidate.is_some();
         let directml_artifact_available = artifacts.directml_ready && dml_model_path.is_some();
-        let has_dml_candidate = directml_detected
-            && directml_artifact_available
-            && self.runtime_bundles().ort.directml_validated();
+        let ort_directml_validated = self.runtime_bundles().ort.directml_validated();
+        let has_dml_candidate =
+            directml_detected && directml_artifact_available && ort_directml_validated;
         let openvino_bundle_ready = self.runtime_bundles().openvino.npu_validated();
+
+        log::info!(
+            "DirectML gates: detected={directml_detected}, artifacts={directml_artifact_available}, \
+             ort_validated={ort_directml_validated} → has_dml_candidate={has_dml_candidate}",
+        );
+        if !has_dml_candidate {
+            log::info!(
+                "DirectML unavailable: {}",
+                crate::probe::directml_unavailable_reason(
+                    directml_detected,
+                    directml_artifact_available,
+                    self.runtime_bundles(),
+                ),
+            );
+        }
 
         if directml_required && force_override == Some(InferenceBackend::Cpu) {
             return Err(directml_required_error(
@@ -697,6 +712,12 @@ impl EngineState {
             stored.as_ref(),
             has_dml_candidate,
             has_openvino_candidate,
+        );
+        log::info!(
+            "Backend selected: {:?} (reason: {:?}, dml={has_dml_candidate}, openvino={has_openvino_candidate}, \
+             force={force_override:?}, persisted={persisted_backend:?})",
+            preferred_backend,
+            decision_reason,
         );
         let release_current_adapter = should_release_current_adapter_for_load(
             current_backend,

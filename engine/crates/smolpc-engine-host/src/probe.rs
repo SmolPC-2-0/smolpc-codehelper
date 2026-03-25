@@ -243,8 +243,23 @@ fn pick_best_dml_candidate(gpus: &[DxgiGpuInfo]) -> Option<DirectMlCandidate> {
 
 #[cfg(target_os = "windows")]
 pub(crate) fn probe_backend_capabilities() -> BackendProbeResult {
+    let start = std::time::Instant::now();
     let gpus = enumerate_dxgi_gpus();
+    let dxgi_elapsed = start.elapsed();
     let directml_device_count = gpus.iter().filter(|gpu| !gpu.is_software).count();
+
+    log::info!(
+        "DXGI probe completed in {:.1}ms: {} adapters ({} non-software)",
+        dxgi_elapsed.as_secs_f64() * 1000.0,
+        gpus.len(),
+        directml_device_count,
+    );
+    for (i, gpu) in gpus.iter().enumerate() {
+        log::debug!(
+            "  GPU[{}]: '{}' vendor=0x{:04x} device=0x{:04x} vram={}MB discrete={} software={}",
+            i, gpu.name, gpu.vendor_id, gpu.device_id, gpu.vram_mb, gpu.is_discrete, gpu.is_software,
+        );
+    }
 
     // directml_device_count = non-software DXGI adapters. All WDDM hardware
     // adapters support DirectML, so this is equivalent to the old
@@ -258,9 +273,16 @@ pub(crate) fn probe_backend_capabilities() -> BackendProbeResult {
     };
 
     if let Some(candidate) = pick_best_dml_candidate(&gpus) {
+        log::info!(
+            "DirectML candidate selected: device_id={} '{}' vram={}MB",
+            candidate.device_id,
+            candidate.device_name,
+            candidate.vram_mb,
+        );
         result.available_backends.push(InferenceBackend::DirectML);
         result.directml_candidate = Some(candidate);
     } else {
+        log::info!("No DirectML candidate: no discrete GPU found");
         result.directml_probe_failure_class = Some("directml_candidate_missing".to_string());
         result.directml_probe_failure_message =
             Some("No DirectML-capable discrete GPU detected".to_string());

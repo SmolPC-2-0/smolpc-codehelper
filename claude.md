@@ -10,8 +10,10 @@ SmolPC Code Helper is an **offline AI coding assistant** for secondary school st
 
 **Architecture:**
 - `engine/` — shared inference server: `smolpc-engine-host` (axum, 17 modules), `smolpc-engine-core` (backends, hardware, models), `smolpc-engine-client` (HTTP+SSE client for apps), `smolpc-tts-server` (standalone TTS sidecar).
-- `apps/codehelper/` — Tauri 2 app with modes: Code (default), Blender, GIMP, LibreOffice. Each mode has its own executor, provider, and runtime under `src-tauri/src/modes/`.
-- `apps/codehelper/src-tauri/src/engine/` — `EngineSupervisor` actor task owns the engine process lifecycle (spawn, health, auto-restart, shutdown). Tauri commands interact via `EngineSupervisorHandle` (mpsc+watch channels, no Mutex). See `docs/ENGINE_SUPERVISOR.md`.
+- `app/` — Tauri 2 desktop app. Code mode is built-in; Blender, GIMP, LibreOffice are loaded via connector crates.
+- `connectors/` — self-contained connector crates (`smolpc-connector-blender`, `smolpc-connector-gimp`, `smolpc-connector-libreoffice`). Each owns its provider, executor, setup, and bundled resources.
+- `crates/smolpc-connector-common/` — shared connector infrastructure: `ToolProvider` trait, `CancellationToken`, `TextStreamer`, setup utilities (host app detection, Python resolution, manifests).
+- `app/src-tauri/src/engine/` — `EngineSupervisor` actor task owns the engine process lifecycle (spawn, health, auto-restart, shutdown). Tauri commands interact via `EngineSupervisorHandle` (mpsc+watch channels, no Mutex).
 - Engine runs as a local HTTP server on port 19432; Tauri apps connect via `smolpc-engine-client`.
 
 **Backend selection priority:** `directml` (discrete GPU only) > `openvino_npu` > `cpu`. RAM-aware model defaults: 16GB+ gets `qwen3-4b`, <16GB gets `qwen2.5-1.5b-instruct`.
@@ -30,7 +32,7 @@ cargo clippy --workspace               # Lint all crates
 cargo test -p smolpc-engine-core       # Core tests
 cargo test -p smolpc-engine-host       # Host tests
 
-# Tauri app (from apps/codehelper/)
+# Tauri app (from app/)
 npm run tauri:dev                      # Full app with hot reload and shared-engine cleanup
 npm run dev                            # Frontend only
 npm run check                          # TypeScript check
@@ -76,7 +78,7 @@ SMOLPC_MODELS_DIR=/path/to/models
 ```bash
 cargo check --workspace && cargo clippy --workspace
 cargo test -p smolpc-engine-core && cargo test -p smolpc-engine-host
-cd apps/codehelper && npm run check && npm run lint
+cd app && npm run check && npm run lint
 ```
 
 **Plugin and tool usage (mandatory):**
@@ -108,9 +110,13 @@ Hard-won rules from development. Organized by theme. **Detailed per-subsystem ru
 - Unit tests validate logic; live `curl` tests validate hardware paths. After changing generation config, backend selection, or model loading: start the engine with `SMOLPC_FORCE_EP=<backend>` and curl a streaming chat completion before declaring it fixed
 - When removing or replacing a dependency, trace every consumed field to its terminal behavior — a "hint" boolean can be a hard gate downstream
 - DirectML on Intel integrated GPU produces garbage — only accept discrete GPUs as DirectML candidates
-- DXGI adapter enumeration (`IDXGIFactory6`) is 1000x faster than WMI for GPU detection
+- DXGI adapter enumeration (`IDXGIFactory6`) is 1000x faster than WMI for GPU detection. GPU detection in the app-side hardware detector (`app/src-tauri/src/hardware/detector.rs`) is disabled (sysinfo v0.32.1 lacks GPU support) — the engine's DXGI probe in `probe.rs` is the authoritative GPU detection
 - NPU StaticLLMPipeline has a fixed context window: `MAX_PROMPT_LEN` (2048) + `MIN_RESPONSE_LEN` (1024). Exceeding `MAX_PROMPT_LEN` crashes with "unknown exception" — no graceful error. Token counting must happen host-side before sending. The C API does not expose a tokenizer; use the `tokenizers` crate with the model's `tokenizer.json` or a character heuristic (~3.5 chars/token for Qwen)
+- Qwen3-4B on NPU with INT4 quantization crashes — only INT8_SYM works. Do not lower `qwen3-4b` `min_ram_gb` below 16.0 until DirectML backend selection is verified working (see known issue below)
 - `smolpc-tts-server` is a standalone workspace (own `[workspace]` in Cargo.toml) — `ort` version conflict prevents workspace membership. Build with `--manifest-path`, not `-p`
+
+*DirectML backend selection (resolved):*
+- DirectML is correctly selected on the RTX 4050 machine. The DXGI probe completes in ~14ms (well within the 1.5s budget). All three gates pass: `directml_detected`, `directml_artifact_available`, `ort.directml_validated()`. Diagnostic logging in `model_loading.rs` and `probe.rs` traces the full decision chain. If DirectML fails to be selected in the future, check the gate log lines first
 
 *Rust state management:*
 - Use RAII drop guards for multi-path state transitions (e.g., `TransitionGuard` for `model_transition_in_progress`)
@@ -120,7 +126,9 @@ Hard-won rules from development. Organized by theme. **Detailed per-subsystem ru
 *Windows process lifecycle:*
 - Detached processes need: PID file on spawn, identity check before kill, stderr→log file, cleanup on all exit paths (graceful + force-kill)
 - Use `CREATE_NO_WINDOW` for background sidecars to prevent console flash
-- Force-backend env var is `SMOLPC_FORCE_EP` (not `SMOLPC_FORCE_BACKEND`)
+- Force-backend env var is `SMOLPC_FORCE_EP` (not `SMOLPC_FORCE_BACKEND`). Note: `SMOLPC_FORCE_EP` set in the shell does NOT reach the engine process — the supervisor explicitly controls it via `spawn_engine` (`cmd.env`/`cmd.env_remove`). Use the dev script's `-ForceEp` parameter or the frontend's runtime mode preference instead
+- `taskkill.exe` can hang for 60+ seconds on some Windows machines. `kill_stale_processes` uses Toolhelp32 (`CreateToolhelp32Snapshot` + `TerminateProcess`) instead — completes in <15ms
+- WMI queries (`Get-WmiObject`, `Get-CimInstance`) also hang on some machines — avoid for GPU detection. DXGI is the correct approach
 
 *Config parsing:*
 - HuggingFace `tokenizer_config.json` `chat_template` can be a string OR an array of `{name, template}` objects — handle both
