@@ -677,17 +677,40 @@ fn resolve_models_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf>
     let override_dir = std::env::var("SMOLPC_MODELS_DIR").ok().map(PathBuf::from);
     let shared_dir = dirs::data_local_dir()
         .map(|base| base.join(SHARED_MODELS_VENDOR_DIR).join(SHARED_MODELS_DIR));
+
+    // Check if bundled models/ actually contains model subdirectories (not just
+    // manifest.json/README.md). The NSIS installer bundles a models/ dir with
+    // metadata only — using it for inference would fail with "unknown exception".
     let bundled_dir = resource_dir
         .map(|res_dir| res_dir.join("models"))
-        .filter(|path| path.exists());
+        .filter(|path| has_model_subdirs(path));
 
-    // Priority: env override → bundled (fresh from installer) → shared local.
-    // Bundled before shared prevents a stale prior install from shadowing
-    // fresh models shipped with the current version.
+    // Priority: env override → shared local (user-provisioned) → bundled (if real models).
+    // Shared before bundled because the provisioning system extracts models to the
+    // shared dir (%LOCALAPPDATA%\SmolPC\models\), while bundled may only have metadata.
     override_dir
         .filter(|path| path.exists())
+        .or_else(|| shared_dir.filter(|path| has_model_subdirs(path)))
         .or(bundled_dir)
-        .or_else(|| shared_dir.filter(|path| path.exists()))
+}
+
+/// Check if a directory contains at least one model subdirectory with actual
+/// model files (not just manifest.json/README.md).
+fn has_model_subdirs(dir: &std::path::Path) -> bool {
+    if !dir.exists() {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        entry.path().is_dir() && {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            // Model dirs have backend subdirs like openvino/ or dml/
+            name.starts_with("qwen") || name.starts_with("phi") || name.starts_with("llama")
+        }
+    })
 }
 
 fn resolve_host_binary_path() -> Option<PathBuf> {
