@@ -685,6 +685,8 @@ fn resolve_models_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf>
 }
 
 fn resolve_host_binary_path() -> Option<PathBuf> {
+    let bin_name = format!("smolpc-engine-host{}", std::env::consts::EXE_SUFFIX);
+
     if let Ok(path) = std::env::var("SMOLPC_ENGINE_HOST_BIN") {
         let path = PathBuf::from(path);
         if path.exists() {
@@ -692,6 +694,23 @@ fn resolve_host_binary_path() -> Option<PathBuf> {
         }
     }
 
+    // Production: check next to the app exe and in binaries/ subdirectory.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            // <install_dir>/binaries/smolpc-engine-host.exe (Tauri resource layout)
+            let in_binaries = dir.join("binaries").join(&bin_name);
+            if in_binaries.exists() {
+                return Some(in_binaries);
+            }
+            // <install_dir>/smolpc-engine-host.exe (flat layout)
+            let beside_exe = dir.join(&bin_name);
+            if beside_exe.exists() {
+                return Some(beside_exe);
+            }
+        }
+    }
+
+    // Development: workspace target directory.
     let workspace_target = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
@@ -701,10 +720,7 @@ fn resolve_host_binary_path() -> Option<PathBuf> {
         } else {
             "release"
         })
-        .join(format!(
-            "smolpc-engine-host{}",
-            std::env::consts::EXE_SUFFIX
-        ));
+        .join(&bin_name);
     if workspace_target.exists() {
         return Some(workspace_target);
     }
