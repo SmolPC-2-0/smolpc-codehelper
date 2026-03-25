@@ -829,19 +829,6 @@ Generating summary...`
 		window.addEventListener('resize', handleResize);
 		window.visualViewport?.addEventListener('resize', handleResize);
 
-		// Check boot state before initialising inference — if models aren't
-		// provisioned yet we show the SetupWizard instead of starting the engine.
-		invoke<{ models_provisioned: boolean; portable: boolean }>('get_boot_state')
-			.then((bootState) => {
-				needsSetup = !bootState.models_provisioned && !bootState.portable;
-				setupChecked = true;
-			})
-			.catch(() => {
-				// If the command fails (e.g. older build without the command), proceed normally.
-				needsSetup = false;
-				setupChecked = true;
-			});
-
 		async function initInference() {
 			try {
 				// Start engine FIRST — listModels needs get_client which waits for Running state.
@@ -853,6 +840,23 @@ Generating summary...`
 				console.error('Failed to initialize inference session:', error);
 			}
 		}
+
+		// Check boot state before initialising inference — if models aren't
+		// provisioned yet we show the SetupWizard instead of starting the engine.
+		// initInference() is deferred until we know models are available.
+		invoke<{ models_provisioned: boolean; portable: boolean }>('get_boot_state')
+			.then((bootState) => {
+				needsSetup = !bootState.models_provisioned && !bootState.portable;
+				setupChecked = true;
+				if (!needsSetup) {
+					initInference();
+				}
+			})
+			.catch(() => {
+				needsSetup = false;
+				setupChecked = true;
+				initInference();
+			});
 
 		// Listen for supervisor lifecycle events instead of polling
 		let unlistenLifecycle: (() => void) | undefined;
@@ -868,7 +872,8 @@ Generating summary...`
 			unlistenAudioRecordingReady = fn;
 		});
 
-		initInference();
+		// initInference() is called from the get_boot_state .then() above,
+		// or from handleSetupComplete() after provisioning finishes.
 		modeStore.initialize();
 		setupStore.initialize();
 		hardwareStore.getCached();
@@ -970,7 +975,18 @@ Generating summary...`
 {#if !setupChecked}
 	<!-- Loading: waiting for boot state check -->
 {:else if needsSetup}
-	<SetupWizard oncomplete={() => (needsSetup = false)} />
+	<SetupWizard
+		oncomplete={async () => {
+			needsSetup = false;
+			// Models are now provisioned — start the engine.
+			try {
+				await performStartup();
+				await inferenceStore.listModels();
+			} catch (e) {
+				console.error('Post-provisioning engine start failed:', e);
+			}
+		}}
+	/>
 {:else}
 	<StartupLoadingScreen
 		readiness={inferenceStore.readiness}
