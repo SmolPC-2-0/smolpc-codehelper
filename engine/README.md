@@ -18,5 +18,6 @@ Shared inference platform for all SmolPC apps.
 ## Key References
 
 - `docs/ENGINE_API.md`
+- `docs/ENGINE_STANDALONE.md`
 - `docs/APP_ONBOARDING_PLAYBOOK.md`
 - `docs/ARCHITECTURE.md`
