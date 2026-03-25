@@ -6,7 +6,7 @@ use crate::modes::blender::execute_blender_request;
 use crate::modes::gimp::{execute_gimp_request, EngineTextGenerator};
 use crate::modes::libreoffice::{execute_libreoffice_request, EngineTextPlanner};
 use crate::modes::registry::ModeProviderRegistry;
-use crate::modes::text_generation::EngineTextStreamer;
+use smolpc_connector_common::EngineTextStreamer;
 use smolpc_assistant_types::{
     AppMode, AssistantResponseDto, AssistantSendRequestDto, AssistantStreamEventDto,
 };

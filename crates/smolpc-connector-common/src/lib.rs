@@ -4,9 +4,11 @@ pub mod launch;
 pub mod manifests;
 pub mod provider;
 pub mod python;
+pub mod text_generation;
 
 pub use cancellation::{CancellationToken, MockCancellationToken};
 pub use provider::{provider_state, ToolProvider, FOUNDATION_PROVIDER_EXECUTION_NOT_IMPLEMENTED};
+pub use text_generation::{EngineTextStreamer, TextStreamer, ASSISTANT_CANCELLED};
 
 // Constants migrated from app setup/types.rs
 pub const SETUP_ITEM_HOST_GIMP: &str = "host_gimp";

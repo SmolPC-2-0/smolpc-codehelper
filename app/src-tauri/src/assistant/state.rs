@@ -18,3 +18,9 @@ impl AssistantState {
         self.cancelled.load(Ordering::Acquire)
     }
 }
+
+impl smolpc_connector_common::CancellationToken for AssistantState {
+    fn is_cancelled(&self) -> bool {
+        self.is_cancelled()
+    }
+}

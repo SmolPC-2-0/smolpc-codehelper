@@ -3,7 +3,7 @@ use super::rag::RagContext;
 use super::response::{build_blender_response, parse_rag_contexts, parse_scene_snapshot};
 use crate::assistant::state::AssistantState;
 use smolpc_connector_common::ToolProvider;
-use crate::modes::text_generation::TextStreamer;
+use smolpc_connector_common::TextStreamer;
 use smolpc_assistant_types::{
     AppMode, AssistantResponseDto, AssistantSendRequestDto, AssistantStreamEventDto,
 };
@@ -180,7 +180,7 @@ mod tests {
     use super::execute_blender_request;
     use crate::assistant::state::AssistantState;
     use smolpc_connector_common::{provider_state, ToolProvider};
-    use crate::modes::text_generation::TextStreamer;
+    use smolpc_connector_common::TextStreamer;
     use async_trait::async_trait;
     use serde_json::json;
     use smolpc_assistant_types::{

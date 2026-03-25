@@ -4,4 +4,3 @@ pub mod config;
 pub mod gimp;
 pub mod libreoffice;
 pub mod registry;
-pub mod text_generation;

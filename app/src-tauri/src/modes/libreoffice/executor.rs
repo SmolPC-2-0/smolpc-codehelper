@@ -2,7 +2,7 @@ use super::profiles::{allowed_tool_names, libreoffice_profile};
 use super::response::{build_libreoffice_response, build_local_fallback_summary};
 use crate::assistant::state::AssistantState;
 use smolpc_connector_common::ToolProvider;
-use crate::modes::text_generation::TextStreamer;
+use smolpc_connector_common::TextStreamer;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use smolpc_assistant_types::{
@@ -798,7 +798,7 @@ mod tests {
     use super::{execute_libreoffice_request, extract_tool_call, TextPlanner};
     use crate::assistant::state::AssistantState;
     use smolpc_connector_common::{provider_state, ToolProvider};
-    use crate::modes::text_generation::TextStreamer;
+    use smolpc_connector_common::TextStreamer;
     use async_trait::async_trait;
     use serde_json::json;
     use smolpc_assistant_types::{

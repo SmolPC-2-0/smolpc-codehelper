@@ -1,18 +1,18 @@
-use crate::assistant::state::AssistantState;
+use crate::CancellationToken;
 use async_trait::async_trait;
 use smolpc_engine_client::{EngineChatMessage, EngineClient};
 use smolpc_engine_core::GenerationConfig;
 use std::sync::{Arc, Mutex};
 use tokio::time::{sleep, Duration};
 
-const ASSISTANT_CANCELLED: &str = "ASSISTANT_CANCELLED";
+pub const ASSISTANT_CANCELLED: &str = "ASSISTANT_CANCELLED";
 
 #[async_trait]
 pub trait TextStreamer: Send + Sync {
     async fn generate_stream(
         &self,
         messages: &[EngineChatMessage],
-        state: &AssistantState,
+        cancel: &dyn CancellationToken,
         on_token: &mut (dyn FnMut(String) + Send),
     ) -> Result<String, String>;
 }
@@ -48,7 +48,7 @@ impl TextStreamer for EngineTextStreamer {
     async fn generate_stream(
         &self,
         messages: &[EngineChatMessage],
-        state: &AssistantState,
+        cancel: &dyn CancellationToken,
         on_token: &mut (dyn FnMut(String) + Send),
     ) -> Result<String, String> {
         let cancel_client = self.client.clone();
@@ -66,7 +66,7 @@ impl TextStreamer for EngineTextStreamer {
 
         let cancel_future = async {
             loop {
-                if state.is_cancelled() {
+                if cancel.is_cancelled() {
                     let _ = cancel_client.cancel().await;
                     break;
                 }
@@ -84,14 +84,14 @@ impl TextStreamer for EngineTextStreamer {
         let reply_text = reply.lock().map(|value| value.clone()).unwrap_or_default();
 
         match result {
-            Ok(_) if state.is_cancelled() => Err(ASSISTANT_CANCELLED.to_string()),
+            Ok(_) if cancel.is_cancelled() => Err(ASSISTANT_CANCELLED.to_string()),
             Ok(_) => Ok(reply_text),
             Err(error) => {
                 let message = error.to_string();
-                if state.is_cancelled() || Self::is_cancelled_error(&message) {
+                if cancel.is_cancelled() || Self::is_cancelled_error(&message) {
                     Err(ASSISTANT_CANCELLED.to_string())
                 } else {
-                    Err(format!("Blender generation failed: {message}"))
+                    Err(format!("Text generation failed: {message}"))
                 }
             }
         }
@@ -101,34 +101,40 @@ impl TextStreamer for EngineTextStreamer {
 #[cfg(test)]
 mod tests {
     use super::TextStreamer;
-    use crate::assistant::state::AssistantState;
+    use crate::{CancellationToken, MockCancellationToken};
     use async_trait::async_trait;
     use smolpc_engine_client::EngineChatMessage;
+    use std::sync::Arc;
 
-    struct MockStreamer;
+    struct MockStreamer {
+        token: Arc<MockCancellationToken>,
+    }
 
     #[async_trait]
     impl TextStreamer for MockStreamer {
         async fn generate_stream(
             &self,
             _messages: &[EngineChatMessage],
-            state: &AssistantState,
+            _cancel: &dyn CancellationToken,
             on_token: &mut (dyn FnMut(String) + Send),
         ) -> Result<String, String> {
             on_token("hello ".to_string());
-            state.mark_cancelled();
+            self.token.mark_cancelled();
             Err("ASSISTANT_CANCELLED".to_string())
         }
     }
 
     #[tokio::test]
     async fn text_streamer_trait_can_propagate_cancelled_result() {
-        let state = AssistantState::default();
+        let token = Arc::new(MockCancellationToken::new());
+        let mock = MockStreamer {
+            token: Arc::clone(&token),
+        };
         let mut seen = String::new();
 
-        let error = MockStreamer
-            .generate_stream(&[], &state, &mut |token| {
-                seen.push_str(&token);
+        let error = mock
+            .generate_stream(&[], token.as_ref(), &mut |t| {
+                seen.push_str(&t);
             })
             .await
             .expect_err("stream cancelled");
