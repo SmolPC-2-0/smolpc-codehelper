@@ -3,7 +3,7 @@ use super::response::build_tool_execution_result;
 use super::runtime::GimpRuntimeConfig;
 use super::transport::{connect_session, default_transport_config, tool_definition};
 use smolpc_connector_common::{provider_state, ToolProvider};
-use crate::setup::gimp::{
+use crate::setup::{
     ensure_gimp_plugin_runtime_prepared, validate_supported_gimp, GimpPluginRuntimePrepareOutcome,
 };
 use smolpc_connector_common::host_apps::{detect_gimp, HostAppDetection};

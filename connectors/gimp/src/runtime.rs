@@ -1,4 +1,4 @@
-use crate::setup::gimp::{
+use crate::setup::{
     resolve_gimp_resource_layout, GIMP_PLUGIN_SOCKET_HOST, GIMP_PLUGIN_SOCKET_PORT,
 };
 use smolpc_connector_common::python::resolve_prepared_python_command;

@@ -3,7 +3,7 @@ use super::planner::{
     answer_without_tool, plan_call_api, select_tool, SelectedTool, TextGenerator,
 };
 use super::response::{parse_gimp_info_reply, parse_image_metadata_reply};
-use crate::assistant::state::AssistantState;
+use smolpc_connector_common::CancellationToken;
 use smolpc_connector_common::ToolProvider;
 use smolpc_assistant_types::{
     AppMode, AssistantResponseDto, AssistantSendRequestDto, AssistantStreamEventDto,
@@ -14,8 +14,8 @@ const ASSISTANT_CANCELLED: &str = "ASSISTANT_CANCELLED";
 const GIMP_CONNECT_ERROR_HINT: &str =
     "Could not connect to GIMP. Make sure GIMP is running and the plugin is installed.";
 
-fn ensure_not_cancelled(state: &AssistantState) -> Result<(), String> {
-    if state.is_cancelled() {
+fn ensure_not_cancelled(cancel: &dyn CancellationToken) -> Result<(), String> {
+    if cancel.is_cancelled() {
         Err(ASSISTANT_CANCELLED.to_string())
     } else {
         Ok(())
@@ -48,7 +48,7 @@ pub async fn execute_gimp_request<F>(
     provider: Arc<dyn ToolProvider>,
     generator: &dyn TextGenerator,
     request: &AssistantSendRequestDto,
-    state: &AssistantState,
+    cancel: &dyn CancellationToken,
     mut emit: F,
 ) -> Result<AssistantResponseDto, String>
 where
@@ -58,7 +58,7 @@ where
         phase: "selecting_action".to_string(),
         detail: "Selecting the best GIMP action for this request.".to_string(),
     });
-    ensure_not_cancelled(state)?;
+    ensure_not_cancelled(cancel)?;
 
     if let Some(fast_path) = detect_fast_path(&request.user_text) {
         emit(AssistantStreamEventDto::Status {
@@ -66,7 +66,7 @@ where
             detail: "Connecting to GIMP.".to_string(),
         });
         ensure_gimp_connected(&provider).await?;
-        ensure_not_cancelled(state)?;
+        ensure_not_cancelled(cancel)?;
 
         emit(AssistantStreamEventDto::ToolCall {
             name: fast_path.tool_name.clone(),
@@ -102,11 +102,11 @@ where
     }
 
     if let Some(direct_tool) = detect_direct_tool(&request.user_text) {
-        return execute_direct_tool(provider, direct_tool, state, &mut emit).await;
+        return execute_direct_tool(provider, direct_tool, cancel, &mut emit).await;
     }
 
     let selection = select_tool(generator, &request.user_text).await?;
-    ensure_not_cancelled(state)?;
+    ensure_not_cancelled(cancel)?;
 
     match selection.tool {
         SelectedTool::None => {
@@ -131,10 +131,10 @@ where
             Ok(response)
         }
         SelectedTool::GetGimpInfo => {
-            execute_direct_tool(provider, DirectToolKind::GimpInfo, state, &mut emit).await
+            execute_direct_tool(provider, DirectToolKind::GimpInfo, cancel, &mut emit).await
         }
         SelectedTool::GetImageMetadata => {
-            execute_direct_tool(provider, DirectToolKind::ImageMetadata, state, &mut emit).await
+            execute_direct_tool(provider, DirectToolKind::ImageMetadata, cancel, &mut emit).await
         }
         SelectedTool::CallApi => {
             emit(AssistantStreamEventDto::Status {
@@ -142,7 +142,7 @@ where
                 detail: "Planning the requested GIMP edit.".to_string(),
             });
             let plan = plan_call_api(generator, &request.user_text).await?;
-            ensure_not_cancelled(state)?;
+            ensure_not_cancelled(cancel)?;
 
             emit(AssistantStreamEventDto::Status {
                 phase: "connecting".to_string(),
@@ -157,7 +157,7 @@ where
                 .into_iter()
                 .flatten()
             {
-                ensure_not_cancelled(state)?;
+                ensure_not_cancelled(cancel)?;
                 let tool_name = step
                     .get("tool")
                     .and_then(serde_json::Value::as_str)
@@ -216,19 +216,19 @@ where
 async fn execute_direct_tool<F>(
     provider: Arc<dyn ToolProvider>,
     tool: DirectToolKind,
-    state: &AssistantState,
+    cancel: &dyn CancellationToken,
     emit: &mut F,
 ) -> Result<AssistantResponseDto, String>
 where
     F: FnMut(AssistantStreamEventDto),
 {
-    ensure_not_cancelled(state)?;
+    ensure_not_cancelled(cancel)?;
     emit(AssistantStreamEventDto::Status {
         phase: "connecting".to_string(),
         detail: "Connecting to GIMP.".to_string(),
     });
     ensure_gimp_connected(&provider).await?;
-    ensure_not_cancelled(state)?;
+    ensure_not_cancelled(cancel)?;
 
     let (tool_name, thought) = match tool {
         DirectToolKind::GimpInfo => ("get_gimp_info", "Query GIMP environment details."),
@@ -282,7 +282,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::execute_gimp_request;
-    use crate::assistant::state::AssistantState;
+    use smolpc_connector_common::MockCancellationToken;
     use smolpc_connector_common::{provider_state, ToolProvider};
     use async_trait::async_trait;
     use serde_json::json;
@@ -436,7 +436,7 @@ mod tests {
             provider,
             &generator,
             &request("What image is open right now?"),
-            &AssistantState::default(),
+            &MockCancellationToken::new(),
             |event| events.push(event),
         )
         .await
@@ -465,7 +465,7 @@ mod tests {
             provider,
             &generator,
             &request("Crop this image to a square"),
-            &AssistantState::default(),
+            &MockCancellationToken::new(),
             |_| {},
         )
         .await
@@ -496,7 +496,7 @@ mod tests {
             provider,
             &generator,
             &request("Rotate the image 90 degrees clockwise"),
-            &AssistantState::default(),
+            &MockCancellationToken::new(),
             |_| {},
         )
         .await
@@ -521,7 +521,7 @@ mod tests {
             provider,
             &generator,
             &request("What can you do in GIMP?"),
-            &AssistantState::default(),
+            &MockCancellationToken::new(),
             |_| {},
         )
         .await
@@ -544,7 +544,7 @@ mod tests {
             provider,
             &generator,
             &request("Crop this image to a square"),
-            &AssistantState::default(),
+            &MockCancellationToken::new(),
             |_| {},
         )
         .await

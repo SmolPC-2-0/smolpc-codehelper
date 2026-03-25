@@ -1,6 +1,6 @@
 use smolpc_connector_blender::BlenderProvider;
 use super::code::CodeProvider;
-use super::gimp::GimpProvider;
+use smolpc_connector_gimp::GimpProvider;
 use super::libreoffice::LibreOfficeProvider;
 use smolpc_connector_common::ToolProvider;
 use smolpc_assistant_types::AppMode;

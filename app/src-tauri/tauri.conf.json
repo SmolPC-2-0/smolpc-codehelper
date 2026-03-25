@@ -39,7 +39,7 @@
 			"binaries/": "binaries/",
 			"resources/launcher/": "launcher/",
 			"resources/model-installer/": "model-installer/",
-			"resources/gimp/": "gimp/",
+			"../../connectors/gimp/resources/": "gimp/",
 			"../../connectors/blender/resources/": "blender/",
 			"resources/libreoffice/": "libreoffice/",
 			"resources/python/": "python/",

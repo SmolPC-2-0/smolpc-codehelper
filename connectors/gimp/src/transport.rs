@@ -1,4 +1,4 @@
-use crate::setup::gimp::{GIMP_BRIDGE_HOST, GIMP_BRIDGE_PORT};
+use crate::setup::{GIMP_BRIDGE_HOST, GIMP_BRIDGE_PORT};
 use smolpc_assistant_types::ToolDefinitionDto;
 use smolpc_mcp_client::{McpSession, McpTool, TcpTransportConfig};
 
