@@ -1,15 +1,15 @@
 use super::bridge::{start_scene_bridge, BridgeConfig, SceneBridgeHandle};
 use super::rag::{RagContext, RagIndex};
 use super::state::{shared_scene_cache, SceneCache, SceneSnapshot};
-use smolpc_connector_common::{provider_state, ToolProvider, MODE_UNDO_NOT_SUPPORTED};
 use crate::setup::{ensure_blender_addon_prepared, BlenderAddonPrepareOutcome};
-use smolpc_connector_common::host_apps::{detect_blender, HostAppDetection};
-use smolpc_connector_common::launch::is_matching_blender_process_running;
 use async_trait::async_trait;
 use serde_json::json;
 use smolpc_assistant_types::{
     AppMode, ProviderStateDto, ToolDefinitionDto, ToolExecutionResultDto,
 };
+use smolpc_connector_common::host_apps::{detect_blender, HostAppDetection};
+use smolpc_connector_common::launch::is_matching_blender_process_running;
+use smolpc_connector_common::{provider_state, ToolProvider, MODE_UNDO_NOT_SUPPORTED};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex as AsyncMutex, RwLock};
@@ -497,9 +497,9 @@ mod tests {
     use super::BlenderProvider;
     use crate::bridge::BridgeConfig;
     use crate::state::SceneData;
-    use smolpc_connector_common::ToolProvider;
     use serde_json::json;
     use smolpc_assistant_types::AppMode;
+    use smolpc_connector_common::ToolProvider;
     use std::path::{Path, PathBuf};
     use std::sync::{Mutex as StdMutex, OnceLock};
     use tempfile::{tempdir, TempDir};

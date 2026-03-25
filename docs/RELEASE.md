@@ -10,7 +10,7 @@ The app ships as an **NSIS installer** (`SmolPC Code Helper_x.x.x_x64-setup.exe`
 
 | Component | Size | Description |
 |-----------|------|-------------|
-| App binary | ~10 MB | `smolpc-code-helper.exe` (Tauri shell) |
+| App binary | ~10 MB | `smolpc-desktop.exe` (Tauri shell) |
 | Engine sidecar | ~10 MB | `smolpc-engine-host.exe` (inference server) |
 | OpenVINO runtime | ~170 MB | 15 DLLs for CPU and NPU inference (2026.0.0) |
 | DirectML/ORT runtime | ~40 MB | 4 DLLs for GPU inference via DirectML |
@@ -120,7 +120,7 @@ The draft release appears in GitHub with the `.exe` attached. Review and publish
 | Item | Path |
 |------|------|
 | App install | `%LOCALAPPDATA%\Programs\SmolPC Code Helper\` |
-| App binary | `...\smolpc-code-helper.exe` |
+| App binary | `...\smolpc-desktop.exe` |
 | Engine sidecar | `...\binaries\smolpc-engine-host.exe` |
 | Bundled DLLs | `...\libs\` and `...\libs\openvino\` |
 | Models (shared) | `%LOCALAPPDATA%\SmolPC\models\` |

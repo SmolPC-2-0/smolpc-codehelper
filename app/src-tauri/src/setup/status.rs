@@ -1,17 +1,17 @@
-use smolpc_connector_blender::blender_addon_item;
-use smolpc_connector_gimp::gimp_plugin_runtime_item;
-use smolpc_connector_common::host_apps::{detect_all_with_policy, HostAppDetection};
-use smolpc_connector_common::launch::setup_launch_detail;
 use super::models::bundled_model_item;
-use smolpc_connector_common::python::bundled_python_item;
 use super::state::SetupState;
 use super::types::SETUP_ITEM_ENGINE_RUNTIME;
-use smolpc_connector_common::{
-    SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP, SETUP_ITEM_HOST_LIBREOFFICE,
-};
 use smolpc_assistant_types::{
     SetupItemDto, SetupItemStateDto, SetupOverallStateDto, SetupStatusDto,
 };
+use smolpc_connector_blender::blender_addon_item;
+use smolpc_connector_common::host_apps::{detect_all_with_policy, HostAppDetection};
+use smolpc_connector_common::launch::setup_launch_detail;
+use smolpc_connector_common::python::bundled_python_item;
+use smolpc_connector_common::{
+    SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP, SETUP_ITEM_HOST_LIBREOFFICE,
+};
+use smolpc_connector_gimp::gimp_plugin_runtime_item;
 
 pub async fn collect_setup_status(state: &SetupState) -> SetupStatusDto {
     state.load_cache_from_disk_if_needed().await;
@@ -175,8 +175,8 @@ fn overall_state_for_items(items: &[SetupItemDto], has_last_error: bool) -> Setu
 mod tests {
     use super::collect_setup_status;
     use crate::setup::state::SetupState;
-    use smolpc_connector_common::{SETUP_ITEM_BLENDER_ADDON, SETUP_ITEM_GIMP_PLUGIN_RUNTIME};
     use smolpc_assistant_types::{SetupItemStateDto, SetupOverallStateDto};
+    use smolpc_connector_common::{SETUP_ITEM_BLENDER_ADDON, SETUP_ITEM_GIMP_PLUGIN_RUNTIME};
     use tempfile::TempDir;
 
     #[tokio::test]

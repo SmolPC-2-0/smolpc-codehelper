@@ -1,9 +1,9 @@
-use smolpc_connector_blender::BlenderProvider;
 use super::code::CodeProvider;
+use smolpc_assistant_types::AppMode;
+use smolpc_connector_blender::BlenderProvider;
+use smolpc_connector_common::ToolProvider;
 use smolpc_connector_gimp::GimpProvider;
 use smolpc_connector_libreoffice::LibreOfficeProvider;
-use smolpc_connector_common::ToolProvider;
-use smolpc_assistant_types::AppMode;
 use std::path::PathBuf;
 use std::sync::Arc;
 

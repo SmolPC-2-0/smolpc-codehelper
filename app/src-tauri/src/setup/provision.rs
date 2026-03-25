@@ -1,10 +1,10 @@
-use smolpc_connector_blender::ensure_blender_addon_prepared;
-use smolpc_connector_gimp::ensure_gimp_plugin_runtime_prepared;
-use smolpc_connector_common::host_apps::{detect_blender_with_policy, detect_gimp_with_policy};
-use smolpc_connector_common::python::prepare_bundled_python;
 use super::state::SetupState;
 use super::status::collect_setup_status;
+use smolpc_connector_blender::ensure_blender_addon_prepared;
+use smolpc_connector_common::host_apps::{detect_blender_with_policy, detect_gimp_with_policy};
+use smolpc_connector_common::python::prepare_bundled_python;
 use smolpc_connector_common::{SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP};
+use smolpc_connector_gimp::ensure_gimp_plugin_runtime_prepared;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -96,10 +96,10 @@ fn prepare_setup_directories(setup_root: &Path) -> Result<(), String> {
 mod tests {
     use super::prepare_setup;
     use crate::setup::state::SetupState;
+    use smolpc_assistant_types::SetupItemStateDto;
     use smolpc_connector_common::{
         SETUP_ITEM_GIMP_PLUGIN_RUNTIME, SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP,
     };
-    use smolpc_assistant_types::SetupItemStateDto;
     use std::path::Path;
     use std::sync::{Mutex as StdMutex, OnceLock};
     use tempfile::TempDir;

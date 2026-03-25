@@ -1,12 +1,12 @@
 use super::prompts::build_question_prompts;
 use super::rag::RagContext;
 use super::response::{build_blender_response, parse_rag_contexts, parse_scene_snapshot};
-use smolpc_connector_common::CancellationToken;
-use smolpc_connector_common::ToolProvider;
-use smolpc_connector_common::TextStreamer;
 use smolpc_assistant_types::{
     AppMode, AssistantResponseDto, AssistantSendRequestDto, AssistantStreamEventDto,
 };
+use smolpc_connector_common::CancellationToken;
+use smolpc_connector_common::TextStreamer;
+use smolpc_connector_common::ToolProvider;
 use smolpc_engine_client::EngineChatMessage;
 use std::sync::Arc;
 
@@ -178,15 +178,15 @@ where
 #[cfg(test)]
 mod tests {
     use super::execute_blender_request;
-    use smolpc_connector_common::MockCancellationToken;
-    use smolpc_connector_common::{provider_state, ToolProvider};
-    use smolpc_connector_common::TextStreamer;
     use async_trait::async_trait;
     use serde_json::json;
     use smolpc_assistant_types::{
         AppMode, AssistantMessageDto, AssistantSendRequestDto, AssistantStreamEventDto,
         ProviderStateDto, ToolDefinitionDto, ToolExecutionResultDto,
     };
+    use smolpc_connector_common::MockCancellationToken;
+    use smolpc_connector_common::TextStreamer;
+    use smolpc_connector_common::{provider_state, ToolProvider};
     use smolpc_engine_client::EngineChatMessage;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};

@@ -1,6 +1,6 @@
 {
 	"$schema": "../../node_modules/@tauri-apps/cli/config.schema.json",
-	"productName": "SmolPC Code Helper",
+	"productName": "SmolPC 2.0",
 	"version": "2.2.0",
 	"identifier": "com.smolpc.codehelper",
 	"build": {

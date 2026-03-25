@@ -51,12 +51,12 @@ function Request-EngineShutdown {
 }
 
 function Stop-StaleCodeHelperApp {
-    $existing = Get-Process -Name "smolpc-code-helper" -ErrorAction SilentlyContinue
+    $existing = Get-Process -Name "smolpc-desktop" -ErrorAction SilentlyContinue
     if ($null -eq $existing) {
         return
     }
 
-    Write-Host "Force-stopping stale smolpc-code-helper process(es) before dev launch..."
+    Write-Host "Force-stopping stale smolpc-desktop process(es) before dev launch..."
     $existing | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
 }

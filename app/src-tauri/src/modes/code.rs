@@ -1,10 +1,10 @@
-use smolpc_connector_common::{
-    provider_state, ToolProvider, FOUNDATION_PROVIDER_EXECUTION_NOT_IMPLEMENTED,
-    MODE_UNDO_NOT_SUPPORTED,
-};
 use async_trait::async_trait;
 use smolpc_assistant_types::{
     AppMode, ProviderStateDto, ToolDefinitionDto, ToolExecutionResultDto,
+};
+use smolpc_connector_common::{
+    provider_state, ToolProvider, FOUNDATION_PROVIDER_EXECUTION_NOT_IMPLEMENTED,
+    MODE_UNDO_NOT_SUPPORTED,
 };
 
 #[derive(Debug, Default)]
@@ -57,8 +57,8 @@ impl ToolProvider for CodeProvider {
 #[cfg(test)]
 mod tests {
     use super::CodeProvider;
-    use smolpc_connector_common::ToolProvider;
     use smolpc_assistant_types::AppMode;
+    use smolpc_connector_common::ToolProvider;
 
     #[tokio::test]
     async fn code_provider_returns_idle_state() {

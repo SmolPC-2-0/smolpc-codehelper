@@ -1,15 +1,15 @@
 use crate::assistant::state::AssistantState;
 use crate::assistant::UNIFIED_ASSISTANT_NOT_IMPLEMENTED;
-use smolpc_connector_common::MODE_UNDO_NOT_SUPPORTED;
 use crate::engine::EngineSupervisorHandle;
-use smolpc_connector_blender::execute_blender_request;
-use smolpc_connector_gimp::{execute_gimp_request, EngineTextGenerator};
-use smolpc_connector_libreoffice::{execute_libreoffice_request, EngineTextPlanner};
 use crate::modes::registry::ModeProviderRegistry;
-use smolpc_connector_common::EngineTextStreamer;
 use smolpc_assistant_types::{
     AppMode, AssistantResponseDto, AssistantSendRequestDto, AssistantStreamEventDto,
 };
+use smolpc_connector_blender::execute_blender_request;
+use smolpc_connector_common::EngineTextStreamer;
+use smolpc_connector_common::MODE_UNDO_NOT_SUPPORTED;
+use smolpc_connector_gimp::{execute_gimp_request, EngineTextGenerator};
+use smolpc_connector_libreoffice::{execute_libreoffice_request, EngineTextPlanner};
 use std::time::Duration;
 use tauri::ipc::Channel;
 
@@ -54,11 +54,18 @@ pub async fn assistant_send(
             let planner = EngineTextPlanner::new(engine_client.clone());
             let generator = EngineTextStreamer::new(engine_client);
 
-            execute_libreoffice_request(provider, &planner, &generator, &request, &*state, |event| {
-                if let Err(error) = on_event.send(event) {
-                    log::warn!("Failed to emit LibreOffice assistant event: {error}");
-                }
-            })
+            execute_libreoffice_request(
+                provider,
+                &planner,
+                &generator,
+                &request,
+                &*state,
+                |event| {
+                    if let Err(error) = on_event.send(event) {
+                        log::warn!("Failed to emit LibreOffice assistant event: {error}");
+                    }
+                },
+            )
             .await
         }
         _ => Err(UNIFIED_ASSISTANT_NOT_IMPLEMENTED.to_string()),

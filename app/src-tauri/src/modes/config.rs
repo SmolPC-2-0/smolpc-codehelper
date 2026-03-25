@@ -1,5 +1,5 @@
-use smolpc_connector_libreoffice::libreoffice_profile;
 use smolpc_assistant_types::{AppMode, ModeCapabilitiesDto, ModeConfigDto, ProviderKind};
+use smolpc_connector_libreoffice::libreoffice_profile;
 
 pub fn list_mode_configs() -> Vec<ModeConfigDto> {
     [

@@ -192,7 +192,7 @@ function Find-InstalledApp {
         (Join-Path $env:LOCALAPPDATA "SmolPC Code Helper"),
         (Join-Path $env:LOCALAPPDATA "Programs\SmolPC Code Helper")
     )
-    $exeNames = @("smolpc-code-helper.exe", "SmolPC Code Helper.exe")
+    $exeNames = @("smolpc-desktop.exe", "SmolPC 2.0.exe")
     foreach ($dir in $searchDirs) {
         foreach ($name in $exeNames) {
             $exe = Join-Path $dir $name
