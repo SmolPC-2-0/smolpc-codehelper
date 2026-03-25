@@ -3,8 +3,8 @@ use super::rag::{RagContext, RagIndex};
 use super::state::{shared_scene_cache, SceneCache, SceneSnapshot};
 use smolpc_connector_common::{provider_state, ToolProvider, MODE_UNDO_NOT_SUPPORTED};
 use crate::setup::blender::{ensure_blender_addon_prepared, BlenderAddonPrepareOutcome};
-use crate::setup::host_apps::{detect_blender, HostAppDetection};
-use crate::setup::launch::is_matching_blender_process_running;
+use smolpc_connector_common::host_apps::{detect_blender, HostAppDetection};
+use smolpc_connector_common::launch::is_matching_blender_process_running;
 use async_trait::async_trait;
 use serde_json::json;
 use smolpc_assistant_types::{

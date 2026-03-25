@@ -1,4 +1,4 @@
-use super::manifests::{load_manifest, missing_expected_paths, resource_root};
+use smolpc_connector_common::manifests::{load_manifest, missing_expected_paths, resource_root};
 use super::types::{DEFAULT_BUNDLED_MODEL_ID, SETUP_ITEM_BUNDLED_MODEL};
 use smolpc_assistant_types::{SetupItemDto, SetupItemStateDto};
 use std::path::Path;

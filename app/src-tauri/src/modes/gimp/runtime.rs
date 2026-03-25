@@ -1,7 +1,7 @@
 use crate::setup::gimp::{
     resolve_gimp_resource_layout, GIMP_PLUGIN_SOCKET_HOST, GIMP_PLUGIN_SOCKET_PORT,
 };
-use crate::setup::python::resolve_prepared_python_command;
+use smolpc_connector_common::python::resolve_prepared_python_command;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -170,7 +170,7 @@ mod tests {
         development_python_candidates, resolve_python_command_with_candidates,
         DEFAULT_PYTHON_COMMAND,
     };
-    use crate::setup::python::prepared_python_root;
+    use smolpc_connector_common::python::prepared_python_root;
     use std::path::Path;
     use tempfile::TempDir;
 

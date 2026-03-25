@@ -1,4 +1,4 @@
-use super::manifests::{load_manifest, missing_expected_paths, resource_root};
+use smolpc_connector_common::manifests::{load_manifest, missing_expected_paths, resource_root};
 use smolpc_connector_common::SETUP_ITEM_GIMP_PLUGIN_RUNTIME;
 use serde::{Deserialize, Serialize};
 use smolpc_assistant_types::{SetupItemDto, SetupItemStateDto};

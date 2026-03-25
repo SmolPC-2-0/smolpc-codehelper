@@ -6,8 +6,8 @@ use smolpc_connector_common::{provider_state, ToolProvider};
 use crate::setup::gimp::{
     ensure_gimp_plugin_runtime_prepared, validate_supported_gimp, GimpPluginRuntimePrepareOutcome,
 };
-use crate::setup::host_apps::{detect_gimp, HostAppDetection};
-use crate::setup::launch::is_matching_gimp_process_running;
+use smolpc_connector_common::host_apps::{detect_gimp, HostAppDetection};
+use smolpc_connector_common::launch::is_matching_gimp_process_running;
 use async_trait::async_trait;
 use serde_json::json;
 use smolpc_assistant_types::{

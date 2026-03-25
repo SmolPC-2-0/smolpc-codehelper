@@ -1,8 +1,8 @@
 use crate::engine::EngineSupervisorHandle;
 use crate::modes::config::list_mode_configs;
 use crate::modes::registry::ModeProviderRegistry;
-use crate::setup::host_apps::{detect_blender, detect_gimp, detect_libreoffice, HostAppDetection};
-use crate::setup::launch::{
+use smolpc_connector_common::host_apps::{detect_blender, detect_gimp, detect_libreoffice, HostAppDetection};
+use smolpc_connector_common::launch::{
     launch_blender_if_needed, launch_gimp_if_needed, launch_libreoffice_mode,
 };
 use smolpc_assistant_types::{AppMode, ModeConfigDto, ModeStatusDto, ProviderStateDto};

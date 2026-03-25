@@ -1,9 +1,9 @@
 use super::blender::blender_addon_item;
 use super::gimp::gimp_plugin_runtime_item;
-use super::host_apps::{detect_all_with_policy, HostAppDetection};
-use super::launch::setup_launch_detail;
+use smolpc_connector_common::host_apps::{detect_all_with_policy, HostAppDetection};
+use smolpc_connector_common::launch::setup_launch_detail;
 use super::models::bundled_model_item;
-use super::python::bundled_python_item;
+use smolpc_connector_common::python::bundled_python_item;
 use super::state::SetupState;
 use super::types::SETUP_ITEM_ENGINE_RUNTIME;
 use smolpc_connector_common::{

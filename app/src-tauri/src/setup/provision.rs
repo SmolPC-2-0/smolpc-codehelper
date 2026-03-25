@@ -1,7 +1,7 @@
 use super::blender::ensure_blender_addon_prepared;
 use super::gimp::ensure_gimp_plugin_runtime_prepared;
-use super::host_apps::{detect_blender_with_policy, detect_gimp_with_policy};
-use super::python::prepare_bundled_python;
+use smolpc_connector_common::host_apps::{detect_blender_with_policy, detect_gimp_with_policy};
+use smolpc_connector_common::python::prepare_bundled_python;
 use super::state::SetupState;
 use super::status::collect_setup_status;
 use smolpc_connector_common::{SETUP_ITEM_HOST_BLENDER, SETUP_ITEM_HOST_GIMP};

@@ -1,5 +1,5 @@
 use super::resources::LibreOfficeResourceLayout;
-use crate::setup::python::resolve_prepared_python_command;
+use smolpc_connector_common::python::resolve_prepared_python_command;
 use smolpc_mcp_client::{McpSession, StdioTransportConfig};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

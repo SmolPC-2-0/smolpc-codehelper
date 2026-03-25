@@ -1,5 +1,5 @@
-use super::manifests::{load_manifest, missing_expected_paths, resource_root};
-use smolpc_connector_common::SETUP_ITEM_BUNDLED_PYTHON;
+use crate::manifests::{load_manifest, missing_expected_paths, resource_root};
+use crate::SETUP_ITEM_BUNDLED_PYTHON;
 use smolpc_assistant_types::{SetupItemDto, SetupItemStateDto};
 use std::path::{Path, PathBuf};
 

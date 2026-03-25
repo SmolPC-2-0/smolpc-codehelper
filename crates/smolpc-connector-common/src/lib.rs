@@ -1,5 +1,9 @@
 pub mod cancellation;
+pub mod host_apps;
+pub mod launch;
+pub mod manifests;
 pub mod provider;
+pub mod python;
 
 pub use cancellation::{CancellationToken, MockCancellationToken};
 pub use provider::{provider_state, ToolProvider, FOUNDATION_PROVIDER_EXECUTION_NOT_IMPLEMENTED};
