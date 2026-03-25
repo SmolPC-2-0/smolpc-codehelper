@@ -223,7 +223,7 @@ async fn provision_from_local(
     let total_archive_bytes: u64 = entries
         .iter()
         .filter_map(|e| {
-            let p = source_dir.join(&e.archive_path);
+            let p = source_dir.join(&e.archive_name);
             p.metadata().ok().map(|m| m.len())
         })
         .sum();
@@ -268,7 +268,8 @@ async fn provision_from_local(
             });
         }
 
-        let archive_path = source_dir.join(&entry.archive_path);
+        // archive_name is the filename; archives sit alongside the manifest in source_dir
+        let archive_path = source_dir.join(&entry.archive_name);
         let archive_size = archive_path.metadata().map(|m| m.len()).unwrap_or(0);
 
         let _ = on_event.send(ProvisioningEvent::ArchiveStarted {

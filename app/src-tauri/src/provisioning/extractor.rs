@@ -3,6 +3,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 
+/// Windows ERROR_NOT_SAME_DEVICE — `fs::rename` fails across volumes.
+#[cfg(windows)]
+const ERROR_NOT_SAME_DEVICE: i32 = 17;
+
 pub type ProgressCallback = Box<dyn Fn(u64, u64) + Send>;
 
 /// Extract a ZIP archive to `target_dir`.
@@ -102,7 +106,7 @@ pub fn extract_zip(
     }
     match fs::rename(&temp_dir, target_dir) {
         Ok(()) => {}
-        Err(ref e) if e.raw_os_error() == Some(17) => {
+        Err(ref e) if e.raw_os_error() == Some(ERROR_NOT_SAME_DEVICE) => {
             // Cross-device rename — fall back to recursive copy + delete
             copy_dir_recursive(&temp_dir, target_dir)
                 .map_err(|e| format!("cross-drive copy failed: {e}"))?;

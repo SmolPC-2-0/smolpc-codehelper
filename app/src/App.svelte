@@ -978,7 +978,7 @@ Generating summary...`
 	<SetupWizard
 		oncomplete={async () => {
 			needsSetup = false;
-			// Models are now provisioned — start the engine.
+			// Setup wizard completed (models provisioned or skipped) — start the engine.
 			try {
 				await performStartup();
 				await inferenceStore.listModels();
