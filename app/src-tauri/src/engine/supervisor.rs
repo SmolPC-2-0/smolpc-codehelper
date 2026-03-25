@@ -671,7 +671,6 @@ fn resolve_host_binary_path() -> Option<PathBuf> {
     let workspace_target = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
-        .join("..")
         .join("target")
         .join(if cfg!(debug_assertions) {
             "debug"
