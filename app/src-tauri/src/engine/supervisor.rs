@@ -344,7 +344,11 @@ impl<R: Runtime> EngineSupervisor<R> {
             }
         };
 
-        // 2. Delete old token and regenerate a fresh one.
+        // 2. Ensure runtime dirs exist before writing token.
+        let _ = std::fs::create_dir_all(&paths.shared_runtime_dir);
+        let _ = std::fs::create_dir_all(&paths.data_dir);
+
+        // 3. Delete old token and regenerate a fresh one.
         let token_path = paths.shared_runtime_dir.join("engine-token.txt");
         let _ = std::fs::remove_file(&token_path);
         let token = match load_or_create_token(&token_path) {
@@ -378,10 +382,6 @@ impl<R: Runtime> EngineSupervisor<R> {
             dml_device_id: self.runtime_config.dml_device_id,
             force_respawn: false,
         };
-
-        // Create runtime dirs if needed.
-        let _ = std::fs::create_dir_all(&options.shared_runtime_dir);
-        let _ = std::fs::create_dir_all(&options.data_dir);
 
         let pid = match spawn_engine(&options, &token) {
             Ok(pid) => {
