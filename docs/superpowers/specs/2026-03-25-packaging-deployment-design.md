@@ -107,6 +107,29 @@ app/src-tauri/src/provisioning/
 
 Note: Hardware detection reuses the existing `app/src-tauri/src/hardware/` module (`HardwareCache`, `detect_hardware` command). No new hardware probe — the provisioning module calls the existing detection infrastructure to get GPU/RAM info for model recommendation. This respects zone ownership: the app's hardware detector provides display-level info, the engine owns backend selection policy.
 
+### Singleton Guard
+
+The app must ensure only one instance runs provisioning at a time. If the user double-clicks the shortcut, two instances could race through extraction to the same `%LOCALAPPDATA%\SmolPC\models\` directory, corrupting files.
+
+Use a Windows named mutex acquired at app startup, before provisioning begins:
+
+```rust
+use windows::Win32::System::Threading::CreateMutexW;
+
+fn acquire_singleton() -> Result<OwnedHandle, SingletonError> {
+    let name = w!("Global\\SmolPC-Provisioning");
+    let handle = unsafe { CreateMutexW(None, true, name)? };
+    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        return Err(SingletonError::AlreadyRunning);
+    }
+    Ok(handle)
+}
+```
+
+If the mutex is already held, the second instance shows: *"SmolPC is already setting up. Please wait for the other window to finish."* and exits. The mutex is released automatically when the process exits (including crashes), so it cannot deadlock.
+
+This guard only applies during provisioning — after models are installed, multiple app instances are fine (the engine already handles concurrent connections).
+
 ### Tauri Commands
 
 ```rust
@@ -216,6 +239,27 @@ Note: The `EngineSupervisor` IS modified for portable mode (see Portable Mode se
   }
 }
 ```
+
+### VC++ Redistributable
+
+ORT, OpenVINO, and DirectML DLLs all link against `vcruntime140.dll` / `msvcp140.dll`. A clean Windows install may not have these. The NSIS installer must detect and install the Visual C++ Redistributable (2015-2022, x64) as a prerequisite.
+
+Tauri's NSIS backend supports this via the `nsis.installerHooks` mechanism. The `NSIS_HOOK_PREINSTALL` macro should:
+
+1. Check if `vcruntime140.dll` exists in `$SYSDIR`
+2. If missing, extract the bundled `vc_redist.x64.exe` to `$TEMP` and run it with `/install /quiet /norestart`
+3. Fail the install with a clear message if the redistributable install fails
+
+```nsis
+!macro NSIS_HOOK_PREINSTALL
+  ; Check for VC++ Redistributable (required by ORT, OpenVINO, DirectML DLLs)
+  IfFileExists "$SYSDIR\vcruntime140.dll" +3 0
+    File "/oname=$TEMP\vc_redist.x64.exe" "${NSISDIR}\..\prereqs\vc_redist.x64.exe"
+    nsExec::ExecToLog '"$TEMP\vc_redist.x64.exe" /install /quiet /norestart'
+!macroend
+```
+
+The `build-release.ps1` script must download `vc_redist.x64.exe` during the staging step and place it in the NSIS resources directory. The portable variant's README should list the VC++ Redistributable as a manual prerequisite.
 
 ### Code Signing
 
@@ -372,6 +416,8 @@ Engine code itself requires **zero changes** — it already supports both `resou
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
+| VC++ Redistributable missing on clean machine | High | Engine crashes on start | NSIS pre-install hook detects and installs vcredist; portable README documents prerequisite |
+| Concurrent provisioning from double-click | Medium | Corrupted model files | Named mutex (`Global\SmolPC-Provisioning`) acquired before provisioning; second instance shows message and exits |
 | NSIS 2 GB limit hit if DLL payload grows | Low | Blocks release | Monitor installer size in build script; fail if >1.5 GB |
 | USB removed mid-extraction | Medium | Partial files | Extract to temp dir, atomic rename on completion |
 | HuggingFace download interrupted | Medium | Frustrating UX | HTTP range-request resume, progress persisted to disk |
