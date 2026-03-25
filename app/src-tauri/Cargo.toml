@@ -35,6 +35,7 @@ smolpc-mcp-client = { path = "../../crates/smolpc-mcp-client" }
 smolpc-connector-common = { path = "../../crates/smolpc-connector-common" }
 smolpc-connector-blender = { path = "../../connectors/blender" }
 smolpc-connector-gimp = { path = "../../connectors/gimp" }
+smolpc-connector-libreoffice = { path = "../../connectors/libreoffice" }
 async-trait = { workspace = true }
 axum = { workspace = true }
 rand = { workspace = true }

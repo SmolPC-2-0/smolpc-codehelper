@@ -496,7 +496,7 @@ impl ToolProvider for LibreOfficeProvider {
 #[cfg(test)]
 mod tests {
     use super::LibreOfficeProvider;
-    use crate::modes::libreoffice::resources::ResourceResolutionOptions;
+    use crate::resources::ResourceResolutionOptions;
     use smolpc_connector_common::ToolProvider;
     use serde_json::json;
     use smolpc_assistant_types::AppMode;

@@ -1,6 +1,6 @@
 use super::profiles::{allowed_tool_names, libreoffice_profile};
 use super::response::{build_libreoffice_response, build_local_fallback_summary};
-use crate::assistant::state::AssistantState;
+use smolpc_connector_common::CancellationToken;
 use smolpc_connector_common::ToolProvider;
 use smolpc_connector_common::TextStreamer;
 use async_trait::async_trait;
@@ -69,8 +69,8 @@ impl TextPlanner for EngineTextPlanner {
     }
 }
 
-fn ensure_not_cancelled(state: &AssistantState) -> Result<(), String> {
-    if state.is_cancelled() {
+fn ensure_not_cancelled(cancel: &dyn CancellationToken) -> Result<(), String> {
+    if cancel.is_cancelled() {
         Err(ASSISTANT_CANCELLED.to_string())
     } else {
         Ok(())
@@ -611,7 +611,7 @@ fn extract_tool_call(raw_text: &str) -> Option<ToolCall> {
 async fn stream_summary_with_fallback<F>(
     mode: AppMode,
     generator: &dyn TextStreamer,
-    state: &AssistantState,
+    cancel: &dyn CancellationToken,
     user_text: &str,
     tool_result: ToolExecutionResultDto,
     mut emit: F,
@@ -632,7 +632,7 @@ where
     let mut used_local_fallback = false;
     let reply = match timeout(
         SUMMARY_TIMEOUT,
-        generator.generate_stream(&messages, state, &mut |token| {
+        generator.generate_stream(&messages, cancel, &mut |token| {
             accumulated_text.push_str(&token);
             emit(AssistantStreamEventDto::Token { token });
         }),
@@ -673,7 +673,7 @@ pub async fn execute_libreoffice_request<F>(
     planner: &dyn TextPlanner,
     streamer: &dyn TextStreamer,
     request: &AssistantSendRequestDto,
-    state: &AssistantState,
+    cancel: &dyn CancellationToken,
     mut emit: F,
 ) -> Result<AssistantResponseDto, String>
 where
@@ -689,7 +689,7 @@ where
     });
 
     provider.connect_if_needed(mode).await?;
-    ensure_not_cancelled(state)?;
+    ensure_not_cancelled(cancel)?;
 
     let tools = provider.list_tools(mode).await?;
     if tools.is_empty() {
@@ -770,7 +770,7 @@ where
         }
     };
 
-    ensure_not_cancelled(state)?;
+    ensure_not_cancelled(cancel)?;
     emit(AssistantStreamEventDto::ToolCall {
         name: tool_call.name.clone(),
         arguments: tool_call.arguments.clone(),
@@ -788,7 +788,7 @@ where
     }
 
     let response =
-        stream_summary_with_fallback(mode, streamer, state, &request.user_text, tool_result, emit)
+        stream_summary_with_fallback(mode, streamer, cancel, &request.user_text, tool_result, emit)
             .await;
     Ok(response)
 }
@@ -796,7 +796,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{execute_libreoffice_request, extract_tool_call, TextPlanner};
-    use crate::assistant::state::AssistantState;
+    use smolpc_connector_common::MockCancellationToken;
     use smolpc_connector_common::{provider_state, ToolProvider};
     use smolpc_connector_common::TextStreamer;
     use async_trait::async_trait;
@@ -866,7 +866,7 @@ mod tests {
         async fn generate_stream(
             &self,
             _messages: &[EngineChatMessage],
-            _state: &AssistantState,
+            _cancel: &dyn smolpc_connector_common::CancellationToken,
             on_token: &mut (dyn FnMut(String) + Send),
         ) -> Result<String, String> {
             on_token("Writer ".to_string());
@@ -882,7 +882,7 @@ mod tests {
         async fn generate_stream(
             &self,
             _messages: &[EngineChatMessage],
-            _state: &AssistantState,
+            _cancel: &dyn smolpc_connector_common::CancellationToken,
             _on_token: &mut (dyn FnMut(String) + Send),
         ) -> Result<String, String> {
             Err("summary failed".to_string())
@@ -896,10 +896,9 @@ mod tests {
         async fn generate_stream(
             &self,
             _messages: &[EngineChatMessage],
-            state: &AssistantState,
+            _cancel: &dyn smolpc_connector_common::CancellationToken,
             _on_token: &mut (dyn FnMut(String) + Send),
         ) -> Result<String, String> {
-            state.mark_cancelled();
             Err("ASSISTANT_CANCELLED".to_string())
         }
     }
@@ -911,7 +910,7 @@ mod tests {
         async fn generate_stream(
             &self,
             _messages: &[EngineChatMessage],
-            _state: &AssistantState,
+            _cancel: &dyn smolpc_connector_common::CancellationToken,
             _on_token: &mut (dyn FnMut(String) + Send),
         ) -> Result<String, String> {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -974,7 +973,7 @@ mod tests {
                 .to_string(),
         };
         let streamer = MockStreamer;
-        let state = AssistantState::default();
+        let cancel = MockCancellationToken::new();
         let events = Arc::new(Mutex::new(Vec::<AssistantStreamEventDto>::new()));
 
         let response = execute_libreoffice_request(
@@ -982,7 +981,7 @@ mod tests {
             &planner,
             &streamer,
             &request(AppMode::Writer, "Add a heading"),
-            &state,
+            &cancel,
             {
                 let events = Arc::clone(&events);
                 move |event| {
@@ -1012,14 +1011,14 @@ mod tests {
                 .to_string(),
         };
         let streamer = MockStreamer;
-        let state = AssistantState::default();
+        let cancel = MockCancellationToken::new();
 
         let response = execute_libreoffice_request(
             provider,
             &planner,
             &streamer,
             &request(AppMode::Impress, "Add a slide"),
-            &state,
+            &cancel,
             |_| {},
         )
         .await
@@ -1090,14 +1089,14 @@ I hope this helps!"#;
                 .to_string(),
         };
         let streamer = FailingStreamer;
-        let state = AssistantState::default();
+        let cancel = MockCancellationToken::new();
 
         let response = execute_libreoffice_request(
             provider,
             &planner,
             &streamer,
             &request(AppMode::Writer, "List docs"),
-            &state,
+            &cancel,
             |_| {},
         )
         .await
@@ -1121,14 +1120,14 @@ I hope this helps!"#;
                 .to_string(),
         };
         let streamer = CancellableStreamer;
-        let state = AssistantState::default();
+        let cancel = MockCancellationToken::new();
 
         let response = execute_libreoffice_request(
             provider,
             &planner,
             &streamer,
             &request(AppMode::Writer, "Add heading"),
-            &state,
+            &cancel,
             |_| {},
         )
         .await
@@ -1154,14 +1153,14 @@ I hope this helps!"#;
                 .to_string(),
         };
         let streamer = SlowStreamer;
-        let state = AssistantState::default();
+        let cancel = MockCancellationToken::new();
 
         let response = execute_libreoffice_request(
             provider,
             &planner,
             &streamer,
             &request(AppMode::Writer, "Add heading"),
-            &state,
+            &cancel,
             |_| {},
         )
         .await

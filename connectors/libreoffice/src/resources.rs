@@ -43,7 +43,6 @@ fn resource_candidates(
         candidates.push(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("resources")
-                .join("libreoffice")
                 .join("mcp_server"),
         );
     }

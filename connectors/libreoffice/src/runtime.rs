@@ -139,7 +139,7 @@ fn ensure_log_dir(path: &Path) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::LibreOfficeRuntimeConfig;
-    use crate::modes::libreoffice::resources::LibreOfficeResourceLayout;
+    use crate::resources::LibreOfficeResourceLayout;
     use std::path::PathBuf;
     use tempfile::tempdir;
 

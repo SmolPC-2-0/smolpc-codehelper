@@ -6,6 +6,7 @@ members = [
   "crates/smolpc-mcp-client",
   "connectors/blender",
   "connectors/gimp",
+  "connectors/libreoffice",
   "engine/crates/smolpc-engine-core",
   "engine/crates/smolpc-engine-host",
   "engine/crates/smolpc-engine-client",

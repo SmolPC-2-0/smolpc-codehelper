@@ -4,7 +4,7 @@ use smolpc_connector_common::MODE_UNDO_NOT_SUPPORTED;
 use crate::engine::EngineSupervisorHandle;
 use smolpc_connector_blender::execute_blender_request;
 use smolpc_connector_gimp::{execute_gimp_request, EngineTextGenerator};
-use crate::modes::libreoffice::{execute_libreoffice_request, EngineTextPlanner};
+use smolpc_connector_libreoffice::{execute_libreoffice_request, EngineTextPlanner};
 use crate::modes::registry::ModeProviderRegistry;
 use smolpc_connector_common::EngineTextStreamer;
 use smolpc_assistant_types::{
@@ -54,7 +54,7 @@ pub async fn assistant_send(
             let planner = EngineTextPlanner::new(engine_client.clone());
             let generator = EngineTextStreamer::new(engine_client);
 
-            execute_libreoffice_request(provider, &planner, &generator, &request, &state, |event| {
+            execute_libreoffice_request(provider, &planner, &generator, &request, &*state, |event| {
                 if let Err(error) = on_event.send(event) {
                     log::warn!("Failed to emit LibreOffice assistant event: {error}");
                 }
