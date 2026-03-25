@@ -16,6 +16,7 @@
 	import ComposerBar from '$lib/components/chat/ComposerBar.svelte';
 	import SetupBanner from '$lib/components/setup/SetupBanner.svelte';
 	import SetupPanel from '$lib/components/setup/SetupPanel.svelte';
+	import SetupWizard from '$lib/components/setup/SetupWizard.svelte';
 	import StartupLoadingScreen from '$lib/components/StartupLoadingScreen.svelte';
 	import { chatsStore } from '$lib/stores/chats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
@@ -37,6 +38,8 @@
 	import type { AppMode } from '$lib/types/mode';
 	import type { AssistantStreamEvent } from '$lib/types/assistant';
 
+	let needsSetup = $state(false);
+	let setupChecked = $state(false);
 	let messagesContainer: HTMLDivElement | undefined = $state();
 	let activeStreamSessionId = $state<string | null>(null);
 	let currentStreamingChatId = $state<string | null>(null);
@@ -136,7 +139,9 @@
 	const isCancelling = $derived(inferenceStore.cancelState === 'pending');
 	const isInferenceBusy = $derived(inferenceStore.isGenerating || isCancelling || hasActiveStream);
 	const composerDraftKey = $derived(`${activeMode}:${currentChat?.id ?? 'new'}`);
-	const effectiveModelId = $derived(inferenceStore.currentModel ?? settingsStore.selectedModel ?? null);
+	const effectiveModelId = $derived(
+		inferenceStore.currentModel ?? settingsStore.selectedModel ?? null
+	);
 	const recommendedToolModelId = $derived(TOOL_MODE_MODEL_RECOMMENDATIONS[activeMode] ?? null);
 	const recommendedToolModelAvailable = $derived.by(() => {
 		if (!recommendedToolModelId) {
@@ -145,9 +150,7 @@
 
 		return inferenceStore.availableModels.some((model) => model.id === recommendedToolModelId);
 	});
-	const toolModelRecommendationDismissed = $derived(
-		dismissedToolRecommendationMode === activeMode
-	);
+	const toolModelRecommendationDismissed = $derived(dismissedToolRecommendationMode === activeMode);
 	const showToolModelRecommendation = $derived(
 		recommendedToolModelId !== null &&
 			effectiveModelId === TOOL_MODE_SMALL_MODEL_TRIGGER &&
@@ -838,6 +841,23 @@ Generating summary...`
 			}
 		}
 
+		// Check boot state before initialising inference — if models aren't
+		// provisioned yet we show the SetupWizard instead of starting the engine.
+		// initInference() is deferred until we know models are available.
+		invoke<{ models_provisioned: boolean; portable: boolean }>('get_boot_state')
+			.then((bootState) => {
+				needsSetup = !bootState.models_provisioned && !bootState.portable;
+				setupChecked = true;
+				if (!needsSetup) {
+					initInference();
+				}
+			})
+			.catch(() => {
+				needsSetup = false;
+				setupChecked = true;
+				initInference();
+			});
+
 		// Listen for supervisor lifecycle events instead of polling
 		let unlistenLifecycle: (() => void) | undefined;
 		let unlistenAudioRecordingReady: (() => void) | undefined;
@@ -852,7 +872,8 @@ Generating summary...`
 			unlistenAudioRecordingReady = fn;
 		});
 
-		initInference();
+		// initInference() is called from the get_boot_state .then() above,
+		// or from handleSetupComplete() after provisioning finishes.
 		modeStore.initialize();
 		setupStore.initialize();
 		hardwareStore.getCached();
@@ -951,182 +972,199 @@ Generating summary...`
 	});
 </script>
 
-<StartupLoadingScreen
-	readiness={inferenceStore.readiness}
-	onRetry={performStartup}
-	visible={!startupComplete}
-/>
+{#if !setupChecked}
+	<!-- Loading: waiting for boot state check -->
+{:else if needsSetup}
+	<SetupWizard
+		oncomplete={async () => {
+			needsSetup = false;
+			// Models are now provisioned — start the engine.
+			try {
+				await performStartup();
+				await inferenceStore.listModels();
+			} catch (e) {
+				console.error('Post-provisioning engine start failed:', e);
+			}
+		}}
+	/>
+{:else}
+	<StartupLoadingScreen
+		readiness={inferenceStore.readiness}
+		onRetry={performStartup}
+		visible={!startupComplete}
+	/>
 
-<div class="app-shell">
-	<div
-		class={`sidebar-stage ${uiStore.isSidebarOpen ? 'sidebar-stage--open' : 'sidebar-stage--closed'}`}
-	>
-		<Sidebar onClose={() => uiStore.setSidebarOpen(false)} />
-	</div>
-
-	<div class="workspace-shell">
-		<WorkspaceHeader
-			title={pageTitle}
-			showSidebarToggle={!uiStore.isSidebarOpen}
-			status={inferenceStore.status}
-			modelInfoActive={showModelInfoPanel}
-			hardwareActive={showHardwarePanel}
-			shortcutsOpen={showShortcutsOverlay}
-			canExport={messages.length > 0}
-			onOpenSidebar={() => uiStore.setSidebarOpen(true)}
-			onToggleModelInfo={() => handleToggleHeaderOverlay('modelInfo')}
-			onToggleHardware={() => handleToggleHeaderOverlay('hardware')}
-			onToggleShortcuts={handleToggleShortcutsOverlay}
-			onExportChat={handleExportChat}
+	<div class="app-shell">
+		<div
+			class={`sidebar-stage ${uiStore.isSidebarOpen ? 'sidebar-stage--open' : 'sidebar-stage--closed'}`}
 		>
-			{#snippet modeSwitcher()}
-				<AppModeDropdown
-					modes={activeModeConfigs}
-					{activeMode}
-					onChange={handleModeChange}
-					disabled={isSwitchingMode}
-					{modeAvailability}
-					{unavailableReasons}
-				/>
-			{/snippet}
-		</WorkspaceHeader>
+			<Sidebar onClose={() => uiStore.setSidebarOpen(false)} />
+		</div>
 
-		<WorkspaceControls helpOpen={showHelpDrawer} onToggleHelp={handleToggleHelpDrawer}>
-			{#snippet leadingContent()}
-				{#if activeHostLaunchLabel}
-					<button
-						type="button"
-						class="mode-launch-button"
-						onclick={handleOpenHostApp}
-						disabled={!canOpenHostApp || launchingHostApp}
-						title={canOpenHostApp
-							? activeHostLaunchLabel
-							: (unavailableReasons[activeMode] ?? `${activeHostLaunchLabel} unavailable`)}
-					>
-						{launchingHostApp ? 'Opening...' : activeHostLaunchLabel}
-					</button>
-				{/if}
-			{/snippet}
-		</WorkspaceControls>
+		<div class="workspace-shell">
+			<WorkspaceHeader
+				title={pageTitle}
+				showSidebarToggle={!uiStore.isSidebarOpen}
+				status={inferenceStore.status}
+				modelInfoActive={showModelInfoPanel}
+				hardwareActive={showHardwarePanel}
+				shortcutsOpen={showShortcutsOverlay}
+				canExport={messages.length > 0}
+				onOpenSidebar={() => uiStore.setSidebarOpen(true)}
+				onToggleModelInfo={() => handleToggleHeaderOverlay('modelInfo')}
+				onToggleHardware={() => handleToggleHeaderOverlay('hardware')}
+				onToggleShortcuts={handleToggleShortcutsOverlay}
+				onExportChat={handleExportChat}
+			>
+				{#snippet modeSwitcher()}
+					<AppModeDropdown
+						modes={activeModeConfigs}
+						{activeMode}
+						onChange={handleModeChange}
+						disabled={isSwitchingMode}
+						{modeAvailability}
+						{unavailableReasons}
+					/>
+				{/snippet}
+			</WorkspaceHeader>
 
-		{#if inferenceStore.lifecycleState.state === 'crashed'}
-			<div
-				class="mx-4 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-200"
-			>
-				Engine crashed — restarting automatically...
-			</div>
-		{:else if inferenceStore.lifecycleState.state === 'failed'}
-			<div
-				class="mx-4 mt-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-4 py-2 text-sm text-rose-200"
-			>
-				Engine failed: {inferenceStore.lifecycleState.message}
-			</div>
-		{/if}
+			<WorkspaceControls helpOpen={showHelpDrawer} onToggleHelp={handleToggleHelpDrawer}>
+				{#snippet leadingContent()}
+					{#if activeHostLaunchLabel}
+						<button
+							type="button"
+							class="mode-launch-button"
+							onclick={handleOpenHostApp}
+							disabled={!canOpenHostApp || launchingHostApp}
+							title={canOpenHostApp
+								? activeHostLaunchLabel
+								: (unavailableReasons[activeMode] ?? `${activeHostLaunchLabel} unavailable`)}
+						>
+							{launchingHostApp ? 'Opening...' : activeHostLaunchLabel}
+						</button>
+					{/if}
+				{/snippet}
+			</WorkspaceControls>
 
-		<!-- Memory pressure stays visible unless the tool-model recommendation is intentionally taking over. -->
-		{#if memoryPressureNotice && !showToolModelRecommendation}
-			<div
-				class={`mx-4 mt-2 rounded-lg border px-4 py-2 text-sm ${
-					inferenceStore.memoryPressure?.level === 'critical'
-						? 'border-rose-500/35 bg-rose-500/10 text-rose-200'
-						: 'border-amber-500/30 bg-amber-500/10 text-amber-200'
-				}`}
-			>
-				<div class="flex items-start justify-between gap-3">
-					<span>{memoryPressureNotice}</span>
-					<button
-						type="button"
-						class="shrink-0 rounded border border-current/40 px-2 py-0.5 text-xs opacity-80 hover:opacity-100"
-						onclick={dismissMemoryPressureNotice}
-						aria-label="Dismiss memory warning"
-					>
-						Dismiss
-					</button>
+			{#if inferenceStore.lifecycleState.state === 'crashed'}
+				<div
+					class="mx-4 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-200"
+				>
+					Engine crashed — restarting automatically...
 				</div>
-			</div>
-		{/if}
+			{:else if inferenceStore.lifecycleState.state === 'failed'}
+				<div
+					class="mx-4 mt-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-4 py-2 text-sm text-rose-200"
+				>
+					Engine failed: {inferenceStore.lifecycleState.message}
+				</div>
+			{/if}
 
-		{#if hostAppLaunchError}
-			<div
-				class="mx-4 mt-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-4 py-2 text-sm text-rose-200"
-			>
-				{hostAppLaunchError}
-			</div>
-		{/if}
+			<!-- Memory pressure stays visible unless the tool-model recommendation is intentionally taking over. -->
+			{#if memoryPressureNotice && !showToolModelRecommendation}
+				<div
+					class={`mx-4 mt-2 rounded-lg border px-4 py-2 text-sm ${
+						inferenceStore.memoryPressure?.level === 'critical'
+							? 'border-rose-500/35 bg-rose-500/10 text-rose-200'
+							: 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+					}`}
+				>
+					<div class="flex items-start justify-between gap-3">
+						<span>{memoryPressureNotice}</span>
+						<button
+							type="button"
+							class="shrink-0 rounded border border-current/40 px-2 py-0.5 text-xs opacity-80 hover:opacity-100"
+							onclick={dismissMemoryPressureNotice}
+							aria-label="Dismiss memory warning"
+						>
+							Dismiss
+						</button>
+					</div>
+				</div>
+			{/if}
 
-		{#if setupNeedsAttention}
-			<SetupBanner status={setupStatus} error={setupError} onOpen={openSetupPanel} />
-		{/if}
+			{#if hostAppLaunchError}
+				<div
+					class="mx-4 mt-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-4 py-2 text-sm text-rose-200"
+				>
+					{hostAppLaunchError}
+				</div>
+			{/if}
 
-		{#if showToolModelRecommendation}
-			<ModelRecommendationBanner
-				recommendedModelLabel={recommendedToolModelId!}
-				message={toolModelRecommendationMessage}
-				severity={toolModelRecommendationSeverity}
-				busy={switchingRecommendedModel}
-				disabled={isInferenceBusy}
-				onSwitch={handleSwitchToRecommendedModel}
-				onDismiss={handleDismissToolRecommendation}
+			{#if setupNeedsAttention}
+				<SetupBanner status={setupStatus} error={setupError} onOpen={openSetupPanel} />
+			{/if}
+
+			{#if showToolModelRecommendation}
+				<ModelRecommendationBanner
+					recommendedModelLabel={recommendedToolModelId!}
+					message={toolModelRecommendationMessage}
+					severity={toolModelRecommendationSeverity}
+					busy={switchingRecommendedModel}
+					disabled={isInferenceBusy}
+					onSwitch={handleSwitchToRecommendedModel}
+					onDismiss={handleDismissToolRecommendation}
+				/>
+			{/if}
+
+			<ConversationView
+				mode={activeMode}
+				suggestions={modeSuggestions}
+				{messages}
+				{latestAssistantMessageId}
+				showQuickExamples={uiStore.showQuickExamples}
+				onSelectExample={handleExampleSelect}
+				onToggleExamples={(show) => uiStore.setShowQuickExamples(show)}
+				onUserScrollUp={markScrollIntentUp}
+				onScroll={handleScroll}
+				{showScrollToLatest}
+				onScrollToLatest={handleScrollToLatest}
+				onRegenerateMessage={handleRegenerateMessage}
+				onContinueMessage={handleContinueMessage}
+				onBranchFromMessage={handleBranchFromMessage}
+				onContainerReady={setMessagesContainer}
 			/>
-		{/if}
 
-		<ConversationView
-			mode={activeMode}
-			suggestions={modeSuggestions}
-			{messages}
-			{latestAssistantMessageId}
-			showQuickExamples={uiStore.showQuickExamples}
-			onSelectExample={handleExampleSelect}
-			onToggleExamples={(show) => uiStore.setShowQuickExamples(show)}
-			onUserScrollUp={markScrollIntentUp}
-			onScroll={handleScroll}
-			{showScrollToLatest}
-			onScrollToLatest={handleScrollToLatest}
-			onRegenerateMessage={handleRegenerateMessage}
-			onContinueMessage={handleContinueMessage}
-			onBranchFromMessage={handleBranchFromMessage}
-			onContainerReady={setMessagesContainer}
+			<ComposerBar
+				isLoaded={inferenceStore.isLoaded}
+				isGenerating={inferenceStore.isGenerating}
+				{hasActiveStream}
+				{isCancelling}
+				{bottomOffset}
+				draftKey={composerDraftKey}
+				onSend={handleSendMessage}
+				onCancel={handleCancelGeneration}
+			/>
+		</div>
+
+		<HardwarePanel visible={showHardwarePanel} onClose={() => uiStore.closeOverlay()} />
+		<ModelInfoPanel
+			visible={showModelInfoPanel}
+			busy={isInferenceBusy}
+			onClose={() => uiStore.closeOverlay()}
 		/>
-
-		<ComposerBar
-			isLoaded={inferenceStore.isLoaded}
-			isGenerating={inferenceStore.isGenerating}
-			{hasActiveStream}
-			{isCancelling}
-			{bottomOffset}
-			draftKey={composerDraftKey}
-			onSend={handleSendMessage}
-			onCancel={handleCancelGeneration}
+		<KeyboardShortcutsOverlay
+			open={showShortcutsOverlay}
+			onClose={() => (showShortcutsOverlay = false)}
+		/>
+		<ModeHelpDrawer
+			open={showHelpDrawer}
+			mode={activeMode}
+			modeLabel={activeModeLabel}
+			onClose={closeHelpDrawer}
+		/>
+		<SetupPanel
+			visible={showSetupPanel}
+			status={setupStatus}
+			error={setupError}
+			loading={setupStore.loading}
+			preparing={setupStore.preparing}
+			onRefresh={() => setupStore.refresh()}
+			onPrepare={() => setupStore.prepare()}
+			onClose={() => (showSetupPanel = false)}
 		/>
 	</div>
-
-	<HardwarePanel visible={showHardwarePanel} onClose={() => uiStore.closeOverlay()} />
-	<ModelInfoPanel
-		visible={showModelInfoPanel}
-		busy={isInferenceBusy}
-		onClose={() => uiStore.closeOverlay()}
-	/>
-	<KeyboardShortcutsOverlay
-		open={showShortcutsOverlay}
-		onClose={() => (showShortcutsOverlay = false)}
-	/>
-	<ModeHelpDrawer
-		open={showHelpDrawer}
-		mode={activeMode}
-		modeLabel={activeModeLabel}
-		onClose={closeHelpDrawer}
-	/>
-	<SetupPanel
-		visible={showSetupPanel}
-		status={setupStatus}
-		error={setupError}
-		loading={setupStore.loading}
-		preparing={setupStore.preparing}
-		onRefresh={() => setupStore.refresh()}
-		onPrepare={() => setupStore.prepare()}
-		onClose={() => (showSetupPanel = false)}
-	/>
-</div>
+{/if}
 
 <style>
 	.app-shell {

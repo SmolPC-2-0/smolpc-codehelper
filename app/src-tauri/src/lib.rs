@@ -4,6 +4,7 @@ mod commands;
 mod engine;
 mod hardware;
 mod modes;
+mod provisioning;
 mod security;
 mod setup;
 
@@ -25,6 +26,7 @@ use commands::inference::{
 use commands::modes::{list_modes, mode_open_host_app, mode_refresh_tools, mode_status};
 use commands::setup::{setup_prepare, setup_status};
 use engine::{EngineLifecycleState, EngineSupervisor, EngineSupervisorHandle};
+use provisioning::ProvisioningCancel;
 use modes::registry::ModeProviderRegistry;
 use setup::SetupState;
 use smolpc_engine_client::EngineClient;
@@ -271,6 +273,7 @@ pub fn run() {
         })
         .manage(AssistantState::default())
         .manage(HardwareCache::default())
+        .manage(ProvisioningCancel::default())
         .manage(commands::audio::AudioState::default())
         .invoke_handler(tauri::generate_handler![
             read,
@@ -306,7 +309,12 @@ pub fn run() {
             commands::audio::stop_recording,
             commands::audio::speak_text,
             commands::audio::stop_playback,
-            commands::audio::is_playing
+            commands::audio::is_playing,
+            provisioning::get_boot_state,
+            provisioning::detect_model_sources,
+            provisioning::get_recommended_model,
+            provisioning::provision_models,
+            provisioning::cancel_provisioning,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -390,8 +398,12 @@ fn force_kill_engine(handle_pid: Option<u32>) {
     #[cfg(target_os = "windows")]
     {
         // Check if the process name matches before killing
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
         let check = std::process::Command::new("tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output();
         if let Ok(output) = check {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -412,6 +424,7 @@ fn force_kill_engine(handle_pid: Option<u32>) {
         log::info!("Force-killing engine process (PID {pid})");
         let _ = std::process::Command::new("taskkill")
             .args(["/F", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
             .output();
     }
     #[cfg(unix)]

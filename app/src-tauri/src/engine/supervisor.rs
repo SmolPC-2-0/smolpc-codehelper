@@ -10,6 +10,7 @@ use crate::app_paths::{
     bundled_resource_dir_path, default_dev_bundled_resource_dir,
     select_bundled_resource_dir_resolution,
 };
+use crate::provisioning::{exe_dir, is_portable};
 use smolpc_engine_client::{
     kill_stale_processes, load_or_create_token, spawn_engine, wait_for_healthy, EngineClient,
     EngineConnectOptions, RuntimeModePreference,
@@ -343,7 +344,11 @@ impl<R: Runtime> EngineSupervisor<R> {
             }
         };
 
-        // 2. Delete old token and regenerate a fresh one.
+        // 2. Ensure runtime dirs exist before writing token.
+        let _ = std::fs::create_dir_all(&paths.shared_runtime_dir);
+        let _ = std::fs::create_dir_all(&paths.data_dir);
+
+        // 3. Delete old token and regenerate a fresh one.
         let token_path = paths.shared_runtime_dir.join("engine-token.txt");
         let _ = std::fs::remove_file(&token_path);
         let token = match load_or_create_token(&token_path) {
@@ -377,10 +382,6 @@ impl<R: Runtime> EngineSupervisor<R> {
             dml_device_id: self.runtime_config.dml_device_id,
             force_respawn: false,
         };
-
-        // Create runtime dirs if needed.
-        let _ = std::fs::create_dir_all(&options.shared_runtime_dir);
-        let _ = std::fs::create_dir_all(&options.data_dir);
 
         let pid = match spawn_engine(&options, &token) {
             Ok(pid) => {
@@ -466,6 +467,35 @@ impl<R: Runtime> EngineSupervisor<R> {
 
     /// Resolve all paths needed for spawning the engine.
     fn resolve_paths(&self) -> Result<SpawnPaths, String> {
+        let portable = is_portable();
+        log::info!(
+            "Supervisor: resolve_paths — is_portable={portable}, exe_dir={:?}",
+            exe_dir()
+        );
+
+        if portable {
+            let exe_dir = exe_dir().ok_or("Cannot determine exe directory")?;
+
+            // Warn if running from a network drive (slow, may break)
+            let path_str = exe_dir.to_string_lossy();
+            if path_str.starts_with("\\\\") {
+                log::warn!(
+                    "Portable mode running from network path: {} — performance may be degraded",
+                    path_str
+                );
+            }
+
+            return Ok(SpawnPaths {
+                port: DEFAULT_ENGINE_PORT,
+                app_version: self.app_handle.package_info().version.to_string(),
+                shared_runtime_dir: exe_dir.join("data").join("engine-runtime"),
+                data_dir: exe_dir.join("data"),
+                resource_dir: None, // Forces engine to use exe-relative DLL resolution
+                models_dir: Some(exe_dir.join("models")),
+                host_binary: Some(exe_dir.join("smolpc-engine-host.exe")),
+            });
+        }
+
         let app_data_dir = self
             .app_handle
             .path()
@@ -647,20 +677,45 @@ fn resolve_models_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf>
     let override_dir = std::env::var("SMOLPC_MODELS_DIR").ok().map(PathBuf::from);
     let shared_dir = dirs::data_local_dir()
         .map(|base| base.join(SHARED_MODELS_VENDOR_DIR).join(SHARED_MODELS_DIR));
+
+    // Check if bundled models/ actually contains model subdirectories (not just
+    // manifest.json/README.md). The NSIS installer bundles a models/ dir with
+    // metadata only — using it for inference would fail with "unknown exception".
     let bundled_dir = resource_dir
         .map(|res_dir| res_dir.join("models"))
-        .filter(|path| path.exists());
+        .filter(|path| has_model_subdirs(path));
 
-    // Priority: env override → bundled (fresh from installer) → shared local.
-    // Bundled before shared prevents a stale prior install from shadowing
-    // fresh models shipped with the current version.
+    // Priority: env override → shared local (user-provisioned) → bundled (if real models).
+    // Shared before bundled because the provisioning system extracts models to the
+    // shared dir (%LOCALAPPDATA%\SmolPC\models\), while bundled may only have metadata.
     override_dir
         .filter(|path| path.exists())
+        .or_else(|| shared_dir.filter(|path| has_model_subdirs(path)))
         .or(bundled_dir)
-        .or_else(|| shared_dir.filter(|path| path.exists()))
+}
+
+/// Check if a directory contains at least one model subdirectory with actual
+/// model files (not just manifest.json/README.md).
+fn has_model_subdirs(dir: &std::path::Path) -> bool {
+    if !dir.exists() {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        entry.path().is_dir() && {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            // Model dirs have backend subdirs like openvino/ or dml/
+            name.starts_with("qwen") || name.starts_with("phi") || name.starts_with("llama")
+        }
+    })
 }
 
 fn resolve_host_binary_path() -> Option<PathBuf> {
+    let bin_name = format!("smolpc-engine-host{}", std::env::consts::EXE_SUFFIX);
+
     if let Ok(path) = std::env::var("SMOLPC_ENGINE_HOST_BIN") {
         let path = PathBuf::from(path);
         if path.exists() {
@@ -668,6 +723,23 @@ fn resolve_host_binary_path() -> Option<PathBuf> {
         }
     }
 
+    // Production: check next to the app exe and in binaries/ subdirectory.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            // <install_dir>/binaries/smolpc-engine-host.exe (Tauri resource layout)
+            let in_binaries = dir.join("binaries").join(&bin_name);
+            if in_binaries.exists() {
+                return Some(in_binaries);
+            }
+            // <install_dir>/smolpc-engine-host.exe (flat layout)
+            let beside_exe = dir.join(&bin_name);
+            if beside_exe.exists() {
+                return Some(beside_exe);
+            }
+        }
+    }
+
+    // Development: workspace target directory.
     let workspace_target = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
@@ -677,10 +749,7 @@ fn resolve_host_binary_path() -> Option<PathBuf> {
         } else {
             "release"
         })
-        .join(format!(
-            "smolpc-engine-host{}",
-            std::env::consts::EXE_SUFFIX
-        ));
+        .join(&bin_name);
     if workspace_target.exists() {
         return Some(workspace_target);
     }
