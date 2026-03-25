@@ -27,7 +27,8 @@
 - **Gate:** `cargo check --workspace` + `cargo test -p smolpc-connector-common`
 
 ## Phase 3: Extract Blender connector
-- **Status:** pending
+- **Status:** completed
+- **Commit:** 05a123c
 - **Key spec sections:** 3 (connector deps), 4 (file moves), 5 (import rewiring — both app-side and intra-connector)
 - **Gate:** `cargo check --workspace` + `cargo test -p smolpc-connector-blender`
 
