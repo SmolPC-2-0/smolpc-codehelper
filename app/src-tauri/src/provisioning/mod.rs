@@ -317,7 +317,9 @@ async fn provision_from_local(
         }
 
         // Extract archive.
-        let extract_target = target_dir.join(&entry.id).join(&entry.backend);
+        // ZIP archives contain the backend dir internally (e.g., openvino/manifest.json),
+        // so extract to models/{id}/ — the ZIP creates the backend subdirectory.
+        let extract_target = target_dir.join(&entry.id);
         let cancel_extract = Arc::clone(&cancel);
         let archive_path_extract = archive_path.clone();
         let channel_ref = on_event.clone();

@@ -5,9 +5,11 @@
 		sources: ModelSource[];
 		recommendation: ModelRecommendation | null;
 		onselect: (source: ModelSource) => void;
+		onretry: () => void;
+		onskip: () => void;
 	}
 
-	let { sources, recommendation, onselect }: Props = $props();
+	let { sources, recommendation, onselect, onretry, onskip }: Props = $props();
 
 	function formatBytes(bytes: number): string {
 		if (bytes >= 1_073_741_824) {
@@ -56,6 +58,25 @@
 	{/each}
 
 	{#if sources.length === 0}
-		<p class="py-4 text-center text-sm text-zinc-400">No installation sources detected.</p>
+		<p class="py-4 text-center text-sm text-zinc-400">
+			No installation sources detected. Insert the SmolPC USB drive or connect to the internet.
+		</p>
 	{/if}
+
+	<div class="flex items-center justify-center gap-4 pt-2">
+		<button
+			type="button"
+			onclick={onretry}
+			class="rounded-lg border border-zinc-600 bg-zinc-700 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-600"
+		>
+			Retry detection
+		</button>
+		<button
+			type="button"
+			onclick={onskip}
+			class="rounded-lg px-4 py-2 text-sm text-zinc-500 hover:text-zinc-300"
+		>
+			Skip for now
+		</button>
+	</div>
 </div>

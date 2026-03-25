@@ -25,32 +25,49 @@ fn has_manifest(dir: &Path) -> bool {
     dir.join("models").join(MANIFEST_FILENAME).exists()
 }
 
-/// On Windows, scans drive roots A: through Z: for directories matching
-/// `SmolPC*/models/model-archives.json`. Returns all matching root dirs.
-#[cfg(windows)]
-fn scan_drives() -> Vec<PathBuf> {
+/// Scan a single drive root for SmolPC model directories.
+fn scan_single_drive(drive: &str) -> Vec<PathBuf> {
+    let drive_path = Path::new(drive);
+    if !drive_path.exists() {
+        return Vec::new();
+    }
+    let entries = match std::fs::read_dir(drive_path) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
     let mut found = Vec::new();
-    for letter in b'A'..=b'Z' {
-        let drive = format!("{}:\\", letter as char);
-        let drive_path = Path::new(&drive);
-        if !drive_path.exists() {
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
             continue;
         }
-        // Iterate entries in the drive root looking for SmolPC* directories
-        let entries = match std::fs::read_dir(drive_path) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if name_str.starts_with(SMOLPC_VENDOR) && has_manifest(&path) {
-                found.push(path);
-            }
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str.starts_with(SMOLPC_VENDOR) && has_manifest(&path) {
+            found.push(path);
+        }
+    }
+    found
+}
+
+/// On Windows, scans drive roots C: through Z: for directories matching
+/// `SmolPC*/models/model-archives.json`. Each drive gets a 2-second timeout
+/// to avoid hanging on network drives or disconnecting USB.
+#[cfg(windows)]
+fn scan_drives() -> Vec<PathBuf> {
+    use std::sync::mpsc;
+
+    let mut found = Vec::new();
+    for letter in b'C'..=b'Z' {
+        let drive = format!("{}:\\", letter as char);
+        let (tx, rx) = mpsc::channel();
+        let drive_clone = drive.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(scan_single_drive(&drive_clone));
+        });
+        match rx.recv_timeout(std::time::Duration::from_secs(2)) {
+            Ok(paths) => found.extend(paths),
+            Err(_) => {} // Timeout or disconnected — skip this drive
         }
     }
     found

@@ -95,11 +95,43 @@ pub fn extract_zip(
         }
     }
 
-    // Atomic rename: temp → target.
-    fs::rename(&temp_dir, target_dir)
-        .map_err(|e| format!("cannot rename temp dir to target: {e}"))?;
+    // Atomic rename: temp → target. Falls back to copy+delete if rename fails
+    // across Windows volumes (ERROR_NOT_SAME_DEVICE).
+    if target_dir.exists() {
+        let _ = fs::remove_dir_all(target_dir);
+    }
+    match fs::rename(&temp_dir, target_dir) {
+        Ok(()) => {}
+        Err(ref e) if e.raw_os_error() == Some(17) => {
+            // Cross-device rename — fall back to recursive copy + delete
+            copy_dir_recursive(&temp_dir, target_dir)
+                .map_err(|e| format!("cross-drive copy failed: {e}"))?;
+            let _ = fs::remove_dir_all(&temp_dir);
+        }
+        Err(e) => return Err(format!("cannot move extracted files: {e}")),
+    }
 
     Ok(target_dir.to_owned())
+}
+
+/// Recursively copy a directory tree from `src` to `dst`.
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst)
+        .map_err(|e| format!("cannot create {}: {e}", dst.display()))?;
+    for entry in fs::read_dir(src)
+        .map_err(|e| format!("cannot read {}: {e}", src.display()))?
+    {
+        let entry = entry.map_err(|e| format!("dir entry error: {e}"))?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)
+                .map_err(|e| format!("cannot copy {}: {e}", src_path.display()))?;
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

@@ -67,6 +67,8 @@
 					sources={provisioningStore.sources}
 					recommendation={provisioningStore.recommendation}
 					onselect={handleSelectSource}
+					onretry={handleRetry}
+					onskip={oncomplete}
 				/>
 			</div>
 		{:else if provisioningStore.phase === 'provisioning' || provisioningStore.phase === 'verifying'}
@@ -104,15 +106,24 @@
 						</p>
 					</div>
 				</div>
-				{#if provisioningStore.errorRetryable}
+				<div class="flex gap-3">
+					{#if provisioningStore.errorRetryable}
+						<button
+							type="button"
+							onclick={handleRetry}
+							class="rounded-lg border border-rose-500/40 bg-rose-500/20 px-4 py-2 text-sm font-medium text-rose-200 hover:bg-rose-500/30 focus:ring-2 focus:ring-rose-500 focus:ring-offset-2 focus:ring-offset-zinc-900 focus:outline-none"
+						>
+							Try again
+						</button>
+					{/if}
 					<button
 						type="button"
-						onclick={handleRetry}
-						class="rounded-lg border border-rose-500/40 bg-rose-500/20 px-4 py-2 text-sm font-medium text-rose-200 hover:bg-rose-500/30 focus:ring-2 focus:ring-rose-500 focus:ring-offset-2 focus:ring-offset-zinc-900 focus:outline-none"
+						onclick={oncomplete}
+						class="rounded-lg px-4 py-2 text-sm text-zinc-500 hover:text-zinc-300"
 					>
-						Try again
+						Skip for now
 					</button>
-				{/if}
+				</div>
 			</div>
 		{:else if provisioningStore.phase === 'complete'}
 			<!-- Auto-transitions via $effect; show brief confirmation in case of delay -->
