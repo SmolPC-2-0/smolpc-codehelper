@@ -153,7 +153,7 @@ export const provisioningStore = {
 		};
 
 		try {
-			await invoke('provision_models', { source, modelIds, channel });
+			await invoke('provision_models', { source, modelIds, onEvent: channel });
 		} catch (e) {
 			// Only override if no error was already reported via the channel
 			if (!channelReportedError) {
