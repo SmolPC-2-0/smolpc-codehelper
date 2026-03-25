@@ -45,6 +45,7 @@
 - **Gate:** `cargo check --workspace` + `cargo test -p smolpc-connector-libreoffice`
 
 ## Phase 6: Cleanup and identity
-- **Status:** pending
+- **Status:** completed
+- **Commit:** 624d6bd
 - **Key spec sections:** 6 (all config updates), 0e-0h (constants, scripts, identifier), 10 (full verification), 11 (risk mitigations)
 - **Gate:** Full verification checklist from spec Section 10
