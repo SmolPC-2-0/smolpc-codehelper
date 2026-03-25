@@ -1,14 +1,16 @@
 !macro NSIS_HOOK_PREINSTALL
   ; Check for VC++ Redistributable (required by ORT, OpenVINO, DirectML DLLs)
   IfFileExists "$SYSDIR\vcruntime140.dll" vcredist_ok
-    ; VC++ Runtime not found — install it
-    SetDetailsPrint textonly
-    DetailPrint "Installing Visual C++ Redistributable..."
-    SetDetailsPrint listonly
-    File "/oname=$TEMP\vc_redist.x64.exe" "${NSISDIR}\..\prereqs\vc_redist.x64.exe"
-    nsExec::ExecToLog '"$TEMP\vc_redist.x64.exe" /install /quiet /norestart'
-    Pop $0
-    Delete "$TEMP\vc_redist.x64.exe"
+    ; VC++ Runtime not found — try to install it
+    ; /nonfatal: build succeeds even if vc_redist.x64.exe wasn't staged
+    File /nonfatal "/oname=$TEMP\vc_redist.x64.exe" "${NSISDIR}\..\prereqs\vc_redist.x64.exe"
+    IfFileExists "$TEMP\vc_redist.x64.exe" 0 vcredist_ok
+      SetDetailsPrint textonly
+      DetailPrint "Installing Visual C++ Redistributable..."
+      SetDetailsPrint listonly
+      nsExec::ExecToLog '"$TEMP\vc_redist.x64.exe" /install /quiet /norestart'
+      Pop $0
+      Delete "$TEMP\vc_redist.x64.exe"
   vcredist_ok:
 !macroend
 
