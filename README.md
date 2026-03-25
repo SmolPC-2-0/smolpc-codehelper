@@ -24,8 +24,8 @@ The repository is organized into three zones with explicit ownership boundaries:
 │       ├── smolpc-engine-host
 │       └── smolpc-engine-client
 ├── launcher/
+├── app/                    (CodeHelper)
 ├── apps/
-│   ├── codehelper/
 │   ├── libreoffice-assistant/
 │   ├── gimp-assistant/
 │   └── blender-assistant/
@@ -72,4 +72,4 @@ npm run boundary:check
 - [engine/README.md](engine/README.md)
 - [launcher/README.md](launcher/README.md)
 - [apps/README.md](apps/README.md)
-- [apps/codehelper/README.md](apps/codehelper/README.md)
+- [app/README.md](app/README.md)

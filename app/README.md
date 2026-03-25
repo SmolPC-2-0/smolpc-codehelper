@@ -4,9 +4,9 @@ CodeHelper frontend and Tauri app shell.
 
 ## Structure
 
-- `apps/codehelper/src`: Svelte frontend
-- `apps/codehelper/src-tauri`: Rust/Tauri backend
-- `apps/codehelper/scripts`: app-local development scripts
+- `app/src`: Svelte frontend
+- `app/src-tauri`: Rust/Tauri backend
+- `app/scripts`: app-local development scripts
 
 ## Commands (from repo root)
 

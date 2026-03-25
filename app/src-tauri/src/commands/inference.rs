@@ -135,7 +135,7 @@ fn normalize_mode_id(mode: Option<&str>) -> Option<String> {
 
 fn is_heavy_host_mode(mode: Option<&str>) -> bool {
     // Keep this list aligned with host-tool mode registration in
-    // apps/codehelper/src-tauri/src/modes/config.rs.
+    // app/src-tauri/src/modes/config.rs.
     matches!(normalize_mode_id(mode).as_deref(), Some("gimp" | "blender"))
 }
 

@@ -42,10 +42,10 @@ Reference docs:
 ## 3.1 Stable on `main`
 
 1. Launcher orchestration commands exist under CodeHelper backend:
-   1. `apps/codehelper/src-tauri/src/launcher/`
-   2. `apps/codehelper/src-tauri/src/commands/launcher.rs`
+   1. `app/src-tauri/src/launcher/`
+   2. `app/src-tauri/src/commands/launcher.rs`
 2. Launcher manifest currently lives at:
-   1. `apps/codehelper/src-tauri/resources/launcher/apps.manifest.json`
+   1. `app/src-tauri/resources/launcher/apps.manifest.json`
 3. `apps/libreoffice-assistant` remains a staging root.
 
 ## 3.2 In-flight launcher work
@@ -102,7 +102,7 @@ Do after launcher branch merges or launcher shape is finalized:
 Until launcher merge settles, treat manifest path as an environment-dependent target:
 
 1. Current `main` runtime path:
-   1. `apps/codehelper/src-tauri/resources/launcher/apps.manifest.json`
+   1. `app/src-tauri/resources/launcher/apps.manifest.json`
 2. Candidate post-merge path (if standalone launcher lands):
    1. `launcher/src-tauri/resources/launcher/apps.manifest.json`
 
