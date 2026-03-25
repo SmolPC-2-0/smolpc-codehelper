@@ -10,6 +10,7 @@ use crate::app_paths::{
     bundled_resource_dir_path, default_dev_bundled_resource_dir,
     select_bundled_resource_dir_resolution,
 };
+use crate::provisioning::{exe_dir, is_portable};
 use smolpc_engine_client::{
     kill_stale_processes, load_or_create_token, spawn_engine, wait_for_healthy, EngineClient,
     EngineConnectOptions, RuntimeModePreference,
@@ -466,6 +467,29 @@ impl<R: Runtime> EngineSupervisor<R> {
 
     /// Resolve all paths needed for spawning the engine.
     fn resolve_paths(&self) -> Result<SpawnPaths, String> {
+        if is_portable() {
+            let exe_dir = exe_dir().ok_or("Cannot determine exe directory")?;
+
+            // Warn if running from a network drive (slow, may break)
+            let path_str = exe_dir.to_string_lossy();
+            if path_str.starts_with("\\\\") {
+                log::warn!(
+                    "Portable mode running from network path: {} — performance may be degraded",
+                    path_str
+                );
+            }
+
+            return Ok(SpawnPaths {
+                port: DEFAULT_ENGINE_PORT,
+                app_version: self.app_handle.package_info().version.to_string(),
+                shared_runtime_dir: exe_dir.join("data").join("engine-runtime"),
+                data_dir: exe_dir.join("data"),
+                resource_dir: None, // Forces engine to use exe-relative DLL resolution
+                models_dir: Some(exe_dir.join("models")),
+                host_binary: Some(exe_dir.join("smolpc-engine-host.exe")),
+            });
+        }
+
         let app_data_dir = self
             .app_handle
             .path()
