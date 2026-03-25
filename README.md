@@ -134,15 +134,15 @@ cargo check -p smolpc-code-helper
 Current default Windows install/runtime locations:
 
 - App install:
-  `%LOCALAPPDATA%\\Programs\\SmolPC Code Helper\\`
+  `%LOCALAPPDATA%\Programs\SmolPC Code Helper\`
 - App binary:
-  `%LOCALAPPDATA%\\Programs\\SmolPC Code Helper\\smolpc-code-helper.exe`
+  `%LOCALAPPDATA%\Programs\SmolPC Code Helper\smolpc-code-helper.exe`
 - Shared models:
-  `%LOCALAPPDATA%\\SmolPC\\models\\`
+  `%LOCALAPPDATA%\SmolPC\models\`
 - Engine runtime:
-  `%LOCALAPPDATA%\\SmolPC\\engine-runtime\\`
+  `%LOCALAPPDATA%\SmolPC\engine-runtime\`
 - Engine log:
-  `%LOCALAPPDATA%\\SmolPC\\engine-runtime\\engine-spawn.log`
+  `%LOCALAPPDATA%\SmolPC\engine-runtime\engine-spawn.log`
 
 ## Building a Windows Installer
 
@@ -165,6 +165,8 @@ npm run runtime:setup:python
 ```powershell
 npm run engine:build:release
 ```
+
+This stages the current engine sidecar into the app bundle inputs before the installer build.
 
 ### 3. Build the NSIS installer
 
@@ -232,7 +234,7 @@ This is the typical deployment flow for schools or offline machines.
 4. Run `Install-CodeHelper.cmd`.
 5. The current installer flow should:
    - install the app
-   - install model archives to `%LOCALAPPDATA%\\SmolPC\\models\\`
+   - install model archives to `%LOCALAPPDATA%\SmolPC\models\`
    - launch the app
 6. On first launch, the engine should auto-detect the best supported backend on that machine.
 
@@ -244,7 +246,7 @@ If models are already present on the machine, or you are distributing them separ
 
 1. Build the NSIS installer.
 2. Run the installer on the target machine.
-3. Ensure models exist under `%LOCALAPPDATA%\\SmolPC\\models\\`.
+3. Ensure models exist under `%LOCALAPPDATA%\SmolPC\models\`.
 4. Launch the app normally.
 
 ## Troubleshooting
@@ -254,7 +256,7 @@ If models are already present on the machine, or you are distributing them separ
 The most common cause is missing models. Check:
 
 ```text
-%LOCALAPPDATA%\\SmolPC\\models\\
+%LOCALAPPDATA%\SmolPC\models\
 ```
 
 ### Engine fails to start
@@ -262,7 +264,7 @@ The most common cause is missing models. Check:
 Check:
 
 ```text
-%LOCALAPPDATA%\\SmolPC\\engine-runtime\\engine-spawn.log
+%LOCALAPPDATA%\SmolPC\engine-runtime\engine-spawn.log
 ```
 
 ### `npm run runtime:setup:*` fails in Windows PowerShell
