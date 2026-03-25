@@ -42,6 +42,10 @@ mod platform {
             }
         }
     }
+
+    // Safety: Windows HANDLE is a process-wide kernel object identifier,
+    // safe to use from any thread. CloseHandle is thread-safe.
+    unsafe impl Send for SingletonGuard {}
 }
 
 #[cfg(not(windows))]

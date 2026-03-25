@@ -26,6 +26,7 @@ use commands::inference::{
 use commands::modes::{list_modes, mode_open_host_app, mode_refresh_tools, mode_status};
 use commands::setup::{setup_prepare, setup_status};
 use engine::{EngineLifecycleState, EngineSupervisor, EngineSupervisorHandle};
+use provisioning::ProvisioningCancel;
 use modes::registry::ModeProviderRegistry;
 use setup::SetupState;
 use smolpc_engine_client::EngineClient;
@@ -272,6 +273,7 @@ pub fn run() {
         })
         .manage(AssistantState::default())
         .manage(HardwareCache::default())
+        .manage(ProvisioningCancel::default())
         .manage(commands::audio::AudioState::default())
         .invoke_handler(tauri::generate_handler![
             read,
@@ -307,7 +309,12 @@ pub fn run() {
             commands::audio::stop_recording,
             commands::audio::speak_text,
             commands::audio::stop_playback,
-            commands::audio::is_playing
+            commands::audio::is_playing,
+            provisioning::get_boot_state,
+            provisioning::detect_model_sources,
+            provisioning::get_recommended_model,
+            provisioning::provision_models,
+            provisioning::cancel_provisioning,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
