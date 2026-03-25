@@ -33,7 +33,8 @@
 - **Gate:** `cargo check --workspace` + `cargo test -p smolpc-connector-blender`
 
 ## Phase 4: Extract GIMP connector
-- **Status:** pending
+- **Status:** completed
+- **Commit:** 3238db7
 - **Key spec sections:** 3 (connector deps), 4 (file moves), 5 (import rewiring — note GIMP runtime.rs/transport.rs intra-connector rewiring)
 - **Gate:** `cargo check --workspace` + `cargo test -p smolpc-connector-gimp`
 
