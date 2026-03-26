@@ -37,17 +37,15 @@ pub(crate) async fn health(
     state.last_activity_ms.store(epoch_ms(), Ordering::SeqCst);
     let readiness = state.engine.readiness.lock().await;
     let state_name = format!("{:?}", readiness.state).to_ascii_lowercase();
-    if matches!(readiness.state, ReadinessState::Failed) {
-        Ok((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({"ok": false, "state": state_name})),
-        ))
-    } else {
-        Ok((
-            StatusCode::OK,
-            Json(serde_json::json!({"ok": true, "state": state_name})),
-        ))
-    }
+    // Health is a process-liveness check only. ReadinessState::Failed means the
+    // engine could not load a model — the process is still alive and healthy.
+    // Returning 503 here caused the supervisor to misinterpret an application-level
+    // startup failure as a process death and crash-loop the engine needlessly.
+    // Use /engine/status for readiness and error details.
+    Ok((
+        StatusCode::OK,
+        Json(serde_json::json!({"ok": true, "state": state_name})),
+    ))
 }
 
 pub(crate) async fn meta(
