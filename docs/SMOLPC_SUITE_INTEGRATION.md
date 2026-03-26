@@ -1,5 +1,7 @@
 # Shared Engine Integration Notes
 
+> Deprecated note (March 26, 2026): this file is older branch-era guidance and still contains stale app-path examples. For current onboarding work, start with [APP_ONBOARDING_PLAYBOOK.md](./APP_ONBOARDING_PLAYBOOK.md) and use [ENGINE_API.md](./ENGINE_API.md) as the contract reference.
+
 This branch introduces a shared engine architecture with three crates:
 
 - `engine/crates/smolpc-engine-core`
