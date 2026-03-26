@@ -5,9 +5,11 @@
 		sources: ModelSource[];
 		recommendation: ModelRecommendation | null;
 		onselect: (source: ModelSource) => void;
+		onretry?: () => void;
+		onskip?: () => void;
 	}
 
-	let { sources, recommendation, onselect }: Props = $props();
+	let { sources, recommendation, onselect, onretry, onskip }: Props = $props();
 
 	function formatBytes(bytes: number): string {
 		if (bytes >= 1_073_741_824) {
@@ -56,6 +58,33 @@
 	{/each}
 
 	{#if sources.length === 0}
-		<p class="py-4 text-center text-sm text-zinc-400">No installation sources detected.</p>
+		<div
+			class="flex flex-col items-center gap-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-6"
+		>
+			<p class="text-sm text-amber-200/80">
+				No installation sources found. Connect a USB drive with SmolPC models, check your internet
+				connection, or skip setup to use the app without AI features.
+			</p>
+			<div class="flex gap-3">
+				{#if onretry}
+					<button
+						type="button"
+						onclick={onretry}
+						class="rounded-lg border border-amber-500/40 bg-amber-500/20 px-4 py-2 text-sm font-medium text-amber-200 hover:bg-amber-500/30 focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-zinc-900 focus:outline-none"
+					>
+						Retry
+					</button>
+				{/if}
+				{#if onskip}
+					<button
+						type="button"
+						onclick={onskip}
+						class="rounded-lg border border-zinc-600 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-700 focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900 focus:outline-none"
+					>
+						Skip for now
+					</button>
+				{/if}
+			</div>
+		</div>
 	{/if}
 </div>
