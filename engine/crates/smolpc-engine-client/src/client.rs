@@ -332,6 +332,7 @@ impl EngineClient {
         let body = serde_json::json!({
             "text": text,
             "voice": voice.unwrap_or("Bella"),
+            "speed": 1.5,
         });
         let response = self
             .http
