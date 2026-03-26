@@ -9,7 +9,7 @@ This is the right path for:
 - direct localhost API testing
 - debugging startup, auth, or runtime issues outside the app shell
 
-If you are building a Rust or Tauri app in this repo, prefer `smolpc-engine-client` instead. If you need the full endpoint reference, use [docs/ENGINE_API.md](./ENGINE_API.md). If you are onboarding another app, use [docs/APP_ONBOARDING_PLAYBOOK.md](./APP_ONBOARDING_PLAYBOOK.md).
+If you are building a Rust or Tauri app in this repo, prefer `smolpc-engine-client` instead. If you need the full endpoint reference, use [docs/ENGINE_API.md](./ENGINE_API.md). If you are onboarding another app, use [docs/APP_ONBOARDING_PLAYBOOK.md](./APP_ONBOARDING_PLAYBOOK.md). For an overview of all single-component workflows, see [docs/SINGLE_APP_WORKFLOWS.md](./SINGLE_APP_WORKFLOWS.md).
 
 Current `main` assumptions:
 
