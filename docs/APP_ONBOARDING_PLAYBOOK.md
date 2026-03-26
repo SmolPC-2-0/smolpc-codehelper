@@ -4,11 +4,7 @@ Use this playbook when onboarding another app (Blender helper, GIMP helper, etc.
 
 This is the fastest path for both developers and AI-assisted integration sessions.
 
-Monorepo placement convention for new apps:
-
-1. Create app root under `apps/<app-name>/`.
-2. Keep app UX/tool logic in the app root.
-3. Integrate inference only through shared engine contract/client.
+Keep app UX/tool logic in your app, and integrate inference only through the shared engine contract or client.
 
 ## Scope
 
@@ -19,13 +15,16 @@ Monorepo placement convention for new apps:
 ## Start Here
 
 1. Read [ENGINE_API.md](./ENGINE_API.md).
-2. Read [SMOLPC_SUITE_INTEGRATION.md](./SMOLPC_SUITE_INTEGRATION.md).
+2. Skim current repo examples if you want working integration patterns:
+   - [app/src-tauri/src/engine/supervisor.rs](../app/src-tauri/src/engine/supervisor.rs)
+   - [app/src-tauri/src/commands/inference.rs](../app/src-tauri/src/commands/inference.rs)
+   - [crates/smolpc-connector-common/src/text_generation.rs](../crates/smolpc-connector-common/src/text_generation.rs)
 3. Run shared model bootstrap once on the machine for the supported shared baseline:
    - `npm run runtime:setup:openvino`
    - `npm run model:setup:qwen25-instruct`
    - `npm run model:setup:qwen3-4b`
    - `qwen3-4b` now self-builds its DirectML artifact from `Qwen/Qwen3-4B` in an isolated Python `3.14` venv; export logs are written under `%LOCALAPPDATA%/SmolPC/logs/dml-export`
-5. Use this playbook as the implementation checklist.
+4. Use this playbook as the implementation checklist.
 
 ## Shared Model Baseline
 
@@ -50,11 +49,12 @@ Your app should depend only on:
 2. `smolpc-engine-client` crate (preferred for Rust apps).
 3. `backend_status` payload for diagnostics/UX.
 
-Do not depend on:
+What not to depend on:
 
 1. Internal logs.
 2. Internal engine module paths.
 3. Branch-head behavior not captured in contract docs.
+4. Stale app-specific repo paths from older layouts.
 
 ## Integration Paths
 
@@ -63,11 +63,68 @@ Do not depend on:
 1. Add dependency on `smolpc-engine-client`.
 2. Build `EngineConnectOptions`.
 3. Call `connect_or_spawn(options)`.
-4. Use typed calls:
-   1. `load_model`
-   2. `generate_text` or `generate_stream`
-   3. `status`
-   4. `cancel`
+4. Use typed calls such as `status`, `load_model`, `generate_stream_messages`, and `cancel`.
+
+Minimal example:
+
+```rust
+use smolpc_engine_client::{
+    connect_or_spawn, EngineChatMessage, EngineConnectOptions, RuntimeModePreference,
+};
+use std::path::PathBuf;
+
+async fn run_engine_flow() -> Result<(), Box<dyn std::error::Error>> {
+    let local_app_data = std::env::var("LOCALAPPDATA")?;
+    let smolpc_root = PathBuf::from(local_app_data).join("SmolPC");
+    let shared_runtime_dir = smolpc_root.join("engine-runtime");
+    let data_dir = shared_runtime_dir.join("host-data");
+    let models_dir = smolpc_root.join("models");
+
+    let options = EngineConnectOptions {
+        port: 19432,
+        app_version: "dev-onboarding".to_string(),
+        shared_runtime_dir,
+        data_dir,
+        resource_dir: None,
+        models_dir: Some(models_dir),
+        host_binary: None,
+        runtime_mode: RuntimeModePreference::Auto,
+        dml_device_id: None,
+        force_respawn: false,
+    };
+
+    let client = connect_or_spawn(options).await?;
+
+    let status = client.status().await?;
+    println!("Engine ready: {}", status.ready);
+
+    client.load_model("qwen2.5-1.5b-instruct").await?;
+
+    let messages = vec![
+        EngineChatMessage {
+            role: "system".to_string(),
+            content: "You are a concise local assistant.".to_string(),
+        },
+        EngineChatMessage {
+            role: "user".to_string(),
+            content: "Explain what this app needs to do to onboard successfully.".to_string(),
+        },
+    ];
+
+    let metrics = client
+        .generate_stream_messages(&messages, None, |token| {
+            print!("{token}");
+        })
+        .await?;
+    println!("\nMetrics: {:?}", metrics);
+
+    Ok(())
+}
+```
+
+Call `client.cancel().await?` from your UI or cancellation token when the user aborts an in-flight generation request.
+
+For app-style startup policy flows, `EngineClient::ensure_started(...)` is also available. The current Tauri app wraps that call behind its engine supervisor instead of calling it directly from every command handler.
 
 ## Path B: Non-Rust app (HTTP)
 
@@ -80,6 +137,48 @@ Do not depend on:
    1. `GET /engine/meta`
    2. `POST /engine/load` with the selected shared model id (for example `qwen2.5-1.5b-instruct`)
    3. `POST /v1/chat/completions`
+
+This path assumes the engine host is already running, either because your app started it or because a companion launcher/wrapper did.
+
+Minimal PowerShell example:
+
+```powershell
+$baseUrl = "http://127.0.0.1:19432"
+$tokenPath = Join-Path $env:LOCALAPPDATA "SmolPC\engine-runtime\engine-token.txt"
+$token = (Get-Content $tokenPath -Raw).Trim()
+$authHeader = "Authorization: Bearer $token"
+
+curl.exe -sS `
+  -H $authHeader `
+  "$baseUrl/engine/meta"
+
+$loadBody = '{"model_id":"qwen2.5-1.5b-instruct"}'
+curl.exe -sS `
+  -X POST `
+  -H $authHeader `
+  -H "Content-Type: application/json" `
+  --data $loadBody `
+  "$baseUrl/engine/load"
+
+$chatBody = @'
+{
+  "model": "smolpc-engine",
+  "messages": [
+    { "role": "user", "content": "Give me a short onboarding checklist." }
+  ],
+  "stream": false
+}
+'@
+
+curl.exe -sS `
+  -X POST `
+  -H $authHeader `
+  -H "Content-Type: application/json" `
+  --data $chatBody `
+  "$baseUrl/v1/chat/completions"
+```
+
+Use the full request and streaming details in [ENGINE_API.md](./ENGINE_API.md) as the source of truth. The `/engine/load` step chooses the shared model; the `model` field in `/v1/chat/completions` is just the OpenAI-compatible request field.
 
 ## Minimum Onboarding Checklist
 
@@ -174,5 +273,7 @@ Requirements:
 Reference docs:
 - docs/APP_ONBOARDING_PLAYBOOK.md
 - docs/ENGINE_API.md
-- docs/SMOLPC_SUITE_INTEGRATION.md
+- app/src-tauri/src/engine/supervisor.rs
+- app/src-tauri/src/commands/inference.rs
+- crates/smolpc-connector-common/src/text_generation.rs
 ```
