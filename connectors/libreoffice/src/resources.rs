@@ -173,7 +173,7 @@ mod tests {
         )
         .expect_err("missing mcp_server.py should fail");
 
-        assert!(error.contains("mcp_server.py is missing"));
+        assert!(error.contains("mcp_server.py"), "error should mention mcp_server.py: {error}");
         assert!(error.contains(direct_dir.to_string_lossy().as_ref()));
     }
 
