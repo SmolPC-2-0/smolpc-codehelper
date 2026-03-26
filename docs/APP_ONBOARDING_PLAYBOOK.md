@@ -4,7 +4,7 @@ Use this playbook when onboarding another app (Blender helper, GIMP helper, etc.
 
 This is the fastest path for both developers and AI-assisted integration sessions.
 
-Keep app UX/tool logic in your app, and integrate inference only through the shared engine contract or client.
+Keep app UX/tool logic in the app you are onboarding, follow the current repo layout conventions for that branch, and integrate inference only through the shared engine contract or client.
 
 ## Scope
 
@@ -124,7 +124,7 @@ async fn run_engine_flow() -> Result<(), Box<dyn std::error::Error>> {
 
 Call `client.cancel().await?` from your UI or cancellation token when the user aborts an in-flight generation request.
 
-For app-style startup policy flows, `EngineClient::ensure_started(...)` is also available. The current Tauri app wraps that call behind its engine supervisor instead of calling it directly from every command handler.
+For app-style startup policy flows, `EngineClient::ensure_started(...)` is also available directly on the client. The current Tauri app wraps that call behind its engine supervisor instead of calling it directly from every command handler.
 
 ## Path B: Non-Rust app (HTTP)
 
@@ -146,16 +146,14 @@ Minimal PowerShell example:
 $baseUrl = "http://127.0.0.1:19432"
 $tokenPath = Join-Path $env:LOCALAPPDATA "SmolPC\engine-runtime\engine-token.txt"
 $token = (Get-Content $tokenPath -Raw).Trim()
-$authHeader = "Authorization: Bearer $token"
-
 curl.exe -sS `
-  -H $authHeader `
+  -H "Authorization: Bearer $token" `
   "$baseUrl/engine/meta"
 
 $loadBody = '{"model_id":"qwen2.5-1.5b-instruct"}'
 curl.exe -sS `
   -X POST `
-  -H $authHeader `
+  -H "Authorization: Bearer $token" `
   -H "Content-Type: application/json" `
   --data $loadBody `
   "$baseUrl/engine/load"
@@ -172,7 +170,7 @@ $chatBody = @'
 
 curl.exe -sS `
   -X POST `
-  -H $authHeader `
+  -H "Authorization: Bearer $token" `
   -H "Content-Type: application/json" `
   --data $chatBody `
   "$baseUrl/v1/chat/completions"
@@ -273,6 +271,7 @@ Requirements:
 Reference docs:
 - docs/APP_ONBOARDING_PLAYBOOK.md
 - docs/ENGINE_API.md
+- live examples:
 - app/src-tauri/src/engine/supervisor.rs
 - app/src-tauri/src/commands/inference.rs
 - crates/smolpc-connector-common/src/text_generation.rs
