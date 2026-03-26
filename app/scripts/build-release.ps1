@@ -269,8 +269,8 @@ function Find-Installer {
 
 function Find-InstalledApp {
     $searchDirs = @(
-        (Join-Path $env:LOCALAPPDATA "SmolPC Code Helper"),
-        (Join-Path $env:LOCALAPPDATA "Programs\SmolPC Code Helper")
+        (Join-Path $env:LOCALAPPDATA "SmolPC 2.0"),
+        (Join-Path $env:LOCALAPPDATA "Programs\SmolPC 2.0")
     )
     $exeNames = @("smolpc-desktop.exe", "SmolPC 2.0.exe")
     foreach ($dir in $searchDirs) {
@@ -296,7 +296,7 @@ if ($null -eq $installer) {
 }
 
 Write-Host ""
-Write-Host "  SmolPC Code Helper - Offline Installer" -ForegroundColor Cyan
+Write-Host "  SmolPC 2.0 - Offline Installer" -ForegroundColor Cyan
 Write-Host ""
 
 Write-Host "[1/3] Installing application (silent)..."
@@ -328,7 +328,7 @@ if (Test-Path $modelInstallScript -PathType Leaf) {
 
 Write-Host ""
 if (-not $NoLaunchApp) {
-    Write-Host "[3/3] Launching SmolPC Code Helper..."
+    Write-Host "[3/3] Launching SmolPC 2.0..."
     Start-Process -FilePath $appExe | Out-Null
 } else {
     Write-Host "[3/3] Skipped launch (-NoLaunchApp)."
@@ -348,7 +348,7 @@ function New-InstallWrapperCmd {
     $content = @'
 @echo off
 setlocal
-echo SmolPC Code Helper - Offline Installer
+echo SmolPC 2.0 - Offline Installer
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install-CodeHelper.ps1" %*
 if errorlevel 1 (

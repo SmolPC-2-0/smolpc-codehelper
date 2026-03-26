@@ -245,6 +245,8 @@ pub fn run() {
                 )?;
             }
 
+            app.handle().plugin(tauri_plugin_opener::init())?;
+
             log::info!("Hardware detection will occur on first request");
 
             let resource_dir = resolve_bundled_resource_dir(app);

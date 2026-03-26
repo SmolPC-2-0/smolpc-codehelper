@@ -46,7 +46,7 @@
 	<div class="flex w-full max-w-md flex-col gap-6 px-6">
 		<!-- Header -->
 		<div class="text-center">
-			<h1 class="text-2xl font-bold text-zinc-100">SmolPC Code Helper</h1>
+			<h1 class="text-2xl font-bold text-zinc-100">SmolPC 2.0</h1>
 			<p class="mt-1 text-sm text-zinc-400">AI model setup</p>
 		</div>
 
