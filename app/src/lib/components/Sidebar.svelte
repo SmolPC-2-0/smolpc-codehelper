@@ -190,8 +190,7 @@
 	<div class="sidebar__header">
 		<div class="sidebar__header-row">
 			<div>
-				<h1>SmolPC Helper</h1>
-				<p>Offline coding assistant workspace</p>
+				<h1>SmolPC 2.0</h1>
 			</div>
 			{#if onClose}
 				<Button
@@ -519,21 +518,15 @@
 
 	.sidebar__header-row {
 		display: flex;
-		align-items: flex-start;
+		align-items: center;
 		justify-content: space-between;
 		gap: 0.5rem;
 	}
 
 	.sidebar__header h1 {
-		font-size: 0.97rem;
-		font-weight: 650;
+		font-size: 1.25rem;
+		font-weight: 700;
 		letter-spacing: 0.01em;
-	}
-
-	.sidebar__header p {
-		margin-top: 0.3rem;
-		font-size: 0.72rem;
-		color: var(--color-muted-foreground);
 	}
 
 	:global(.sidebar__collapse) {
