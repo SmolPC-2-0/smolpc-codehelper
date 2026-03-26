@@ -527,6 +527,16 @@ impl<R: Runtime> EngineSupervisor<R> {
         .map(|resolution| bundled_resource_dir_path(&resolution).to_path_buf());
 
         let models_dir = resolve_models_dir(bundled_resource_dir.as_deref());
+
+        // Copy bundled voice models (whisper, TTS) to the shared models dir on
+        // first launch so they're co-located with provisioned LLM models.
+        let shared_models = dirs::data_local_dir()
+            .map(|base| base.join(SHARED_MODELS_VENDOR_DIR).join(SHARED_MODELS_DIR));
+        ensure_voice_models(
+            bundled_resource_dir.as_deref(),
+            shared_models.as_deref(),
+        );
+
         let host_binary = resolve_host_binary_path();
 
         let port = std::env::var("SMOLPC_ENGINE_PORT")
@@ -692,6 +702,54 @@ fn resolve_models_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf>
         .filter(|path| path.exists())
         .or_else(|| shared_dir.filter(|path| has_model_subdirs(path)))
         .or(bundled_dir)
+}
+
+/// Voice model directories bundled in the installer that should be copied to the
+/// shared models dir on first launch. These are small enough to bundle (~110 MB)
+/// and must be co-located with LLM models since the engine has a single models dir.
+const VOICE_MODEL_DIRS: &[&str] = &["whisper-base.en", "kittentts-nano"];
+
+/// Copy voice models from the bundled resource dir to the shared models dir if
+/// they're missing. This lets reinstalling the installer fix voice without
+/// requiring a separate USB provisioning step.
+fn ensure_voice_models(resource_dir: Option<&std::path::Path>, shared_dir: Option<&std::path::Path>) {
+    let Some(resource_dir) = resource_dir else { return };
+    let Some(shared_dir) = shared_dir else { return };
+
+    let bundled_models = resource_dir.join("models");
+    if !bundled_models.exists() {
+        return;
+    }
+
+    for dir_name in VOICE_MODEL_DIRS {
+        let bundled = bundled_models.join(dir_name);
+        let target = shared_dir.join(dir_name);
+
+        if target.exists() || !bundled.exists() {
+            continue;
+        }
+
+        log::info!("Copying bundled voice model '{}' to shared models dir", dir_name);
+        if let Err(e) = copy_dir_recursive(&bundled, &target) {
+            log::warn!("Failed to copy voice model '{}': {}", dir_name, e);
+        }
+    }
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| format!("create dir {}: {e}", dst.display()))?;
+    for entry in std::fs::read_dir(src).map_err(|e| format!("read dir {}: {e}", src.display()))? {
+        let entry = entry.map_err(|e| format!("dir entry: {e}"))?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)
+                .map_err(|e| format!("copy {} -> {}: {e}", src_path.display(), dst_path.display()))?;
+        }
+    }
+    Ok(())
 }
 
 /// Check if a directory contains at least one model subdirectory with actual
