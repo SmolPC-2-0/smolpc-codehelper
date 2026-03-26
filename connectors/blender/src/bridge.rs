@@ -87,12 +87,12 @@ fn generate_bridge_token() -> String {
 fn bridge_token_dir() -> Result<PathBuf, String> {
     if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
         return Ok(PathBuf::from(local_app_data)
-            .join("SmolPC")
+            .join("SmolPC 2.0")
             .join("engine-runtime"));
     }
 
     dirs::data_local_dir()
-        .map(|path| path.join("SmolPC").join("engine-runtime"))
+        .map(|path| path.join("SmolPC 2.0").join("engine-runtime"))
         .ok_or_else(|| {
             "Unable to resolve a local data directory for the Blender bridge token".to_string()
         })

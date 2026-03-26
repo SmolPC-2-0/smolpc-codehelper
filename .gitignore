@@ -36,6 +36,7 @@ dist-ssr
 /app/src-tauri/libs/openvino/*
 !/app/src-tauri/libs/openvino/.gitkeep
 /app/src-tauri/resources/python/payload/
+/app/src-tauri/prereqs/
 /app/src-tauri/*.dll
 nul
 

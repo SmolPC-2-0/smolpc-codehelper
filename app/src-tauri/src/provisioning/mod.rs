@@ -172,7 +172,7 @@ pub async fn provision_models(
             code: ProvisioningErrorCode::ExtractionFailed,
             message: "Cannot determine local data directory".to_string(),
         })?
-        .join("SmolPC")
+        .join("SmolPC 2.0")
         .join("models");
 
     match source {

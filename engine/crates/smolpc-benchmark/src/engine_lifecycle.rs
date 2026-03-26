@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use crate::config::BenchmarkBackend;
 
-const SHARED_RUNTIME_VENDOR_DIR: &str = "SmolPC";
+const SHARED_RUNTIME_VENDOR_DIR: &str = "SmolPC 2.0";
 const SHARED_RUNTIME_DIR: &str = "engine-runtime";
 const HOST_DATA_DIR: &str = "host-data";
 const MODEL_LOAD_TIMEOUT: Duration = Duration::from_secs(600);

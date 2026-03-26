@@ -21,10 +21,9 @@
 	});
 
 	function handleSelectSource(source: ModelSource) {
-		const modelIds = provisioningStore.recommendation
-			? [provisioningStore.recommendation.model_id]
-			: [];
-		provisioningStore.startProvisioning(source, modelIds);
+		// Empty array = install all models available in the source manifest.
+		// The local folder is the source of truth: 1 model = 1, 2 = 2.
+		provisioningStore.startProvisioning(source, []);
 	}
 
 	function handleCancel() {

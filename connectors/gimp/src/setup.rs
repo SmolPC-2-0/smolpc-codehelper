@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use smolpc_assistant_types::{SetupItemDto, SetupItemStateDto};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const GIMP_BRIDGE_HOST: &str = "127.0.0.1";
@@ -295,7 +297,11 @@ fn infer_gimp_major_version_from_path(gimp_path: &Path) -> Option<u8> {
 fn detect_gimp_major_version_from_command(gimp_path: &Path) -> Option<u8> {
     // Generic install paths like /usr/bin/gimp do not encode the major version,
     // so use `--version` when the path itself is ambiguous.
-    let output = Command::new(gimp_path).arg("--version").output().ok()?;
+    let mut cmd = Command::new(gimp_path);
+    cmd.arg("--version");
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    let output = cmd.output().ok()?;
     if !output.status.success() {
         return None;
     }

@@ -20,7 +20,7 @@ pub(crate) fn epoch_ms() -> u64 {
 
 pub(crate) fn default_data_dir() -> PathBuf {
     if let Some(path) = dirs::data_local_dir() {
-        return path.join("SmolPC").join("engine");
+        return path.join("SmolPC 2.0").join("engine");
     }
     PathBuf::from(".smolpc-engine")
 }
@@ -58,20 +58,49 @@ pub(crate) fn select_best_model_for_ram(
 }
 
 pub(crate) fn built_in_default_model_id() -> Option<String> {
+    use smolpc_engine_core::models::ModelLoader;
+
     let models = ModelRegistry::available_models();
     let total_ram_gb = crate::probe::total_system_ram_gb();
     if let Some(ram) = total_ram_gb {
         if let Some((id, min)) = select_best_model_for_ram(&models, ram) {
-            log::info!(
-                "Auto-selected default model '{id}' (total RAM: {ram:.1}GB, model requires: {min:.1}GB)",
+            // Verify the selected model's directory actually exists on disk.
+            // If only the smaller model was provisioned, fall back gracefully
+            // instead of crashing with "Model directory not found".
+            let model_dir = ModelLoader::openvino_dir(&id);
+            if model_dir.exists() {
+                log::info!(
+                    "Auto-selected default model '{id}' (total RAM: {ram:.1}GB, model requires: {min:.1}GB)",
+                );
+                return Some(id);
+            }
+            log::warn!(
+                "Best model '{id}' selected by RAM but directory missing ({}), trying fallback",
+                model_dir.display(),
             );
-            return Some(id);
+            // Try remaining models in descending RAM order.
+            let fallback = models
+                .iter()
+                .filter(|m| m.id != id && (m.min_ram_gb as f64) <= ram)
+                .find(|m| ModelLoader::openvino_dir(&m.directory).exists());
+            if let Some(fb) = fallback {
+                log::info!(
+                    "Falling back to '{}' (directory exists)",
+                    fb.id,
+                );
+                return Some(fb.id.clone());
+            }
         }
         log::warn!(
             "No model fits available RAM ({ram:.1}GB) — falling back to smallest registered model",
         );
     }
-    models.into_iter().next().map(|m| m.id)
+    // Last resort: first registered model whose directory exists.
+    models
+        .iter()
+        .find(|m| ModelLoader::openvino_dir(&m.directory).exists())
+        .map(|m| m.id.clone())
+        .or_else(|| models.into_iter().next().map(|m| m.id))
 }
 
 pub(crate) fn resolve_default_model_id_with_sources(

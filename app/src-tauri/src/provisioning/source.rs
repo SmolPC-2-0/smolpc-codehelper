@@ -5,7 +5,7 @@ use crate::provisioning::types::ModelSource;
 
 const BREADCRUMB_FILENAME: &str = "installer-source.txt";
 const MANIFEST_FILENAME: &str = "model-archives.json";
-const SMOLPC_VENDOR: &str = "SmolPC";
+const SMOLPC_VENDOR: &str = "SmolPC 2.0";
 
 /// Per-drive timeout for scanning. Network/slow USB drives that don't respond
 /// within this budget are skipped rather than blocking the UI.
