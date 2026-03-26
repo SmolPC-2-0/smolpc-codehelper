@@ -445,6 +445,20 @@ impl EngineState {
         let openvino_required = model_requires_openvino(&model_id);
         let model_def = ModelRegistry::get_model(&model_id)
             .ok_or_else(|| format!("Unknown model ID: {model_id}"))?;
+
+        // Early RAM check: reject models that require more RAM than available.
+        // This prevents a crash at preflight when the user manually selects a
+        // model too large for the machine (e.g. Qwen3-4B on 8 GB).
+        if let Some(total_ram_gb) = crate::probe::total_system_ram_gb() {
+            if (model_def.min_ram_gb as f64) > total_ram_gb {
+                return Err(format!(
+                    "Insufficient RAM for '{}': requires {:.0} GB, system has {:.1} GB. \
+                     Try a smaller model like 'qwen2.5-1.5b-instruct'.",
+                    model_id, model_def.min_ram_gb, total_ram_gb,
+                ));
+            }
+        }
+
         let cpu_model_dir = ModelLoader::openvino_dir(&model_def.directory);
         let artifacts = resolve_model_lane_artifacts(&model_def.directory);
         let dml_model_path = ModelLoader::resolve_model_file_for_backend(
