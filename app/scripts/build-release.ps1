@@ -1,0 +1,382 @@
+[CmdletBinding()]
+param(
+    [ValidateSet('Online', 'Lite', 'Standard', 'Full', 'Portable')]
+    [string]$Variant = 'Online'
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+# ---------------------------------------------------------------------------
+# Path resolution
+# ---------------------------------------------------------------------------
+
+$ScriptsDir    = $PSScriptRoot
+$AppRoot       = (Resolve-Path (Join-Path $ScriptsDir "..")).Path
+$WorkspaceRoot = (Resolve-Path (Join-Path $ScriptsDir "..\..\..")).Path
+
+$DistRoot         = Join-Path $WorkspaceRoot "dist"
+$ModelArchivesDir = Join-Path $DistRoot "model-archives"
+$NsisSearchRoot   = Join-Path $AppRoot "src-tauri\target\release\bundle\nsis"
+
+$MaxInstallerBytes = 1610612736  # 1.5 GB in bytes
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host ""
+    Write-Host "==> $Message" -ForegroundColor Cyan
+}
+
+function Write-Success {
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Green
+}
+
+function Find-NsisInstaller {
+    if (-not (Test-Path $NsisSearchRoot -PathType Container)) {
+        throw "NSIS bundle directory does not exist: $NsisSearchRoot`nRun 'npm run tauri build' first."
+    }
+
+    $candidates = Get-ChildItem -LiteralPath $NsisSearchRoot -Filter "*.exe" -File |
+        Sort-Object LastWriteTime -Descending
+
+    if ($candidates.Count -eq 0) {
+        throw "No .exe installer found in: $NsisSearchRoot"
+    }
+
+    return $candidates[0]
+}
+
+function Read-ModelManifest {
+    param([string]$ManifestPath)
+
+    if (-not (Test-Path $ManifestPath -PathType Leaf)) {
+        throw "Model manifest not found: $ManifestPath"
+    }
+
+    $raw = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+    return $raw.models
+}
+
+function Get-ModelsForVariant {
+    param(
+        [string]$VariantName,
+        [array]$AllModels
+    )
+
+    if ($VariantName -eq 'Lite') {
+        return @($AllModels | Where-Object { $_.id -eq 'qwen2.5-1.5b-instruct' })
+    }
+    if ($VariantName -eq 'Standard') {
+        return @($AllModels | Where-Object { $_.id -eq 'qwen3-4b' })
+    }
+    if ($VariantName -eq 'Full') {
+        return @($AllModels)
+    }
+
+    throw "Unexpected variant: $VariantName"
+}
+
+function Build-OfflineBundle {
+    param([string]$VariantName, [object]$InstallerItem)
+
+    Write-Step "Building model archives for $VariantName"
+
+    Write-Host "  Running build-dml-model-archives.ps1..."
+    & "$ScriptsDir\build-dml-model-archives.ps1"
+    if ($LASTEXITCODE -ne 0) { throw "build-dml-model-archives.ps1 failed." }
+
+    Write-Host "  Running build-openvino-model-archives.ps1..."
+    & "$ScriptsDir\build-openvino-model-archives.ps1"
+    if ($LASTEXITCODE -ne 0) { throw "build-openvino-model-archives.ps1 failed." }
+
+    Write-Success "  Model archives built."
+
+    Write-Step "Assembling offline bundle for $VariantName"
+
+    # Read manifests written by the archive scripts
+    $dmlModels      = Read-ModelManifest (Join-Path $ModelArchivesDir "dml-model-archives.json")
+    $openVinoModels = Read-ModelManifest (Join-Path $ModelArchivesDir "openvino-model-archives.json")
+    $allModels      = @($dmlModels) + @($openVinoModels)
+
+    # Filter by variant
+    $selectedModels = Get-ModelsForVariant -VariantName $VariantName -AllModels $allModels
+
+    if ($selectedModels.Count -eq 0) {
+        throw "No model archives matched variant '$VariantName'. Verify that model archives were built successfully."
+    }
+
+    # Assemble bundle directory
+    $bundleName   = "SmolPC-$VariantName"
+    $bundleRoot   = Join-Path $DistRoot "offline\$bundleName"
+    $bundleModels = Join-Path $bundleRoot "models"
+
+    # Clean existing bundle directory so we don't accumulate stale files
+    if (Test-Path $bundleRoot) {
+        Remove-Item -LiteralPath $bundleRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $bundleModels | Out-Null
+
+    # Copy installer
+    Copy-Item -LiteralPath $InstallerItem.FullName -Destination (Join-Path $bundleRoot $InstallerItem.Name) -Force
+
+    # Copy model archives and collect manifest entries
+    $manifestModels = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($model in $selectedModels) {
+        $archiveSrc = Join-Path $ModelArchivesDir $model.archive_name
+        if (-not (Test-Path $archiveSrc -PathType Leaf)) {
+            throw "Model archive not found: $archiveSrc"
+        }
+        $archiveSizeMB = [math]::Round((Get-Item $archiveSrc).Length / 1MB, 1)
+        Copy-Item -LiteralPath $archiveSrc -Destination (Join-Path $bundleModels $model.archive_name) -Force
+        Write-Host "  Included: $($model.archive_name) ($archiveSizeMB MB)"
+        $manifestModels.Add($model)
+    }
+
+    # Write combined model-archives.json into the bundle
+    $combinedManifest = [PSCustomObject]@{
+        version = 1
+        models  = $manifestModels
+    }
+    $combinedManifest | ConvertTo-Json -Depth 6 |
+        Set-Content -LiteralPath (Join-Path $bundleModels "model-archives.json") -Encoding UTF8
+
+    # ZIP the bundle
+    $offlineDir = Join-Path $DistRoot "offline"
+    New-Item -ItemType Directory -Force -Path $offlineDir | Out-Null
+
+    $zipPath = Join-Path $offlineDir "$bundleName.zip"
+    if (Test-Path $zipPath) {
+        Remove-Item -LiteralPath $zipPath -Force
+    }
+
+    $tarExe = Join-Path $env:SystemRoot "System32\tar.exe"
+    & $tarExe -a -cf $zipPath -C $offlineDir $bundleName
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create bundle archive: $zipPath"
+    }
+
+    # Remove staging directory (the ZIP is the artifact)
+    Remove-Item -LiteralPath $bundleRoot -Recurse -Force
+
+    $zipSizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 1)
+    Write-Success "  Offline bundle: $zipPath ($zipSizeMB MB)"
+}
+
+function Build-PortableBundle {
+    param([object]$InstallerItem)
+
+    Write-Step "Assembling Portable variant"
+
+    Write-Warning "Portable variant requires manual verification -- layout extraction from Tauri NSIS installs is not fully automated."
+
+    $portableDir  = Join-Path $DistRoot "portable"
+    $portableRoot = Join-Path $portableDir "SmolPC-Portable"
+
+    if (Test-Path $portableRoot) {
+        Remove-Item -LiteralPath $portableRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
+
+    # Sentinel file — signals is_portable() to use flat layout resolution
+    Set-Content -LiteralPath (Join-Path $portableRoot ".portable") -Value "SmolPC portable deployment" -Encoding UTF8
+    Write-Host "  Created .portable sentinel."
+
+    # Engine binary
+    $engineSrc = Join-Path $AppRoot "src-tauri\binaries\smolpc-engine-host-x86_64-pc-windows-msvc.exe"
+    if (Test-Path $engineSrc -PathType Leaf) {
+        Copy-Item -LiteralPath $engineSrc -Destination $portableRoot -Force
+        Write-Host "  Copied engine binary."
+    } else {
+        Write-Warning "  Engine binary not found at expected path: $engineSrc"
+        Write-Warning "  Run stage-engine-sidecar.ps1 first."
+    }
+
+    # Runtime libs -- DirectML and OpenVINO
+    $libsDir = Join-Path $AppRoot "src-tauri\libs"
+    if (Test-Path $libsDir -PathType Container) {
+        $portableLibs = Join-Path $portableRoot "libs"
+        New-Item -ItemType Directory -Force -Path $portableLibs | Out-Null
+        Copy-Item -Path (Join-Path $libsDir "*") -Destination $portableLibs -Recurse -Force
+        Write-Host "  Copied libs."
+    } else {
+        Write-Warning "  Libs directory not found: $libsDir"
+    }
+
+    # Bundled Python runtime
+    $pythonSrc = Join-Path $AppRoot "src-tauri\resources\python\payload"
+    if (Test-Path $pythonSrc -PathType Container) {
+        $portablePython = Join-Path $portableRoot "resources\python\payload"
+        New-Item -ItemType Directory -Force -Path $portablePython | Out-Null
+        Copy-Item -Path (Join-Path $pythonSrc "*") -Destination $portablePython -Recurse -Force
+        Write-Host "  Copied bundled Python runtime."
+    } else {
+        Write-Warning "  Bundled Python runtime not found: $pythonSrc"
+    }
+
+    # Lite model archives (qwen2.5-1.5b-instruct only)
+    $dmlManifestPath   = Join-Path $ModelArchivesDir "dml-model-archives.json"
+    $ovinoManifestPath = Join-Path $ModelArchivesDir "openvino-model-archives.json"
+
+    $portableModelsDir = Join-Path $portableRoot "models"
+    New-Item -ItemType Directory -Force -Path $portableModelsDir | Out-Null
+
+    $portableModels = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($manifestPath in @($dmlManifestPath, $ovinoManifestPath)) {
+        if (Test-Path $manifestPath -PathType Leaf) {
+            $models     = Read-ModelManifest $manifestPath
+            $liteModels = @($models | Where-Object { $_.id -eq 'qwen2.5-1.5b-instruct' })
+            foreach ($model in $liteModels) {
+                $archiveSrc = Join-Path $ModelArchivesDir $model.archive_name
+                if (Test-Path $archiveSrc -PathType Leaf) {
+                    Copy-Item -LiteralPath $archiveSrc -Destination $portableModelsDir -Force
+                    Write-Host "  Copied model archive: $($model.archive_name)"
+                    $portableModels.Add($model)
+                } else {
+                    Write-Warning "  Model archive not found (skipped): $archiveSrc"
+                    Write-Warning "  Run build-dml-model-archives.ps1 / build-openvino-model-archives.ps1 first."
+                }
+            }
+        } else {
+            Write-Warning "  Model manifest not found (skipped): $manifestPath"
+        }
+    }
+
+    if ($portableModels.Count -gt 0) {
+        $portableManifest = [PSCustomObject]@{
+            version = 1
+            models  = $portableModels
+        }
+        $portableManifest | ConvertTo-Json -Depth 6 |
+            Set-Content -LiteralPath (Join-Path $portableModelsDir "model-archives.json") -Encoding UTF8
+    }
+
+    # ZIP the portable folder
+    New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
+
+    $zipPath = Join-Path $portableDir "SmolPC-Portable.zip"
+    if (Test-Path $zipPath) {
+        Remove-Item -LiteralPath $zipPath -Force
+    }
+
+    $tarExe = Join-Path $env:SystemRoot "System32\tar.exe"
+    & $tarExe -a -cf $zipPath -C $portableDir "SmolPC-Portable"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create portable archive: $zipPath"
+    }
+
+    Remove-Item -LiteralPath $portableRoot -Recurse -Force
+
+    $zipSizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 1)
+    Write-Success "  Portable bundle: $zipPath ($zipSizeMB MB)"
+    Write-Warning "  Portable variant requires manual verification -- confirm app binary is included and the install layout is correct before distributing."
+}
+
+# ---------------------------------------------------------------------------
+# Step 1: Stage runtimes (idempotent)
+# ---------------------------------------------------------------------------
+
+Write-Step "Staging runtimes"
+
+Write-Host "  Running setup-directml-runtime.ps1..."
+& "$ScriptsDir\setup-directml-runtime.ps1"
+if ($LASTEXITCODE -ne 0) { throw "setup-directml-runtime.ps1 failed." }
+
+Write-Host "  Running setup-openvino-runtime.ps1..."
+& "$ScriptsDir\setup-openvino-runtime.ps1"
+if ($LASTEXITCODE -ne 0) { throw "setup-openvino-runtime.ps1 failed." }
+
+Write-Host "  Running setup-bundled-python-runtime.ps1..."
+& "$ScriptsDir\setup-bundled-python-runtime.ps1"
+if ($LASTEXITCODE -ne 0) { throw "setup-bundled-python-runtime.ps1 failed." }
+
+Write-Success "  Runtimes staged."
+
+# ---------------------------------------------------------------------------
+# Step 2: Stage engine sidecar
+# ---------------------------------------------------------------------------
+
+Write-Step "Staging engine sidecar"
+& "$ScriptsDir\stage-engine-sidecar.ps1"
+if ($LASTEXITCODE -ne 0) { throw "stage-engine-sidecar.ps1 failed." }
+Write-Success "  Engine sidecar staged."
+
+# ---------------------------------------------------------------------------
+# Step 3: Build NSIS installer
+# ---------------------------------------------------------------------------
+
+Write-Step "Building NSIS installer (npm run tauri build)"
+
+Push-Location $AppRoot
+try {
+    npm run tauri build
+    if ($LASTEXITCODE -ne 0) { throw "'npm run tauri build' failed with exit code $LASTEXITCODE." }
+} finally {
+    Pop-Location
+}
+
+Write-Success "  Tauri build complete."
+
+# ---------------------------------------------------------------------------
+# Step 4: Find installer
+# ---------------------------------------------------------------------------
+
+Write-Step "Locating NSIS installer"
+
+$installer = Find-NsisInstaller
+Write-Host "  Found: $($installer.FullName)"
+Write-Host "  Size:  $([math]::Round($installer.Length / 1MB, 1)) MB"
+
+# ---------------------------------------------------------------------------
+# Step 5: Size guard (must be < 1.5 GB)
+# ---------------------------------------------------------------------------
+
+if ($installer.Length -gt $MaxInstallerBytes) {
+    $sizeMB  = [math]::Round($installer.Length / 1MB, 1)
+    $limitMB = [math]::Round($MaxInstallerBytes / 1MB, 1)
+    Write-Host "  ERROR: Installer is $sizeMB MB -- exceeds the $limitMB MB limit." -ForegroundColor Red
+    throw "Installer size guard failed."
+}
+
+Write-Success "  Size guard passed."
+
+# ---------------------------------------------------------------------------
+# Step 6: Variant-specific packaging
+# ---------------------------------------------------------------------------
+
+if ($Variant -eq 'Online') {
+    Write-Step "Packaging Online variant"
+
+    $onlineDir = Join-Path $DistRoot "online"
+    New-Item -ItemType Directory -Force -Path $onlineDir | Out-Null
+
+    $dest = Join-Path $onlineDir $installer.Name
+    Copy-Item -LiteralPath $installer.FullName -Destination $dest -Force
+    Write-Success "  Online installer: $dest"
+}
+elseif ($Variant -eq 'Lite' -or $Variant -eq 'Standard' -or $Variant -eq 'Full') {
+    Build-OfflineBundle -VariantName $Variant -InstallerItem $installer
+}
+elseif ($Variant -eq 'Portable') {
+    Build-PortableBundle -InstallerItem $installer
+}
+else {
+    throw "Unknown variant: $Variant"
+}
+
+# ---------------------------------------------------------------------------
+# Done
+# ---------------------------------------------------------------------------
+
+Write-Host ""
+Write-Host "==========================================" -ForegroundColor Green
+Write-Host "  build-release.ps1 complete!" -ForegroundColor Green
+Write-Host "  Variant: $Variant" -ForegroundColor Green
+Write-Host "  Dist:    $DistRoot" -ForegroundColor Green
+Write-Host "==========================================" -ForegroundColor Green

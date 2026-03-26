@@ -1,0 +1,21 @@
+[package]
+name = "smolpc-connector-libreoffice"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+smolpc-connector-common = { path = "../../crates/smolpc-connector-common" }
+smolpc-assistant-types = { path = "../../crates/smolpc-assistant-types" }
+smolpc-mcp-client = { path = "../../crates/smolpc-mcp-client" }
+smolpc-engine-client = { path = "../../engine/crates/smolpc-engine-client" }
+smolpc-engine-core = { path = "../../engine/crates/smolpc-engine-core" }
+async-trait.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+tempfile = "3.13"

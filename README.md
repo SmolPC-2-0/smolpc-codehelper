@@ -24,8 +24,8 @@ The current integrated desktop app in this repo is **SmolPC Code Helper**, which
 │       ├── smolpc-engine-host
 │       └── smolpc-engine-client
 ├── launcher/
+├── app/                    (CodeHelper)
 ├── apps/
-│   ├── codehelper/
 │   ├── libreoffice-assistant/
 │   ├── gimp-assistant/
 │   └── blender-assistant/

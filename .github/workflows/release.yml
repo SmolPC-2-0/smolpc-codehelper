@@ -48,27 +48,27 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            apps/codehelper/src-tauri/libs
-            apps/codehelper/src-tauri/resources/python/payload
-          key: staged-runtimes-${{ hashFiles('apps/codehelper/scripts/setup-openvino-runtime.ps1', 'apps/codehelper/scripts/setup-directml-runtime.ps1', 'apps/codehelper/scripts/setup-bundled-python-runtime.ps1') }}
+            app/src-tauri/libs
+            app/src-tauri/resources/python/payload
+          key: staged-runtimes-${{ hashFiles('app/scripts/setup-openvino-runtime.ps1', 'app/scripts/setup-directml-runtime.ps1', 'app/scripts/setup-bundled-python-runtime.ps1') }}
 
       - name: Stage DirectML runtime
         if: steps.cache-dlls.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          & apps/codehelper/scripts/setup-directml-runtime.ps1 -Force
+          & app/scripts/setup-directml-runtime.ps1 -Force
 
       - name: Stage OpenVINO runtime
         if: steps.cache-dlls.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          & apps/codehelper/scripts/setup-openvino-runtime.ps1
+          & app/scripts/setup-openvino-runtime.ps1
 
       - name: Stage bundled Python runtime
         if: steps.cache-dlls.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          & apps/codehelper/scripts/setup-bundled-python-runtime.ps1
+          & app/scripts/setup-bundled-python-runtime.ps1
 
       - name: Build shared engine host sidecar
         run: cargo build --release -p smolpc-engine-host --target ${{ matrix.target }}
@@ -76,26 +76,26 @@ jobs:
       - name: Stage sidecar binary
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path apps/codehelper/src-tauri/binaries -Force | Out-Null
+          New-Item -ItemType Directory -Path app/src-tauri/binaries -Force | Out-Null
           $sideBin = "target/${{ matrix.target }}/release/smolpc-engine-host.exe"
           if (!(Test-Path $sideBin)) {
             Write-Error "Expected sidecar binary missing: $sideBin"
             throw "Build output did not contain target-specific sidecar artifact."
           }
-          Copy-Item $sideBin "apps/codehelper/src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}.exe" -Force
+          Copy-Item $sideBin "app/src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}.exe" -Force
 
       - name: Validate staged artifacts
         shell: pwsh
         run: |
           $required = @(
-            "apps/codehelper/src-tauri/libs/onnxruntime.dll",
-            "apps/codehelper/src-tauri/libs/DirectML.dll",
-            "apps/codehelper/src-tauri/libs/onnxruntime-genai.dll",
-            "apps/codehelper/src-tauri/libs/openvino/openvino_genai_c.dll",
-            "apps/codehelper/src-tauri/libs/openvino/tbb12.dll",
-            "apps/codehelper/src-tauri/libs/openvino/openvino_intel_cpu_plugin.dll",
-            "apps/codehelper/src-tauri/resources/python/payload/python.exe",
-            "apps/codehelper/src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}.exe"
+            "app/src-tauri/libs/onnxruntime.dll",
+            "app/src-tauri/libs/DirectML.dll",
+            "app/src-tauri/libs/onnxruntime-genai.dll",
+            "app/src-tauri/libs/openvino/openvino_genai_c.dll",
+            "app/src-tauri/libs/openvino/tbb12.dll",
+            "app/src-tauri/libs/openvino/openvino_intel_cpu_plugin.dll",
+            "app/src-tauri/resources/python/payload/python.exe",
+            "app/src-tauri/binaries/smolpc-engine-host-${{ matrix.target }}.exe"
           )
           $missing = $required | Where-Object { -not (Test-Path $_) }
           if ($missing) {
@@ -108,7 +108,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          projectPath: apps/codehelper
+          projectPath: app
           tagName: v__VERSION__
           releaseName: 'v__VERSION__'
           releaseBody: 'See the commit history for a complete list of changes.'

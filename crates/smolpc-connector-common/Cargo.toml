@@ -1,0 +1,20 @@
+[package]
+name = "smolpc-connector-common"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+smolpc-assistant-types = { path = "../smolpc-assistant-types" }
+smolpc-engine-core = { path = "../../engine/crates/smolpc-engine-core" }
+smolpc-engine-client = { path = "../../engine/crates/smolpc-engine-client" }
+async-trait.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+sysinfo.workspace = true
+
+[dev-dependencies]
+tempfile = "3.13"

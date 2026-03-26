@@ -36,7 +36,7 @@ Run before opening PR:
 npm run check
 npm run boundary:check
 cargo test -p smolpc-engine-core -p smolpc-engine-client -p smolpc-engine-host
-cargo check -p smolpc-code-helper
+cargo check -p smolpc-desktop
 ```
 
 ## Documentation Quality Bar

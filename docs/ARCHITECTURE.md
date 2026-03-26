@@ -23,7 +23,7 @@ This document is the current source of truth for repository organization and own
 - `engine/crates/smolpc-engine-core`: runtime and model domain logic
 - `engine/crates/smolpc-engine-host`: localhost API host
 - `engine/crates/smolpc-engine-client`: typed client for app integrations
-- `apps/codehelper`: current integrated app
+- `app`: current integrated app
 - `apps/libreoffice-assistant`, `apps/gimp-assistant`, `apps/blender-assistant`: staged app roots
 - `launcher`: launcher zone docs and extraction target
 

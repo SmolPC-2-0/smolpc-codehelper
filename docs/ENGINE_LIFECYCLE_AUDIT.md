@@ -6,12 +6,12 @@ This document captures the architectural analysis of the engine lifecycle manage
 ## Current Architecture
 
 ### Components
-- **InferenceState** (`apps/codehelper/src-tauri/src/commands/inference.rs`) — Tauri managed state holding cached engine client, connect lock, runtime config, and desired model. Four `Arc<Mutex<T>>` fields.
+- **InferenceState** (`app/src-tauri/src/commands/inference.rs`) — Tauri managed state holding cached engine client, connect lock, runtime config, and desired model. Four `Arc<Mutex<T>>` fields.
 - **resolve_client()** (same file, ~line 356) — The single entry point for all 16 Tauri commands to get an engine client. Implements double-checked locking with `connect_lock` serializing spawn/connect attempts.
 - **connect_or_spawn()** (`engine/crates/smolpc-engine-client/src/spawn.rs`) — The engine client crate's spawn logic. Manages file-based spawn lock, token regeneration, process spawning, and health wait loop.
 - **EngineClient** (`engine/crates/smolpc-engine-client/src/client.rs`) — HTTP client wrapper. Clone-friendly (Arc-based reqwest::Client). All methods are stateless HTTP calls.
-- **Health polling** (`apps/codehelper/src/App.svelte`, lines 804-874) — Frontend setTimeout chain polling `engine_health_only` every 10s. Triggers reconnection via `reestablishEngineSession()` when engine dies.
-- **Launcher orchestrator** (`apps/codehelper/src-tauri/src/launcher/orchestrator.rs`) — Duplicate engine client caching pattern for the launcher shell.
+- **Health polling** (`app/src/App.svelte`, lines 804-874) — Frontend setTimeout chain polling `engine_health_only` every 10s. Triggers reconnection via `reestablishEngineSession()` when engine dies.
+- **Launcher orchestrator** (`app/src-tauri/src/launcher/orchestrator.rs`) — Duplicate engine client caching pattern for the launcher shell.
 
 ### Lock Architecture
 

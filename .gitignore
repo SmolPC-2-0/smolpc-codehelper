@@ -19,9 +19,9 @@ dist-ssr
 .env.*
 !.env.example
 /target/
-/apps/codehelper/src-tauri/target/
+/app/src-tauri/target/
 /engine/crates/smolpc-tts-server/target/
-/apps/codehelper/src-tauri/gen/schemas
+/app/src-tauri/gen/schemas
 /docs/.local_docs/
 .claude/settings.local.json
 .claude/scripts/
@@ -29,17 +29,17 @@ dist-ssr
 # ONNX Runtime and models
 /ort-extracted/
 /onnxruntime-*.zip
-/apps/codehelper/src-tauri/models/
-/apps/codehelper/src-tauri/libs/*
-!/apps/codehelper/src-tauri/libs/README.md
-!/apps/codehelper/src-tauri/libs/openvino/
-/apps/codehelper/src-tauri/libs/openvino/*
-!/apps/codehelper/src-tauri/libs/openvino/.gitkeep
-/apps/codehelper/src-tauri/resources/python/payload/
-/apps/codehelper/src-tauri/*.dll
+/app/src-tauri/models/
+/app/src-tauri/libs/*
+!/app/src-tauri/libs/README.md
+!/app/src-tauri/libs/openvino/
+/app/src-tauri/libs/openvino/*
+!/app/src-tauri/libs/openvino/.gitkeep
+/app/src-tauri/resources/python/payload/
+/app/src-tauri/*.dll
 nul
 
 # Local/generated artifacts
 cache_dir/
-/apps/codehelper/scripts/src-tauri/
+/app/scripts/src-tauri/
 /tmp/
