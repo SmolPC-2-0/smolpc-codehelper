@@ -4,7 +4,9 @@ Use this guide when you are adding a mode to the current unified SmolPC desktop 
 
 This is for contributors changing the integrated app under `app/`. If you are onboarding a separate app or helper to the shared engine contract, start with [APP_ONBOARDING_PLAYBOOK.md](./APP_ONBOARDING_PLAYBOOK.md) instead.
 
-Current `main` layout note:
+For general repo conventions and contribution workflow, also read [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+## Current Main Layout
 
 - the active unified shell lives under `app/`
 - connector implementations live under `connectors/`
@@ -193,6 +195,19 @@ When adding a new mode on current `main`, work in this order:
 6. Update setup/host-launch wiring for host-backed modes.
 7. Verify `list_modes`, `mode_status`, and message-send behavior all match the intended mode shape.
 
+## Verification Checklist
+
+Before you call a mode onboarding change done, verify the actual runtime path as well as the file wiring:
+
+1. `list_modes` returns the new mode with the expected id, label, and capability metadata.
+2. `mode_status` resolves for the new mode without falling back to a misleading generic state.
+3. Sending a message reaches the intended execution path:
+   - direct engine chat for `code`-style modes
+   - `assistant_send` plus the intended provider family for tool-backed modes
+4. Host-backed modes stay unavailable until the required setup items pass, then become available without extra manual toggles.
+5. `open_host_app` and any mode-specific host-launch labels still point to the intended desktop app.
+6. The empty state, help drawer, and other mode-specific shell copy maps do not still assume the previous mode list.
+
 ## Definition Of Done
 
 A unified mode onboarding change is complete when:
@@ -203,4 +218,4 @@ A unified mode onboarding change is complete when:
    - tool-backed assistant/provider flow
 3. Host-backed modes report correct status, host-launch behavior, and setup availability.
 4. Mode-specific UI text and shell maps do not still assume the old set of modes.
-5. The change can be understood without reverse-engineering older `apps/codehelper/...` layouts.
+5. The change can be understood without reverse-engineering the older pre-unification `apps/codehelper/...` layout.
