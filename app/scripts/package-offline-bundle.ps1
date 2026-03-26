@@ -53,7 +53,7 @@ $modelsRoot = Resolve-ModelsRoot -Path $ModelsRoot
 $bundleScript = Join-Path $repoRoot "scripts\build-windows-local-bundle.ps1"
 
 Write-Host "=========================================="
-Write-Host "  SmolPC Code Helper - Offline Packager"
+Write-Host "  SmolPC 2.0 - Offline Packager"
 Write-Host "=========================================="
 Write-Host ""
 Write-Host "  Repo root:    $repoRoot"
