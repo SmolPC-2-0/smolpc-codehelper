@@ -296,10 +296,7 @@ impl EngineClient {
     }
 
     /// Transcribe 16kHz mono f32 audio via Whisper STT endpoint.
-    pub async fn transcribe(
-        &self,
-        audio_16khz_mono: &[f32],
-    ) -> Result<String, EngineClientError> {
+    pub async fn transcribe(&self, audio_16khz_mono: &[f32]) -> Result<String, EngineClientError> {
         let bytes: Vec<u8> = audio_16khz_mono
             .iter()
             .flat_map(|s| s.to_le_bytes())

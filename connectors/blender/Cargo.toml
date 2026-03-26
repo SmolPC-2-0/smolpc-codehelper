@@ -1,0 +1,25 @@
+[package]
+name = "smolpc-connector-blender"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+smolpc-connector-common = { path = "../../crates/smolpc-connector-common" }
+smolpc-assistant-types = { path = "../../crates/smolpc-assistant-types" }
+smolpc-engine-client = { path = "../../engine/crates/smolpc-engine-client" }
+async-trait.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+axum.workspace = true
+rand.workspace = true
+dirs.workspace = true
+serde-pickle = "1.2"
+
+[dev-dependencies]
+tempfile = "3.13"
+tower = "0.5"
+reqwest.workspace = true

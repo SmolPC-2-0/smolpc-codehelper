@@ -1,0 +1,5 @@
+[build]
+# Limit parallel rustc jobs to prevent OOM on machines with ≤16GB RAM.
+# The workspace has 10 crates; full parallelism can exceed available memory
+# during debug builds (each rustc instance uses ~500MB-1.5GB).
+jobs = 2

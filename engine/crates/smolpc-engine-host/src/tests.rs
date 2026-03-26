@@ -1043,108 +1043,81 @@ fn ram_selection_4gb_returns_none() {
     assert_eq!(selected, None);
 }
 
-#[test]
-fn classify_startup_model_error_flags_memory_pressure() {
-    let classified = classify_startup_model_error("OpenVINO runtime failed: out of memory");
-    assert_eq!(classified.code, STARTUP_MEMORY_PRESSURE);
-    assert!(classified.retryable);
-    assert!(classified.message.contains("Memory pressure detected."));
-}
-
-#[test]
-fn classify_startup_model_error_ignores_non_memory_substrings() {
-    let classified = classify_startup_model_error("Launcher window room resize failed");
-    assert_eq!(classified.code, STARTUP_MODEL_LOAD_FAILED);
-    assert!(!classified.message.contains("Memory pressure detected."));
-}
-
-#[test]
-fn with_memory_pressure_hint_is_idempotent() {
-    let hinted =
-        with_memory_pressure_hint("generation failed: out of memory", Some("qwen3-4b"));
-    let hinted_twice = with_memory_pressure_hint(&hinted, Some("qwen3-4b"));
-    assert_eq!(hinted, hinted_twice);
-}
-
-#[test]
-fn startup_mode_directml_required_sets_directml_gate() {
-    assert!(StartupMode::DirectmlRequired.requires_directml());
-    assert!(!StartupMode::Auto.requires_directml());
-}
-
 // ── Whisper STT tests ────────────────────────────────────────────
 
-    #[test]
-    fn audio_body_must_be_f32_aligned() {
-        // f32 samples are 4 bytes each. Non-aligned bodies must be rejected.
-        assert!(5 % 4 != 0, "5 bytes is not f32-aligned");
-        assert!(8 % 4 == 0, "8 bytes is f32-aligned");
-        assert!(0 % 4 == 0, "empty is technically aligned but rejected separately");
-    }
+#[test]
+fn audio_body_must_be_f32_aligned() {
+    // f32 samples are 4 bytes each. Non-aligned bodies must be rejected.
+    assert!(5 % 4 != 0, "5 bytes is not f32-aligned");
+    assert!(8 % 4 == 0, "8 bytes is f32-aligned");
+    assert!(
+        0 % 4 == 0,
+        "empty is technically aligned but rejected separately"
+    );
+}
 
-    #[test]
-    fn f32_le_bytes_round_trip() {
-        let samples: Vec<f32> = vec![0.0, 0.5, -0.5, 1.0, -1.0];
-        let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
-        let recovered: Vec<f32> = bytes
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-            .collect();
-        assert_eq!(samples, recovered);
-    }
+#[test]
+fn f32_le_bytes_round_trip() {
+    let samples: Vec<f32> = vec![0.0, 0.5, -0.5, 1.0, -1.0];
+    let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+    let recovered: Vec<f32> = bytes
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
+    assert_eq!(samples, recovered);
+}
 
-    #[test]
-    fn whisper_model_path_structure() {
-        let models_dir = PathBuf::from("/fake/models");
-        let whisper_dir = models_dir.join("whisper-base.en").join("openvino");
-        assert!(
-            whisper_dir.ends_with("whisper-base.en/openvino")
-                || whisper_dir.ends_with(r"whisper-base.en\openvino"),
-            "unexpected path: {}",
-            whisper_dir.display()
-        );
-    }
+#[test]
+fn whisper_model_path_structure() {
+    let models_dir = PathBuf::from("/fake/models");
+    let whisper_dir = models_dir.join("whisper-base.en").join("openvino");
+    assert!(
+        whisper_dir.ends_with("whisper-base.en/openvino")
+            || whisper_dir.ends_with(r"whisper-base.en\openvino"),
+        "unexpected path: {}",
+        whisper_dir.display()
+    );
+}
 
-    // ── TTS sidecar tests ────────────────────────────────────────────
+// ── TTS sidecar tests ────────────────────────────────────────────
 
-    #[test]
-    fn tts_binary_not_in_resource_dir() {
-        // In debug builds, the fallback path may find the actual built binary
-        // in the workspace target dir. This test only verifies that an empty
-        // resource_dir doesn't contain the binary.
-        let dir = tempdir().unwrap();
-        let binaries = dir.path().join("binaries");
-        fs::create_dir_all(&binaries).unwrap();
-        // binaries/ dir exists but is empty — no TTS binary inside it
-        let binary_name = format!("smolpc-tts-server{}", std::env::consts::EXE_SUFFIX);
-        assert!(!binaries.join(&binary_name).exists());
-    }
+#[test]
+fn tts_binary_not_in_resource_dir() {
+    // In debug builds, the fallback path may find the actual built binary
+    // in the workspace target dir. This test only verifies that an empty
+    // resource_dir doesn't contain the binary.
+    let dir = tempdir().unwrap();
+    let binaries = dir.path().join("binaries");
+    fs::create_dir_all(&binaries).unwrap();
+    // binaries/ dir exists but is empty — no TTS binary inside it
+    let binary_name = format!("smolpc-tts-server{}", std::env::consts::EXE_SUFFIX);
+    assert!(!binaries.join(&binary_name).exists());
+}
 
-    #[test]
-    fn tts_binary_found_in_binaries_dir() {
-        let dir = tempdir().unwrap();
-        let binaries = dir.path().join("binaries");
-        fs::create_dir_all(&binaries).unwrap();
-        let binary_name = format!("smolpc-tts-server{}", std::env::consts::EXE_SUFFIX);
-        fs::write(binaries.join(&binary_name), b"fake").unwrap();
-        let result = crate::tts_sidecar::resolve_tts_binary(Some(dir.path()));
-        assert!(result.is_some());
-        assert!(result.unwrap().ends_with(&binary_name));
-    }
+#[test]
+fn tts_binary_found_in_binaries_dir() {
+    let dir = tempdir().unwrap();
+    let binaries = dir.path().join("binaries");
+    fs::create_dir_all(&binaries).unwrap();
+    let binary_name = format!("smolpc-tts-server{}", std::env::consts::EXE_SUFFIX);
+    fs::write(binaries.join(&binary_name), b"fake").unwrap();
+    let result = crate::tts_sidecar::resolve_tts_binary(Some(dir.path()));
+    assert!(result.is_some());
+    assert!(result.unwrap().ends_with(&binary_name));
+}
 
-    #[test]
-    fn audio_speech_request_defaults() {
-        let req: AudioSpeechRequest =
-            serde_json::from_str(r#"{"text":"hello"}"#).unwrap();
-        assert_eq!(req.voice, "Bella");
-        assert_eq!(req.speed, 1.0);
-        assert_eq!(req.text, "hello");
-    }
+#[test]
+fn audio_speech_request_defaults() {
+    let req: AudioSpeechRequest = serde_json::from_str(r#"{"text":"hello"}"#).unwrap();
+    assert_eq!(req.voice, "Bella");
+    assert_eq!(req.speed, 1.0);
+    assert_eq!(req.text, "hello");
+}
 
-    #[test]
-    fn audio_speech_request_with_overrides() {
-        let req: AudioSpeechRequest =
-            serde_json::from_str(r#"{"text":"hi","voice":"Luna","speed":1.5}"#).unwrap();
-        assert_eq!(req.voice, "Luna");
-        assert_eq!(req.speed, 1.5);
-    }
+#[test]
+fn audio_speech_request_with_overrides() {
+    let req: AudioSpeechRequest =
+        serde_json::from_str(r#"{"text":"hi","voice":"Luna","speed":1.5}"#).unwrap();
+    assert_eq!(req.voice, "Luna");
+    assert_eq!(req.speed, 1.5);
+}

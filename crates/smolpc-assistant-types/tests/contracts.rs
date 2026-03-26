@@ -33,7 +33,8 @@ fn mode_config_uses_camel_case_keys() {
     let value = serde_json::to_value(dto).expect("serialize mode config");
     assert_eq!(value["providerKind"], "local");
     assert_eq!(value["systemPromptKey"], "mode.code.default");
-    assert_eq!(value["capabilities"]["showBenchmarkPanel"], true);
+    assert_eq!(value["capabilities"]["showExport"], true);
+    assert_eq!(value["capabilities"]["showContextControls"], true);
 }
 
 #[test]

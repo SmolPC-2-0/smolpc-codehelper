@@ -1,0 +1,12 @@
+{
+	"apps": [
+		{
+			"app_id": "codehelper",
+			"display_name": "SmolPC 2.0",
+			"exe_path": "%LOCALAPPDATA%\\Programs\\SmolPC 2.0\\smolpc-desktop.exe",
+			"args": [],
+			"focus_command": null,
+			"min_engine_api_major": 1
+		}
+	]
+}

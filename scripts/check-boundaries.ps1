@@ -18,13 +18,13 @@ function Assert-PathAbsent {
     }
 }
 
-Assert-PathAbsent "apps/codehelper/src-tauri/src/inference" "Legacy app-owned inference module must remain removed"
-Assert-PathAbsent "apps/codehelper/src-tauri/src/models" "Legacy app-owned model module must remain removed"
-Assert-PathAbsent "apps/codehelper/src-tauri/src/commands/ollama.rs" "Legacy Ollama command path must remain removed"
-Assert-PathAbsent "apps/codehelper/src/lib/stores/ollama.svelte.ts" "Legacy Ollama frontend store must remain removed"
-Assert-PathAbsent "apps/codehelper/src/lib/types/ollama.ts" "Legacy Ollama frontend types must remain removed"
+Assert-PathAbsent "app/src-tauri/src/inference" "Legacy app-owned inference module must remain removed"
+Assert-PathAbsent "app/src-tauri/src/models" "Legacy app-owned model module must remain removed"
+Assert-PathAbsent "app/src-tauri/src/commands/ollama.rs" "Legacy Ollama command path must remain removed"
+Assert-PathAbsent "app/src/lib/stores/ollama.svelte.ts" "Legacy Ollama frontend store must remain removed"
+Assert-PathAbsent "app/src/lib/types/ollama.ts" "Legacy Ollama frontend types must remain removed"
 
-$commandsModPath = "apps/codehelper/src-tauri/src/commands/mod.rs"
+$commandsModPath = "app/src-tauri/src/commands/mod.rs"
 if (Test-Path $commandsModPath) {
     $commandsMod = Get-Content $commandsModPath -Raw
     if ($commandsMod -match "\\bollama\\b") {
@@ -32,7 +32,7 @@ if (Test-Path $commandsModPath) {
     }
 }
 
-$appCargoPath = "apps/codehelper/src-tauri/Cargo.toml"
+$appCargoPath = "app/src-tauri/Cargo.toml"
 if (Test-Path $appCargoPath) {
     $appCargo = Get-Content $appCargoPath -Raw
     if ($appCargo -match "smolpc-engine-host") {
@@ -43,20 +43,20 @@ if (Test-Path $appCargoPath) {
 $hostImportPattern = "(use\s+smolpc_engine_host\b|smolpc_engine_host::)"
 $hostImportMatches = @()
 if (Get-Command rg -ErrorAction SilentlyContinue) {
-    $rgMatches = rg --line-number --glob "*.rs" $hostImportPattern "apps/codehelper/src-tauri/src"
+    $rgMatches = rg --line-number --glob "*.rs" $hostImportPattern "app/src-tauri/src"
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rgMatches)) {
         $hostImportMatches = @($rgMatches)
     }
 } else {
     $hostImportMatches = @(
-        Get-ChildItem -Path "apps/codehelper/src-tauri/src" -Recurse -Filter "*.rs" |
+        Get-ChildItem -Path "app/src-tauri/src" -Recurse -Filter "*.rs" |
             Select-String -Pattern $hostImportPattern -CaseSensitive |
             ForEach-Object { "{0}:{1}:{2}" -f $_.Path, $_.LineNumber, $_.Line.Trim() }
     )
 }
 
 if ($hostImportMatches.Count -gt 0) {
-    Report-Violation "Direct smolpc_engine_host imports are not allowed in apps/codehelper/src-tauri/src"
+    Report-Violation "Direct smolpc_engine_host imports are not allowed in app/src-tauri/src"
     Write-Host $hostImportMatches
 }
 
