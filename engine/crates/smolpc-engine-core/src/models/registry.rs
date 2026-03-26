@@ -32,7 +32,7 @@ impl ModelRegistry {
                 name: "Qwen2.5 1.5B Instruct".to_string(),
                 size: "1.5B".to_string(),
                 disk_size_gb: 0.9,
-                min_ram_gb: 8.0,
+                min_ram_gb: 3.0,
                 estimated_runtime_ram_gb: 1.5,
                 directory: "qwen2.5-1.5b-instruct".to_string(),
                 description: "Default shared model with OpenVINO CPU/NPU and DirectML artifacts"
