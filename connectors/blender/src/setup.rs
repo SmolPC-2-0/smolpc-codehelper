@@ -5,6 +5,8 @@ use serde_json::Value;
 use smolpc_assistant_types::{SetupItemDto, SetupItemStateDto};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const BLENDER_ADDON_MODULE_ID: &str = "blender_helper_http";
@@ -335,12 +337,15 @@ fn run_blender_background_json(
     python_expr: &str,
     action: &str,
 ) -> Result<Value, String> {
-    let output = Command::new(blender_path)
-        .arg("--background")
+    let mut cmd = Command::new(blender_path);
+    cmd.arg("--background")
         .arg("--python-expr")
         .arg(python_expr)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    let output = cmd
         .output()
         .map_err(|error| format!("Failed to start Blender to {action}: {error}"))?;
 

@@ -5,6 +5,8 @@ use smolpc_connector_common::python::resolve_prepared_python_command;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 use super::transport::{DEFAULT_GIMP_HOST, DEFAULT_GIMP_PORT};
 
@@ -58,16 +60,18 @@ impl GimpRuntimeConfig {
             .open(log_dir.join("bridge.stderr.log"))
             .map_err(|error| format!("Unable to open GIMP bridge stderr log: {error}"))?;
 
-        Command::new(&self.python_command)
-            .arg(&self.bridge_entrypoint)
+        let mut cmd = Command::new(&self.python_command);
+        cmd.arg(&self.bridge_entrypoint)
             .current_dir(&self.working_dir)
             .env("SMOLPC_GIMP_BRIDGE_HOST", &self.bridge_host)
             .env("SMOLPC_GIMP_BRIDGE_PORT", self.bridge_port.to_string())
             .env("SMOLPC_GIMP_PLUGIN_HOST", &self.plugin_host)
             .env("SMOLPC_GIMP_PLUGIN_PORT", self.plugin_port.to_string())
             .stdout(Stdio::from(stdout_log))
-            .stderr(Stdio::from(stderr_log))
-            .spawn()
+            .stderr(Stdio::from(stderr_log));
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        cmd.spawn()
             .map_err(|error| {
                 format!(
                     "Unable to start the GIMP MCP bridge via {} {}: {error}",
