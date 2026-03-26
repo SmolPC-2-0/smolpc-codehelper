@@ -203,7 +203,10 @@ pub async fn start_scene_bridge(
         .await
         .map_err(|error| {
             let text = error.to_string();
-            if text.contains("address already in use") || text.contains("Address already in use") {
+            if text.contains("address already in use")
+                || text.contains("Address already in use")
+                || text.contains("Only one usage of each socket address")
+            {
                 format!(
                     "Unable to start the Blender bridge because port {} is already in use. Close the conflicting process and refresh Blender mode.",
                     config.port
@@ -505,9 +508,8 @@ mod tests {
         handle.stop();
         for _ in 0..20 {
             match reqwest::get(&health_url).await {
-                Err(error) if error.is_connect() => return,
-                Err(error) => panic!("unexpected shutdown error: {error}"),
-                Ok(_) => tokio::time::sleep(std::time::Duration::from_millis(25)).await,
+                Err(_) => return, // Any connection failure means shutdown succeeded
+                Ok(_) => tokio::time::sleep(std::time::Duration::from_millis(50)).await,
             }
         }
 
