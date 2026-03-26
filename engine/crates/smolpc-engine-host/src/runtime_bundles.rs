@@ -134,12 +134,26 @@ fn absolute_env_override(key: &str) -> Option<PathBuf> {
 
 fn production_lib_root(resource_dir: Option<&Path>) -> Option<PathBuf> {
     if let Some(resource_dir) = resource_dir {
-        return Some(resource_dir.join("libs"));
+        return Some(strip_extended_length_prefix(resource_dir).join("libs"));
     }
 
     std::env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(|parent| parent.join("libs")))
+}
+
+/// Strip the Windows `\\?\` extended-length path prefix if present.
+///
+/// Tauri's `resource_dir()` can return paths with this prefix, which is
+/// incompatible with `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR` in `LoadLibraryExW`
+/// on some Windows configurations.
+fn strip_extended_length_prefix(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped)
+    } else {
+        path.to_path_buf()
+    }
 }
 
 fn dev_workspace_lib_roots(manifest_dir: &Path) -> Vec<PathBuf> {
@@ -513,7 +527,7 @@ mod tests {
     use super::{
         build_openvino_bundle, build_ort_bundle, dev_workspace_lib_roots,
         resolve_runtime_bundles_for_mode, resolve_runtime_bundles_for_mode_with_manifest,
-        RuntimeLoadMode,
+        strip_extended_length_prefix, RuntimeLoadMode,
     };
     use std::ffi::{OsStr, OsString};
     use std::fs;
@@ -867,6 +881,20 @@ mod tests {
         let bundle = build_openvino_bundle(root);
         assert!(!bundle.npu_validated());
         assert_eq!(bundle.failure_code(), Some("openvino_tbb_missing"));
+    }
+
+    #[test]
+    fn strip_extended_length_prefix_removes_prefix() {
+        let path = Path::new(r"\\?\C:\Users\test\AppData\Local\SmolPC");
+        let stripped = strip_extended_length_prefix(path);
+        assert_eq!(stripped, PathBuf::from(r"C:\Users\test\AppData\Local\SmolPC"));
+    }
+
+    #[test]
+    fn strip_extended_length_prefix_noop_for_normal_paths() {
+        let path = Path::new(r"C:\Users\test\AppData\Local\SmolPC");
+        let stripped = strip_extended_length_prefix(path);
+        assert_eq!(stripped, PathBuf::from(r"C:\Users\test\AppData\Local\SmolPC"));
     }
 
     fn create_ort_files(root: &Path, files: &[&str]) {

@@ -1,10 +1,15 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::provisioning::types::ModelSource;
 
 const BREADCRUMB_FILENAME: &str = "installer-source.txt";
 const MANIFEST_FILENAME: &str = "model-archives.json";
 const SMOLPC_VENDOR: &str = "SmolPC";
+
+/// Per-drive timeout for scanning. Network/slow USB drives that don't respond
+/// within this budget are skipped rather than blocking the UI.
+const DRIVE_SCAN_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Reads the breadcrumb file from `%LOCALAPPDATA%\SmolPC\installer-source.txt`.
 /// Returns the path stored in the file if it exists and is readable.
@@ -25,22 +30,23 @@ fn has_manifest(dir: &Path) -> bool {
     dir.join("models").join(MANIFEST_FILENAME).exists()
 }
 
-/// On Windows, scans drive roots A: through Z: for directories matching
-/// `SmolPC*/models/model-archives.json`. Returns all matching root dirs.
+/// Scan a single drive root for SmolPC directories. Runs on a thread with a
+/// timeout so that slow/network drives don't block the UI.
 #[cfg(windows)]
-fn scan_drives() -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    for letter in b'A'..=b'Z' {
-        let drive = format!("{}:\\", letter as char);
-        let drive_path = Path::new(&drive);
+fn scan_single_drive(letter: u8) -> Vec<PathBuf> {
+    let drive = format!("{}:\\", letter as char);
+    let drive_path = PathBuf::from(&drive);
+
+    // Spawn a thread with a timeout to avoid hanging on slow/network drives.
+    let handle = std::thread::spawn(move || {
         if !drive_path.exists() {
-            continue;
+            return Vec::new();
         }
-        // Iterate entries in the drive root looking for SmolPC* directories
-        let entries = match std::fs::read_dir(drive_path) {
+        let entries = match std::fs::read_dir(&drive_path) {
             Ok(e) => e,
-            Err(_) => continue,
+            Err(_) => return Vec::new(),
         };
+        let mut found = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_dir() {
@@ -51,6 +57,46 @@ fn scan_drives() -> Vec<PathBuf> {
             if name_str.starts_with(SMOLPC_VENDOR) && has_manifest(&path) {
                 found.push(path);
             }
+        }
+        found
+    });
+
+    match handle.join() {
+        Ok(result) => result,
+        Err(_) => Vec::new(),
+    }
+}
+
+/// On Windows, scans drive roots A: through Z: for directories matching
+/// `SmolPC*/models/model-archives.json`. Each drive is scanned with a timeout
+/// to avoid hanging on slow or network drives.
+#[cfg(windows)]
+fn scan_drives() -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    // Skip A: and B: (floppy drives) to avoid legacy hardware delays.
+    for letter in b'C'..=b'Z' {
+        // Use a thread + timeout per drive to avoid blocking on network mounts.
+        let handle = std::thread::spawn(move || scan_single_drive(letter));
+
+        // Wait with a timeout — if the drive doesn't respond, skip it.
+        let start = std::time::Instant::now();
+        loop {
+            if handle.is_finished() {
+                if let Ok(results) = handle.join() {
+                    found.extend(results);
+                }
+                break;
+            }
+            if start.elapsed() >= DRIVE_SCAN_TIMEOUT {
+                log::warn!(
+                    "Drive {}:\\ scan timed out after {:?}, skipping",
+                    letter as char,
+                    DRIVE_SCAN_TIMEOUT
+                );
+                // Thread is abandoned — it will eventually complete on its own.
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
     found

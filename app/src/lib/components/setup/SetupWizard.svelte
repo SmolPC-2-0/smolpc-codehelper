@@ -34,6 +34,10 @@
 	function handleRetry() {
 		provisioningStore.detectSources();
 	}
+
+	function handleSkip() {
+		oncomplete();
+	}
 </script>
 
 <div
@@ -67,6 +71,8 @@
 					sources={provisioningStore.sources}
 					recommendation={provisioningStore.recommendation}
 					onselect={handleSelectSource}
+					onretry={handleRetry}
+					onskip={handleSkip}
 				/>
 			</div>
 		{:else if provisioningStore.phase === 'provisioning' || provisioningStore.phase === 'verifying'}

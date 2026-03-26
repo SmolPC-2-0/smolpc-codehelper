@@ -69,6 +69,12 @@ pub fn extract_zip(
     let mut archive =
         zip::ZipArchive::new(file).map_err(|e| format!("invalid ZIP archive: {e}"))?;
 
+    // Detect a common top-level directory prefix in the archive to strip it.
+    // Many model archives contain `{backend}/file.bin` internally, but the
+    // caller already includes the backend in `target_dir`, which causes path
+    // doubling (e.g. `models/id/backend/backend/file.bin`).
+    let strip_prefix = detect_common_prefix(&mut archive);
+
     let mut bytes_written: u64 = 0;
 
     for i in 0..archive.len() {
@@ -84,9 +90,24 @@ pub fn extract_zip(
 
         // enclosed_name() rejects path-traversal attempts (zip-slip).
         let rel_path = match entry.enclosed_name() {
-            Some(p) => p,
+            Some(p) => p.to_owned(),
             None => continue,
         };
+
+        // Strip the common top-level directory if present.
+        let rel_path = if let Some(prefix) = &strip_prefix {
+            match rel_path.strip_prefix(prefix) {
+                Ok(stripped) => stripped.to_owned(),
+                Err(_) => rel_path,
+            }
+        } else {
+            rel_path
+        };
+
+        // Skip empty paths (the prefix directory entry itself).
+        if rel_path.as_os_str().is_empty() {
+            continue;
+        }
 
         let out_path = temp_dir.join(&rel_path);
 
@@ -136,11 +157,96 @@ pub fn extract_zip(
         }
     }
 
-    // Atomic rename: temp → target.
-    fs::rename(&temp_dir, target_dir)
-        .map_err(|e| format!("cannot rename temp dir to target: {e}"))?;
+    // Move temp → target. Use rename first (fast, atomic on same volume),
+    // falling back to recursive copy + delete for cross-drive moves.
+    move_dir(&temp_dir, target_dir)?;
 
     Ok(target_dir.to_owned())
+}
+
+/// If every entry in the archive shares a single top-level directory, return it
+/// so we can strip it during extraction. Returns `None` if entries are at the
+/// root or if there are multiple top-level directories.
+fn detect_common_prefix(archive: &mut zip::ZipArchive<fs::File>) -> Option<PathBuf> {
+    let mut common: Option<PathBuf> = None;
+    for i in 0..archive.len() {
+        let entry = match archive.by_index(i) {
+            Ok(e) => e,
+            Err(_) => return None,
+        };
+        let name = match entry.enclosed_name() {
+            Some(p) => p.to_owned(),
+            None => continue,
+        };
+        let mut components = name.components();
+        let first = match components.next() {
+            Some(c) => PathBuf::from(c.as_os_str()),
+            None => continue,
+        };
+        // Only consider it a prefix if the entry has more components (i.e. it
+        // is inside a directory, not a root-level file).
+        if components.next().is_none() && !entry.is_dir() {
+            // Root-level file — no common prefix.
+            return None;
+        }
+        match &common {
+            Some(existing) if existing != &first => return None,
+            None => common = Some(first),
+            _ => {}
+        }
+    }
+    common
+}
+
+/// Move `src` directory to `dst`. Tries `fs::rename` first (atomic, same-volume),
+/// then falls back to recursive copy + delete for cross-device moves.
+fn move_dir(src: &Path, dst: &Path) -> Result<(), String> {
+    match fs::rename(src, dst) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // On Windows, cross-drive rename fails with ERROR_NOT_SAME_DEVICE.
+            // Fall back to recursive copy.
+            let is_cross_device = e.raw_os_error() == Some(17) // POSIX EXDEV
+                || e.raw_os_error() == Some(0x11) // Windows ERROR_NOT_SAME_DEVICE
+                || e.kind() == io::ErrorKind::Other;
+
+            if !is_cross_device {
+                return Err(format!("cannot rename temp dir to target: {e}"));
+            }
+
+            copy_dir_recursive(src, dst)?;
+            fs::remove_dir_all(src)
+                .map_err(|e| format!("cannot clean up temp dir after copy: {e}"))?;
+            Ok(())
+        }
+    }
+}
+
+/// Recursively copy all files and directories from `src` to `dst`.
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst)
+        .map_err(|e| format!("cannot create target dir {}: {e}", dst.display()))?;
+
+    for entry in fs::read_dir(src)
+        .map_err(|e| format!("cannot read dir {}: {e}", src.display()))?
+    {
+        let entry = entry.map_err(|e| format!("cannot read dir entry: {e}"))?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path).map_err(|e| {
+                format!(
+                    "cannot copy {} -> {}: {e}",
+                    src_path.display(),
+                    dst_path.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +260,7 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
 
+    /// Create a flat ZIP (no common prefix directory).
     fn create_test_zip(dir: &Path) -> PathBuf {
         let zip_path = dir.join("test.zip");
         let file = std::fs::File::create(&zip_path).unwrap();
@@ -163,6 +270,24 @@ mod tests {
         writer.write_all(b"hello world").unwrap();
         writer.start_file("subdir/nested.txt", options).unwrap();
         writer.write_all(b"nested content").unwrap();
+        writer.finish().unwrap();
+        zip_path
+    }
+
+    /// Create a ZIP with all entries under a common prefix directory.
+    fn create_prefixed_zip(dir: &Path, prefix: &str) -> PathBuf {
+        let zip_path = dir.join("prefixed.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        writer
+            .start_file(format!("{prefix}/model.bin"), options)
+            .unwrap();
+        writer.write_all(b"model data").unwrap();
+        writer
+            .start_file(format!("{prefix}/config.json"), options)
+            .unwrap();
+        writer.write_all(b"{}").unwrap();
         writer.finish().unwrap();
         zip_path
     }
@@ -205,6 +330,31 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_zip_strips_common_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let zip_path = create_prefixed_zip(tmp.path(), "openvino_npu");
+        let target = tmp.path().join("output");
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        let result = extract_zip(&zip_path, &target, cancel, Box::new(|_, _| {}));
+        assert!(result.is_ok(), "extraction failed: {:?}", result);
+
+        // Files should be directly under target, NOT under target/openvino_npu/
+        assert!(
+            target.join("model.bin").exists(),
+            "model.bin should be at target root after prefix strip"
+        );
+        assert!(
+            target.join("config.json").exists(),
+            "config.json should be at target root after prefix strip"
+        );
+        assert!(
+            !target.join("openvino_npu").exists(),
+            "prefix dir should NOT exist — it should have been stripped"
+        );
+    }
+
+    #[test]
     fn test_extract_zip_cancel() {
         let tmp = tempfile::tempdir().unwrap();
         let zip_path = create_test_zip(tmp.path());
@@ -227,6 +377,25 @@ mod tests {
         assert!(
             !target.with_extension("extracting").exists(),
             "temp dir should be cleaned up after cancellation"
+        );
+    }
+
+    #[test]
+    fn test_copy_dir_recursive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        std::fs::write(src.join("a.txt"), "aaa").unwrap();
+        std::fs::write(src.join("sub/b.txt"), "bbb").unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        assert_eq!(std::fs::read_to_string(dst.join("a.txt")).unwrap(), "aaa");
+        assert_eq!(
+            std::fs::read_to_string(dst.join("sub/b.txt")).unwrap(),
+            "bbb"
         );
     }
 }
