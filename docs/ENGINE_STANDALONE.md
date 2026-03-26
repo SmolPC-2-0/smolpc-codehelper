@@ -118,6 +118,8 @@ This does three important things:
 - creates `engine-token.txt` if it does not already exist
 - exports the same token into `SMOLPC_ENGINE_TOKEN`, which the host requires at startup
 
+For local standalone testing on Windows, this `NewGuid()` approach is fine: it uses Windows-backed randomness and is appropriate for a localhost bearer token.
+
 ### 2. Optional backend override
 
 Leave backend selection on automatic mode unless you are doing targeted validation.
@@ -166,15 +168,38 @@ Notes:
 
 - `--resource-dir` is optional, but recommended in repo-dev/manual workflows because the host resolves runtime bundles from `resource_dir\libs`.
 - `SMOLPC_MODELS_DIR` remains the supported way to point the host at the shared models root.
+- `--app-version standalone-dev` is only used as an app/version identity input for the host. It is safe to leave as-is for manual testing.
 - If you are using a packaged install instead of a repo checkout, the host binary and resource root will come from the packaged app resources rather than `target\debug` and `apps\codehelper\src-tauri`.
+- This example captures stderr in `engine-spawn.log`. If you also want stdout, add `-RedirectStandardOutput` to a second log file.
 
-### 4. Confirm the process is up
+### 4. Confirm the process is up and wait for health
 
 ```powershell
 Get-Process -Id $engine.Id
 ```
 
-If that succeeds, you can begin calling the API with the same `$token` you loaded above.
+Then wait for the HTTP listener to come up:
+
+```powershell
+$deadline = (Get-Date).AddSeconds(30)
+while ((Get-Date) -lt $deadline) {
+    try {
+        $status = curl.exe -s -o NUL -w "%{http_code}" `
+          -H "Authorization: Bearer $token" `
+          http://127.0.0.1:19432/engine/health
+        if ($status -eq "200") {
+            Write-Host "Engine ready"
+            break
+        }
+    } catch {
+        # Ignore transient connection failures while the listener starts.
+    }
+
+    Start-Sleep -Milliseconds 500
+}
+```
+
+If the health check still returns a connection error after the loop, check `engine-spawn.log` before continuing.
 
 ## Manual Request Flow
 
@@ -191,7 +216,7 @@ curl.exe -s `
 Expected shape:
 
 ```json
-{"ok":true}
+{ "ok": true }
 ```
 
 ### 2. Read engine metadata
@@ -280,6 +305,24 @@ curl.exe -s `
 
 For streaming requests and the full payload contract, use [docs/ENGINE_API.md](./ENGINE_API.md).
 
+## Clean Shutdown
+
+Preferred shutdown path:
+
+```powershell
+curl.exe -s `
+  -X POST `
+  -H "Authorization: Bearer $token" `
+  http://127.0.0.1:19432/engine/shutdown
+```
+
+If the host is stuck and you need to stop it manually:
+
+```powershell
+$pid = Get-Content $pidPath -Raw
+Stop-Process -Id $pid -Force
+```
+
 ## Troubleshooting
 
 ### Missing token or token mismatch
@@ -297,7 +340,7 @@ Check:
 
 ### Port already in use
 
-If `19432` is already occupied, either shut down the other engine process or start this one on a different port and update your request URLs to match.
+If `19432` is already occupied, either shut down the other engine process or update `--port` in `$arguments` and change your request URLs to match the new port.
 
 ### Host fails health within timeout
 
@@ -306,6 +349,7 @@ If `/engine/health` never comes up after startup, check:
 - `%LOCALAPPDATA%\SmolPC\engine-runtime\engine-spawn.log`
 - the process listed in `%LOCALAPPDATA%\SmolPC\engine-runtime\engine.pid`
 - whether the host binary actually started successfully
+- whether stdout needs to be captured separately with `-RedirectStandardOutput`
 
 ### Missing models or runtime bundles
 
