@@ -585,6 +585,10 @@ Write-Host "  Running setup-bundled-python-runtime.ps1..."
 & "$ScriptsDir\setup-bundled-python-runtime.ps1"
 if ($LASTEXITCODE -ne 0) { throw "setup-bundled-python-runtime.ps1 failed." }
 
+Write-Host "  Running setup-vcredist.ps1..."
+& "$ScriptsDir\setup-vcredist.ps1"
+if ($LASTEXITCODE -ne 0) { throw "setup-vcredist.ps1 failed." }
+
 Write-Success "  Runtimes staged."
 
 # ---------------------------------------------------------------------------
