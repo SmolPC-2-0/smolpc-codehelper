@@ -4,6 +4,10 @@ Use this playbook when onboarding another app (Blender helper, GIMP helper, etc.
 
 This is the fastest path for both developers and AI-assisted integration sessions.
 
+## See Also
+
+If you are adding a mode into the unified desktop shell itself, use [UNIFIED_MODE_ONBOARDING.md](./UNIFIED_MODE_ONBOARDING.md) instead.
+
 Keep app UX/tool logic in the app you are onboarding, follow the current repo layout conventions for that branch, and integrate inference only through the shared engine contract or client.
 
 ## Scope
