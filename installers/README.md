@@ -1,34 +1,39 @@
-# Offline USB Installer
+# Offline Installers
 
-This directory contains the tooling and output for building a fully offline, USB-distributable package of SmolPC Code Helper.
+This directory contains tooling and output for fully offline, USB-distributable SmolPC Code Helper installers.
 
-## What the offline bundle contains
+## Available Bundles
 
-```
-usb/
-  SmolPC Code Helper_x.x.x_x64-setup.exe    # NSIS installer (~278 MB)
-  Install-CodeHelper.cmd                      # Double-click to install everything
-  Install-CodeHelper.ps1                      # PowerShell orchestrator
+| Bundle | Models | Recommended target |
+|------|------|------|
+| `usb/` | All models (Qwen 2.5 + Qwen 3) | 8 GB+ USB, mixed hardware |
+| `qwen2.5-1.5b-instruct/` | Qwen 2.5 1.5B only (lightweight) | 4 GB+ USB, 8 GB RAM machines |
+| `qwen3-4b/` | Qwen 3 4B only (advanced) | 8 GB+ USB, 16 GB RAM machines |
+
+## What a bundle contains
+
+Each bundle follows this layout:
+
+```text
+<bundle>/
+  SmolPC Code Helper_x.x.x_x64-setup.exe
+  Install-CodeHelper.cmd
+  Install-CodeHelper.ps1
   models/
-    model-archives.json                       # Manifest with checksums
-    SHA256SUMS.txt                            # Checksum file
-    Install-Models.ps1                        # Model extraction script
-    qwen2.5-1.5b-instruct-dml.zip           # Qwen 2.5 1.5B — DirectML (~1.3 GB)
-    qwen2.5-1.5b-instruct-openvino.zip      # Qwen 2.5 1.5B — OpenVINO (~900 MB)
-    qwen3-4b-dml.zip                         # Qwen 3 4B — DirectML (~2.9 GB)
-    qwen3-4b-openvino.zip                    # Qwen 3 4B — OpenVINO (~2.2 GB)
+    model-archives.json
+    SHA256SUMS.txt
+    Install-Models.ps1
+    <model-archive>.zip
 ```
 
-**Total size: ~4-5 GB** — fits on an 8 GB USB stick.
-
-## How to build it
+## How to build
 
 Prerequisites: Node.js 22+, Rust 1.88+, PowerShell 7 (`pwsh`), models downloaded to `%LOCALAPPDATA%\SmolPC\models\`.
 
 From the repo root:
 
 ```powershell
-cd apps/codehelper
+cd app
 
 # 1. Stage runtime DLLs (one-time)
 pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-directml-runtime.ps1 -Force
@@ -39,24 +44,24 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-bundled-python-run
 npm run model:setup:qwen25-instruct
 npm run model:setup:qwen3-4b
 
-# 3. Build the offline bundle
+# 3. Build the full offline bundle (all models)
 pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-offline-bundle.ps1 -OutputDir ../../installers/usb
 ```
 
-Output lands in `installers/usb/`.
+Output lands in `installers/usb/`. Per-model bundles are assembled from the full bundle by copying the installer and filtering model archives.
 
-## How to deploy to a school
+## How to deploy
 
-1. Copy the entire `usb/` folder to a USB stick
+1. Copy the chosen bundle folder to a USB stick
 2. On the target Windows machine, double-click `Install-CodeHelper.cmd`
 3. The wrapper script will:
    - Install the app silently (no admin required) to `%LOCALAPPDATA%\Programs\SmolPC Code Helper\`
    - Extract AI models to `%LOCALAPPDATA%\SmolPC\models\`
-   - Launch the app — it auto-detects the best backend (DirectML GPU, OpenVINO NPU, or CPU)
+   - Launch the app and auto-detect the best backend (DirectML GPU, OpenVINO NPU, or CPU)
 
-No internet connection is required at any point.
+No internet connection is required at any point, and admin rights are not required.
 
-## What gets installed where
+## What gets installed
 
 | Item | Path |
 |------|------|

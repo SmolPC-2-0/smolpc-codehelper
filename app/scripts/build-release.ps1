@@ -81,6 +81,290 @@ function Get-ModelsForVariant {
     throw "Unexpected variant: $VariantName"
 }
 
+function New-InstallModelsPowerShell {
+    param([string]$Path)
+
+    $content = @'
+param(
+    [string]$ManifestPath = "",
+    [switch]$Force
+)
+
+$ErrorActionPreference = "Stop"
+
+$scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+
+if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
+    $ManifestPath = Join-Path $scriptDir "model-archives.json"
+} elseif (-not [System.IO.Path]::IsPathRooted($ManifestPath)) {
+    $ManifestPath = Join-Path (Get-Location).Path $ManifestPath
+}
+
+$manifestDirectory = Split-Path -Parent $ManifestPath
+$modelsRoot = Join-Path $env:LOCALAPPDATA "SmolPC\models"
+
+if (-not (Test-Path $ManifestPath -PathType Leaf)) {
+    throw "Missing model manifest at '$ManifestPath'."
+}
+
+$manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+if ($null -eq $manifest.models -or $manifest.models.Count -eq 0) {
+    throw "Model manifest is empty."
+}
+
+Write-Host "Installing model archives to $modelsRoot"
+New-Item -ItemType Directory -Force -Path $modelsRoot | Out-Null
+
+$tempRoot = Join-Path $env:TEMP ("smolpc-model-install-" + [Guid]::NewGuid().ToString("N"))
+try {
+    New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+
+    foreach ($model in $manifest.models) {
+        $modelId = [string]$model.id
+        $backend = [string]$model.backend
+        $archiveName = [string]$model.archive_name
+        $archivePath = [string]$model.archive_path
+        $expectedSha256 = [string]$model.sha256
+
+        if ([string]::IsNullOrWhiteSpace($modelId) -or [string]::IsNullOrWhiteSpace($backend)) {
+            throw "Manifest entry missing 'id' or 'backend'."
+        }
+
+        $targetDir = Join-Path $modelsRoot "$modelId\$backend"
+        if (-not $Force -and (Test-Path $targetDir -PathType Container)) {
+            $fileCount = @(Get-ChildItem -LiteralPath $targetDir -File -ErrorAction SilentlyContinue).Count
+            if ($fileCount -gt 0) {
+                Write-Host "  Skipping $modelId/$backend (already installed, $fileCount files)."
+                continue
+            }
+        }
+
+        Write-Host "  Installing $modelId ($backend)..."
+
+        $localArchive = Join-Path $manifestDirectory $archivePath
+        if (-not (Test-Path $localArchive -PathType Leaf)) {
+            throw "Archive file not found: $localArchive"
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($expectedSha256)) {
+            Write-Host "    Verifying checksum..."
+            $actualSha256 = (Get-FileHash -Path $localArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualSha256 -ne $expectedSha256.ToLowerInvariant()) {
+                throw "Checksum mismatch for '$archiveName'. Expected $expectedSha256, got $actualSha256."
+            }
+        }
+
+        Write-Host "    Extracting (this may take a minute for large models)..."
+        $extractRoot = Join-Path $tempRoot ("extract-$modelId-$backend")
+        if (Test-Path $extractRoot) {
+            Remove-Item -LiteralPath $extractRoot -Recurse -Force
+        }
+
+        Expand-Archive -LiteralPath $localArchive -DestinationPath $extractRoot -Force
+
+        $extractedBackendDir = Join-Path $extractRoot $backend
+        if (-not (Test-Path $extractedBackendDir -PathType Container)) {
+            throw "Archive '$archiveName' did not contain expected '$backend' directory."
+        }
+
+        $modelTargetRoot = Join-Path $modelsRoot $modelId
+        New-Item -ItemType Directory -Force -Path $modelTargetRoot | Out-Null
+        if (Test-Path $targetDir) {
+            Remove-Item -LiteralPath $targetDir -Recurse -Force
+        }
+        Copy-Item -LiteralPath $extractedBackendDir -Destination $targetDir -Recurse -Force
+
+        Write-Host "    Verifying extracted artifacts..."
+        $verifyErrors = @()
+
+        if ($backend -eq "openvino") {
+            $modelManifestPath = Join-Path $targetDir "manifest.json"
+            if (-not (Test-Path $modelManifestPath -PathType Leaf)) {
+                $verifyErrors += "manifest.json is missing from $modelId/$backend"
+            } else {
+                try {
+                    $modelManifest = Get-Content -LiteralPath $modelManifestPath -Raw | ConvertFrom-Json
+                } catch {
+                    $verifyErrors += "manifest.json for $modelId/$backend is not valid JSON: $_"
+                }
+
+                if ($null -ne $modelManifest) {
+                    if ($null -ne $modelManifest.entrypoint) {
+                        $entryPath = Join-Path $targetDir ([string]$modelManifest.entrypoint)
+                        if (-not (Test-Path $entryPath -PathType Leaf)) {
+                            $verifyErrors += "entrypoint '$($modelManifest.entrypoint)' is missing"
+                        } elseif ((Get-Item -LiteralPath $entryPath).Length -eq 0) {
+                            $verifyErrors += "entrypoint '$($modelManifest.entrypoint)' is zero bytes"
+                        }
+                    }
+
+                    if ($null -ne $modelManifest.required_files -and $modelManifest.required_files.Count -gt 0) {
+                        foreach ($reqFile in $modelManifest.required_files) {
+                            $reqPath = Join-Path $targetDir ([string]$reqFile)
+                            if (-not (Test-Path $reqPath -PathType Leaf)) {
+                                $verifyErrors += "required file '$reqFile' is missing"
+                            } elseif ((Get-Item -LiteralPath $reqPath).Length -eq 0) {
+                                $verifyErrors += "required file '$reqFile' is zero bytes"
+                            }
+                        }
+                    }
+                }
+            }
+        } elseif ($backend -eq "dml") {
+            $dmlRequired = @("model.onnx", "genai_config.json", "tokenizer.json")
+            foreach ($reqFile in $dmlRequired) {
+                $reqPath = Join-Path $targetDir $reqFile
+                if (-not (Test-Path $reqPath -PathType Leaf)) {
+                    $verifyErrors += "required file '$reqFile' is missing"
+                } elseif ((Get-Item -LiteralPath $reqPath).Length -eq 0) {
+                    $verifyErrors += "required file '$reqFile' is zero bytes"
+                }
+            }
+        }
+
+        $installedFiles = @(Get-ChildItem -LiteralPath $targetDir -File -ErrorAction SilentlyContinue)
+        if ($installedFiles.Count -eq 0) {
+            $verifyErrors += "no files found in $targetDir after extraction"
+        }
+
+        if ($verifyErrors.Count -gt 0) {
+            $errorDetail = $verifyErrors -join "`n      "
+            throw "Verification failed for $modelId ($backend):`n      $errorDetail"
+        }
+
+        Write-Host "    Verified: $($installedFiles.Count) files present, all non-zero."
+    }
+
+    Write-Host ""
+    Write-Host "All models installed and verified."
+} finally {
+    if (Test-Path $tempRoot) {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force
+    }
+}
+'@
+
+    Set-Content -LiteralPath $Path -Value $content -Encoding UTF8
+}
+
+function New-InstallWrapperPowerShell {
+    param([string]$Path)
+
+    $content = @'
+param(
+    [switch]$ForceModels,
+    [switch]$NoLaunchApp
+)
+
+$ErrorActionPreference = "Stop"
+
+$packageRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+
+function Find-Installer {
+    param([string]$Root)
+    return Get-ChildItem -LiteralPath $Root -File -Filter "*-setup.exe" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+}
+
+function Find-InstalledApp {
+    $searchDirs = @(
+        (Join-Path $env:LOCALAPPDATA "SmolPC Code Helper"),
+        (Join-Path $env:LOCALAPPDATA "Programs\SmolPC Code Helper")
+    )
+    $exeNames = @("smolpc-desktop.exe", "SmolPC 2.0.exe")
+    foreach ($dir in $searchDirs) {
+        foreach ($name in $exeNames) {
+            $exe = Join-Path $dir $name
+            if (Test-Path $exe -PathType Leaf) {
+                return $exe
+            }
+        }
+    }
+    return $null
+}
+
+$installer = Find-Installer -Root $packageRoot
+$modelsDir = Join-Path $packageRoot "models"
+$modelInstallScript = Join-Path $modelsDir "Install-Models.ps1"
+$manifestPath = Join-Path $modelsDir "model-archives.json"
+
+if ($null -eq $installer) {
+    Write-Host "ERROR: No *-setup.exe found in '$packageRoot'." -ForegroundColor Red
+    Write-Host "Make sure you are running this from the offline bundle folder."
+    exit 1
+}
+
+Write-Host ""
+Write-Host "  SmolPC Code Helper - Offline Installer" -ForegroundColor Cyan
+Write-Host ""
+
+Write-Host "[1/3] Installing application (silent)..."
+$proc = Start-Process -FilePath $installer.FullName -ArgumentList "/S" -PassThru -Wait
+if ($proc.ExitCode -ne 0) {
+    Write-Host "ERROR: Installer failed with exit code $($proc.ExitCode)." -ForegroundColor Red
+    exit 1
+}
+$appExe = Find-InstalledApp
+if ($null -eq $appExe) {
+    Write-Host "ERROR: App installed but executable not found. Check install path." -ForegroundColor Red
+    exit 1
+}
+Write-Host "  Installed to: $(Split-Path -Parent $appExe)"
+
+if (Test-Path $modelInstallScript -PathType Leaf) {
+    Write-Host ""
+    Write-Host "[2/3] Installing AI models (this takes several minutes)..."
+    $modelArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $modelInstallScript, "-ManifestPath", $manifestPath)
+    if ($ForceModels) { $modelArgs += "-Force" }
+    & powershell @modelArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "WARNING: Model installation had errors. App may not work until models are installed." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host ""
+    Write-Host "[2/3] Skipped - no model installer found."
+}
+
+Write-Host ""
+if (-not $NoLaunchApp) {
+    Write-Host "[3/3] Launching SmolPC Code Helper..."
+    Start-Process -FilePath $appExe | Out-Null
+} else {
+    Write-Host "[3/3] Skipped launch (-NoLaunchApp)."
+}
+
+Write-Host ""
+Write-Host "  Done! The engine auto-detects your best backend on first launch." -ForegroundColor Green
+Write-Host ""
+'@
+
+    Set-Content -LiteralPath $Path -Value $content -Encoding UTF8
+}
+
+function New-InstallWrapperCmd {
+    param([string]$Path)
+
+    $content = @'
+@echo off
+setlocal
+echo SmolPC Code Helper - Offline Installer
+echo.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install-CodeHelper.ps1" %*
+if errorlevel 1 (
+  echo.
+  echo Installation failed. Check the error above.
+  pause
+  exit /b %errorlevel%
+)
+echo.
+pause
+endlocal
+'@
+
+    Set-Content -LiteralPath $Path -Value $content -Encoding ASCII
+}
+
 function Build-OfflineBundle {
     param([string]$VariantName, [object]$InstallerItem)
 
@@ -145,6 +429,11 @@ function Build-OfflineBundle {
     }
     $combinedManifest | ConvertTo-Json -Depth 6 |
         Set-Content -LiteralPath (Join-Path $bundleModels "model-archives.json") -Encoding UTF8
+
+    # Generate install scripts
+    New-InstallModelsPowerShell -Path (Join-Path $bundleModels "Install-Models.ps1")
+    New-InstallWrapperPowerShell -Path (Join-Path $bundleRoot "Install-CodeHelper.ps1")
+    New-InstallWrapperCmd -Path (Join-Path $bundleRoot "Install-CodeHelper.cmd")
 
     # ZIP the bundle
     $offlineDir = Join-Path $DistRoot "offline"

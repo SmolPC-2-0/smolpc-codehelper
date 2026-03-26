@@ -4,3 +4,18 @@ usb/*.cmd
 usb/*.ps1
 usb/models/
 !usb/.gitkeep
+
+# Per-model bundle build artifacts
+qwen2.5-1.5b-instruct/*.exe
+qwen2.5-1.5b-instruct/*.cmd
+qwen2.5-1.5b-instruct/*.ps1
+qwen2.5-1.5b-instruct/models/
+!qwen2.5-1.5b-instruct/.gitkeep
+!qwen2.5-1.5b-instruct/README.txt
+
+qwen3-4b/*.exe
+qwen3-4b/*.cmd
+qwen3-4b/*.ps1
+qwen3-4b/models/
+!qwen3-4b/.gitkeep
+!qwen3-4b/README.txt

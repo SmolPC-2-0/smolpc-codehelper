@@ -152,11 +152,69 @@ try {
         }
         Copy-Item -LiteralPath $extractedBackendDir -Destination $targetDir -Recurse -Force
 
-        Write-Host "    Done."
+        Write-Host "    Verifying extracted artifacts..."
+        $verifyErrors = @()
+
+        if ($backend -eq "openvino") {
+            $modelManifestPath = Join-Path $targetDir "manifest.json"
+            if (-not (Test-Path $modelManifestPath -PathType Leaf)) {
+                $verifyErrors += "manifest.json is missing from $modelId/$backend"
+            } else {
+                try {
+                    $modelManifest = Get-Content -LiteralPath $modelManifestPath -Raw | ConvertFrom-Json
+                } catch {
+                    $verifyErrors += "manifest.json for $modelId/$backend is not valid JSON: $_"
+                }
+
+                if ($null -ne $modelManifest) {
+                    if ($null -ne $modelManifest.entrypoint) {
+                        $entryPath = Join-Path $targetDir ([string]$modelManifest.entrypoint)
+                        if (-not (Test-Path $entryPath -PathType Leaf)) {
+                            $verifyErrors += "entrypoint '$($modelManifest.entrypoint)' is missing"
+                        } elseif ((Get-Item -LiteralPath $entryPath).Length -eq 0) {
+                            $verifyErrors += "entrypoint '$($modelManifest.entrypoint)' is zero bytes"
+                        }
+                    }
+
+                    if ($null -ne $modelManifest.required_files -and $modelManifest.required_files.Count -gt 0) {
+                        foreach ($reqFile in $modelManifest.required_files) {
+                            $reqPath = Join-Path $targetDir ([string]$reqFile)
+                            if (-not (Test-Path $reqPath -PathType Leaf)) {
+                                $verifyErrors += "required file '$reqFile' is missing"
+                            } elseif ((Get-Item -LiteralPath $reqPath).Length -eq 0) {
+                                $verifyErrors += "required file '$reqFile' is zero bytes"
+                            }
+                        }
+                    }
+                }
+            }
+        } elseif ($backend -eq "dml") {
+            $dmlRequired = @("model.onnx", "genai_config.json", "tokenizer.json")
+            foreach ($reqFile in $dmlRequired) {
+                $reqPath = Join-Path $targetDir $reqFile
+                if (-not (Test-Path $reqPath -PathType Leaf)) {
+                    $verifyErrors += "required file '$reqFile' is missing"
+                } elseif ((Get-Item -LiteralPath $reqPath).Length -eq 0) {
+                    $verifyErrors += "required file '$reqFile' is zero bytes"
+                }
+            }
+        }
+
+        $installedFiles = @(Get-ChildItem -LiteralPath $targetDir -File -ErrorAction SilentlyContinue)
+        if ($installedFiles.Count -eq 0) {
+            $verifyErrors += "no files found in $targetDir after extraction"
+        }
+
+        if ($verifyErrors.Count -gt 0) {
+            $errorDetail = $verifyErrors -join "`n      "
+            throw "Verification failed for $modelId ($backend):`n      $errorDetail"
+        }
+
+        Write-Host "    Verified: $($installedFiles.Count) files present, all non-zero."
     }
 
     Write-Host ""
-    Write-Host "All models installed."
+    Write-Host "All models installed and verified."
 } finally {
     if (Test-Path $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force
