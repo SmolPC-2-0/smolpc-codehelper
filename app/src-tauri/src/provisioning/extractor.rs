@@ -35,9 +35,29 @@ pub fn extract_zip(
     let temp_dir = target_dir.with_extension("extracting");
 
     // Clean up any leftover temp dir from a previous aborted attempt.
+    // Retry a few times with a delay — antivirus can briefly lock files
+    // after a crash, making the first removal attempt fail.
     if temp_dir.exists() {
-        fs::remove_dir_all(&temp_dir)
-            .map_err(|e| format!("cannot remove stale temp dir: {e}"))?;
+        let mut last_err = None;
+        for attempt in 0..3 {
+            match fs::remove_dir_all(&temp_dir) {
+                Ok(()) => {
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    if attempt < 2 {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                    }
+                }
+            }
+        }
+        if let Some(e) = last_err {
+            return Err(format!(
+                "cannot remove stale temp dir after retries (antivirus may be locking files): {e}"
+            ));
+        }
     }
 
     fs::create_dir_all(&temp_dir)
@@ -83,8 +103,29 @@ pub fn extract_zip(
             let mut out_file = fs::File::create(&out_path)
                 .map_err(|e| format!("cannot create file {}: {e}", out_path.display()))?;
 
-            io::copy(&mut entry, &mut out_file)
-                .map_err(|e| format!("IO error extracting {}: {e}", rel_path.display()))?;
+            match io::copy(&mut entry, &mut out_file) {
+                Ok(_) => {}
+                Err(e) => {
+                    // Check if this is a disk-full error. On Windows,
+                    // ERROR_DISK_FULL (112) or ERROR_HANDLE_DISK_FULL (39)
+                    // can occur when another app consumed space mid-extraction.
+                    let is_disk_full = e.raw_os_error() == Some(112)
+                        || e.raw_os_error() == Some(39)
+                        || e.kind() == io::ErrorKind::StorageFull;
+                    if is_disk_full {
+                        let _ = fs::remove_dir_all(&temp_dir);
+                        return Err(format!(
+                            "disk full during extraction of {} — another application \
+                             may have consumed disk space. Free up space and try again.",
+                            rel_path.display()
+                        ));
+                    }
+                    return Err(format!(
+                        "IO error extracting {}: {e}",
+                        rel_path.display()
+                    ));
+                }
+            }
 
             bytes_written += out_path
                 .metadata()

@@ -61,6 +61,38 @@ fn scan_drives() -> Vec<PathBuf> {
     Vec::new()
 }
 
+/// If the breadcrumb path doesn't exist (USB drive letter changed), try the
+/// same relative path on every other drive letter. For example, if the
+/// breadcrumb says `E:\SmolPC-Full\` but the USB remounted as `F:\`, check
+/// `F:\SmolPC-Full\` etc.
+#[cfg(windows)]
+fn resolve_breadcrumb_on_other_drives(bc_dir: &Path) -> Option<PathBuf> {
+    // Extract the relative path after the drive root (e.g. `SmolPC-Full\`).
+    let rel = bc_dir.strip_prefix(bc_dir.ancestors().last()?).ok()?;
+    // On Windows paths like E:\Foo, the components are: Prefix(E:), RootDir(\), Normal(Foo)
+    // strip_prefix with the root won't work; use the path after the drive letter.
+    let path_str = bc_dir.to_string_lossy();
+    let after_drive = path_str.get(3..)?; // Skip "E:\"
+    for letter in b'C'..=b'Z' {
+        let candidate = PathBuf::from(format!("{}:\\{}", letter as char, after_drive));
+        if candidate != bc_dir && has_manifest(&candidate) {
+            log::info!(
+                "Breadcrumb path {} not found, resolved to {} on different drive",
+                bc_dir.display(),
+                candidate.display()
+            );
+            return Some(candidate);
+        }
+    }
+    let _ = rel; // suppress unused warning
+    None
+}
+
+#[cfg(not(windows))]
+fn resolve_breadcrumb_on_other_drives(_bc_dir: &Path) -> Option<PathBuf> {
+    None
+}
+
 /// Detects available model sources in priority order:
 /// 1. Breadcrumb (installer left a path hint in `%LOCALAPPDATA%\SmolPC\installer-source.txt`)
 /// 2. Drive scan (USB/external drive with a SmolPC* folder)
@@ -76,6 +108,11 @@ pub fn detect_sources(internet_available: bool) -> Vec<ModelSource> {
         if has_manifest(&bc_dir) {
             seen_paths.push(bc_dir.clone());
             sources.push(ModelSource::Local { path: bc_dir });
+        } else if let Some(resolved) = resolve_breadcrumb_on_other_drives(&bc_dir) {
+            // Breadcrumb path is stale (drive letter changed), but we found it
+            // on another drive.
+            seen_paths.push(resolved.clone());
+            sources.push(ModelSource::Local { path: resolved });
         }
     }
 
