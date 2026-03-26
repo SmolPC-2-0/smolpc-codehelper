@@ -3,6 +3,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
+	import { openUrl } from '@tauri-apps/plugin-opener';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import HardwarePanel from '$lib/components/HardwarePanel.svelte';
 	import ModelInfoPanel from '$lib/components/ModelInfoPanel.svelte';
@@ -888,12 +889,26 @@ Generating summary...`
 
 		window.addEventListener('keydown', handleKeyDown);
 
+		// Intercept external link clicks and open in the system browser
+		// instead of navigating inside the Tauri WebView.
+		function handleExternalLinks(e: MouseEvent) {
+			const anchor = (e.target as HTMLElement).closest('a[href]');
+			if (!anchor) return;
+			const href = anchor.getAttribute('href');
+			if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+				e.preventDefault();
+				openUrl(href);
+			}
+		}
+		document.addEventListener('click', handleExternalLinks);
+
 		return () => {
 			unlistenLifecycle?.();
 			unlistenAudioRecordingReady?.();
 			window.removeEventListener('keydown', handleKeyDown);
 			window.removeEventListener('resize', handleResize);
 			window.visualViewport?.removeEventListener('resize', handleResize);
+			document.removeEventListener('click', handleExternalLinks);
 		};
 	});
 
