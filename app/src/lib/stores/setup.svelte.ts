@@ -46,6 +46,14 @@ export const setupStore = {
 		error = null;
 		try {
 			status = await getSetupStatus();
+			// Auto-prepare on startup if any items need it (e.g. bundled Python
+			// payload) so the user doesn't have to manually click Prepare.
+			const needsPrepare = status?.items.some(
+				(item) => item.canPrepare && item.state !== 'ready'
+			);
+			if (needsPrepare) {
+				status = await prepareSetup();
+			}
 		} catch (cause) {
 			error = toErrorMessage(cause);
 		} finally {

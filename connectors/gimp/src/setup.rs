@@ -61,7 +61,7 @@ pub fn gimp_plugin_runtime_item(
                 "GIMP is not installed or could not be detected yet, so the bundled plugin/runtime cannot be provisioned."
                     .to_string(),
             ),
-            required: true,
+            required: false,
             can_prepare: false,
         };
     };
@@ -72,7 +72,7 @@ pub fn gimp_plugin_runtime_item(
             label,
             state: SetupItemStateDto::Missing,
             detail: Some(detail),
-            required: true,
+            required: false,
             can_prepare: false,
         };
     }
@@ -85,7 +85,7 @@ pub fn gimp_plugin_runtime_item(
                 label,
                 state: SetupItemStateDto::Missing,
                 detail: Some(error),
-                required: true,
+                required: false,
                 can_prepare: false,
             };
         }
@@ -100,7 +100,7 @@ pub fn gimp_plugin_runtime_item(
                 "Tauri app-local-data directory is unavailable, so the GIMP provision marker cannot be stored."
                     .to_string(),
             ),
-            required: true,
+            required: false,
             can_prepare: false,
         };
     };
@@ -120,7 +120,7 @@ pub fn gimp_plugin_runtime_item(
                         GIMP_BRIDGE_HOST,
                         GIMP_BRIDGE_PORT
                     )),
-                    required: true,
+                    required: false,
                     can_prepare: false,
                 }
             } else {
@@ -132,7 +132,7 @@ pub fn gimp_plugin_runtime_item(
                         "GIMP provision marker exists, but the provisioned plugin entry is missing at {}. Run Prepare to repair it.",
                         target_entry.display()
                     )),
-                    required: true,
+                    required: false,
                     can_prepare: true,
                 }
             }
@@ -145,7 +145,7 @@ pub fn gimp_plugin_runtime_item(
                 "Bundled GIMP plugin/runtime provisioning is out of date and needs repair from the bundled resource snapshot."
                     .to_string(),
             ),
-            required: true,
+            required: false,
             can_prepare: true,
         },
         Ok(None) => SetupItemDto {
@@ -156,7 +156,7 @@ pub fn gimp_plugin_runtime_item(
                 "GIMP detected at {}. The bundled plugin/runtime snapshot is staged and can be provisioned automatically.",
                 gimp_path.display()
             )),
-            required: true,
+            required: false,
             can_prepare: true,
         },
         Err(error) => SetupItemDto {
@@ -166,7 +166,7 @@ pub fn gimp_plugin_runtime_item(
             detail: Some(format!(
                 "GIMP plugin/runtime provision state is invalid and needs repair. {error}"
             )),
-            required: true,
+            required: false,
             can_prepare: true,
         },
     }

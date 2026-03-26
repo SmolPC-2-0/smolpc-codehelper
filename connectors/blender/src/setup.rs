@@ -50,7 +50,7 @@ pub fn blender_addon_item(
                 "Blender is not installed or could not be detected yet, so the bundled addon cannot be provisioned."
                     .to_string(),
             ),
-            required: true,
+            required: false,
             can_prepare: false,
         };
     };
@@ -63,7 +63,7 @@ pub fn blender_addon_item(
                 label,
                 state: SetupItemStateDto::Missing,
                 detail: Some(error),
-                required: true,
+                required: false,
                 can_prepare: false,
             };
         }
@@ -78,7 +78,7 @@ pub fn blender_addon_item(
                 "Tauri app-local-data directory is unavailable, so the Blender addon provision marker cannot be stored."
                     .to_string(),
             ),
-            required: true,
+            required: false,
             can_prepare: false,
         };
     };
@@ -96,7 +96,7 @@ pub fn blender_addon_item(
                         target_path.display(),
                         blender_path.display()
                     )),
-                    required: true,
+                    required: false,
                     can_prepare: false,
                 }
             } else {
@@ -108,7 +108,7 @@ pub fn blender_addon_item(
                         "Blender addon marker exists, but the provisioned addon file is missing at {}. Run Prepare to repair it.",
                         target_path.display()
                     )),
-                    required: true,
+                    required: false,
                     can_prepare: true,
                 }
             }
@@ -121,7 +121,7 @@ pub fn blender_addon_item(
                 "Blender addon provisioning is out of date and needs to be repaired from the bundled resource snapshot."
                     .to_string(),
             ),
-            required: true,
+            required: false,
             can_prepare: true,
         },
         Ok(None) => SetupItemDto {
@@ -132,7 +132,7 @@ pub fn blender_addon_item(
                 "Blender detected at {}. The bundled addon snapshot is staged and can be provisioned automatically.",
                 blender_path.display()
             )),
-            required: true,
+            required: false,
             can_prepare: true,
         },
         Err(error) => SetupItemDto {
@@ -142,7 +142,7 @@ pub fn blender_addon_item(
             detail: Some(format!(
                 "Blender addon provision state is invalid and needs repair. {error}"
             )),
-            required: true,
+            required: false,
             can_prepare: true,
         },
     }
