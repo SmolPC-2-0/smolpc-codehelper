@@ -17,8 +17,8 @@
 !macro NSIS_HOOK_POSTINSTALL
   ; Write breadcrumb so the app knows where the installer was launched from.
   ; $EXEDIR = directory containing the installer .exe (e.g., E:\SmolPC-Lite\)
-  CreateDirectory "$LOCALAPPDATA\SmolPC"
-  FileOpen $0 "$LOCALAPPDATA\SmolPC\installer-source.txt" w
+  CreateDirectory "$LOCALAPPDATA\SmolPC 2.0"
+  FileOpen $0 "$LOCALAPPDATA\SmolPC 2.0\installer-source.txt" w
   FileWrite $0 "$EXEDIR"
   FileClose $0
 !macroend

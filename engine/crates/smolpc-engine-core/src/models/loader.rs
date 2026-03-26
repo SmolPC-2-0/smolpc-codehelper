@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 const MODELS_DIR_OVERRIDE_ENV: &str = "SMOLPC_MODELS_DIR";
-const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
+const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC 2.0";
 const SHARED_MODELS_DIR: &str = "models";
 const LEGACY_MODEL_FILENAME: &str = "model.onnx";
 const TOKENIZER_FILENAME: &str = "tokenizer.json";

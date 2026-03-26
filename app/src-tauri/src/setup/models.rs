@@ -7,7 +7,7 @@ use std::path::Path;
 fn shared_model_exists() -> bool {
     if let Some(base) = dirs::data_local_dir() {
         let shared = base
-            .join("SmolPC")
+            .join("SmolPC 2.0")
             .join("models")
             .join(DEFAULT_BUNDLED_MODEL_ID);
         if shared.exists() {
@@ -24,7 +24,7 @@ pub fn bundled_model_item(resource_dir: Option<&Path>) -> SetupItemDto {
     if shared_model_exists() {
         let shared_path = dirs::data_local_dir()
             .unwrap()
-            .join("SmolPC")
+            .join("SmolPC 2.0")
             .join("models")
             .join(DEFAULT_BUNDLED_MODEL_ID);
         return SetupItemDto {

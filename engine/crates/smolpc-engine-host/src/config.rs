@@ -20,7 +20,7 @@ pub(crate) fn epoch_ms() -> u64 {
 
 pub(crate) fn default_data_dir() -> PathBuf {
     if let Some(path) = dirs::data_local_dir() {
-        return path.join("SmolPC").join("engine");
+        return path.join("SmolPC 2.0").join("engine");
     }
     PathBuf::from(".smolpc-engine")
 }

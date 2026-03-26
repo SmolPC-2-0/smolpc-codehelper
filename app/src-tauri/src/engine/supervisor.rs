@@ -503,7 +503,7 @@ impl<R: Runtime> EngineSupervisor<R> {
             .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
 
         let shared_runtime_dir = if let Some(base) = dirs::data_local_dir() {
-            base.join("SmolPC").join("engine-runtime")
+            base.join("SmolPC 2.0").join("engine-runtime")
         } else {
             app_data_dir.join("engine-runtime")
         };
@@ -659,7 +659,7 @@ impl<R: Runtime> EngineSupervisor<R> {
 // --- Path resolution helpers ---
 
 const DEFAULT_ENGINE_PORT: u16 = 19432;
-const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC";
+const SHARED_MODELS_VENDOR_DIR: &str = "SmolPC 2.0";
 const SHARED_MODELS_DIR: &str = "models";
 
 /// Resolved paths for engine spawning.

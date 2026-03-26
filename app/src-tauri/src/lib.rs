@@ -365,7 +365,7 @@ pub fn run() {
 /// `options.shared_runtime_dir.join("engine.pid")`, where shared_runtime_dir
 /// is set to `dirs::data_local_dir()/SmolPC/engine-runtime` in inference.rs:164.
 fn engine_pid_path() -> Option<std::path::PathBuf> {
-    dirs::data_local_dir().map(|d| d.join("SmolPC").join("engine-runtime").join("engine.pid"))
+    dirs::data_local_dir().map(|d| d.join("SmolPC 2.0").join("engine-runtime").join("engine.pid"))
 }
 
 fn cleanup_engine_pid() {
