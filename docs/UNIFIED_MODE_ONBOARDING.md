@@ -22,10 +22,10 @@ On current `main`, a unified mode is split across a few layers:
    - [app/src-tauri/src/modes/config.rs](../app/src-tauri/src/modes/config.rs)
 3. Backend provider-family routing:
    - [app/src-tauri/src/modes/registry.rs](../app/src-tauri/src/modes/registry.rs)
-4. Backend mode commands:
+4. Backend mode commands (two files):
    - [app/src-tauri/src/commands/modes.rs](../app/src-tauri/src/commands/modes.rs)
    - [app/src-tauri/src/commands/assistant.rs](../app/src-tauri/src/commands/assistant.rs)
-5. Frontend mode fallback and active-mode state:
+5. Frontend mode fallback and active-mode state (two files):
    - [app/src/lib/types/mode.ts](../app/src/lib/types/mode.ts)
    - [app/src/lib/stores/mode.svelte.ts](../app/src/lib/stores/mode.svelte.ts)
 
@@ -115,6 +115,7 @@ Required updates:
    - map the new mode to that family
 6. Extend [app/src-tauri/src/commands/assistant.rs](../app/src-tauri/src/commands/assistant.rs) so the new mode actually executes through the correct connector flow.
 7. Add backend mode config and frontend fallback config.
+8. Register the new provider in [app/src-tauri/src/lib.rs](../app/src-tauri/src/lib.rs) (managed state construction and any new Tauri command registrations).
 
 For host-backed families, also expect setup work:
 
@@ -218,4 +219,5 @@ A unified mode onboarding change is complete when:
    - tool-backed assistant/provider flow
 3. Host-backed modes report correct status, host-launch behavior, and setup availability.
 4. Mode-specific UI text and shell maps do not still assume the old set of modes.
-5. The change can be understood without reverse-engineering the older pre-unification `apps/codehelper/...` layout.
+5. The change can be understood without reverse-engineering the older pre-unification layout (the old layout used `apps/codehelper/` before the unified shell consolidation into `app/`).
+6. The existing test suite remains green: `cargo test -p smolpc-engine-core -p smolpc-engine-host` and `cd app && npm run check && npm run lint`.
