@@ -133,10 +133,9 @@ fn host_detection_item(detection: HostAppDetection) -> SetupItemDto {
         )),
     };
 
-    let required = matches!(
-        detection.id,
-        SETUP_ITEM_HOST_GIMP | SETUP_ITEM_HOST_BLENDER | SETUP_ITEM_HOST_LIBREOFFICE
-    );
+    // Host apps are optional connectors — missing Blender/GIMP/LibreOffice should
+    // not flag "setup needs attention" since the app works fine in Code mode.
+    let required = false;
 
     SetupItemDto {
         id: detection.id.to_string(),
