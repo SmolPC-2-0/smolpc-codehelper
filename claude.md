@@ -54,7 +54,7 @@ SMOLPC_MODELS_DIR=/path/to/models
 
 **DLL loading is centralized.** All `Library::new()` / `load_with_flags()` calls live in `runtime_loading.rs`. A source-invariant test enforces this — adding DLL loading elsewhere fails CI.
 
-**OpenVINO DLL load order matters.** Windows requires dependency order: `tbb12 -> openvino -> openvino_c -> openvino_ir_frontend -> openvino_intel_cpu_plugin -> openvino_intel_npu_plugin -> openvino_tokenizers -> openvino_genai`
+**OpenVINO DLL load order matters.** Windows requires dependency order: `tbb12 -> tbbbind -> tbbmalloc -> tbbmalloc_proxy -> openvino -> openvino_c -> openvino_ir_frontend -> openvino_intel_cpu_plugin -> [openvino_intel_npu_compiler -> openvino_intel_npu_plugin] -> icudt -> icuuc -> openvino_tokenizers -> openvino_genai -> openvino_genai_c`
 
 **OpenVINO models must be IR format.** The OpenVINO lane expects `.xml` + `.bin` artifacts, not ONNX. The `openvino/manifest.json` is the artifact readiness gate.
 
@@ -127,7 +127,7 @@ Hard-won rules from development. Organized by theme. **Detailed per-subsystem ru
 - Detached processes need: PID file on spawn, identity check before kill, stderr→log file, cleanup on all exit paths (graceful + force-kill)
 - Use `CREATE_NO_WINDOW` for background sidecars to prevent console flash
 - Force-backend env var is `SMOLPC_FORCE_EP` (not `SMOLPC_FORCE_BACKEND`). Note: `SMOLPC_FORCE_EP` set in the shell does NOT reach the engine process — the supervisor explicitly controls it via `spawn_engine` (`cmd.env`/`cmd.env_remove`). Use the dev script's `-ForceEp` parameter or the frontend's runtime mode preference instead
-- `taskkill.exe` can hang for 60+ seconds on some Windows machines. `kill_stale_processes` uses Toolhelp32 (`CreateToolhelp32Snapshot` + `TerminateProcess`) instead — completes in <15ms
+- `taskkill.exe` can hang for 60+ seconds on some Windows machines. `kill_stale_processes` still uses `taskkill /F /IM` with `CREATE_NO_WINDOW`. Toolhelp32 (`OpenProcess`) is used only for PID liveness checks in `is_lock_holder_dead()`, not for killing
 - WMI queries (`Get-WmiObject`, `Get-CimInstance`) also hang on some machines — avoid for GPU detection. DXGI is the correct approach
 
 *Config parsing:*
