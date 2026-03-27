@@ -1,5 +1,4 @@
 use super::resources::LibreOfficeResourceLayout;
-use smolpc_connector_common::python::resolve_prepared_python_command;
 use smolpc_mcp_client::{McpSession, StdioTransportConfig};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -79,12 +78,13 @@ impl LibreOfficeRuntimeConfig {
 
 fn resolve_python_command(
     working_dir: &Path,
-    app_local_data_dir: Option<&Path>,
+    _app_local_data_dir: Option<&Path>,
     allow_system_python_fallback: bool,
 ) -> Result<String, String> {
-    if let Some(command) = resolve_prepared_python_command(app_local_data_dir) {
-        return Ok(command);
-    }
+    // The bundled embedded Python (3.12 embed zip) lacks SSL and cannot create
+    // usable virtual environments for pip packages. The MCP server requires
+    // python-docx, python-pptx, odfdo etc. so we skip the embedded Python
+    // entirely and resolve from .venv or system Python which have full stdlib.
 
     if allow_system_python_fallback {
         for candidate in development_python_candidates(working_dir) {
@@ -105,15 +105,25 @@ fn development_python_candidates(working_dir: &Path) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     let venv_dir = working_dir.join(".venv");
 
+    // Also check the source-tree venv (CARGO_MANIFEST_DIR) in case the
+    // resolved working_dir is in target/debug/ where Tauri copies resources.
+    let source_venv_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("mcp_server")
+        .join(".venv");
+
     #[cfg(windows)]
     {
         candidates.push(venv_dir.join("Scripts").join("python.exe"));
+        candidates.push(source_venv_dir.join("Scripts").join("python.exe"));
     }
 
     #[cfg(not(windows))]
     {
         candidates.push(venv_dir.join("bin").join("python3"));
         candidates.push(venv_dir.join("bin").join("python"));
+        candidates.push(source_venv_dir.join("bin").join("python3"));
+        candidates.push(source_venv_dir.join("bin").join("python"));
     }
 
     candidates
@@ -189,5 +199,25 @@ mod tests {
         let summary = config.summary();
         assert!(summary.contains("python-docx"));
         assert!(summary.contains("mcp_server.py"));
+    }
+
+    #[test]
+    fn source_tree_venv_candidate_is_included() {
+        let candidates = super::development_python_candidates(&PathBuf::from("/some/target/dir"));
+        let source_candidate = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("mcp_server")
+            .join(".venv");
+
+        #[cfg(windows)]
+        let expected = source_candidate.join("Scripts").join("python.exe");
+        #[cfg(not(windows))]
+        let expected = source_candidate.join("bin").join("python3");
+
+        assert!(
+            candidates.contains(&expected),
+            "Should include source-tree .venv candidate: {}",
+            expected.display()
+        );
     }
 }
