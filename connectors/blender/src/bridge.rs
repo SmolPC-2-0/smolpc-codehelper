@@ -27,7 +27,7 @@ impl Default for BridgeConfig {
     fn default() -> Self {
         Self {
             host: "127.0.0.1".to_string(),
-            port: 5179,
+            port: 5180,
         }
     }
 }

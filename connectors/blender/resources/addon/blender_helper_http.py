@@ -68,7 +68,7 @@ def _read_bridge_token():
     local_app_data = os.environ.get('LOCALAPPDATA', '')
     if not local_app_data:
         return None
-    token_path = os.path.join(local_app_data, 'SmolPC', 'engine-runtime', 'bridge-token.txt')
+    token_path = os.path.join(local_app_data, 'SmolPC 2.0', 'engine-runtime', 'bridge-token.txt')
     try:
         with open(token_path, 'r') as f:
             return f.read().strip() or None
@@ -85,141 +85,111 @@ def _auth_headers():
 
 
 # ============================================================================
-# HTTP Client Functions
+# HTTP Client Functions (stdlib only — no 'requests' in Blender's Python)
 # ============================================================================
 
-def ask_question(question, server_url="http://127.0.0.1:5179"):
-    """Ask an educational question through the local assistant bridge."""
-    import requests
+import json as _json
+import urllib.request
+import urllib.error
 
+
+def _post_json(url, payload, headers=None, timeout=60):
+    """POST JSON and return parsed response. Uses only stdlib."""
+    data = _json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(url, data=data, method='POST')
+    req.add_header('Content-Type', 'application/json')
+    if headers:
+        for key, value in headers.items():
+            req.add_header(key, value)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return _json.loads(resp.read().decode('utf-8'))
+
+
+def _get_json(url, headers=None, timeout=5):
+    """GET JSON and return parsed response. Uses only stdlib."""
+    req = urllib.request.Request(url, method='GET')
+    if headers:
+        for key, value in headers.items():
+            req.add_header(key, value)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return _json.loads(resp.read().decode('utf-8'))
+
+
+def ask_question(question, server_url="http://127.0.0.1:5180"):
+    """Ask an educational question through the local assistant bridge."""
     try:
         scene_context = gather_scene_info()
-
-        response = requests.post(
+        data = _post_json(
             f"{server_url}/ask",
-            json={
-                'question': question,
-                'scene_context': scene_context
-            },
+            {'question': question, 'scene_context': scene_context},
             headers=_auth_headers(),
-            timeout=60
+            timeout=60,
         )
-
-        response.raise_for_status()
-        data = response.json()
-
         return {
             'answer': data.get('answer', ''),
             'contexts_used': data.get('contexts_used', 0),
-            'error': None
+            'error': None,
         }
-
-    except requests.exceptions.ConnectionError:
+    except urllib.error.URLError:
         return {
             'answer': None,
-            'error': 'Cannot connect to Blender Learning Assistant. Open the desktop app and try again.'
+            'error': 'Cannot connect to Blender Learning Assistant. Open the desktop app and try again.',
         }
-    except requests.exceptions.Timeout:
-        return {
-            'answer': None,
-            'error': 'Request timed out.'
-        }
+    except TimeoutError:
+        return {'answer': None, 'error': 'Request timed out.'}
     except Exception as e:
-        return {
-            'answer': None,
-            'error': f'Error: {str(e)}'
-        }
+        return {'answer': None, 'error': f'Error: {str(e)}'}
 
 
-def get_suggestions(server_url="http://127.0.0.1:5179"):
+def get_suggestions(server_url="http://127.0.0.1:5180"):
     """Get learning suggestions based on current scene."""
-    import requests
-
     try:
         scene_data = gather_scene_info()
-
-        response = requests.post(
+        data = _post_json(
             f"{server_url}/scene_analysis",
-            json={
-                'goal': 'learning blender',
-                'scene_data': scene_data
-            },
+            {'goal': 'learning blender', 'scene_data': scene_data},
             headers=_auth_headers(),
-            timeout=60
+            timeout=60,
         )
-
-        response.raise_for_status()
-        data = response.json()
-
-        return {
-            'suggestions': data.get('suggestions', []),
-            'error': None
-        }
-
-    except requests.exceptions.ConnectionError:
-        return {
-            'suggestions': None,
-            'error': 'Cannot connect to Blender Learning Assistant.'
-        }
+        return {'suggestions': data.get('suggestions', []), 'error': None}
+    except urllib.error.URLError:
+        return {'suggestions': None, 'error': 'Cannot connect to Blender Learning Assistant.'}
     except Exception as e:
-        return {
-            'suggestions': None,
-            'error': f'Error: {str(e)}'
-        }
+        return {'suggestions': None, 'error': f'Error: {str(e)}'}
 
 
-def update_scene_data(server_url="http://127.0.0.1:5179"):
+def update_scene_data(server_url="http://127.0.0.1:5180"):
     """Send current scene data to server for caching."""
-    import requests
-
     try:
         scene_data = gather_scene_info()
-
-        response = requests.post(
+        _post_json(
             f"{server_url}/scene/update",
-            json={'scene_data': scene_data},
+            {'scene_data': scene_data},
             headers=_auth_headers(),
-            timeout=0.5
+            timeout=0.5,
         )
-
-        response.raise_for_status()
         return {'success': True, 'error': None}
-
-    except requests.exceptions.ConnectionError:
+    except urllib.error.URLError:
         return {'success': False, 'error': 'Server not running'}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
 
-def check_server_health(server_url="http://127.0.0.1:5179", timeout=5):
+def check_server_health(server_url="http://127.0.0.1:5180", timeout=5):
     """Check if the Blender Learning Assistant bridge is running."""
-    import requests
-
     try:
-        response = requests.get(f"{server_url}/health", timeout=timeout)
-        response.raise_for_status()
-        data = response.json()
-
+        data = _get_json(f"{server_url}/health", timeout=timeout)
         return {
             'running': True,
             'rag_enabled': data.get('rag_enabled', False),
             'rag_docs': data.get('rag_docs', 0),
             'error': None,
-            'last_updated': time.time()
+            'last_updated': time.time(),
         }
-
-    except requests.exceptions.ConnectionError:
-        return {
-            'running': False,
-            'error': 'Server not running',
-            'last_updated': time.time()
-        }
+    except urllib.error.URLError:
+        return {'running': False, 'error': 'Server not running', 'last_updated': time.time()}
     except Exception as e:
-        return {
-            'running': False,
-            'error': str(e),
-            'last_updated': time.time()
-        }
+        return {'running': False, 'error': str(e), 'last_updated': time.time()}
 
 
 # ============================================================================
