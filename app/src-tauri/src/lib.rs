@@ -28,6 +28,7 @@ use commands::setup::{setup_prepare, setup_status};
 use engine::{EngineLifecycleState, EngineSupervisor, EngineSupervisorHandle};
 use provisioning::ProvisioningCancel;
 use modes::registry::ModeProviderRegistry;
+use smolpc_connector_common::ToolProvider;
 use setup::SetupState;
 use smolpc_engine_client::EngineClient;
 use std::path::PathBuf;
@@ -331,6 +332,18 @@ pub fn run() {
             commands::audio::stop_recording_sync(&audio);
             commands::audio::stop_playback_sync(&audio);
 
+            // Disconnect all connector providers so their bridges release
+            // the listening port.  Without this the TCP socket persists as
+            // a ghost on Windows and blocks the bridge on the next launch.
+            let registry = app_handle.state::<ModeProviderRegistry>();
+            tauri::async_runtime::block_on(async {
+                let _ = registry.blender.disconnect_if_needed(smolpc_assistant_types::AppMode::Blender).await;
+                let _ = registry.gimp.disconnect_if_needed(smolpc_assistant_types::AppMode::Gimp).await;
+                let _ = registry.libreoffice.disconnect_if_needed(smolpc_assistant_types::AppMode::Writer).await;
+            });
+            cleanup_bridge_port_file();
+            log::info!("Connector providers disconnected");
+
             // Primary: shut down via supervisor handle.
             let supervisor_handle = app_handle.state::<EngineSupervisorHandle>();
             // Snapshot the PID before shutdown clears it — used as fallback for force-kill.
@@ -372,6 +385,16 @@ fn engine_pid_path() -> Option<std::path::PathBuf> {
 
 fn cleanup_engine_pid() {
     if let Some(path) = engine_pid_path() {
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+fn cleanup_bridge_port_file() {
+    if let Some(dir) = dirs::data_local_dir() {
+        let path = dir
+            .join("SmolPC 2.0")
+            .join("engine-runtime")
+            .join("bridge-port.txt");
         let _ = std::fs::remove_file(&path);
     }
 }
