@@ -240,19 +240,57 @@ In addition to `stop_token_ids` (which operate at the token ID level), the callb
 
 The `StreamCallbackState` tracks a `callback_count` against a `max_callback_count` limit. If the C-level `max_new_tokens` is not honored for any reason (ABI mismatch, pipeline bug), the counter forcibly stops generation. This is a third line of defense after `max_new_tokens` and stop token/string detection.
 
+## Known Limitations and Workarounds
+
+### NPU Device Corruption After Heavy Usage
+
+Repeated NPU pipeline creation and destruction (e.g., running benchmarks, switching backends rapidly, or repeated model loads) can leave the NPU driver in a corrupt state. Symptoms:
+
+- `ov_genai_llm_pipeline_create: unknown exception` on model load
+- Empty NPU blob cache directory (compilation started but never finished)
+- Generation failures on a previously working pipeline
+
+**Workaround:** Reboot the machine to reset the NPU device state. After reboot, the cache will recompile on first load and the NPU will function normally. There is no software-level recovery short of a full device reset.
+
+### "Context Too Long" Error on Fresh Chats
+
+The engine maps all `ov_genai` + `unknown exception` errors during generation to the user-friendly message: *"This conversation has gotten too long for the current inference mode."* This is correct when the tokenized input exceeds MAX_PROMPT_LEN, but it is a **misclassification** when the real cause is NPU device corruption (see above). If a fresh chat with a short message triggers this error, the cause is almost certainly a corrupt NPU state, not an actual context overflow.
+
+### First-Time Compilation Is Slow
+
+The first load of any model on NPU compiles the model to an NPU-specific blob. This takes 3-5 minutes for Qwen at MAX_PROMPT_LEN=2048 and there is no way to skip it. The compiled blob is cached to disk so subsequent loads take seconds. Changing MAX_PROMPT_LEN, MIN_RESPONSE_LEN, the model, or the OpenVINO version invalidates the cache and triggers recompilation.
+
+Users will see a long "Loading AI model..." screen on first launch with NPU. The engine's 300-second preflight budget accommodates this. If compilation exceeds the budget, the engine falls back to CPU temporarily.
+
+### Qwen3-4B INT4 Is Broken on NPU
+
+INT4 quantization for Qwen3-4B produces garbage output or crashes on NPU. Only INT8_SYM works. The model artifacts shipped for NPU use INT8_SYM (the 3.8 GB `openvino_model.bin`). Do not substitute INT4 artifacts for NPU use.
+
+### No Graceful Context Window Enforcement
+
+The NPU does not validate input length before processing. If the tokenized chat history exceeds MAX_PROMPT_LEN (2048 tokens), the pipeline crashes with "unknown exception" instead of returning an error. The engine host attempts to humanize this, but cannot distinguish it from other "unknown exception" causes (see above).
+
+**Practical impact:** Multi-turn conversations on NPU are limited to approximately 2048 input tokens total (system prompt + all messages). Long conversations must either be trimmed or switched to CPU mode.
+
 ## Performance Characteristics
 
-| Metric | NPU | CPU | DirectML (discrete GPU) |
-|---|---|---|---|
-| TTFT (first load) | 3-5 minutes (compilation) | Seconds | Seconds |
-| TTFT (cached) | ~200ms | ~1-2s | Variable |
-| Decode speed | Moderate (~10-15 tok/s) | Slow (~3-8 tok/s) | Fast (~20-40 tok/s) |
-| Power draw | Low | High | High |
-| Context window | Fixed (MAX_PROMPT_LEN) | Unlimited (within RAM) | Unlimited (within VRAM) |
-| Sampling | Greedy only | Full | Full |
-| Quantization | INT8_SYM (Qwen3), INT4 (Qwen2.5) | INT4 | INT4 |
+Benchmarked on Core Ultra 7 155H / 15.4 GB RAM / RTX 4050 (2026-03-27, 3 runs per prompt, 10 prompts):
 
-The NPU's main advantage is TTFT after the compilation cache is populated — it can start generating tokens faster than CPU because the compiled graph is optimized for the hardware. The main disadvantage is the fixed context window, which limits multi-turn conversation length.
+| Metric | Qwen 2.5 1.5B | | | Qwen3 4B | | |
+|---|---|---|---|---|---|---|
+| | **CPU** | **DirectML** | **NPU** | **CPU** | **DirectML** | **NPU** |
+| Median TTFT | 63 ms | 152 ms | 2,279 ms | 161 ms | 260 ms | 4,091 ms |
+| Median tok/s | 51.7 | 108.6 | 16.5 | 15.1 | 52.5 | 7.9 |
+| Median TPOT | 19.4 ms | 8.5 ms | 60.5 ms | 66.3 ms | 17.7 ms | 127.0 ms |
+| Peak RSS | 1,966 MB | 508 MB | 2,611 MB | 5,838 MB | 593 MB | 5,031 MB |
+
+**Key observations:**
+
+- **DirectML is fastest** on this machine (RTX 4050 discrete GPU). Machines without a discrete GPU will not have this option.
+- **CPU has the lowest TTFT** — good for perceived responsiveness on the first token.
+- **NPU has high TTFT** (~2.3s for 1.5B, ~4.1s for 4B) due to StaticLLMPipeline overhead per generation call, but steady throughput once generating.
+- **NPU's advantage is power efficiency**, not raw speed. On battery-powered laptops without a discrete GPU, it provides hardware acceleration without the thermal overhead of CPU inference.
+- **Qwen3-4B is ~3x slower and uses ~3x more memory** than Qwen 2.5 1.5B across all backends.
 
 ## OpenVINO Version
 

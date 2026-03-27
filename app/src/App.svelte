@@ -1333,6 +1333,10 @@ Generating summary...`
 			width: min(17.5rem, 86vw);
 		}
 
+		.sidebar-stage--closed {
+			width: 0;
+		}
+
 		.mode-selector-group {
 			display: flex;
 			width: 100%;

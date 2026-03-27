@@ -8,6 +8,29 @@ The platform includes Code Helper (a coding assistant), plus connectors for Blen
 
 The app ships as a single installer with bundled models, runtimes, and a setup wizard that detects available hardware and provisions the right model automatically.
 
+## Installation (Pre-Built)
+
+The `SmolPC_2.0_Final_Build/` folder at the repository root contains the ready-to-use distribution:
+
+```
+SmolPC_2.0_Final_Build/
+├── SmolPC 2.0_2.2.0_x64-setup.exe   # NSIS installer
+└── models/                           # Pre-built model archives
+    ├── qwen2.5-1.5b-instruct/       #   8 GB machines
+    └── qwen3-4b/                     #   16 GB+ machines
+```
+
+1. Run the installer (no admin rights required).
+2. On first launch, the setup wizard detects the models folder and provisions them automatically. If models are not detected, point the wizard to the `models/` directory.
+
+The app auto-detects your hardware and selects the best backend:
+
+| Priority | Backend | Hardware Required |
+|----------|---------|-------------------|
+| 1 | DirectML | Discrete GPU (NVIDIA, AMD) |
+| 2 | OpenVINO NPU | Intel Core Ultra NPU |
+| 3 | CPU | Any (fallback) |
+
 ## Architecture at a Glance
 
 ```
@@ -23,7 +46,9 @@ Tauri 2 Desktop App (Svelte 5 + Tailwind 4)
 
 The engine runs as a standalone local HTTP server. The desktop app connects via `smolpc-engine-client`. Connectors for Blender, GIMP, and LibreOffice extend the assistant into creative and productivity apps.
 
-## Prerequisites
+## Development Setup
+
+### Prerequisites
 
 | Requirement | Version |
 |-------------|---------|
@@ -32,8 +57,6 @@ The engine runs as a standalone local HTTP server. The desktop app connects via 
 | **OS** | Windows 11 |
 | **RAM** | 8 GB minimum, 16 GB recommended |
 | **Hardware** | Intel Core Ultra (NPU) recommended; discrete GPU (DirectML) or CPU-only supported |
-
-## Quick Start
 
 ### 1. Clone and install dependencies
 
@@ -45,7 +68,7 @@ npm ci
 
 ### 2. Stage runtime libraries (one-time)
 
-From the `app/` directory:
+These scripts download the native DLLs the engine needs at runtime. Run from the repo root:
 
 ```powershell
 # OpenVINO runtime (required for NPU and CPU inference)
@@ -54,11 +77,13 @@ npm run runtime:setup:openvino
 # DirectML runtime (required for discrete GPU inference)
 npm run runtime:setup:dml
 
-# Bundled Python (required for GIMP/Blender connectors)
+# Bundled Python (required for GIMP/Blender/LibreOffice connectors)
 npm run runtime:setup:python
 ```
 
 ### 3. Download models (one-time)
+
+Models are downloaded from HuggingFace and installed to `%LOCALAPPDATA%\SmolPC\models\`:
 
 ```powershell
 # Lightweight model for 8 GB machines (~900 MB - 1.3 GB)
@@ -81,39 +106,34 @@ cargo run -p smolpc-engine-host
 cd app && npm run dev
 ```
 
-The app auto-detects your hardware and selects the best backend:
+### Rebuilding the installer
 
-| Priority | Backend | Hardware Required |
-|----------|---------|-------------------|
-| 1 | DirectML | Discrete GPU (NVIDIA, AMD) |
-| 2 | OpenVINO NPU | Intel Core Ultra NPU |
-| 3 | CPU | Any (fallback) |
-
-## Build for Production
-
-### NSIS Installer
+After making code changes, rebuild the NSIS installer:
 
 ```powershell
-cd app
 npm run tauri build
 ```
 
-The installer requires no admin rights and bundles an offline WebView2 installer.
+This produces `target/release/bundle/nsis/SmolPC 2.0_<version>_x64-setup.exe`.
 
-### Offline USB Bundle
+## Known Limitations
 
-For school deployment with no internet:
-
-```powershell
-cd app
-npm run package:offline
-```
-
-Creates a self-contained bundle (installer + models + runtimes) for USB deployment. See [`installers/README.md`](installers/README.md) for details.
+- **NPU first-time compilation takes 3-5 minutes.** The first launch on an Intel NPU compiles the model to hardware-specific blobs. Subsequent launches load from cache in seconds.
+- **NPU context window is fixed at ~2048 input tokens.** Long multi-turn conversations must switch to CPU mode. See [`docs/engine/NPU_GUIDE.md`](docs/engine/NPU_GUIDE.md) for details.
+- **Qwen3-4B requires 16 GB RAM.** Machines with less than 16 GB are limited to Qwen 2.5 1.5B.
+- **DirectML on Intel integrated GPUs produces garbage output.** Only discrete GPUs (NVIDIA, AMD) are accepted as DirectML candidates.
+- **NPU device corruption after heavy usage.** Repeated model loading/unloading can leave the NPU in a bad state. Reboot to recover. See [`docs/engine/NPU_GUIDE.md`](docs/engine/NPU_GUIDE.md#known-limitations-and-workarounds).
 
 ## Documentation
 
-See [`docs/`](docs/) for full documentation, including architecture, engine API reference, deployment guides, and deep dives into inference, hardware detection, and connector development.
+| Area | Docs |
+|------|------|
+| **Architecture** | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| **Engine** | [`docs/engine/`](docs/engine/) — API reference, lifecycle, inference deep dive, NPU guide |
+| **Hardware** | [`docs/hardware/`](docs/hardware/) — hardware detection, model selection, OpenVINO FFI |
+| **Development** | [`docs/development/`](docs/development/) — workflow, testing, benchmarks, design decisions |
+| **Apps** | [`docs/apps/`](docs/apps/) — mode capabilities, connector development guide |
+| **Security** | [`docs/SECURITY_AND_PRIVACY.md`](docs/SECURITY_AND_PRIVACY.md) |
 
 ## License
 

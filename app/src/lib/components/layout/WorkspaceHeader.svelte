@@ -92,6 +92,7 @@
 <style>
 	.workspace-header {
 		position: relative;
+		z-index: 10;
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.75rem;

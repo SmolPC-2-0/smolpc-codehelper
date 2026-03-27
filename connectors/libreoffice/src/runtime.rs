@@ -1,5 +1,4 @@
 use super::resources::LibreOfficeResourceLayout;
-use smolpc_connector_common::python::resolve_prepared_python_command;
 use smolpc_mcp_client::{McpSession, StdioTransportConfig};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -18,10 +17,6 @@ pub struct LibreOfficeRuntimeConfig {
     pub entrypoint: PathBuf,
     pub working_dir: PathBuf,
     pub python_command: String,
-    /// When using the bundled standalone Python (not a venv Python), this points
-    /// to the pre-installed `.venv/Lib/site-packages/` directory so that
-    /// third-party packages are available via PYTHONPATH.
-    pub site_packages_dir: Option<PathBuf>,
     pub log_dir: PathBuf,
 }
 
@@ -31,22 +26,14 @@ impl LibreOfficeRuntimeConfig {
         app_local_data_dir: Option<&Path>,
         allow_system_python_fallback: bool,
     ) -> Result<Self, String> {
-        let uses_prepared_python = resolve_prepared_python_command(app_local_data_dir).is_some();
-        let python_command = resolve_python_command(
-            &layout.mcp_server_dir,
-            app_local_data_dir,
-            allow_system_python_fallback,
-        )?;
-        let site_packages_dir = if uses_prepared_python {
-            resolve_site_packages_dir(&layout.mcp_server_dir)
-        } else {
-            None
-        };
         Ok(Self {
             entrypoint: layout.mcp_server_py_path.clone(),
             working_dir: layout.mcp_server_dir.clone(),
-            python_command,
-            site_packages_dir,
+            python_command: resolve_python_command(
+                &layout.mcp_server_dir,
+                app_local_data_dir,
+                allow_system_python_fallback,
+            )?,
             log_dir: resolve_log_dir(app_local_data_dir),
         })
     }
@@ -57,27 +44,6 @@ impl LibreOfficeRuntimeConfig {
             "SMOLPC_MCP_LOG_DIR".to_string(),
             ensure_log_dir(&self.log_dir)?.to_string_lossy().to_string(),
         );
-
-        // When using the bundled standalone Python (not a venv), inject PYTHONPATH
-        // so that pre-installed packages from the bundled .venv are importable.
-        if let Some(ref site_packages) = self.site_packages_dir {
-            env.insert(
-                "PYTHONPATH".to_string(),
-                build_python_path(site_packages),
-            );
-            // Prevent importing from user site-packages on the target machine.
-            env.insert("PYTHONNOUSERSITE".to_string(), "1".to_string());
-            // pywin32 needs its DLL directory (pywintypes313.dll etc.) discoverable.
-            let pywin32_dll_dir = site_packages.join("pywin32_system32");
-            if pywin32_dll_dir.is_dir() {
-                // Prepend to PATH so Windows DLL loader finds pywin32 DLLs.
-                let existing_path = std::env::var("PATH").unwrap_or_default();
-                env.insert(
-                    "PATH".to_string(),
-                    format!("{};{}", pywin32_dll_dir.to_string_lossy(), existing_path),
-                );
-            }
-        }
 
         Ok(StdioTransportConfig {
             command: self.python_command.clone(),
@@ -112,62 +78,21 @@ impl LibreOfficeRuntimeConfig {
 
 fn resolve_python_command(
     working_dir: &Path,
-    app_local_data_dir: Option<&Path>,
-    allow_system_python_fallback: bool,
+    _app_local_data_dir: Option<&Path>,
+    _allow_system_python_fallback: bool,
 ) -> Result<String, String> {
-    // 1. Try the bundled full CPython prepared by setup_prepare().
-    //    This is a standalone CPython 3.13 with SSL support.
-    if let Some(prepared) = resolve_prepared_python_command(app_local_data_dir) {
-        return Ok(prepared);
-    }
+    // The bundled embedded Python (3.12 embed zip) lacks SSL and cannot create
+    // usable virtual environments for pip packages. The MCP server requires
+    // python-docx, python-pptx, odfdo etc. so we always resolve from .venv or
+    // system Python which have full stdlib.
 
-    // 2. Dev fallback: try .venv from the working dir or source tree.
-    if allow_system_python_fallback {
-        for candidate in development_python_candidates(working_dir) {
-            if candidate.is_file() {
-                return Ok(candidate.to_string_lossy().to_string());
-            }
-        }
-
-        return Ok(DEFAULT_PYTHON_COMMAND.to_string());
-    }
-
-    Err(
-        "Bundled Python is not prepared yet. Use setup_prepare() from the setup panel before starting Writer or Slides.".to_string(),
-    )
-}
-
-/// When using the bundled standalone Python, resolve the site-packages directory
-/// from the pre-installed .venv shipped alongside the MCP server.
-fn resolve_site_packages_dir(mcp_server_dir: &Path) -> Option<PathBuf> {
-    let site_packages = mcp_server_dir
-        .join(".venv")
-        .join("Lib")
-        .join("site-packages");
-    if site_packages.is_dir() {
-        Some(site_packages)
-    } else {
-        None
-    }
-}
-
-/// Build a PYTHONPATH value that includes site-packages and the additional
-/// directories required by pywin32 (win32, win32/lib).
-fn build_python_path(site_packages: &Path) -> String {
-    let sep = ";";
-    let mut parts = vec![site_packages.to_string_lossy().to_string()];
-
-    // pywin32 needs win32/ and win32/lib/ on sys.path (normally added via .pth)
-    let win32_dir = site_packages.join("win32");
-    if win32_dir.is_dir() {
-        parts.push(win32_dir.to_string_lossy().to_string());
-        let win32_lib = win32_dir.join("lib");
-        if win32_lib.is_dir() {
-            parts.push(win32_lib.to_string_lossy().to_string());
+    for candidate in development_python_candidates(working_dir) {
+        if candidate.is_file() {
+            return Ok(candidate.to_string_lossy().to_string());
         }
     }
 
-    parts.join(sep)
+    Ok(DEFAULT_PYTHON_COMMAND.to_string())
 }
 
 fn development_python_candidates(working_dir: &Path) -> Vec<PathBuf> {
@@ -248,40 +173,12 @@ mod tests {
             entrypoint: PathBuf::from("mcp_server.py"),
             working_dir: PathBuf::from("."),
             python_command: "python3".to_string(),
-            site_packages_dir: None,
             log_dir,
         };
 
         let transport = config.stdio_transport_config().expect("transport config");
         assert!(transport.env.contains_key("SMOLPC_MCP_LOG_DIR"));
-        assert!(!transport.env.contains_key("PYTHONPATH"));
         assert_eq!(transport.args, vec!["mcp_server.py"]);
-    }
-
-    #[test]
-    fn stdio_transport_config_injects_pythonpath_when_site_packages_set() {
-        let tempdir = tempdir().expect("tempdir");
-        let log_dir = tempdir.path().join("logs");
-        let site_packages = tempdir.path().join("site-packages");
-        std::fs::create_dir_all(&site_packages).expect("create site-packages");
-
-        let config = LibreOfficeRuntimeConfig {
-            entrypoint: PathBuf::from("mcp_server.py"),
-            working_dir: PathBuf::from("."),
-            python_command: "/bundled/python.exe".to_string(),
-            site_packages_dir: Some(site_packages.clone()),
-            log_dir,
-        };
-
-        let transport = config.stdio_transport_config().expect("transport config");
-        assert_eq!(
-            transport.env.get("PYTHONPATH").expect("PYTHONPATH"),
-            &site_packages.to_string_lossy().to_string()
-        );
-        assert_eq!(
-            transport.env.get("PYTHONNOUSERSITE").expect("PYTHONNOUSERSITE"),
-            "1"
-        );
     }
 
     #[test]
@@ -290,7 +187,6 @@ mod tests {
             entrypoint: PathBuf::from("mcp_server.py"),
             working_dir: PathBuf::from("."),
             python_command: "python3".to_string(),
-            site_packages_dir: None,
             log_dir: PathBuf::from("/tmp/logs"),
         };
 

@@ -17,7 +17,6 @@
 		"tauri:dml": "npm run tauri:dml --workspace app",
 		"runtime:setup:openvino": "npm run runtime:setup:openvino --workspace app",
 		"runtime:setup:python": "npm run runtime:setup:python --workspace app",
-		"model:export:dml": "npm run model:export:dml --workspace app",
 		"model:setup:qwen25-instruct": "npm run model:setup:qwen25-instruct --workspace app",
 		"model:setup:qwen3-4b": "npm run model:setup:qwen3-4b --workspace app",
 		"boundary:check": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-boundaries.ps1"

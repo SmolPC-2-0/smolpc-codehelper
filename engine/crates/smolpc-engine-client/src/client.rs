@@ -101,7 +101,9 @@ impl EngineClient {
                 })
                 .to_string(),
             )
-            .timeout(NON_STREAMING_REQUEST_TIMEOUT)
+            // ensure_started triggers model loading, which can take minutes
+            // (DirectML preflight: 60s, OpenVINO: 300s). Use the load timeout.
+            .timeout(LOAD_REQUEST_TIMEOUT)
             .send()
             .await?;
 
