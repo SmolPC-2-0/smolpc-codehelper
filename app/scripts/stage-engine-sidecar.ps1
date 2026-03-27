@@ -11,7 +11,7 @@ function Resolve-RepoRoot {
 }
 
 function Resolve-WorkspaceRoot {
-    return (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
+    return (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 }
 
 $repoRoot = Resolve-RepoRoot

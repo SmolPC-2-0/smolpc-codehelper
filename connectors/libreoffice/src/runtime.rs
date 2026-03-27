@@ -79,26 +79,20 @@ impl LibreOfficeRuntimeConfig {
 fn resolve_python_command(
     working_dir: &Path,
     _app_local_data_dir: Option<&Path>,
-    allow_system_python_fallback: bool,
+    _allow_system_python_fallback: bool,
 ) -> Result<String, String> {
     // The bundled embedded Python (3.12 embed zip) lacks SSL and cannot create
     // usable virtual environments for pip packages. The MCP server requires
-    // python-docx, python-pptx, odfdo etc. so we skip the embedded Python
-    // entirely and resolve from .venv or system Python which have full stdlib.
+    // python-docx, python-pptx, odfdo etc. so we always resolve from .venv or
+    // system Python which have full stdlib.
 
-    if allow_system_python_fallback {
-        for candidate in development_python_candidates(working_dir) {
-            if candidate.is_file() {
-                return Ok(candidate.to_string_lossy().to_string());
-            }
+    for candidate in development_python_candidates(working_dir) {
+        if candidate.is_file() {
+            return Ok(candidate.to_string_lossy().to_string());
         }
-
-        return Ok(DEFAULT_PYTHON_COMMAND.to_string());
     }
 
-    Err(
-        "Bundled Python is not prepared yet. Use setup_prepare() from the setup panel before starting Writer or Slides.".to_string(),
-    )
+    Ok(DEFAULT_PYTHON_COMMAND.to_string())
 }
 
 fn development_python_candidates(working_dir: &Path) -> Vec<PathBuf> {

@@ -287,6 +287,8 @@ pub async fn engine_ensure_started(
             match client.status().await {
                 Ok(status) => {
                     let readiness = map_engine_status_to_readiness(&status);
+
+                    // If the engine is genuinely failed, return the failure.
                     if readiness.state == "failed" {
                         if readiness.error_message.is_some() {
                             return Ok(readiness);
@@ -298,6 +300,23 @@ pub async fn engine_ensure_started(
                             error_message: Some(error_message),
                             ..readiness
                         });
+                    }
+
+                    // If the engine is still in a starting state (probing, loading_model,
+                    // etc.), the HTTP call likely timed out while the engine is still
+                    // working.  Return the actual engine state so the frontend keeps
+                    // polling instead of showing a premature failure.
+                    let still_starting = matches!(
+                        readiness.state.as_str(),
+                        "starting" | "probing" | "resolving_assets" | "loading_model"
+                    );
+                    if still_starting {
+                        log::warn!(
+                            "ensure_started HTTP call failed ({error_message}) but engine is \
+                             still in '{}' state — returning actual state to frontend",
+                            readiness.state
+                        );
+                        return Ok(readiness);
                     }
 
                     Ok(EngineReadinessDto::failed_from(

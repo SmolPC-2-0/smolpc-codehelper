@@ -1,6 +1,6 @@
 {
-  "version": "phase5-bundled-python-cpython-3.12.9-uv-0.10.12",
-  "source": "python.org CPython 3.12.9 embeddable amd64 + Astral uv 0.10.12 staged by runtime:setup:python",
-  "expectedPaths": ["README.md", "payload/python.exe", "payload/uv.exe", "payload/uvx.exe"],
+  "version": "phase6-full-python-cpython-3.13.2-uv-0.10.12",
+  "source": "python-build-standalone CPython 3.13.2 install_only_stripped + Astral uv 0.10.12 staged by runtime:setup:python",
+  "expectedPaths": ["README.md", "payload/python.exe", "payload/python313.dll", "payload/DLLs/_ssl.pyd", "payload/Lib/ssl.py", "payload/uv.exe", "payload/uvx.exe"],
   "status": "staging-required"
 }

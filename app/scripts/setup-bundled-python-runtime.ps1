@@ -2,8 +2,8 @@ param(
     [string]$PayloadRoot = "",
     [string]$PythonArchivePath = "",
     [string]$UvArchivePath = "",
-    [string]$PythonArchiveUrl = "https://www.python.org/ftp/python/3.12.9/python-3.12.9-embed-amd64.zip",
-    [string]$PythonArchiveMd5 = "f34996cc1f44c98729ef6ce92d05e41c",
+    [string]$PythonArchiveUrl = "https://github.com/indygreg/python-build-standalone/releases/download/20250317/cpython-3.13.2+20250317-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+    [string]$PythonArchiveSha256 = "",
     [string]$UvArchiveUrl = "https://releases.astral.sh/github/uv/releases/download/0.10.12/uv-x86_64-pc-windows-msvc.zip",
     [string]$UvArchiveSha256 = "4c1d55501869b3330d4aabf45ad6024ce2367e0f3af83344395702d272c22e88"
 )
@@ -137,7 +137,7 @@ function Remove-TreeIfPresent {
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $payloadRoot = Resolve-TargetPath -Path $PayloadRoot -RepoRoot $repoRoot
 $tempRoot = Join-Path $env:TEMP ("smolpc-python-runtime-" + [Guid]::NewGuid().ToString("N"))
-$pythonDownloadPath = Join-Path $tempRoot "python-embed.zip"
+$pythonDownloadPath = Join-Path $tempRoot "cpython-standalone.tar.gz"
 $uvDownloadPath = Join-Path $tempRoot "uv.zip"
 $pythonExtractRoot = Join-Path $tempRoot "python-extract"
 $uvExtractRoot = Join-Path $tempRoot "uv-extract"
@@ -148,26 +148,34 @@ $uvArchive = Resolve-ArchivePath -ArchivePath $UvArchivePath -DownloadPath $uvDo
 
 $requiredPayloadFiles = @(
     "python.exe",
-    "pythonw.exe",
-    "python312.dll",
-    "python312.zip",
-    "python312._pth",
+    "python313.dll",
+    "python3.dll",
     "vcruntime140.dll",
     "uv.exe",
     "uvx.exe"
 )
 
+# Additional sentinel files that prove we have a full CPython (not embed zip)
+$requiredSentinelFiles = @(
+    "DLLs\_ssl.pyd",
+    "Lib\ssl.py",
+    "Lib\site.py"
+)
+
 try {
     New-Item -ItemType Directory -Force -Path $tempRoot, $pythonExtractRoot, $uvExtractRoot, $stagingPayloadRoot | Out-Null
 
-    Download-ArchiveIfNeeded -ArchivePath $pythonArchive -ArchiveUrl $PythonArchiveUrl -Label "CPython embeddable"
+    Download-ArchiveIfNeeded -ArchivePath $pythonArchive -ArchiveUrl $PythonArchiveUrl -Label "CPython standalone"
     Download-ArchiveIfNeeded -ArchivePath $uvArchive -ArchiveUrl $UvArchiveUrl -Label "uv"
 
-    Assert-FileHash -Path $pythonArchive -Algorithm MD5 -Expected $PythonArchiveMd5 -Label "CPython embeddable"
+    if (-not [string]::IsNullOrWhiteSpace($PythonArchiveSha256)) {
+        Assert-FileHash -Path $pythonArchive -Algorithm SHA256 -Expected $PythonArchiveSha256 -Label "CPython standalone"
+    }
     Assert-FileHash -Path $uvArchive -Algorithm SHA256 -Expected $UvArchiveSha256 -Label "uv"
 
-    Write-Host "Extracting CPython embeddable runtime..."
-    Expand-Archive -LiteralPath $pythonArchive -DestinationPath $pythonExtractRoot -Force
+    Write-Host "Extracting CPython standalone runtime..."
+    # python-build-standalone ships as .tar.gz — use system tar to avoid Git Bash path issues
+    & "$env:SystemRoot\System32\tar.exe" -xzf $pythonArchive -C $pythonExtractRoot 2>&1 | ForEach-Object { "$_" }
     $pythonRoot = Resolve-ExtractedRoot -ExtractRoot $pythonExtractRoot -Sentinel "python.exe"
     Copy-DirectoryContents -SourceRoot $pythonRoot -DestinationRoot $stagingPayloadRoot
 
@@ -182,6 +190,12 @@ try {
 
     $missing = @(
         foreach ($fileName in $requiredPayloadFiles) {
+            $candidate = Join-Path $stagingPayloadRoot $fileName
+            if (-not (Test-Path $candidate -PathType Leaf)) {
+                $fileName
+            }
+        }
+        foreach ($fileName in $requiredSentinelFiles) {
             $candidate = Join-Path $stagingPayloadRoot $fileName
             if (-not (Test-Path $candidate -PathType Leaf)) {
                 $fileName
