@@ -3,7 +3,13 @@ use super::state::SceneSnapshot;
 use smolpc_assistant_types::{AssistantResponseDto, ToolExecutionResultDto};
 
 pub fn parse_scene_snapshot(payload: &serde_json::Value) -> Option<SceneSnapshot> {
-    serde_json::from_value(payload.clone()).ok()
+    match serde_json::from_value(payload.clone()) {
+        Ok(snapshot) => Some(snapshot),
+        Err(error) => {
+            log::warn!("Failed to parse scene snapshot: {error}");
+            None
+        }
+    }
 }
 
 pub fn parse_rag_contexts(payload: &serde_json::Value) -> Vec<RagContext> {

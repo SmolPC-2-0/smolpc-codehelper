@@ -10,7 +10,7 @@ use std::os::windows::process::CommandExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const BLENDER_ADDON_MODULE_ID: &str = "blender_helper_http";
-pub const BLENDER_ADDON_VERSION: &str = "7.0.0";
+pub const BLENDER_ADDON_VERSION: &str = "7.2.0";
 
 const BLENDER_RESOURCE_ROOT: &str = "blender";
 const BLENDER_ADDON_RELATIVE_PATH: &str = "addon/blender_helper_http.py";

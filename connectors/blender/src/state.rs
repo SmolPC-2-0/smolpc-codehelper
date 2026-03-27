@@ -28,6 +28,8 @@ pub struct SceneData {
     pub mode: String,
     pub render_engine: Option<String>,
     #[serde(default)]
+    pub selected_objects: Vec<String>,
+    #[serde(default)]
     pub objects: Vec<SceneObject>,
 }
 
@@ -58,9 +60,9 @@ impl SceneCache {
                 if age > SCENE_STALE_THRESHOLD_SECS {
                     SceneSnapshot {
                         connected: false,
-                        scene_data: None,
+                        scene_data: Some(scene_data.clone()),
                         message: Some(
-                            "Scene data is stale. Blender may not be connected right now."
+                            "Scene data may be stale. Blender may not be connected right now."
                                 .to_string(),
                         ),
                         last_update: Some(last_update),
@@ -123,6 +125,7 @@ mod tests {
             active_object: Some("Cube".to_string()),
             mode: "OBJECT".to_string(),
             render_engine: Some("BLENDER_EEVEE".to_string()),
+            selected_objects: vec!["Cube".to_string()],
             objects: Vec::new(),
         });
 

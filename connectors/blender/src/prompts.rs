@@ -92,16 +92,24 @@ fn format_scene_summary(scene_context: Option<&SceneData>) -> String {
                 String::new()
             };
 
+            let selected_line = if scene.selected_objects.is_empty() {
+                "None".to_string()
+            } else {
+                scene.selected_objects.join(", ")
+            };
+
             format!(
                 "Current Scene Information (live snapshot):
 - Objects: {} total
 - Active object: {}
+- Selected objects: {}
 - Mode: {}
 - Render engine: {}
 - Listed objects (name | type | modifiers):
 {}{}",
                 scene.object_count,
                 scene.active_object.as_deref().unwrap_or("None"),
+                selected_line,
                 scene.mode,
                 scene.render_engine.as_deref().unwrap_or("Unknown"),
                 object_lines,

@@ -125,6 +125,44 @@ pub fn resolve_prepared_python_command(app_local_data_dir: Option<&Path>) -> Opt
     })
 }
 
+/// Resolve the prepared `uv` command next to the prepared Python.
+///
+/// Returns `Some(uv_path)` when a `uv` executable sits alongside the prepared
+/// Python in the payload directory.
+pub fn resolve_prepared_uv_command(app_local_data_dir: Option<&Path>) -> Option<String> {
+    prepared_python_root(app_local_data_dir).and_then(|root| {
+        prepared_uv_candidates(&root)
+            .into_iter()
+            .find(|candidate| candidate.is_file())
+            .map(|path| path.to_string_lossy().to_string())
+    })
+}
+
+fn prepared_uv_candidates(root: &Path) -> Vec<PathBuf> {
+    let payload_root = root.join("payload");
+    let mut candidates = Vec::new();
+
+    #[cfg(windows)]
+    {
+        candidates.extend([
+            payload_root.join("uv.exe"),
+            root.join("uv.exe"),
+        ]);
+    }
+
+    #[cfg(not(windows))]
+    {
+        candidates.extend([
+            payload_root.join("uv"),
+            payload_root.join("bin").join("uv"),
+            root.join("bin").join("uv"),
+            root.join("uv"),
+        ]);
+    }
+
+    candidates
+}
+
 fn prepared_version_matches(root: Option<&Path>, version: &str) -> bool {
     let Some(root) = root else {
         return false;

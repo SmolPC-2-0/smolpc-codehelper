@@ -9,17 +9,22 @@ Connects to the local Blender Learning Assistant bridge for AI-powered guidance.
 """
 
 import bpy
+import os
 import traceback
 import time
 
 bl_info = {
     "name": "Blender Learning Assistant",
     "author": "SmolPC",
-    "version": (7, 0, 0),
+    "version": (7, 2, 0),
     "blender": (3, 0, 0),
     "category": "3D View",
     "description": "Educational assistant for learning Blender (offline)",
 }
+
+MAX_SYNC_OBJECTS = 300
+MAX_MODIFIERS_PER_OBJECT = 8
+MAX_SELECTED_OBJECTS = 32
 
 
 # ============================================================================
@@ -27,53 +32,134 @@ bl_info = {
 # ============================================================================
 
 def gather_scene_info():
-    """Collect current scene state for educational assistant."""
-    try:
-        scene_data = {
-            'object_count': len(bpy.context.scene.objects),
-            'objects': [],
-            'selected_objects': [obj.name for obj in bpy.context.selected_objects],
-            'active_object': bpy.context.active_object.name if bpy.context.active_object else None,
-            'mode': bpy.context.mode,
-            'render_engine': bpy.context.scene.render.engine
-        }
+    """Collect current scene state for educational assistant.
 
-        # Gather detailed object info
-        for obj in bpy.context.scene.objects:
+    Each field is gathered individually so that one failure (e.g.
+    bpy.context.selected_objects unavailable in a timer callback)
+    does not prevent the rest of the scene data from being sent.
+    """
+    scene_data = {
+        'object_count': 0,
+        'objects': [],
+        'selected_objects': [],
+        'active_object': None,
+        'mode': 'OBJECT',
+        'render_engine': None,
+    }
+
+    scene = None
+    try:
+        scene = bpy.context.scene
+    except Exception:
+        scene = None
+
+    try:
+        if scene is not None:
+            scene_data['object_count'] = len(scene.objects)
+    except Exception:
+        pass
+
+    try:
+        scene_data['active_object'] = (
+            bpy.context.active_object.name if bpy.context.active_object else None
+        )
+    except Exception:
+        pass
+
+    try:
+        selected_objects = []
+        for index, obj in enumerate(bpy.context.selected_objects):
+            if index >= MAX_SELECTED_OBJECTS:
+                break
+            selected_objects.append(obj.name)
+        scene_data['selected_objects'] = selected_objects
+    except Exception:
+        pass
+
+    try:
+        scene_data['mode'] = bpy.context.mode
+    except Exception:
+        pass
+
+    try:
+        if scene is not None:
+            scene_data['render_engine'] = scene.render.engine
+    except Exception:
+        pass
+
+    try:
+        if scene is None:
+            return scene_data
+
+        for index, obj in enumerate(scene.objects):
+            if index >= MAX_SYNC_OBJECTS:
+                break
+
+            modifiers = []
+            for modifier_index, modifier in enumerate(obj.modifiers):
+                if modifier_index >= MAX_MODIFIERS_PER_OBJECT:
+                    break
+                modifiers.append({'name': modifier.name, 'type': modifier.type})
+
             obj_info = {
                 'name': obj.name,
                 'type': obj.type,
-                'modifiers': [
-                    {'name': m.name, 'type': m.type}
-                    for m in obj.modifiers
-                ],
+                'modifiers': modifiers,
                 'material_count': len(obj.material_slots)
             }
             scene_data['objects'].append(obj_info)
-
-        return scene_data
-
     except Exception as e:
-        print(f"Error gathering scene info: {e}")
-        return {'error': str(e)}
+        print(f"Error gathering object details: {e}")
+
+    return scene_data
 
 
 # ============================================================================
 # Bridge Token Auth
 # ============================================================================
 
-def _read_bridge_token():
-    """Read the bridge auth token written by the Tauri app."""
-    import os
+def _runtime_dir():
+    """Return the engine-runtime directory path."""
     local_app_data = os.environ.get('LOCALAPPDATA', '')
     if not local_app_data:
         return None
-    token_path = os.path.join(local_app_data, 'SmolPC 2.0', 'engine-runtime', 'bridge-token.txt')
+    return os.path.join(local_app_data, 'SmolPC 2.0', 'engine-runtime')
+
+
+def _read_bridge_token():
+    """Read the bridge auth token written by the Tauri app."""
+    runtime_dir = _runtime_dir()
+    if not runtime_dir:
+        return None
+    token_path = os.path.join(runtime_dir, 'bridge-token.txt')
     try:
         with open(token_path, 'r') as f:
             return f.read().strip() or None
     except (OSError, IOError):
         return None
+
+
+def _read_bridge_port(default=5180):
+    """Read the bridge port written by the Tauri app.
+
+    Falls back to *default* when the file is missing or unreadable so
+    the addon still works when the bridge uses the preferred port.
+    """
+    runtime_dir = _runtime_dir()
+    if not runtime_dir:
+        return default
+    port_path = os.path.join(runtime_dir, 'bridge-port.txt')
+    try:
+        with open(port_path, 'r') as f:
+            return int(f.read().strip())
+    except (OSError, IOError, ValueError):
+        return default
+
+
+def _bridge_url():
+    """Return the base URL for the Blender bridge."""
+    port = _read_bridge_port()
+    return f"http://127.0.0.1:{port}"
 
 
 def _auth_headers():
@@ -98,6 +184,7 @@ def _post_json(url, payload, headers=None, timeout=60):
     data = _json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(url, data=data, method='POST')
     req.add_header('Content-Type', 'application/json')
+    req.add_header('Connection', 'close')
     if headers:
         for key, value in headers.items():
             req.add_header(key, value)
@@ -108,6 +195,7 @@ def _post_json(url, payload, headers=None, timeout=60):
 def _get_json(url, headers=None, timeout=5):
     """GET JSON and return parsed response. Uses only stdlib."""
     req = urllib.request.Request(url, method='GET')
+    req.add_header('Connection', 'close')
     if headers:
         for key, value in headers.items():
             req.add_header(key, value)
@@ -115,8 +203,9 @@ def _get_json(url, headers=None, timeout=5):
         return _json.loads(resp.read().decode('utf-8'))
 
 
-def ask_question(question, server_url="http://127.0.0.1:5180"):
+def ask_question(question, server_url=None):
     """Ask an educational question through the local assistant bridge."""
+    server_url = server_url or _bridge_url()
     try:
         scene_context = gather_scene_info()
         data = _post_json(
@@ -141,8 +230,9 @@ def ask_question(question, server_url="http://127.0.0.1:5180"):
         return {'answer': None, 'error': f'Error: {str(e)}'}
 
 
-def get_suggestions(server_url="http://127.0.0.1:5180"):
+def get_suggestions(server_url=None):
     """Get learning suggestions based on current scene."""
+    server_url = server_url or _bridge_url()
     try:
         scene_data = gather_scene_info()
         data = _post_json(
@@ -158,27 +248,35 @@ def get_suggestions(server_url="http://127.0.0.1:5180"):
         return {'suggestions': None, 'error': f'Error: {str(e)}'}
 
 
-def update_scene_data(server_url="http://127.0.0.1:5180"):
+def update_scene_data(server_url=None):
     """Send current scene data to server for caching."""
+    server_url = server_url or _bridge_url()
     try:
         scene_data = gather_scene_info()
         _post_json(
             f"{server_url}/scene/update",
             {'scene_data': scene_data},
             headers=_auth_headers(),
-            timeout=0.5,
+            timeout=2,
         )
         return {'success': True, 'error': None}
+    except urllib.error.HTTPError as e:
+        return {'success': False, 'error': f'HTTP {e.code} from bridge (auth issue?)'}
     except urllib.error.URLError:
         return {'success': False, 'error': 'Server not running'}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
 
-def check_server_health(server_url="http://127.0.0.1:5180", timeout=5):
+def check_server_health(server_url=None, timeout=5):
     """Check if the Blender Learning Assistant bridge is running."""
+    server_url = server_url or _bridge_url()
     try:
-        data = _get_json(f"{server_url}/health", timeout=timeout)
+        data = _get_json(
+            f"{server_url}/health",
+            headers=_auth_headers(),
+            timeout=timeout,
+        )
         return {
             'running': True,
             'rag_enabled': data.get('rag_enabled', False),
@@ -454,13 +552,25 @@ def sync_scene_timer():
     """Periodic timer to send scene data to server and update health cache."""
     global _server_health_cache
 
-    # Update health cache (non-blocking for UI)
-    health = check_server_health(timeout=0.5)
-    _server_health_cache = {**_server_health_cache, **health}
+    try:
+        # Update health cache
+        health = check_server_health(timeout=0.5)
+        _server_health_cache = {**_server_health_cache, **health}
 
-    # Only sync scene if server is running
-    if health['running']:
-        update_scene_data()
+        # Always attempt sync so a flaky health probe does not block updates.
+        result = update_scene_data()
+        if result['success']:
+            _server_health_cache = {
+                **_server_health_cache,
+                'running': True,
+                'error': None,
+                'last_updated': time.time(),
+            }
+        elif result.get('error') and result['error'] != 'Server not running':
+            print(f"[BlenderHelper] Scene sync failed: {result['error']}")
+    except Exception:
+        # Never let an exception escape — Blender silently kills the timer.
+        pass
 
     # Re-register timer (every 5 seconds)
     return 5.0

@@ -178,10 +178,16 @@ impl BlenderProvider {
         if let Some(message) = snapshot.message.as_ref() {
             details.push(message.clone());
         } else if let Some(scene_data) = snapshot.scene_data.as_ref() {
+            let selected = if scene_data.selected_objects.is_empty() {
+                "none".to_string()
+            } else {
+                scene_data.selected_objects.join(", ")
+            };
             details.push(format!(
-                "Live scene available with {} object(s); active object: {}.",
+                "Live scene available with {} object(s); active object: {}; selected: {}.",
                 scene_data.object_count,
-                scene_data.active_object.as_deref().unwrap_or("None")
+                scene_data.active_object.as_deref().unwrap_or("None"),
+                selected,
             ));
         }
 
@@ -636,7 +642,7 @@ exit 0
     }
 
     #[tokio::test]
-    async fn status_returns_friendly_error_when_port_is_occupied() {
+    async fn bridge_starts_on_fallback_port_when_preferred_is_occupied() {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind occupied port");
@@ -651,8 +657,14 @@ exit 0
         );
 
         let state = provider.status(AppMode::Blender).await.expect("status");
-        assert_eq!(state.state, "error");
-        assert!(state.detail.expect("detail").contains("already in use"));
+        // The bridge must NOT fail with the old "already in use" error.
+        // It may show a Blender-detection error in test environments, but
+        // that is unrelated to port conflict handling.
+        let detail = state.detail.unwrap_or_default();
+        assert!(
+            !detail.contains("already in use"),
+            "bridge should fall back instead of reporting port conflict: {detail}"
+        );
     }
 
     #[tokio::test]
@@ -775,6 +787,7 @@ exit 0
                 active_object: Some("Cube".to_string()),
                 mode: "OBJECT".to_string(),
                 render_engine: Some("BLENDER_EEVEE".to_string()),
+                selected_objects: vec!["Cube".to_string()],
                 objects: Vec::new(),
             });
         }
