@@ -180,8 +180,10 @@ pub fn detect_sources(internet_available: bool) -> Vec<ModelSource> {
     sources
 }
 
-/// Returns `true` if `%LOCALAPPDATA%\SmolPC\models\` exists and contains at least
-/// one subdirectory (i.e., at least one model has been installed).
+/// Returns `true` if `%LOCALAPPDATA%\SmolPC 2.0\models\` contains at least one
+/// LLM model subdirectory (qwen*, phi*, llama*). Voice-only dirs like
+/// whisper-base.en or kittentts-nano don't count — the user still needs to
+/// provision an LLM model before the app is usable.
 ///
 /// Note: portable mode is handled separately via `AppBootState::portable`.
 pub fn models_exist() -> bool {
@@ -192,7 +194,13 @@ pub fn models_exist() -> bool {
     let Ok(entries) = std::fs::read_dir(&models_dir) else {
         return false;
     };
-    entries.flatten().any(|e| e.path().is_dir())
+    entries.flatten().any(|e| {
+        e.path().is_dir() && {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("qwen") || name.starts_with("phi") || name.starts_with("llama")
+        }
+    })
 }
 
 #[cfg(test)]
