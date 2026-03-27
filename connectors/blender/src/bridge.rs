@@ -7,7 +7,6 @@ use axum::{Json, Router};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-#[cfg(test)]
 use std::net::SocketAddr;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
@@ -27,7 +26,7 @@ impl Default for BridgeConfig {
     fn default() -> Self {
         Self {
             host: "127.0.0.1".to_string(),
-            port: 5179,
+            port: 5180,
         }
     }
 }
@@ -50,14 +49,12 @@ struct SceneUpdateRequest {
 
 #[derive(Debug)]
 pub struct SceneBridgeHandle {
-    #[cfg(test)]
     local_addr: SocketAddr,
     shutdown: Option<oneshot::Sender<()>>,
     task: tokio::task::JoinHandle<()>,
 }
 
 impl SceneBridgeHandle {
-    #[cfg(test)]
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
@@ -103,6 +100,11 @@ fn write_bridge_token(token: &str) -> Result<(), String> {
     write_bridge_token_in_dir(&directory, token)
 }
 
+fn write_bridge_port(port: u16) -> Result<(), String> {
+    let directory = bridge_token_dir()?;
+    write_bridge_port_in_dir(&directory, port)
+}
+
 fn write_bridge_token_in_dir(directory: &Path, token: &str) -> Result<(), String> {
     std::fs::create_dir_all(directory)
         .map_err(|error| format!("Failed to create bridge token dir: {error}"))?;
@@ -129,6 +131,15 @@ fn write_bridge_token_in_dir(directory: &Path, token: &str) -> Result<(), String
             .map_err(|error| format!("Failed to write bridge token: {error}"))?;
     }
 
+    Ok(())
+}
+
+fn write_bridge_port_in_dir(directory: &Path, port: u16) -> Result<(), String> {
+    std::fs::create_dir_all(directory)
+        .map_err(|error| format!("Failed to create bridge port dir: {error}"))?;
+    let port_path = directory.join("bridge-port.txt");
+    std::fs::write(&port_path, port.to_string())
+        .map_err(|error| format!("Failed to write bridge port: {error}"))?;
     Ok(())
 }
 
@@ -185,40 +196,103 @@ fn build_router(state: BridgeState) -> Router {
         .with_state(state)
 }
 
+fn is_address_in_use(error: &std::io::Error) -> bool {
+    let text = error.to_string();
+    text.contains("address already in use")
+        || text.contains("Address already in use")
+        || text.contains("Only one usage of each socket address")
+}
+
+const STALE_PORT_RETRIES: usize = 3;
+const STALE_PORT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+
 pub async fn start_scene_bridge(
     scene_cache: Arc<RwLock<SceneCache>>,
     config: &BridgeConfig,
 ) -> Result<SceneBridgeHandle, String> {
     let bridge_token = generate_bridge_token();
-    write_bridge_token(&bridge_token)?;
 
     let state = BridgeState {
         scene_cache,
-        bridge_token,
+        bridge_token: bridge_token.clone(),
     };
     let app = build_router(state);
 
     let bind_address = format!("{}:{}", config.host, config.port);
-    let listener = tokio::net::TcpListener::bind(&bind_address)
-        .await
-        .map_err(|error| {
-            let text = error.to_string();
-            if text.contains("address already in use")
-                || text.contains("Address already in use")
-                || text.contains("Only one usage of each socket address")
-            {
-                format!(
-                    "Unable to start the Blender bridge because port {} is already in use. Close the conflicting process and refresh Blender mode.",
-                    config.port
-                )
-            } else {
-                format!("Failed to bind the Blender bridge on {bind_address}: {error}")
+    let listener = match tokio::net::TcpListener::bind(&bind_address).await {
+        Ok(listener) => listener,
+        Err(error) if is_address_in_use(&error) => {
+            // Port is occupied — either a stale bridge from a previous
+            // session or an unrelated process.  Either way, the old bridge
+            // has a different auth token and cannot serve this session.
+            // Try a few quick retries (ghost sockets often free within
+            // seconds on Windows), then fall back to an OS-assigned port.
+            log::info!(
+                "[BlenderBridge] Port {} in use, retrying before fallback...",
+                config.port
+            );
+
+            let mut bound = None;
+            for attempt in 1..=STALE_PORT_RETRIES {
+                tokio::time::sleep(STALE_PORT_RETRY_DELAY).await;
+                match tokio::net::TcpListener::bind(&bind_address).await {
+                    Ok(listener) => {
+                        log::info!(
+                            "[BlenderBridge] Port {} freed after {} retry(ies)",
+                            config.port,
+                            attempt
+                        );
+                        bound = Some(listener);
+                        break;
+                    }
+                    Err(_) => {}
+                }
             }
-        })?;
-    #[cfg(test)]
+
+            match bound {
+                Some(listener) => listener,
+                None => {
+                    // All retries exhausted — fall back to an OS-assigned
+                    // port so the bridge still starts.
+                    log::warn!(
+                        "[BlenderBridge] Port {} stuck, falling back to OS-assigned port",
+                        config.port
+                    );
+                    let fallback = format!("{}:0", config.host);
+                    tokio::net::TcpListener::bind(&fallback).await.map_err(|error| {
+                        format!("Failed to bind the Blender bridge on fallback port: {error}")
+                    })?
+                }
+            }
+        }
+        Err(error) => {
+            return Err(format!(
+                "Failed to bind the Blender bridge on {bind_address}: {error}"
+            ));
+        }
+    };
+
     let local_addr = listener
         .local_addr()
         .map_err(|error| format!("Failed to resolve the Blender bridge address: {error}"))?;
+    let actual_port = local_addr.port();
+
+    // Write port FIRST, then token.  The addon reads the token to
+    // decide auth is available and then reads the port.  Writing port
+    // before token guarantees the addon never connects with a new
+    // token to a stale port.
+    if let Err(error) = write_bridge_port(actual_port) {
+        log::warn!("[BlenderBridge] Failed to write bridge port file: {error}");
+    }
+    write_bridge_token(&bridge_token)?;
+
+    if actual_port != config.port {
+        log::info!(
+            "[BlenderBridge] Listening on fallback port {} (preferred {} was unavailable)",
+            actual_port,
+            config.port
+        );
+    }
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let task = tokio::spawn(async move {
@@ -232,7 +306,6 @@ pub async fn start_scene_bridge(
     });
 
     Ok(SceneBridgeHandle {
-        #[cfg(test)]
         local_addr,
         shutdown: Some(shutdown_tx),
         task,
@@ -383,6 +456,7 @@ mod tests {
             active_object: Some("Cube".to_string()),
             mode: "OBJECT".to_string(),
             render_engine: Some("BLENDER_EEVEE".to_string()),
+            selected_objects: vec!["Cube".to_string()],
             objects: Vec::new(),
         });
 
@@ -426,6 +500,7 @@ mod tests {
                         "scene_data": {
                             "object_count": 2,
                             "active_object": "Suzanne",
+                            "selected_objects": ["Suzanne"],
                             "mode": "OBJECT",
                             "render_engine": "BLENDER_EEVEE",
                             "objects": []
@@ -470,23 +545,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bridge_returns_friendly_port_conflict_error() {
+    async fn bridge_falls_back_to_dynamic_port_on_conflict() {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind occupied port");
-        let port = listener.local_addr().expect("local addr").port();
+        let occupied_port = listener.local_addr().expect("local addr").port();
 
-        let error = start_scene_bridge(
+        let mut handle = start_scene_bridge(
             shared_scene_cache(),
             &BridgeConfig {
                 host: "127.0.0.1".to_string(),
-                port,
+                port: occupied_port,
             },
         )
         .await
-        .expect_err("port conflict");
+        .expect("bridge should fall back to dynamic port");
 
-        assert!(error.contains("already in use"));
+        // The bridge must have picked a different port.
+        assert_ne!(handle.local_addr().port(), occupied_port);
+        handle.stop();
     }
 
     #[tokio::test]

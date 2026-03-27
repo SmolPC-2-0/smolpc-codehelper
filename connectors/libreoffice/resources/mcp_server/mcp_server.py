@@ -581,8 +581,16 @@ def _odt_create_blank(file_path: str, metadata: dict) -> str:
 def _odt_read_text(file_path: str) -> str:
     doc = odfdo.Document(file_path)
     body = doc.body
-    paragraphs = body.get_paragraphs()
-    return "\n".join(p.get_formatted_text() for p in paragraphs)
+    # Include both headings and paragraphs in document order.
+    # odfdo tags are "text:p" and "text:h" (not Clark notation).
+    parts = []
+    for element in body.children:
+        tag = getattr(element, "tag", "")
+        if tag in ("text:h", "text:p"):
+            text = element.get_formatted_text()
+            if text and text.strip():
+                parts.append(text.strip())
+    return "\n".join(parts)
 
 
 def _odt_get_properties(file_path: str) -> dict:

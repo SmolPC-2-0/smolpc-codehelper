@@ -302,6 +302,7 @@ mod tests {
                     "scene_data": {
                         "object_count": 1,
                         "active_object": "Cube",
+                        "selected_objects": ["Cube"],
                         "mode": "OBJECT",
                         "render_engine": "BLENDER_EEVEE",
                         "objects": []
