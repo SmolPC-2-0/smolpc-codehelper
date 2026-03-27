@@ -12,7 +12,7 @@ Our approach: load the native DLLs at runtime using `libloading`, resolve every 
 
 - **No build-time linking** — the engine binary compiles without any native library present. DLLs are resolved at runtime from a configurable bundle directory.
 - **Version-pinned** — we bind to specific C API symbol names from OpenVINO 2026.0.0 and ORT GenAI. If the C API changes, our `load_symbol` calls fail with a clear error naming the missing symbol.
-- **Two separate API families** — OpenVINO GenAI uses `extern "C"` calling convention; ORT GenAI uses `extern "system"` (stdcall on Windows). Each FFI module matches the convention of its target library.
+- **Two separate API families** — OpenVINO GenAI uses `extern "C"` calling convention; ORT GenAI uses `extern "system"` (Microsoft x64 calling convention on 64-bit Windows). Each FFI module matches the convention of its target library.
 
 ## Centralized DLL Loading
 
@@ -26,7 +26,7 @@ All native library loading is confined to a single file. A CI test (`runtime_loa
 
 ### OpenVINO DLL Load Order
 
-OpenVINO requires 14 DLLs (15 with NPU) loaded in strict dependency order. The `ensure_initialized_internal` function loads them sequentially:
+OpenVINO requires 13 DLLs (15 with NPU) loaded in strict dependency order. The `ensure_initialized_internal` function loads them sequentially:
 
 1. `tbb12.dll` — Intel Threading Building Blocks runtime
 2. `tbbbind_2_5.dll` — TBB binding library
@@ -94,6 +94,8 @@ Key function signatures (simplified):
 | `ov_genai_decoded_results_get_perf_metrics` | Extract TTFT, throughput, duration from results |
 
 All functions return an `OvStatus` integer (0 = OK). Errors are retrieved via `ov_get_error_info(status)` and `ov_get_last_err_msg()`, which return C strings. The `check_status` helper converts these into Rust `Result<(), String>`.
+
+The full API surface includes ~28 symbols. Each `_create` function has a corresponding `_free` destructor (e.g., `ov_genai_llm_pipeline_free`, `ov_genai_generation_config_free`, `ov_genai_decoded_results_free`, `ov_genai_chat_history_free`, `ov_genai_json_container_free`). These are the RAII targets for `OvOwned<T>`. Individual config setters (`set_max_new_tokens`, `set_eos_token_id`, `set_temperature`, `set_top_p`, `set_top_k`, etc.) and performance metric getters (`get_num_generation_tokens`, `get_ttft`, `get_throughput`, `get_generate_duration`) are also loaded.
 
 The `presence_penalty` symbol is loaded via `try_load_symbol` (returns `Option`) rather than `load_symbol` (returns `Result`) because it was added in a later OpenVINO version and may not be present in all builds.
 
@@ -236,7 +238,7 @@ The C API returns mean and standard deviation pairs for each metric; we use only
 
 ### C API Bindings
 
-The `GenAiApi` struct holds function pointers from `onnxruntime-genai.dll` and keeps `DirectML.dll` loaded. Key difference from OpenVINO: ORT GenAI uses `extern "system"` (stdcall) calling convention and an error pattern where functions return `*mut OgaResult` (null = success, non-null = error with embedded message).
+The `GenAiApi` struct holds function pointers from `onnxruntime-genai.dll` and keeps `DirectML.dll` loaded. Key difference from OpenVINO: ORT GenAI uses `extern "system"` (Microsoft x64 calling convention) and an error pattern where functions return `*mut OgaResult` (null = success, non-null = error with embedded message).
 
 Key function signatures:
 
@@ -269,10 +271,11 @@ Key function signatures:
 Unlike OpenVINO (which uses a callback-based streaming API), ORT GenAI uses a step-by-step loop:
 
 1. Encode the prompt with `OgaTokenizerEncode` into `OgaSequences`
-2. Create `OgaGeneratorParams` with search options (max_length, temperature, top_k, top_p, repetition_penalty, do_sample)
-3. Create an `OgaGenerator` and append the token sequences
-4. Create an `OgaTokenizerStream` for incremental decoding
-5. Loop:
+2. Read the prompt token count via `OgaSequencesGetSequenceCount(sequences, 0)`. Despite its name, when called with a sequence index this returns the token count of that sequence, not the number of sequences. The prompt token count is added to `max_length` from the generation config to compute the total `max_length` passed to the generator (prompt + response).
+3. Create `OgaGeneratorParams` with search options (max_length, temperature, top_k, top_p, repetition_penalty, do_sample)
+4. Create an `OgaGenerator` and append the token sequences
+5. Create an `OgaTokenizerStream` for incremental decoding
+6. Loop:
    a. Check cancellation flag
    b. Check `OgaGenerator_IsDone` — if true, break
    c. Call `OgaGenerator_GenerateNextToken` — generates one token
@@ -315,12 +318,17 @@ The Whisper wrapper transcribes audio using the OpenVINO GenAI WhisperPipeline. 
 
 The `WhisperApi` struct holds function pointers from the same `openvino_c.dll` and `openvino_genai_c.dll`:
 
-| C API Function | Purpose |
-|---|---|
-| `ov_genai_whisper_pipeline_create` | Create pipeline from model dir + device (variadic) |
-| `ov_genai_whisper_pipeline_generate` | Run transcription on raw audio samples |
-| `ov_genai_whisper_decoded_results_get_string` | Extract transcribed text (two-call buffer pattern) |
-| `ov_genai_whisper_decoded_results_free` | Free results |
+| C API Function | Source DLL | Purpose |
+|---|---|---|
+| `ov_get_error_info` | `openvino_c.dll` | Convert status code to error description string |
+| `ov_get_last_err_msg` | `openvino_c.dll` | Retrieve the last error message string |
+| `ov_genai_whisper_pipeline_create` | `openvino_genai_c.dll` | Create pipeline from model dir + device (variadic) |
+| `ov_genai_whisper_pipeline_free` | `openvino_genai_c.dll` | Destroy pipeline and free resources |
+| `ov_genai_whisper_pipeline_get_generation_config` | `openvino_genai_c.dll` | Get default generation config from pipeline |
+| `ov_genai_whisper_pipeline_generate` | `openvino_genai_c.dll` | Run transcription on raw audio samples |
+| `ov_genai_whisper_generation_config_free` | `openvino_genai_c.dll` | Free generation config |
+| `ov_genai_whisper_decoded_results_get_string` | `openvino_genai_c.dll` | Extract transcribed text (two-call buffer pattern) |
+| `ov_genai_whisper_decoded_results_free` | `openvino_genai_c.dll` | Free results |
 
 ### Transcription Flow
 
@@ -413,6 +421,120 @@ The adapter provides two generation methods:
 - `generate_stream_messages(messages, config, cancelled, on_token)` — structured chat messages. **Only supported by OpenVINO GenAI** (which uses `ov_genai_llm_pipeline_generate_with_history`). DirectML returns an error because ORT GenAI does not have a native structured chat API.
 
 The engine host checks `is_openvino_genai()` to decide whether to use structured messages or the legacy prompt path.
+
+## Request-to-Inference Pipeline
+
+**Source:** `engine/crates/smolpc-engine-host/src/chat.rs`
+
+This section covers how an HTTP chat completion request becomes an inference call. The host-side code in `chat.rs` sits between the axum route handlers and the `InferenceRuntimeAdapter`, translating OpenAI-compatible API parameters into the engine's internal types.
+
+### Path Selection: Structured Messages vs. Legacy Prompt
+
+The `should_use_openvino_structured_messages` function decides which generation path to use:
+
+- **Structured messages** (primary production path): When the runtime is OpenVINO GenAI and no legacy override is active. Calls `request_to_structured_messages` then `generate_stream_messages`.
+- **Legacy prompt** (fallback): When using DirectML, or when explicitly requested. Calls `request_to_prompt` then `generate_stream`.
+
+### `request_to_structured_messages`
+
+Converts `ChatCompletionMessage` (HTTP API type) to `Vec<InferenceChatMessage>` (engine core type). Filters out empty-content messages and validates role names (`system`, `user`, `assistant`). This is a thin conversion; the heavy lifting (thinking control, `/nothink` injection) happens downstream in `create_chat_history`.
+
+### `request_to_prompt` (Legacy ChatML)
+
+Assembles a ChatML-formatted prompt string from the message array:
+
+1. If the request is a single user message that already contains ChatML tags (`<|im_start|>`, `<|im_end|>`), detected by `is_preformatted_chatml_single_user_message`, pass it through unchanged (compatibility with older clients).
+2. Otherwise, wrap each message in `<|im_start|>{role}\n{content}<|im_end|>\n` tags.
+3. If `disable_thinking` is true, append `/nothink` to the first system message's content. If no system message exists, prepend a minimal `<|im_start|>system\n/nothink<|im_end|>\n`.
+4. Append `<|im_start|>assistant\n` to prompt the model to begin generating.
+
+### `request_to_config`
+
+Maps HTTP request parameters to `GenerationConfig` with hard cap clamping:
+
+- `max_tokens` is clamped to `max_tokens_hard_cap()` (default `OPENVINO_MAX_TOKENS_HARD_CAP_DEFAULT = 8192`, configurable via `SMOLPC_OPENVINO_MAX_TOKENS_HARD_CAP` env var at `engine/crates/smolpc-engine-host/src/types.rs`). Zero is rejected as an error. Clamping is logged when it occurs.
+- `temperature`, `top_k`, `top_p`, `repetition_penalty`, and `repetition_penalty_last_n` are passed through to the config.
+- If a model-specific `openvino_request_defaults` config exists (see below), it is used as the base. HTTP parameters override individual fields.
+- Returns `None` if no parameters were changed (the backend uses its own defaults).
+
+### `humanize_generation_error`
+
+Replaces raw engine/FFI error messages with user-friendly text. The NPU `StaticLLMPipeline` throws "unknown exception" when the tokenized chat history exceeds `MAX_PROMPT_LEN`. This function detects that pattern (`ov_genai_llm_pipeline_generate_with_history` + `unknown exception`) and returns a message suggesting the user start a new chat or switch to CPU mode.
+
+## Structured Chat History Path
+
+**Source:** `engine/crates/smolpc-engine-core/src/inference/genai/openvino.rs`
+
+This is the primary production path for OpenVINO inference. Instead of sending a pre-formatted ChatML string, the engine passes structured messages through the OpenVINO GenAI chat history C API. This lets OpenVINO handle tokenization and template rendering internally.
+
+### `generate_stream_messages`
+
+The async entry point for structured generation. Accepts `&[InferenceChatMessage]` (role + content pairs), an optional `GenerationConfig`, a cancellation flag, and a token callback. Internally:
+
+1. Clones the messages and config into owned values for the blocking worker.
+2. Spawns `generate_stream_with_history_blocking` via `tokio::task::spawn_blocking`.
+3. Reads tokens from an `mpsc::unbounded_channel` with a 90-second watchdog (same as the raw prompt path).
+
+### `generate_stream_with_history_blocking`
+
+The synchronous worker that runs on a blocking thread:
+
+1. Acquires the pipeline mutex.
+2. Clamps `max_new_tokens` to the NPU response budget via `clamp_max_new_tokens`.
+3. Creates the `OvGenAiGenerationConfig` via `create_generation_config` (same function used by the raw prompt path).
+4. Creates the `OvGenAiChatHistory` via `create_chat_history` (see below).
+5. Sets up the `StreamCallbackState` and `StreamerCallback` for token streaming.
+6. Calls `generate_with_history_once`, which invokes `ov_genai_llm_pipeline_generate_with_history`.
+7. Returns `GenerationMetrics` with truncation info from the callback state.
+
+### `create_chat_history`
+
+Converts `InferenceChatMessage` into an OpenVINO C API chat history object:
+
+1. **NPU thinking control:** If `disable_thinking` is true and the target is NPU, calls `inject_nothink_into_messages` to prepend `/nothink` to the system message content (or insert a new system message if none exists). The NPU `StaticLLMPipeline` does not support the `extra_context` API.
+2. **JSON serialization:** Serializes the messages to JSON via `serde_json::to_string`, then creates an `OvGenAiJsonContainer` via `ov_genai_json_container_create_from_json_string`.
+3. **History creation:** Creates the `OvGenAiChatHistory` from the JSON container via `ov_genai_chat_history_create_from_json_container`.
+4. **CPU thinking control:** If `disable_thinking` is true and the target is *not* NPU (i.e., CPU), creates a second JSON container with `{"enable_thinking": false}` and attaches it via `ov_genai_chat_history_set_extra_context`. This is the standard OpenVINO mechanism for controlling thinking mode.
+
+### `inject_nothink_into_messages`
+
+Modifies messages in-place for NPU thinking control:
+
+- If a system message exists, prepends `/nothink\n` to its content (using `starts_with` to avoid double-injection).
+- If no system message exists, inserts one at position 0 with content `/nothink`.
+
+## OpenVINO Model Tuning
+
+**Source:** `engine/crates/smolpc-engine-host/src/openvino.rs`
+
+### `OpenVinoModelTuning` and Per-Model Defaults
+
+The `OpenVinoModelTuning` struct controls per-model behavior:
+
+- `request_defaults: Option<GenerationConfig>` — default sampling parameters applied to every request before HTTP overrides.
+- `disable_thinking: bool` — whether to suppress thinking mode (Qwen 3 = true, Qwen 2.5 = false since it has no thinking mode).
+- `presence_penalty: Option<f32>` — presence penalty passed into `OpenVinoGenerationControls`.
+
+`openvino_model_tuning_for_model` returns the tuning for a given model ID:
+
+- **Qwen 3 (`qwen3-4b`):** temperature=0.7, top_p=0.8, top_k=20, disable_thinking=true, presence_penalty=1.5
+- **Qwen 2.5 (`qwen2.5-1.5b-instruct`):** temperature=0.7, top_p=0.8, top_k=20, disable_thinking=false, presence_penalty=1.5
+- **Unknown models:** empty defaults (no request defaults, no thinking control, no presence penalty)
+
+Both supported Qwen models receive identical request defaults. The `disable_thinking` flag is the key differentiator.
+
+### `GenerationControls` vs. `GenerationConfig`
+
+These two types serve different lifecycle roles:
+
+- **`OpenVinoGenerationControls`** (stop tokens, eos_token_id, presence_penalty, ignore_eos, min_new_tokens) — set once at pipeline creation time by `openvino_generation_controls_for_model` and stored in `OpenVinoGenAiInner`. Reused across all requests for the pipeline's lifetime. These control generation termination behavior and are baked into every `create_generation_config` call.
+- **`GenerationConfig`** (max_length, temperature, top_k, top_p, repetition_penalty) — per-request. Created from HTTP parameters by `request_to_config`, merged with model defaults from `openvino_request_defaults`. A new config is built for each generation call.
+
+The model directory can also provide a `generation_config.json` file that overrides `eos_token_id` and `stop_token_ids` in the controls. This is read by `read_openvino_staged_generation_config` and merged in `openvino_generation_controls_for_model`.
+
+### CPU Preflight
+
+OpenVINO CPU also has a preflight validation (`run_preflight` in `openvino.rs`). It generates a single token with `max_length: 1` and `temperature: 0.0`, then validates that `total_tokens > 0`. This differs from the NPU preflight (which is the full probe + pipeline creation at startup) and from the DirectML preflight (which inspects logits for non-finite values). The CPU preflight catches model loading failures and basic inference sanity before the model is exposed to user traffic.
 
 ## Performance Characteristics
 

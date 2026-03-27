@@ -87,10 +87,12 @@ The engine runs as a standalone HTTP server on `localhost:19432`. It is a separa
 Library crate — no binary. Provides the foundations that the engine host builds on.
 
 - **Hardware detection:** DXGI adapter enumeration for GPUs (~14ms), NPU driver probing, CPU/RAM/storage detection via the `hardware-query` crate and `sysinfo`
-- **Inference backends:** `InferenceBackend` enum with three variants: `Cpu`, `DirectML`, `OpenVinoNpu`. Each backend has FFI bindings to the underlying C APIs
+- **Inference backends:** `InferenceBackend` enum with three variants: `Cpu`, `DirectML`, `OpenVinoNpu`. Each backend has FFI bindings to the underlying C APIs. The `InferenceRuntimeAdapter` enum has only two variants: `GenAiDirectMl` (ORT GenAI) and `OpenVinoGenAi` (OpenVINO GenAI C API). There is no separate CPU variant — CPU inference runs as an OpenVINO GenAI device option
 - **FFI wrappers:** `OpenVinoGenAiGenerator` (OpenVINO GenAI C API), `GenAiDirectMlGenerator` (ONNX Runtime GenAI), `WhisperPipeline` (OpenVINO Whisper)
-- **Centralized DLL loading:** All `Library::new()` calls live in `runtime_loading.rs`. A CI test scans every `.rs` file in the workspace and fails if DLL loading appears anywhere else. OpenVINO requires 14 DLLs loaded in strict dependency order; ORT requires 2
-- **Model registry:** `ModelDefinition` structs with RAM thresholds, artifact paths, and backend compatibility. RAM-based auto-selection: 16 GB+ gets Qwen3-4B, <16 GB gets Qwen2.5-1.5B
+- **Centralized DLL loading:** All `Library::new()` calls live in `runtime_loading.rs`. A CI test scans every `.rs` file in the workspace and fails if DLL loading appears anywhere else. OpenVINO requires 13 DLLs (15 with NPU) loaded in strict dependency order; ORT requires 4 (onnxruntime, onnxruntime_providers_shared, onnxruntime_genai, DirectML.dll)
+- **Model registry:** `ModelDefinition` structs with RAM thresholds, artifact paths, and backend compatibility. RAM-based auto-selection: 15 GB+ gets Qwen3-4B, <15 GB gets Qwen2.5-1.5B
+
+- **Backend decision persistence:** `BackendStore` persists backend selection decisions to disk (`backend_decisions.v2.json`). A DirectML demotion (e.g., from probe timeout or generation failure) persists across restarts so the engine does not re-attempt a known-bad backend. Preflight timeouts are stored as `temporary_fallback` and do not overwrite prior good records.
 
 Has no workspace crate dependencies — it is the foundation layer.
 
@@ -127,7 +129,7 @@ Depends on: `smolpc-engine-core`.
 Library crate consumed by the Tauri app and any other engine consumer. Handles the messy process lifecycle:
 
 - `spawn_engine()` — launches the engine as a detached process with PID file, spawn lock, stderr logging, and `CREATE_NO_WINDOW`
-- `wait_for_healthy()` — polls `/engine/health` with configurable timeout (default 60s) and 250ms interval
+- `wait_for_healthy()` — polls `/engine/health` with configurable timeout (default 30s) and 100ms interval
 - `kill_stale_processes()` — cleans up orphaned engine processes with PID identity verification
 - `EngineClient` — HTTP client wrapper with streaming SSE support for chat completions
 - `RuntimeModePreference` — enum (Auto, Cpu, Dml, Npu) for overriding backend selection
@@ -198,6 +200,13 @@ Tauri IPC command handlers organized by domain:
 
 All commands that need the engine access it through the managed `EngineSupervisorHandle` — they send a command and either await a oneshot response or read the watch channel.
 
+#### Security
+
+The `security` module (`app/src-tauri/src/security/`) provides file I/O guards:
+- **Path validation:** canonicalization-based allowlist — resolves symlinks, then verifies the path starts with an approved Tauri directory (app data, cache, local data). Prevents path traversal and symlink escape.
+- **File size limit:** 10 MB maximum for read/write operations, enforced before I/O.
+- **Content size validation:** pre-write check to prevent memory exhaustion from oversized payloads.
+
 #### Mode Provider Registry
 
 Routes `AppMode` variants to `ToolProvider` implementations:
@@ -231,6 +240,8 @@ Registered via `app.manage()` during initialization:
 - `HardwareCache` — cached hardware detection results
 - `ProvisioningCancel` — atomic bool for cancellation
 - `AudioState` — voice input/output state
+- `SetupState` — first-run setup context (resource dir, app local data dir)
+- `ModeProviderRegistry` — routes `AppMode` to `ToolProvider` implementations
 
 ### Svelte 5 Frontend
 
@@ -290,15 +301,15 @@ IPC bridge to Blender via a bundled Python addon. Retrieves scene context (open 
 
 Connects to GIMP's Python-Fu server. Plans operations via the engine (what PDB calls to make), then executes Scheme/Python commands via IPC. Layer-aware and context-sensitive.
 
-**Modules:** provider, executor, transport (IPC), runtime (Python-Fu), planner, heuristics, setup, response
+**Modules:** provider, executor, transport (IPC), runtime (Python-Fu), planner, heuristics, macros, setup, response
 **Resources:** Plugin runtime, C/Python bridge, upstream API references, manifest
 
 ### LibreOffice Connector
 
 Integrates with LibreOffice Writer (document editing) and Impress (presentations) through a shared provider.
 
-**Modules:** provider, executor
-**Resources:** Manifest
+**Modules:** provider, executor, profiles, resources, response, runtime, state
+**Resources:** MCP server, mode profiles, manifest
 
 ---
 
@@ -306,7 +317,7 @@ Integrates with LibreOffice Writer (document editing) and Impress (presentations
 
 ### smolpc-assistant-types
 
-Zero-dependency type definitions shared across the entire workspace:
+No workspace crate dependencies. Type definitions shared across the entire workspace (external deps: `serde`, `serde_json`):
 
 - `AppMode` enum: `Code`, `Gimp`, `Blender`, `Writer`, `Impress`
 - `ModeConfigDto`, `ModeCapabilitiesDto` — mode metadata and feature flags
@@ -329,18 +340,32 @@ Shared connector infrastructure:
 
 Depends on: `smolpc-assistant-types`, `smolpc-engine-core`, `smolpc-engine-client`.
 
+### smolpc-mcp-client
+
+MCP (Model Context Protocol) client implementation for communicating with host application servers. Provides:
+
+- `McpSession` — manages the JSON-RPC session lifecycle (initialize, tool discovery, tool execution)
+- `McpTool` — tool definition type returned by the MCP server
+- `StdioJsonRpcClient` — transport over stdin/stdout (used by LibreOffice connector)
+- `TcpJsonRpcClient` — transport over TCP (used by GIMP connector)
+- `JsonRpcTransport` trait — abstraction over transport mechanisms
+
+No workspace crate dependencies. The GIMP connector uses TCP transport to communicate with the Python-Fu MCP server; the LibreOffice connector uses stdio transport to communicate with its bundled MCP server.
+
 ---
 
 ## Data Flow: Chat Completion
 
-How a user message becomes an AI response:
+Code mode and connector modes use different call paths. Code mode bypasses the assistant layer entirely.
+
+### Code Mode (default)
 
 1. User types a message in `ChatInput.svelte` and presses Enter
 2. `chatsStore.addMessage()` appends the user message to the current chat
-3. `assistantSend()` in `unified.ts` calls `tauri.invoke('assistant_send')` with the message and a Tauri Channel for streaming
-4. The `assistant_send` Tauri command looks up the active mode's `ToolProvider` via `ModeProviderRegistry`
-5. For Code mode: the command builds a message array from chat history and calls the engine via `EngineSupervisorHandle` to get the `EngineClient`
-6. `EngineClient.chat_completions_stream()` sends `POST /v1/chat/completions` to the engine with `stream: true`
+3. `App.svelte` calls `inferenceStore.generateStreamMessages()` with the structured message history and a token callback
+4. The store invokes `tauri.invoke('inference_generate_messages')` with a Tauri Channel for streaming
+5. The `inference_generate_messages` command gets the `EngineClient` via `EngineSupervisorHandle.get_client()`
+6. `EngineClient.chat_completions_stream_messages()` sends `POST /v1/chat/completions` to the engine with `stream: true`
 7. The engine host acquires the queue semaphore (waits if full), then the generation semaphore (capacity 1)
 8. The engine loads the prompt into the active backend (OpenVINO, DirectML, or CPU) via the `InferenceRuntimeAdapter`
 9. The backend's FFI wrapper calls into the native library (OpenVINO GenAI C API or ORT GenAI) and registers a streaming callback
@@ -348,7 +373,14 @@ How a user message becomes an AI response:
 11. `EngineClient` parses the SSE stream and forwards tokens to the Tauri Channel
 12. The frontend receives each token via the channel callback, appends it to the assistant message in `chatsStore`, and renders incrementally
 
-For connector modes (Blender, GIMP, LibreOffice), step 5 differs: the connector retrieves context from the host app, augments the prompt, calls the engine, then executes the generated code in the host app before returning the result.
+### Connector Modes (Blender, GIMP, LibreOffice)
+
+1. User types a message and presses Enter
+2. `chatsStore.addMessage()` appends the user message
+3. `assistantSend()` in `unified.ts` calls `tauri.invoke('assistant_send')` with the message and a Tauri Channel for streaming
+4. The `assistant_send` command looks up the active mode's `ToolProvider` via `ModeProviderRegistry`
+5. The connector retrieves context from the host app, augments the prompt, calls the engine, then executes the generated code in the host app
+6. Results stream back to the frontend via the Tauri Channel
 
 ## Data Flow: App Startup
 
@@ -404,23 +436,23 @@ A Windows global mutex (`Global\SmolPC-Provisioning`) prevents multiple app inst
 ## Crate Dependency Graph
 
 ```
-smolpc-assistant-types (no dependencies)
-        │
-        ▼
-smolpc-engine-core (no workspace dependencies)
-        │
-        ├──────────────────────┐
-        ▼                      ▼
-smolpc-engine-client    smolpc-engine-host (binary)
-        │
-        ├───────────────────────────────────┐
-        ▼                                   ▼
-smolpc-connector-common              smolpc-benchmark
+smolpc-assistant-types    smolpc-engine-core    smolpc-mcp-client
+(no workspace deps)       (no workspace deps)   (no workspace deps)
+        │                         │
+        │                ┌────────┴──────────┐
+        │                ▼                    ▼
+        │        smolpc-engine-client   smolpc-engine-host (binary)
+        │                │
+        ├────────────────┤
+        │                ├───────────────────────────┐
+        ▼                ▼                           ▼
+smolpc-connector-common                       smolpc-benchmark
         │
         ├──────────────┬────────────────────┐
         ▼              ▼                    ▼
 smolpc-connector-  smolpc-connector-  smolpc-connector-
   blender            gimp              libreoffice
+                     (+ mcp-client)   (+ mcp-client)
         │              │                    │
         └──────────────┴────────────────────┘
                        │
@@ -429,9 +461,9 @@ smolpc-connector-  smolpc-connector-  smolpc-connector-
               imports ALL workspace crates
 ```
 
-`smolpc-assistant-types` is the leaf — no dependencies. `smolpc-engine-core` is the foundation. Everything else builds upward. The desktop app (`smolpc-desktop`) is the top-level binary that imports everything.
+`smolpc-assistant-types` and `smolpc-engine-core` are independent leaf crates — neither depends on the other. `smolpc-engine-core` is the inference foundation; `smolpc-assistant-types` provides shared DTOs. Everything else builds upward. The desktop app (`smolpc-desktop`) is the top-level binary that imports everything.
 
-`smolpc-engine-host` is a separate binary that only depends on `smolpc-engine-core` — it does not import connectors or the desktop app.
+`smolpc-engine-host` is a separate binary that only depends on `smolpc-engine-core` — it does not import connectors or the desktop app. `smolpc-mcp-client` is an independent crate (no workspace dependencies) consumed by the GIMP and LibreOffice connectors for MCP protocol communication with host applications.
 
 ---
 
@@ -444,4 +476,4 @@ smolpc-connector-  smolpc-connector-  smolpc-connector-
 | Engine ↔ TTS Sidecar | HTTP (localhost:19433) | None (localhost only) |
 | Connectors ↔ Host Apps | IPC (varies per connector) | None |
 
-The engine listens on `127.0.0.1` only — it is not accessible from other machines. The auth token is auto-generated on first run and shared between the app and engine via file (`SMOLPC_ENGINE_TOKEN` env var).
+The engine listens on `127.0.0.1` only — it is not accessible from other machines. The auth token is auto-generated on first run and persisted to a file (`engine-token.txt` in the shared runtime directory). When spawning the engine process, the supervisor passes the token via the `SMOLPC_ENGINE_TOKEN` environment variable.
