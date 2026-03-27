@@ -3,7 +3,7 @@
 End-to-end connector tests: send prompts, verify tool calls produce correct responses.
 
 Tests each connector's pipeline as far as possible without requiring host apps:
-- LibreOffice: Full pipeline (MCP server over stdio) — create docs, manipulate, verify
+- LibreOffice: Full pipeline (MCP server over stdio) -- create docs, manipulate, verify
 - Blender: RAG retrieval (keyword search over bundled Blender API docs)
 - GIMP: Bridge spawn test (verify MCP bridge script exists and is syntactically valid)
 
@@ -13,98 +13,23 @@ Usage:
 import json
 import os
 import py_compile
-import subprocess
-import sys
+import shutil
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
+from mcp_test_client import McpClient
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-RESPONSE_TIMEOUT = 15
+MCP_SCRIPT = str(REPO_ROOT / "connectors" / "libreoffice" / "resources" / "mcp_server" / "mcp_server.py")
 
 
-# =============================================================================
-# Minimal MCP stdio client (shared with LibreOffice tests)
-# =============================================================================
-
-class McpClient:
-    """JSON-RPC client that talks to an MCP server over stdio."""
-
-    def __init__(self, server_script: str, working_dir: str):
-        env = os.environ.copy()
-        env["SMOLPC_MCP_LOG_DIR"] = working_dir
-        self.proc = subprocess.Popen(
-            [sys.executable, server_script],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=working_dir,
-            env=env,
-        )
-        self._next_id = 1
-        self._initialize()
-
-    def _send(self, method: str, params=None) -> dict:
-        msg_id = self._next_id
-        self._next_id += 1
-        payload = {"jsonrpc": "2.0", "id": msg_id, "method": method}
-        if params is not None:
-            payload["params"] = params
-        self.proc.stdin.write((json.dumps(payload) + "\n").encode())
-        self.proc.stdin.flush()
-        return self._recv(msg_id)
-
-    def _notify(self, method: str, params=None):
-        payload = {"jsonrpc": "2.0", "method": method}
-        if params is not None:
-            payload["params"] = params
-        self.proc.stdin.write((json.dumps(payload) + "\n").encode())
-        self.proc.stdin.flush()
-
-    def _recv(self, expected_id: int) -> dict:
-        deadline = time.monotonic() + RESPONSE_TIMEOUT
-        while time.monotonic() < deadline:
-            line = self.proc.stdout.readline()
-            if not line:
-                stderr = self.proc.stderr.read().decode(errors="replace") if self.proc.poll() is not None else ""
-                raise RuntimeError(f"MCP server closed stdout. stderr: {stderr}")
-            try:
-                msg = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if msg.get("id") == expected_id:
-                return msg
-        raise TimeoutError(f"Timed out waiting for response id={expected_id}")
-
-    def _initialize(self):
-        resp = self._send("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "test-all-connectors", "version": "1.0.0"},
-        })
-        assert "result" in resp, f"initialize failed: {resp}"
-        self._notify("notifications/initialized")
-
-    def list_tools(self) -> list:
-        return self._send("tools/list")["result"]["tools"]
-
-    def call_tool(self, name: str, arguments: dict) -> str:
-        resp = self._send("tools/call", {"name": name, "arguments": arguments})
-        if "error" in resp:
-            raise RuntimeError(f"Tool call error: {resp['error']}")
-        return "\n".join(c["text"] for c in resp["result"]["content"] if c.get("type") == "text")
-
-    def close(self):
-        try:
-            self.proc.stdin.close()
-        except Exception:
-            pass
-        try:
-            self.proc.terminate()
-            self.proc.wait(timeout=5)
-        except Exception:
-            self.proc.kill()
+def _assert_success(test_case, result: str, context: str = ""):
+    """Assert the tool result starts with a success indicator, not 'Error:'."""
+    test_case.assertFalse(
+        result.startswith("Error"),
+        f"Tool returned an error{' (' + context + ')' if context else ''}: {result[:200]}",
+    )
 
 
 # =============================================================================
@@ -114,18 +39,17 @@ class McpClient:
 class TestLibreOfficeWriterPrompts(unittest.TestCase):
     """Simulate user prompts by calling the tools a planner would select."""
 
-    MCP_SCRIPT = str(REPO_ROOT / "connectors" / "libreoffice" / "resources" / "mcp_server" / "mcp_server.py")
-
     @classmethod
     def setUpClass(cls):
         cls.tmpdir = tempfile.mkdtemp(prefix="e2e_writer_")
         cls.docs = os.path.join(cls.tmpdir, "Documents")
         os.makedirs(cls.docs, exist_ok=True)
-        cls.client = McpClient(cls.MCP_SCRIPT, cls.tmpdir)
+        cls.client = McpClient(MCP_SCRIPT, cls.tmpdir)
 
     @classmethod
     def tearDownClass(cls):
         cls.client.close()
+        shutil.rmtree(cls.tmpdir, ignore_errors=True)
 
     def _path(self, name):
         return os.path.join(self.docs, name)
@@ -143,7 +67,7 @@ class TestLibreOfficeWriterPrompts(unittest.TestCase):
         r1 = self.client.call_tool("create_blank_document", {"filename": path})
         self.assertIn("Successfully created", r1)
         r2 = self.client.call_tool("add_heading", {"file_path": path, "text": "Introduction", "level": 1})
-        self.assertNotIn("Error", r2)
+        _assert_success(self, r2, "add_heading")
         content = self.client.call_tool("read_text_document", {"file_path": path})
         self.assertIn("Introduction", content)
 
@@ -152,12 +76,10 @@ class TestLibreOfficeWriterPrompts(unittest.TestCase):
         path = self._path("table-test.docx")
         self.client.call_tool("create_blank_document", {"filename": path})
         result = self.client.call_tool("add_table", {
-            "file_path": path,
-            "rows": 3,
-            "columns": 2,
+            "file_path": path, "rows": 3, "columns": 2,
             "data": [["Name", "Score"], ["Alice", "95"], ["Bob", "87"]],
         })
-        self.assertNotIn("Error", result)
+        _assert_success(self, result, "add_table")
         info = json.loads(self.client.call_tool("test_get_table_info", {"file_path": path, "table_index": 0}))
         self.assertEqual(info["rows"], 3)
         self.assertEqual(info["columns"], 2)
@@ -169,9 +91,9 @@ class TestLibreOfficeWriterPrompts(unittest.TestCase):
         self.client.call_tool("create_blank_document", {"filename": path})
         self.client.call_tool("add_paragraph", {"file_path": path, "text": "The dog ran. Another dog barked."})
         result = self.client.call_tool("search_replace_text", {
-            "file_path": path, "search_text": "dog", "replace_text": "cat"
+            "file_path": path, "search_text": "dog", "replace_text": "cat",
         })
-        self.assertNotIn("Error", result)
+        _assert_success(self, result, "search_replace_text")
         content = self.client.call_tool("read_text_document", {"file_path": path})
         self.assertNotIn("dog", content)
         self.assertIn("cat", content)
@@ -198,18 +120,17 @@ class TestLibreOfficeWriterPrompts(unittest.TestCase):
 class TestLibreOfficeSlidesPrompts(unittest.TestCase):
     """Simulate user prompts for Slides/Impress mode."""
 
-    MCP_SCRIPT = str(REPO_ROOT / "connectors" / "libreoffice" / "resources" / "mcp_server" / "mcp_server.py")
-
     @classmethod
     def setUpClass(cls):
         cls.tmpdir = tempfile.mkdtemp(prefix="e2e_slides_")
         cls.docs = os.path.join(cls.tmpdir, "Documents")
         os.makedirs(cls.docs, exist_ok=True)
-        cls.client = McpClient(cls.MCP_SCRIPT, cls.tmpdir)
+        cls.client = McpClient(MCP_SCRIPT, cls.tmpdir)
 
     @classmethod
     def tearDownClass(cls):
         cls.client.close()
+        shutil.rmtree(cls.tmpdir, ignore_errors=True)
 
     def _path(self, name):
         return os.path.join(self.docs, name)
@@ -226,16 +147,12 @@ class TestLibreOfficeSlidesPrompts(unittest.TestCase):
         path = self._path("two-slides.pptx")
         self.client.call_tool("create_blank_presentation", {"filename": path})
         self.client.call_tool("add_slide", {
-            "file_path": path,
-            "title": "Welcome to SmolPC",
-            "content": "Offline AI for schools",
-            "layout": "Title and Content",
+            "file_path": path, "title": "Welcome to SmolPC",
+            "content": "Offline AI for schools", "layout": "Title and Content",
         })
         self.client.call_tool("add_slide", {
-            "file_path": path,
-            "title": "Features",
-            "content": "Privacy-first, budget hardware, Intel NPU",
-            "layout": "Title and Content",
+            "file_path": path, "title": "Features",
+            "content": "Privacy-first, budget hardware, Intel NPU", "layout": "Title and Content",
         })
         content = self.client.call_tool("read_presentation", {"file_path": path})
         self.assertIn("Welcome to SmolPC", content)
@@ -250,9 +167,9 @@ class TestLibreOfficeSlidesPrompts(unittest.TestCase):
             "content": "Body", "layout": "Title and Content",
         })
         result = self.client.call_tool("edit_slide_title", {
-            "file_path": path, "slide_index": 0, "new_title": "Updated Title"
+            "file_path": path, "slide_index": 0, "new_title": "Updated Title",
         })
-        self.assertNotIn("Error", result)
+        _assert_success(self, result, "edit_slide_title")
         content = self.client.call_tool("read_presentation", {"file_path": path})
         self.assertIn("Updated Title", content)
 
@@ -261,15 +178,13 @@ class TestLibreOfficeSlidesPrompts(unittest.TestCase):
         path = self._path("delete-slide.pptx")
         self.client.call_tool("create_blank_presentation", {"filename": path})
         self.client.call_tool("add_slide", {
-            "file_path": path, "title": "Keep",
-            "content": "A", "layout": "Title and Content",
+            "file_path": path, "title": "Keep", "content": "A", "layout": "Title and Content",
         })
         self.client.call_tool("add_slide", {
-            "file_path": path, "title": "Remove This",
-            "content": "B", "layout": "Title and Content",
+            "file_path": path, "title": "Remove This", "content": "B", "layout": "Title and Content",
         })
         result = self.client.call_tool("delete_slide", {"file_path": path, "slide_index": 1})
-        self.assertNotIn("Error", result)
+        _assert_success(self, result, "delete_slide")
         content = self.client.call_tool("read_presentation", {"file_path": path})
         self.assertNotIn("Remove This", content)
         self.assertIn("Keep", content)
@@ -313,7 +228,7 @@ class TestBlenderRagRetrieval(unittest.TestCase):
         self.assertGreater(len(matches), 0, "Should find bevel modifier docs")
         self.assertTrue(
             any("bevel" in m["signature"].lower() for m in matches),
-            "At least one match should reference bevel in signature"
+            "At least one match should reference bevel in signature",
         )
 
     def test_query_mesh_operations_finds_results(self):
@@ -327,10 +242,9 @@ class TestBlenderRagRetrieval(unittest.TestCase):
 
     def test_query_render_settings_finds_results(self):
         """Prompt: 'How do I change render settings?' should match render entries."""
-        query_terms = {"render"}
         matches = [
             e for e in self.metadata
-            if any(t in e["text"].lower() or t in e["signature"].lower() for t in query_terms)
+            if "render" in e["text"].lower() or "render" in e["signature"].lower()
         ]
         self.assertGreater(len(matches), 0, "Should find render-related docs")
 
